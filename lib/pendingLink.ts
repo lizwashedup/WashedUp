@@ -21,6 +21,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DESTINATION_KEY = 'pendingLinkDestination';
 const CHECKOUT_KEY = 'pendingCheckoutOrderId';
+// Serialize checkout-pointer writes/removals so an older screen cannot erase
+// a newer handoff between its comparison and removal. Other link state is separate.
+let checkoutMutation: Promise<unknown> = Promise.resolve();
+function mutateCheckout<T>(action: () => Promise<T>): Promise<T> {
+  const result = checkoutMutation.then(action, action);
+  checkoutMutation = result.catch(() => undefined);
+  return result;
+}
 
 /**
  * A washedup.app (or washedupapp://) URL to the in-app route it means, or
@@ -64,10 +72,14 @@ export async function stashPendingDestination(href: string): Promise<void> {
   try { await AsyncStorage.setItem(DESTINATION_KEY, href); } catch { /* best-effort */ }
 }
 
-/** Reads and clears in one go, so a destination can never be replayed. */
-export async function consumePendingDestination(): Promise<string | null> {
+/** Reads and clears only while the caller's handoff is still current. */
+export async function consumePendingDestination(
+  shouldConsume: () => boolean = () => true,
+): Promise<string | null> {
   try {
     const href = await AsyncStorage.getItem(DESTINATION_KEY);
+    // Authentication may change while the durable read is in flight.
+    if (!shouldConsume()) return null;
     if (href) await AsyncStorage.removeItem(DESTINATION_KEY);
     return href;
   } catch {
@@ -75,13 +87,17 @@ export async function consumePendingDestination(): Promise<string | null> {
   }
 }
 
-export async function clearPendingDestination(): Promise<void> {
-  try { await AsyncStorage.removeItem(DESTINATION_KEY); } catch { /* best-effort */ }
+export async function clearPendingDestination(
+  shouldClear: () => boolean = () => true,
+): Promise<void> {
+  try {
+    if (shouldClear()) await AsyncStorage.removeItem(DESTINATION_KEY);
+  } catch { /* best-effort */ }
 }
 
 /** Written the moment we hand a buyer to Stripe, with the order already minted. */
-export async function stashPendingCheckout(orderId: string): Promise<void> {
-  try { await AsyncStorage.setItem(CHECKOUT_KEY, orderId); } catch { /* best-effort */ }
+export async function stashPendingCheckout(orderId: string, strict = false): Promise<void> {
+  try { await mutateCheckout(() => AsyncStorage.setItem(CHECKOUT_KEY, orderId)); } catch (error) { if (strict) throw error; }
 }
 
 /**
@@ -90,19 +106,41 @@ export async function stashPendingCheckout(orderId: string): Promise<void> {
  * opening or closing. The order screen clears this only after it can read the
  * real order, so a lifecycle bounce cannot lose a paid ticket destination.
  */
-export async function peekPendingCheckout(): Promise<string | null> {
-  try { return await AsyncStorage.getItem(CHECKOUT_KEY); } catch { return null; }
+export async function peekPendingCheckout(strict = false): Promise<string | null> {
+  try { return await AsyncStorage.getItem(CHECKOUT_KEY); } catch (error) { if (strict) throw error; return null; }
 }
 
-export async function clearPendingCheckout(): Promise<void> {
-  try { await AsyncStorage.removeItem(CHECKOUT_KEY); } catch { /* best-effort */ }
+/**
+ * Resolve the native checkout that belongs to the event the buyer is viewing.
+ * Keeping this beside the durable pointer makes the post-Stripe retry rule
+ * testable without rendering the checkout sheet: another event's stale
+ * pointer is ignored, while this event's order is returned before a second
+ * Stripe session can be opened.
+ */
+export async function pendingCheckoutForEvent<T extends { event_id: string }>(
+  eventId: string,
+  loadOrder: (orderId: string) => Promise<T | null>,
+  strict = false,
+): Promise<string | null> {
+  const orderId = await peekPendingCheckout(strict);
+  if (!orderId) return null;
+  const order = await loadOrder(orderId).catch(error => { if (strict) throw error; return null; });
+  return order?.event_id === eventId ? orderId : null;
+}
+
+export async function clearPendingCheckout(expectedOrderId?: string, isCurrent: () => boolean = () => true): Promise<void> {
+  try { await mutateCheckout(async () => {
+    if (!isCurrent()) return;
+    const current = await AsyncStorage.getItem(CHECKOUT_KEY);
+    if (isCurrent() && (expectedOrderId === undefined || current === expectedOrderId)) await AsyncStorage.removeItem(CHECKOUT_KEY);
+  }); } catch { /* best-effort */ }
 }
 
 /** @deprecated Prefer peekPendingCheckout + clearPendingCheckout at the destination. */
 export async function consumePendingCheckout(): Promise<string | null> {
   try {
     const orderId = await AsyncStorage.getItem(CHECKOUT_KEY);
-    if (orderId) await AsyncStorage.removeItem(CHECKOUT_KEY);
+    if (orderId) await clearPendingCheckout(orderId);
     return orderId;
   } catch {
     return null;

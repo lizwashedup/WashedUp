@@ -1,6 +1,6 @@
 import { formatEventDateLA, getLADayParts, getTodayInLA } from './laDate';
 
-const MENTION_AT_CARET = /(?:^|\s)@([\p{L}\p{N}_]*)$/u;
+const MENTION_AT_CARET = /(?:^|[\s([{])@([\p{L}\p{M}\p{N}_'’\-]*)$/u;
 
 export function mentionQueryAt(text: string, caret: number): string | null {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
@@ -10,10 +10,12 @@ export function mentionQueryAt(text: string, caret: number): string | null {
 
 export function insertMentionAt(text: string, caret: number, firstName: string): { text: string; caret: number } {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
-  const suffix = text.slice(safeCaret);
-  const mention = suffix.startsWith(' ') ? `@${firstName}` : `@${firstName} `;
-  const before = text.slice(0, safeCaret).replace(/@[\p{L}\p{N}_]*$/u, mention);
-  return { text: before + suffix, caret: before.length };
+  if (mentionQueryAt(text, safeCaret) === null) return { text, caret: safeCaret };
+  // Replacing a query halfway through a token must not leave its old ending.
+  const suffix = text.slice(safeCaret).replace(/^[\p{L}\p{M}\p{N}_'’\-]+/u, '');
+  const mention = /^\s/u.test(suffix) ? `@${firstName}` : `@${firstName} `;
+  const before = text.slice(0, safeCaret).replace(/@[\p{L}\p{M}\p{N}_'’\-]*$/u, mention);
+  return { text: before + suffix, caret: before.length + (suffix.startsWith(' ') ? 1 : 0) };
 }
 
 export function isSameChatDay(a: string, b: string): boolean {
@@ -31,4 +33,8 @@ export function formatChatDay(iso: string): string {
     return 'yesterday';
   }
   return formatEventDateLA(iso).toLowerCase();
+}
+
+export function formatChatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }

@@ -1,3 +1,12 @@
+import { communityJoinPushRoute } from '../lib/communityJoinNotification';
+import { subscribePlanNotificationPrompts, planNotificationPromptCopy, type PlanNotificationPromptRequest, type PlanNotificationPromptReason } from '../lib/planNotificationPrompt';
+import { subscribeExpoNotificationResponses } from '../lib/expoNotificationResponses';
+import { communityChatPushRoute } from '../lib/communityChatPushRoute';
+import { memberReactionPushRoute } from '../lib/memberReactionPushRoute';
+import { pageInvitationPushRoute } from '../lib/pageInvitationNotification';
+import { attendeeMessagePushRoute } from '../lib/attendeeMessageNotification';
+import { organizationPageUpdatePushRoute } from '../lib/organizationPageUpdate';
+import { LOCAL_DEVELOPMENT_ONLY } from '../constants/LocalDevelopment';
 import '../global.css';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -24,20 +33,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
 
-// Silence dev-only redboxes that aren't real bugs:
-// 1. expo-notifications trying to read APNs registration from the keychain
-//    on simulators (no push entitlement). Harmless on real devices.
-// 2. device_tokens upsert failing because the table only exists in the
-//    OneSignal migration file, not yet applied to prod. Will be removed
-//    once the migration ships in §8 Step 8 of the OneSignal plan.
+// Silence the dev-only expo-notifications redbox caused by simulators having
+// no APNs entitlement. Real device registration failures must stay visible.
 LogBox.ignoreLogs([
   'getRegistrationInfoAsync',
-  'Failed to upsert device_tokens',
 ]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { supabase } from '../lib/supabase';
@@ -45,28 +49,31 @@ import { isBannedAppleUser } from '../lib/socialAuth';
 import { authedDest, unauthedRoute } from '../lib/authRouting';
 import { fetchNeedsPhoneMigration } from '../lib/authGate';
 import { seedAuthProfile, getAuthProfile } from '../hooks/useProfile';
-import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef, deliberateSignOutAt } from '../lib/navState';
+import { verifyCodeSelfRoutingRef, lastUnauthRedirectAt, authedUserIdRef, deliberateSignOutAt, subscribeVerificationDestination, getVerificationDestination, observeVerificationAccount, approveVerificationDestination, cancelVerificationDestination, type VerificationDestinationHandoff } from '../lib/navState';
 import Colors from '../constants/Colors';
 import {
   usePushNotifications,
   initOneSignal,
   ensureOneSignalReady,
-  getPushPermissionStatus,
-  registerForPushNotifications,
+  getPushPromptPermission, getPushPrimerEligibility,
+  registerPushNotificationsWithResult,
 } from '../hooks/usePushNotifications';
 import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
 import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
+import { ChatKeyboardProvider } from '../components/keyboard/ChatKeyboard';
 import { logError } from '../lib/logger';
-import { onPostPlanPushPrimerRequest } from '../lib/postPlanPushPrimer';
 import { queryClient } from '../lib/queryClient';
 import { withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../constants/FeatureFlags';
+import { useAfterglowFonts } from '../hooks/useAfterglowFonts';
+import { pushRegistrationFeedback } from '../components/notifications/pushRegistrationFeedback';
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import { pendingTransferRoute } from '../lib/ticketTransfer';
-import { clearPendingDestination, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { clearPendingDestination, consumePendingDestination, peekPendingCheckout, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
 import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
@@ -86,7 +93,7 @@ Sentry.init({
   // fires false-alarm crash emails that never reach users. __DEV__ is false in
   // all EAS release builds (preview + production), so prod/preview reporting is
   // unchanged; only dev/sim goes quiet.
-  enabled: !__DEV__,
+  enabled: !LOCAL_DEVELOPMENT_ONLY && !__DEV__,
   tracesSampleRate: 0,
   enableAutoSessionTracking: true,
   ignoreErrors: [/getRegistrationInfoAsync/],
@@ -185,17 +192,19 @@ function RootLayout() {
         apiKey={posthogApiKey || 'placeholder'}
         options={{
           host: 'https://us.i.posthog.com',
-          disabled: !posthogApiKey,
+          disabled: LOCAL_DEVELOPMENT_ONLY || !posthogApiKey,
         }}
       >
         <QueryClientProvider client={queryClient}>
           <SafeAreaProvider>
+            <ChatKeyboardProvider>
             <BottomSheetModalProvider>
               <RootLayoutNav onReady={() => setAuthReady(true)} />
               {showVideoSplash && (
                 <VideoSplash onFinish={() => setShowVideoSplash(false)} />
               )}
             </BottomSheetModalProvider>
+            </ChatKeyboardProvider>
           </SafeAreaProvider>
         </QueryClientProvider>
       </PostHogProvider>
@@ -209,15 +218,14 @@ const styles = StyleSheet.create({
 
 export default Sentry.wrap(RootLayout);
 
-// Pre-permission primer snooze. "Not now" snoozes for 7 days, then the primer
-// can re-ask; a granted permission permanently short-circuits it. Distinct
-// from the chat banner's `push_banner_dismissed_at`.
+// Keep the generic launch reminder and the higher-intent post/join invitation
+// on separate cooldowns. Dismissing an out-of-context reminder must not hide
+// the more relevant invitation after someone actually creates or joins a plan.
+// Preserve the original key for the launch reminder so existing choices carry
+// forward across the OTA.
 const PUSH_PRIMER_SNOOZE_KEY = 'push_primer_snoozed_at';
+const PLAN_PUSH_PRIMER_SNOOZE_KEY = 'plan_push_primer_snoozed_at';
 const PUSH_PRIMER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-// The post-plan primer deliberately bypasses the launch primer's snooze (the
-// moment of value outranks a generic "Not now" from days earlier) but keeps
-// its own 7-day cooldown so posting several plans never turns into a nag.
-const POST_PLAN_PRIMER_SEEN_KEY = 'push_primer_post_plan_seen_at';
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const router = useRouter();
@@ -240,8 +248,22 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const pendingDeepLinkRef = useRef<string | null>(null);
 
   const [authResolved, setAuthResolved] = useState(false);
+  const [authCheckFailed, setAuthCheckFailed] = useState(false);
+  const retryAuthCheckRef = useRef<(() => void) | null>(null);
   const [authedUserId, setAuthedUserId] = useState<string | null>(null);
   const [layoutAlert, setLayoutAlert] = useState<{ title: string; message: string } | null>(null);
+  const [verificationRevision, setVerificationRevision] = useState(0);
+  const verificationResumeRef = useRef<VerificationDestinationHandoff | null>(null);
+  const authIdentityRef = useRef({ userId: null as string | null, revision: 0 });
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelVerificationDestination();
+    };
+  }, []);
+  useEffect(() => subscribeVerificationDestination(() => setVerificationRevision((n) => n + 1)), []);
   const isRecoveryRef = useRef(false);
   const splashHiddenRef = useRef(false);
   const lastNavRef = useRef({ dest: '', ts: 0 });
@@ -263,7 +285,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   useEffect(() => { authResolvedRef.current = authResolved; }, [authResolved]);
   const authedDestRef = useRef('');
   const honorPendingDeepLink = useCallback(() => {
-    if (!navReadyRef.current || !authResolvedRef.current) return;
+    if (!navReadyRef.current || !authResolvedRef.current || isRecoveryRef.current || getVerificationDestination()) return;
     if (!authedUserIdRef.current) return;
     if (!authedDestRef.current.startsWith('/(tabs)')) return;
     const href = pendingDeepLinkRef.current;
@@ -281,13 +303,71 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     honorPendingDeepLink();
   }, [navReady, authResolved, authedUserId, honorPendingDeepLink]);
 
-  usePushNotifications(authedUserId);
+  useEffect(() => {
+    const visit = getVerificationDestination();
+    if (!visit?.approved || !visit.destination || !visit.userId
+      || !navReady || !authResolved || isRecoveryRef.current || authedUserIdRef.current !== visit.userId
+      || verificationResumeRef.current === visit) return;
+    // Verification proposes its destination after the success hold. The ban
+    // check must approve it before even the base screen can be entered.
+    if (!visit.routeCommitted) {
+      visit.routeCommitted = true;
+      router.replace(visit.destination as never);
+      return;
+    }
+    if (!visit.entryApproved || !visit.destination.startsWith('/(tabs)')) return;
+    verificationResumeRef.current = visit;
+    const isCurrent = () => mountedRef.current && getVerificationDestination() === visit && visit.approved && visit.entryApproved
+      && authedUserIdRef.current === visit.userId && !isRecoveryRef.current;
+    void (async () => {
+      // Same priority as the Tabs consumer this visit replaces: a completed
+      // checkout first, then its saved link, then the buffered notification.
+      const orderId = await peekPendingCheckout();
+      if (!isCurrent()) return;
+      if (orderId) {
+        const order = await getOrder(orderId).catch(() => null);
+        if (!isCurrent()) return;
+        if (order && order.status !== 'pending') {
+          pendingDeepLinkRef.current = null;
+          await clearPendingDestination(isCurrent);
+          if (!isCurrent()) return;
+          authedDestRef.current = visit.destination!;
+          cancelVerificationDestination(visit);
+          router.replace(`/tickets/order/${orderId}` as never);
+          return;
+        }
+      }
+      const saved = await consumePendingDestination(isCurrent);
+      if (!isCurrent()) return;
+      const href = saved ?? pendingDeepLinkRef.current ?? await pendingTransferRoute().catch(() => null);
+      if (!isCurrent()) return;
+      pendingDeepLinkRef.current = null;
+      authedDestRef.current = visit.destination!;
+      cancelVerificationDestination(visit);
+      if (href) router.push(href as never);
+    })().catch((error) => {
+      // Storage and order helpers are best-effort. An unexpected rejection
+      // must not leave this visit permanently owning the consumer.
+      if (!isCurrent()) return;
+      logError(error, 'layout.verificationDestination');
+      authedDestRef.current = visit.destination!;
+      cancelVerificationDestination(visit);
+      honorPendingDeepLink();
+    });
+  }, [navReady, authResolved, authedUserId, verificationRevision, router, honorPendingDeepLink]);
+
+  usePushNotifications(authedUserId, { identityResolved: authResolved });
   useSessionLogger(authedUserId);
 
   // PostHog: identify on login, reset on logout. Hook returns null when the
   // provider is in disabled mode (no key configured), so the optional chaining
   // keeps this safe in misconfigured environments.
   const posthog = usePostHog();
+  const capturePushEvent = useCallback((event: string, properties: Record<string, string | null>) => {
+    // Analytics is observability only. A disabled or unhealthy analytics SDK
+    // must never block a permission choice, registration repair, or dismissal.
+    try { posthog?.capture(event, properties); } catch {}
+  }, [posthog]);
   useEffect(() => {
     if (!posthog) return;
     if (authedUserId) {
@@ -309,10 +389,45 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [surveyMembers, setSurveyMembers] = useState<SurveyMember[]>([]);
   const surveyCheckedRef = useRef(false);
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
-  const prevUserIdRef = useRef<string | null>(null);
+  const [reviewCheckDone, setReviewCheckDone] = useState(false);
+  const [reviewSheetPending, setReviewSheetPending] = useState(false);
+  const reviewCheckIdentityRef = useRef<typeof authIdentityRef.current | null>(null);
   const [showPushPrimer, setShowPushPrimer] = useState(false);
-  const [pushPrimerVariant, setPushPrimerVariant] = useState<'launch' | 'postPlan'>('launch');
   const pushPrimerCheckedRef = useRef(false);
+  const [pushPrimerPending, setPushPrimerPending] = useState(false);
+  const [pushPrimerFeedback, setPushPrimerFeedback] = useState<string | null>(null);
+  const pushPrimerCheckRef = useRef<object | null>(null);
+  const pushPrimerVisitRef = useRef<{ identity: typeof authIdentityRef.current; reason?: PlanNotificationPromptReason; settings?: boolean } | null>(null);
+  const planPrimerShownRef = useRef(false);
+  const [planPrimerRequest, setPlanPrimerRequest] = useState<(PlanNotificationPromptRequest & { identity: typeof authIdentityRef.current }) | null>(null);
+  const pushPrimerAttemptRef = useRef<object | null>(null);
+  const pushPrimerAnalyticsVisitRef = useRef<typeof pushPrimerVisitRef.current>(null);
+  const primerIdentity = authIdentityRef.current;
+  const { fonts: primerFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+
+  const retirePushPrimer = () => {
+    pushPrimerCheckRef.current = null;
+    pushPrimerVisitRef.current = null;
+    pushPrimerAttemptRef.current = null;
+    setShowPushPrimer(false);
+    setPushPrimerPending(false);
+    setPushPrimerFeedback(null);
+  };
+  // An account epoch also changes on sign-out/recovery, including A → B → A.
+  // Never let a check or an enable result from that old visit own this modal.
+  const resetAccountOwnedUi = useCallback(() => {
+    pushPrimerCheckedRef.current = false;
+    planPrimerShownRef.current = false;
+    setPlanPrimerRequest(null);
+    retirePushPrimer();
+    surveyCheckedRef.current = false;
+    setSurveyCheckDone(false);
+    setReviewCheckDone(false);
+    reviewCheckIdentityRef.current = null;
+    setSurveyPlan(null);
+    setReviewSheetPending(false);
+  }, []);
+  useEffect(() => resetAccountOwnedUi(), [primerIdentity, resetAccountOwnedUi]);
 
   // ── Root-modal sequencer ──────────────────────────────────────────────────
   // RN can only safely present ONE modal at a time. Closing one modal used to
@@ -332,25 +447,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setTimeout(() => setModalLocked(false), MODAL_HANDOFF_MS);
   };
 
-  // Reset survey/review state when user changes (sign out + sign in as different user)
   useEffect(() => {
-    if (authedUserId && authedUserId !== prevUserIdRef.current) {
-      if (prevUserIdRef.current !== null) {
-        surveyCheckedRef.current = false;
-        setSurveyCheckDone(false);
-        setReviewCheckDone(false);
-        setSurveyPlan(null);
-        setReviewSheetPending(false);
-        pushPrimerCheckedRef.current = false;
-        setShowPushPrimer(false);
-      }
-      prevUserIdRef.current = authedUserId;
-    }
-  }, [authedUserId]);
-
-  useEffect(() => {
-    if (!authedUserId || !authResolved || surveyCheckedRef.current) return;
+    // authIdentityRef advances synchronously inside the Supabase callback,
+    // before the matching React user state commits. Do not let the new visit
+    // consume its survey/review check while the render still belongs to the
+    // previous account.
+    if (!authedUserId || !authResolved || primerIdentity.userId !== authedUserId
+      || surveyCheckedRef.current) return;
     surveyCheckedRef.current = true;
+    const surveyIdentity = authIdentityRef.current;
+    const isCurrent = () => mountedRef.current && authIdentityRef.current === surveyIdentity;
 
     (async () => {
       try {
@@ -359,6 +465,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // today PT does NOT trigger the modal — only plans on a strictly
         // earlier PT calendar day do. Returns null when nothing is eligible.
         const { data, error } = await supabase.rpc('get_pending_post_plan_survey');
+        if (!isCurrent()) return;
         if (error) {
           console.warn('[WashedUp] Survey RPC failed:', error.message);
           return;
@@ -389,7 +496,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // plan once a plan_feedback row exists; if that insert ever failed
         // or the user skipped offline, this guarantees the survey can never
         // re-block them on a later cold start (incident 2026-05-18).
-        if (await isPostPlanSurveyHandled(payload.plan.id)) return;
+        if (await isPostPlanSurveyHandled(payload.plan.id) || !isCurrent()) return;
 
         setSurveyPlan({
           id: payload.plan.id,
@@ -411,9 +518,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           })),
         );
       } catch (e) { logError(e, 'layout.surveyCheck'); }
-      finally { setSurveyCheckDone(true); }
+      finally {
+        if (isCurrent()) {
+          reviewCheckIdentityRef.current = surveyIdentity;
+          setSurveyCheckDone(true);
+          setReviewCheckDone(true);
+        }
+      }
     })();
-  }, [authedUserId, authResolved]);
+  }, [authedUserId, authResolved, primerIdentity]);
 
   // ── App Store review ask ────────────────────────────────────────────────
   // The review ask is no longer a competing root modal. It is the native OS
@@ -423,19 +536,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // review modal did. reviewCheckDone stays as the gate the push primer and the
   // album/mark modals wait on; it now resolves as soon as the survey decision
   // is made (there is no separate review pre-check to await).
-  const [reviewCheckDone, setReviewCheckDone] = useState(false);
-  const [reviewSheetPending, setReviewSheetPending] = useState(false);
-
-  useEffect(() => {
-    if (surveyCheckDone) setReviewCheckDone(true);
-  }, [surveyCheckDone]);
-
   // Called from the survey owner after a TOP-rating completion. Defers the push
   // primer to a later launch (the review sheet owns this beat) and fires the
   // native ask once the survey Modal has unmounted (the handoff window).
   const fireReviewAfterSurvey = () => {
+    planPrimerShownRef.current = true;
+    setPlanPrimerRequest(null);
     pushPrimerCheckedRef.current = true;
-    setShowPushPrimer(false);
+    retirePushPrimer();
     setReviewSheetPending(true);
     setTimeout(() => {
       void maybeRequestReviewAfterTopRating().finally(() =>
@@ -445,65 +553,192 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   };
 
   // Pre-permission primer gate. Native only. Fires once per cold launch
-  // (ref resets only on user change) while the user is authed, auth is
+  // (ref resets on account epoch change) while the user is authed, auth is
   // resolved, push permission is still undetermined, and the 7-day snooze
   // is not active. Never cold-fires the OS prompt: the modal CTA does.
   useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!authedUserId || !authResolved) return;
+    if (primerIdentity.userId !== authedUserId || isRecoveryRef.current) return;
     // Wait for the App Store review decision before evaluating, so the primer
     // never flashes on screen a beat ahead of a review ask that takes
     // precedence (the review check is network-bound and resolves later).
-    if (!reviewCheckDone) return;
+    if (!reviewCheckDone || reviewCheckIdentityRef.current !== primerIdentity) return;
     if (pushPrimerCheckedRef.current) return;
     pushPrimerCheckedRef.current = true;
+    const check = {};
+    pushPrimerCheckRef.current = check;
+    const isCurrent = () => mountedRef.current && pushPrimerCheckRef.current === check
+      && authIdentityRef.current === primerIdentity && !isRecoveryRef.current;
     // A TOP-rating survey completion defers the primer to a later launch via
     // fireReviewAfterSurvey (it sets pushPrimerCheckedRef + hides the primer),
     // so the native review sheet is never stacked under the primer.
     (async () => {
       try {
         const snoozedAt = await AsyncStorage.getItem(PUSH_PRIMER_SNOOZE_KEY);
+        if (!isCurrent()) return;
         if (snoozedAt && Date.now() - Number(snoozedAt) < PUSH_PRIMER_COOLDOWN_MS) return;
-        if (!(await ensureOneSignalReady())) return;
-        const status = await getPushPermissionStatus();
-        // Only show when the OS prompt has never been answered. 'granted'
-        // means we already have (or will silently get) a token; 'denied'
-        // is a hard iOS denial the primer cannot reverse (Settings owns it).
-        if (status !== 'undetermined') return;
-        setPushPrimerVariant('launch');
+        const status = await getPushPrimerEligibility();
+        // This read never registers a device or requests OS permission. A
+        // failed/unknown lookup is not evidence that permission is unasked.
+        if (!isCurrent() || status !== 'requestable') return;
+        pushPrimerVisitRef.current = { identity: primerIdentity };
+        setPushPrimerFeedback(null);
+        setPushPrimerPending(false);
         setShowPushPrimer(true);
       } catch (e) {
         logError(e, 'layout.pushPrimerCheck');
       }
     })();
-  }, [authedUserId, authResolved, reviewCheckDone]);
+    return () => {
+      if (pushPrimerCheckRef.current !== check) return;
+      pushPrimerCheckRef.current = null;
+      // Account switching resets the survey/review decision after this
+      // render. A check cancelled before showing is still eligible once
+      // that new decision completes; an already shown visit is consumed.
+      if (!pushPrimerVisitRef.current) pushPrimerCheckedRef.current = false;
+    };
+  }, [authedUserId, authResolved, reviewCheckDone, primerIdentity]);
 
-  // Post-plan primer request from the composer (lib/postPlanPushPrimer).
-  // Re-checks everything at fire time: authed, its own 7-day cooldown, and
-  // permission still undetermined. Bypasses PUSH_PRIMER_SNOOZE_KEY on purpose
-  // (see that key's comment). Never cold-fires the OS prompt: the modal CTA
-  // does, same contract as the launch primer above. The seen-at stamp is
-  // written at show time, so dismissing still counts against the cooldown.
+  // Confirmed plan flows hand off only after their local sheets finish. The
+  // existing root primer remains the single modal/permission owner.
+  useEffect(() => subscribePlanNotificationPrompts((request) => {
+    if (Platform.OS === 'web' || !mountedRef.current || !authResolved || !authedUserId || request.userId !== authedUserId
+      || authIdentityRef.current !== primerIdentity || isRecoveryRef.current || planPrimerShownRef.current) return;
+    setPlanPrimerRequest((queued) => queued ?? { ...request, identity: primerIdentity });
+  }), [authedUserId, authResolved, primerIdentity]);
+
   useEffect(() => {
-    if (Platform.OS === 'web') return;
-    return onPostPlanPushPrimerRequest(() => {
-      (async () => {
+    if (!planPrimerRequest) return;
+    if (planPrimerShownRef.current || planPrimerRequest.identity !== primerIdentity) {
+      setPlanPrimerRequest(null); return;
+    }
+    if (!authResolved || !authedUserId || !reviewCheckDone || surveyPlan || reviewSheetPending
+      || modalLocked || layoutAlert || showPushPrimer || isRecoveryRef.current) return;
+    // Retire an unfinished cold-launch check before checking this context.
+    pushPrimerCheckedRef.current = true;
+    const check = {}; pushPrimerCheckRef.current = check;
+    const isCurrent = () => mountedRef.current && pushPrimerCheckRef.current === check
+      && authIdentityRef.current === planPrimerRequest.identity && !isRecoveryRef.current;
+    const timer = setTimeout(() => {
+      void (async () => {
         try {
-          if (!authedUserId) return;
-          const seenAt = await AsyncStorage.getItem(POST_PLAN_PRIMER_SEEN_KEY);
-          if (seenAt && Date.now() - Number(seenAt) < PUSH_PRIMER_COOLDOWN_MS) return;
-          if (!(await ensureOneSignalReady())) return;
-          const status = await getPushPermissionStatus();
-          if (status !== 'undetermined') return;
-          await AsyncStorage.setItem(POST_PLAN_PRIMER_SEEN_KEY, String(Date.now()));
-          setPushPrimerVariant('postPlan');
-          setShowPushPrimer(true);
-        } catch (e) {
-          logError(e, 'layout.postPlanPushPrimer');
-        }
+          const snoozedAt = await AsyncStorage.getItem(PLAN_PUSH_PRIMER_SNOOZE_KEY);
+          if (!isCurrent()) return;
+          if (snoozedAt && Date.now() - Number(snoozedAt) < PUSH_PRIMER_COOLDOWN_MS) return;
+          const permission = await getPushPromptPermission();
+          if (!isCurrent() || (permission !== 'requestable' && permission !== 'denied')) return;
+          pushPrimerVisitRef.current = { identity: planPrimerRequest.identity,
+            reason: planPrimerRequest.reason, settings: permission === 'denied' };
+          setPushPrimerFeedback(null); setPushPrimerPending(false); setShowPushPrimer(true);
+        } catch (error) { if (isCurrent()) logError(error, 'layout.planPushPrimerCheck'); }
+        finally { if (isCurrent()) setPlanPrimerRequest(null); }
       })();
+    }, MODAL_HANDOFF_MS);
+    return () => {
+      clearTimeout(timer);
+      if (pushPrimerCheckRef.current === check) pushPrimerCheckRef.current = null;
+    };
+  }, [planPrimerRequest, primerIdentity, authedUserId, authResolved, reviewCheckDone, surveyPlan,
+    reviewSheetPending, modalLocked, layoutAlert, showPushPrimer]);
+
+  const pushPrimerVisible = showPushPrimer && !!authedUserId && authResolved
+    && pushPrimerVisitRef.current?.identity === primerIdentity && !isRecoveryRef.current
+    && !surveyPlan && !reviewSheetPending && !modalLocked && !layoutAlert;
+  const renderedPushPrimerVisit = pushPrimerVisitRef.current;
+  const pushPrimerVisibleRef = useRef(pushPrimerVisible);
+  pushPrimerVisibleRef.current = pushPrimerVisible;
+  useEffect(() => {
+    if (!pushPrimerVisible || !renderedPushPrimerVisit) return;
+    // Only a contextual visit consumes the contextual once-per-launch guard.
+    // A generic reminder can therefore be followed by one meaningful post/join
+    // invitation later in the same session.
+    if (renderedPushPrimerVisit.reason) planPrimerShownRef.current = true;
+    if (pushPrimerAnalyticsVisitRef.current === renderedPushPrimerVisit) return;
+    pushPrimerAnalyticsVisitRef.current = renderedPushPrimerVisit;
+    capturePushEvent('push_primer_viewed', {
+      source: renderedPushPrimerVisit.reason ? 'plan_action' : 'cold_launch',
+      reason: renderedPushPrimerVisit.reason ?? null,
+      destination: renderedPushPrimerVisit.settings ? 'settings' : 'native_prompt',
     });
-  }, [authedUserId]);
+  }, [pushPrimerVisible, renderedPushPrimerVisit, capturePushEvent]);
+  useEffect(() => {
+    // A higher-priority modal taking over retires an in-flight enable. Never
+    // open the OS sheet later underneath a survey or an account alert.
+    if (!pushPrimerVisible && pushPrimerAttemptRef.current) retirePushPrimer();
+  }, [pushPrimerVisible]);
+
+  const enablePushPrimer = async () => {
+    const visit = renderedPushPrimerVisit;
+    if (!mountedRef.current || !visit || visit.identity !== authIdentityRef.current || isRecoveryRef.current
+      || pushPrimerVisitRef.current !== visit || !pushPrimerVisibleRef.current || pushPrimerAttemptRef.current || !authedUserId) return;
+    const attempt = {};
+    pushPrimerAttemptRef.current = attempt;
+    const isCurrent = () => mountedRef.current && pushPrimerAttemptRef.current === attempt
+      && pushPrimerVisitRef.current === visit && authIdentityRef.current === visit.identity
+      && pushPrimerVisibleRef.current && !isRecoveryRef.current;
+    setPushPrimerPending(true);
+    setPushPrimerFeedback(null);
+    capturePushEvent('push_primer_cta_tapped', {
+      source: visit.reason ? 'plan_action' : 'cold_launch',
+      reason: visit.reason ?? null,
+      destination: visit.settings ? 'settings' : 'native_prompt',
+    });
+    try {
+      if (visit.settings) {
+        await Linking.openSettings();
+        if (isCurrent()) retirePushPrimer();
+        return;
+      }
+      let result = await registerPushNotificationsWithResult({ prompt: false, userId: authedUserId });
+      if (!isCurrent()) return;
+      // A retry after OS permission was granted only repairs registration;
+      // it must not request permission again or silently reverse an opt-out.
+      if (result.status === 'permission-required') {
+        result = await registerPushNotificationsWithResult({ prompt: true, userId: authedUserId, canPrompt: isCurrent });
+        if (!isCurrent()) return;
+      }
+      if (result.status === 'permission-denied' && visit.reason) {
+        visit.settings = true;
+        setPushPrimerFeedback(pushRegistrationFeedback(result).message);
+      } else if (result.status === 'registered' || result.status === 'permission-denied' || result.status === 'obsolete') {
+        retirePushPrimer();
+      } else {
+        setPushPrimerFeedback(pushRegistrationFeedback(result).message);
+      }
+      capturePushEvent('push_registration_result', {
+        source: visit.reason ? 'plan_action' : 'cold_launch',
+        reason: visit.reason ?? null,
+        status: result.status,
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      logError(error, 'layout.pushPrimerEnable');
+      setPushPrimerFeedback(visit.settings ? 'Couldn’t open Settings. Try again.' : pushRegistrationFeedback({ status: 'failed' }).message);
+    } finally {
+      if (isCurrent()) {
+        pushPrimerAttemptRef.current = null;
+        setPushPrimerPending(false);
+      }
+    }
+  };
+
+  const dismissPushPrimer = () => {
+    if (!mountedRef.current || !pushPrimerVisibleRef.current || !renderedPushPrimerVisit
+      || pushPrimerVisitRef.current !== renderedPushPrimerVisit || renderedPushPrimerVisit.identity !== authIdentityRef.current) return;
+    const visit = renderedPushPrimerVisit;
+    capturePushEvent('push_primer_dismissed', {
+      source: visit.reason ? 'plan_action' : 'cold_launch',
+      reason: visit.reason ?? null,
+    });
+    retirePushPrimer();
+    // Preserve the existing device-level seven-day Not now choice. A
+    // registration failure alone never writes this suppression timestamp.
+    void AsyncStorage.setItem(
+      visit.reason ? PLAN_PUSH_PRIMER_SNOOZE_KEY : PUSH_PRIMER_SNOOZE_KEY,
+      String(Date.now()),
+    ).catch(() => {});
+  };
 
   useEffect(() => {
     if (authResolved && !splashHiddenRef.current) {
@@ -519,6 +754,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     const onClick = (event: any) => {
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
+      if (type === 'operator_grant') { safePush('/creator/apply'); return; }
+      const joinRoute = communityJoinPushRoute(data, CREATOR_PAGES_ENABLED);
+      if (joinRoute) { safePush(joinRoute); return; }
+      const attendeeRoute = attendeeMessagePushRoute(data, COMMUNITIES_ENABLED);
+      if (attendeeRoute) { safePush(attendeeRoute); return; }
+      const invitationRoute = pageInvitationPushRoute(data, CREATOR_PAGES_ENABLED);
+      if (invitationRoute) { safePush(invitationRoute); return; }
+      const pageUpdateRoute = organizationPageUpdatePushRoute(data, CREATOR_PAGES_ENABLED);
+      if (pageUpdateRoute) { safePush(pageUpdateRoute); return; }
+      const communityRoute = communityChatPushRoute(data, COMMUNITIES_ENABLED);
+      if (communityRoute) { safePush(communityRoute); return; }
+      const memberReactionRoute = memberReactionPushRoute(data);
+      if (memberReactionRoute) { safePush(memberReactionRoute); return; }
 
       // Album notifications: prompt/reminder/no-uploads-nudge open the upload
       // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
@@ -550,6 +798,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         safePush(`/waitlist/${data.eventId}`);
       } else if (
         (type === 'plan_invite' ||
+          type === 'plan_cancelled' ||
           type === 'waitlist_spot' ||
           type === 'duplicate_plan' ||
           type === 'interest_signal' ||
@@ -583,7 +832,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       ) {
         // Yours system: the request banner + swipe stack live on the
         // Yours page. Single inbox routes people notifications there.
-        safePush('/(tabs)/friends');
+        safePush('/(tabs)/friends?tab=people');
       } else if (type === 'people_ping' && data?.eventId) {
         // A ping IS the plan, open the plan detail, not the chat.
         safePush(`/plan/${data.eventId}`);
@@ -598,10 +847,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // "just posted <event>" lands on Scene, where the event lives. The
         // payload carries no event id by design (event_id is the plans FK).
         safePush('/(tabs)/explore');
-        // community_broadcast, community_join_approved, and
-        // community_join_declined intentionally ride the generic fallback
-        // below: they carry no ids, and the chats list (with the communities
-        // section on top) is the right landing for all three.
+        // Source-less join decisions retain the generic chats-list fallback.
       } else if (data?.circleId) {
         // Circle chat push (20260605000200_circle_message_push.sql +
         // 20260827223000_claim_rpc_add_circle_topic_ids.sql):
@@ -627,6 +873,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     let cancelled = false;
     let attached: ((event: any) => void) | null = null;
+    const stopExpoResponses = subscribeExpoNotificationResponses(data => {
+      if (!cancelled) onClick({ notification: { additionalData: data } });
+    });
 
     initOneSignal().then((ready) => {
       if (cancelled || !ready) return;
@@ -640,6 +889,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
     return () => {
       cancelled = true;
+      stopExpoResponses();
       if (attached) {
         try {
           OneSignal.Notifications.removeEventListener('click', attached);
@@ -728,6 +978,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
+    const deferredAuthTimers = new Set<ReturnType<typeof setTimeout>>();
 
     // Hard watchdog: no matter what any auth/network call below does
     // (hang on a stale/expired refresh token, slow/offline network), the
@@ -741,18 +992,34 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       if (!cancelled) setAuthResolved(true);
     }, 10000);
 
-    async function checkAuth() {
+    let initialAttempt = 0;
+    let initialAccountCheckPending = true;
+    async function checkAuth(suppliedSession?: Awaited<ReturnType<typeof supabase.auth.getSession>>) {
+      const attempt = ++initialAttempt;
+      const initialRevision = authIdentityRef.current.revision;
+      const isCurrent = () => !cancelled && !isRecoveryRef.current && attempt === initialAttempt
+        && authIdentityRef.current.revision === initialRevision;
       try {
         // If a password recovery deep link is being handled, don't interfere
         if (isRecoveryRef.current) return;
 
-        const sessionResult = await withTimeout(
-          supabase.auth.getSession(),
-          6000,
-          { data: { session: null } } as any,
-        );
-
-        if (cancelled || isRecoveryRef.current) return;
+        // A missing session is definitive; a delayed/failed storage or token
+        // read is not. Keep the original read alive so it can recover without
+        // forcing a valid returning member to sign in again.
+        const pendingSession = suppliedSession ? Promise.resolve(suppliedSession) : supabase.auth.getSession();
+        const unresolved = Symbol('session-check-unresolved');
+        let sessionResult = await withTimeout(pendingSession, 6000, unresolved as any);
+        if (!isCurrent()) return;
+        if (sessionResult === unresolved) {
+          clearTimeout(authWatchdog);
+          setAuthCheckFailed(true);
+          setAuthResolved(true);
+          sessionResult = await pendingSession;
+          if (!isCurrent()) return;
+        }
+        if (sessionResult?.error) throw sessionResult.error;
+        initialAccountCheckPending = false;
+        setAuthCheckFailed(false);
 
         const session = sessionResult && 'data' in sessionResult
           ? sessionResult.data.session
@@ -774,6 +1041,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // login and double-routing. Cleared again if the user turns out
         // banned / profile-less below.
         authedUserIdRef.current = session.user.id;
+        authIdentityRef.current.userId = session.user.id;
 
         // Apple ban check + profile fetch run in parallel — both are
         // independent of each other and the ban check is a single RPC,
@@ -813,11 +1081,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         ]);
         const profileData = profileResult.profile;
 
-        if (cancelled || isRecoveryRef.current) return;
+        if (!isCurrent()) return;
 
         if (isBanned) {
           await withTimeout(supabase.auth.signOut(), 3000, undefined as any);
-          if (cancelled || isRecoveryRef.current) return;
+          if (!isCurrent()) return;
           authedUserIdRef.current = null;
           setAuthedUserId(null);
           const unauth = unauthedRoute();
@@ -866,79 +1134,68 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.replace(dest as any);
         setTimeout(() => setAuthResolved(true), 80);
       } catch {
-        if (!cancelled) {
-          const unauth = unauthedRoute();
-          lastNavRef.current = { dest: unauth, ts: Date.now() };
-          authedDestRef.current = unauth;
-          router.replace(unauth as any);
-          setTimeout(() => setAuthResolved(true), 80);
+        if (isCurrent()) {
+          clearTimeout(authWatchdog);
+          setAuthCheckFailed(true);
+          setAuthResolved(true);
         }
       }
     }
 
-    checkAuth();
+    retryAuthCheckRef.current = () => {
+      if (cancelled) return;
+      initialAccountCheckPending = true;
+      setAuthCheckFailed(false);
+      setAuthResolved(false);
+      void checkAuth();
+    };
+    void checkAuth();
 
     // Keep listening for sign-in/out and password recovery after initial load
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // The independent cold-start check owns INITIAL_SESSION. Treating it
+      // as an account change would cancel that check before either can route.
+      if (cancelled || event === 'INITIAL_SESSION') return;
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY') setAuthCheckFailed(false);
+      // A refresh can finish the unresolved cold-start read. Defer the same
+      // startup gates until Supabase releases its auth callback lock.
+      if (event === 'TOKEN_REFRESHED' && session?.user && initialAccountCheckPending) {
+        const timer = setTimeout(() => {
+          deferredAuthTimers.delete(timer);
+          if (!cancelled && initialAccountCheckPending) void checkAuth({ data: { session }, error: null });
+        }, 0);
+        deferredAuthTimers.add(timer);
+        return;
+      }
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY') initialAccountCheckPending = false;
+      const userId = session?.user.id ?? null;
+      if (event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY'
+        || authIdentityRef.current.userId !== userId) {
+        authIdentityRef.current = { userId, revision: authIdentityRef.current.revision + 1 };
+        authedDestRef.current = '';
+        // Retire old-account callbacks immediately, before React commits the
+        // new user state. This covers same-account re-entry and batched auth
+        // events where an effect keyed only to rendered state could miss the
+        // intervening visit entirely.
+        resetAccountOwnedUi();
+      }
+      const identity = authIdentityRef.current;
+      const isCurrent = () => !cancelled && !isRecoveryRef.current && authIdentityRef.current === identity;
+      const previousVerification = getVerificationDestination();
+      if (event === 'PASSWORD_RECOVERY') cancelVerificationDestination();
+      const verificationVisit = event === 'PASSWORD_RECOVERY' ? null : observeVerificationAccount(userId);
+      if (previousVerification && !getVerificationDestination()) pendingDeepLinkRef.current = null;
       if (event === 'PASSWORD_RECOVERY') {
         isRecoveryRef.current = true;
         setAuthResolved(true);
         router.replace('/reset-password');
         return;
       }
-      if (event === 'SIGNED_IN' && isRecoveryRef.current) return;
-      // Auto-correct anyone TRANSIENTLY gated: when a fresh token or updated
-      // user arrives and they are sitting on the migration gate but no longer
-      // need it, route them out. Never NEWLY gate on a refresh.
-      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-        if (session?.user && pathnameRef.current === '/migration-gate') {
-          const stillNeeds = await fetchNeedsPhoneMigration();
-          if (!stillNeeds) {
-            const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
-            const dest = authedDest({
-              onboarding_status: data?.onboarding_status,
-              referral_source: data?.referral_source,
-              needs_phone_migration: false,
-            });
-            lastNavRef.current = { dest, ts: Date.now() };
-            authedDestRef.current = dest;
-            router.replace(dest as any);
-          }
-        }
-        return;
-      }
-      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') return;
-
-      // Best-effort: consume a referral code captured while signed out
-      // (QR/link scanned before auth). Fire-and-forget; fully self-
-      // contained and error-swallowed so it cannot affect routing below.
-      if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
-        consumePendingReferral();
-      }
-
-      // A ticket-transfer code stashed while signed out (item 15, draft,
-      // not yet backed by an applied migration) cannot resolve itself like
-      // a referral -- claiming needs the recipient's fresh answers first --
-      // so this only routes back to the claim screen, it does not push()
-      // the primary auth-destination replace() above. NOT verified against
-      // a real device: this touches the same auth-routing file responsible
-      // for the 2026-08-31 signup regression, so treat this block as
-      // needing its own real sign-in walkthrough before it ships, same bar
-      // as everything else in this function.
-      if (event === 'SIGNED_IN') {
-        pendingTransferRoute().then((route) => {
-          if (route) router.push(route as never);
-        }).catch(() => {});
-      }
-
-      // Remember that an account lives on this device (never a token, just
-      // the number), so a session that dies later can offer to sign back in
-      // rather than offering to make a second account.
-      if (event === 'SIGNED_IN' && session?.user?.phone) {
-        rememberAccount(session.user.phone);
-      }
-
+      if (isRecoveryRef.current && event !== 'SIGNED_OUT') return;
+      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT'
+        && event !== 'TOKEN_REFRESHED' && event !== 'USER_UPDATED' && !verificationVisit) return;
       if (!session?.user) {
+        if ((event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && !verificationVisit) return;
         // Did they choose this? A deliberate exit stamps navState immediately
         // before signOut(); anything else is a session that died on its own.
         const deliberate = Date.now() - deliberateSignOutAt.ts < 1500;
@@ -991,91 +1248,165 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         return;
       }
 
-      // Apple ban check — same safety net as checkAuth. Belt-and-suspenders
-      // against the tiny window where SIGNED_IN fires after a fresh Apple
-      // sign-in but before signInWithApple's own ban check has a chance to
-      // run. Also catches any reauthentication flow that bypasses socialAuth.
-      if (await withTimeout(isBannedAppleUser(session.user), 4000, false)) {
-        await withTimeout(supabase.auth.signOut(), 3000, undefined as any);
-        authedUserIdRef.current = null;
-        setAuthedUserId(null);
-        const unauth = unauthedRoute();
-        lastNavRef.current = { dest: unauth, ts: Date.now() };
-        authedDestRef.current = unauth;
-        router.replace(unauth as any);
-        return;
-      }
 
-      // Verify-code is self-routing: it shows a 600ms success animation
-      // before navigating itself via the same authedDest helper. Skip the
-      // root-level redirect so we don't preempt that animation by yanking
-      // the user away the moment SIGNED_IN fires. Pathname-agnostic via
-      // a shared ref — survives deep-link entry to /verify-code.
-      if (verifyCodeSelfRoutingRef.current || pathnameRef.current === '/verify-code') {
-        // verify-code owns routing to plans here; claim the identity so
-        // the post-verify SIGNED_IN re-emits are recognized as re-emits
-        // and don't bounce the user back through authedDest.
-        authedUserIdRef.current = session.user.id;
-        setAuthedUserId(session.user.id);
-        setAuthResolved(true);
-        return;
-      }
+      // Auth listeners run while Supabase holds its session lock. Return
+      // synchronously before any profile/RPC/ban read can re-enter getSession.
+      const timer = setTimeout(() => {
+        deferredAuthTimers.delete(timer);
+        if (!isCurrent()) return;
+        void (async () => {
+          // Auto-correct anyone TRANSIENTLY gated: when a fresh token or updated
+          // user arrives and they are sitting on the migration gate but no longer
+          // need it, route them out. Never NEWLY gate on a refresh.
+          if ((event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && !verificationVisit) {
+            if (session?.user && pathnameRef.current === '/migration-gate') {
+              const stillNeeds = await fetchNeedsPhoneMigration();
+              if (!isCurrent()) return;
+              if (!stillNeeds) {
+                const data = await withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null);
+                if (!isCurrent()) return;
+                const dest = authedDest({
+                  onboarding_status: data?.onboarding_status,
+                  referral_source: data?.referral_source,
+                  needs_phone_migration: false,
+                });
+                lastNavRef.current = { dest, ts: Date.now() };
+                authedDestRef.current = dest;
+                router.replace(dest as any);
+              }
+            }
+            return;
+          }
+          if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && !verificationVisit) return;
 
-      // Re-emitted SIGNED_IN for the user already in the app (foreground /
-      // session recovery), NOT a deliberate login. Do not re-run the phone
-      // gate / re-route mid-session. The 5s lastNavRef dedup below is too
-      // short to catch a refire minutes into a session.
-      if (authedUserIdRef.current === session.user.id) {
-        setAuthedUserId(session.user.id);
-        setAuthResolved(true);
-        return;
-      }
+          // Best-effort: consume a referral code captured while signed out
+          // (QR/link scanned before auth). Fire-and-forget; fully self-
+          // contained and error-swallowed so it cannot affect routing below.
+          if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
+            consumePendingReferral();
+          }
 
-      try {
-        // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
-        // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
-        // window. Falls back to a network fetch if the cache is empty/stale.
-        const [data, needsPhone] = await Promise.all([
-          withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null),
-          fetchNeedsPhoneMigration(),
-        ]);
-        const dest = authedDest({
-          onboarding_status: data?.onboarding_status,
-          referral_source: data?.referral_source,
-          needs_phone_migration: needsPhone,
+          // A ticket-transfer code stashed while signed out (item 15, draft,
+          // not yet backed by an applied migration) cannot resolve itself like
+          // a referral -- claiming needs the recipient's fresh answers first --
+          // so this only routes back to the claim screen, it does not push()
+          // the primary auth-destination replace() above. NOT verified against
+          // a real device: this touches the same auth-routing file responsible
+          // for the 2026-08-31 signup regression, so treat this block as
+          // needing its own real sign-in walkthrough before it ships, same bar
+          // as everything else in this function.
+          if (event === 'SIGNED_IN') {
+            pendingTransferRoute().then((route) => {
+              if (route && isCurrent() && !getVerificationDestination()) router.push(route as never);
+            }).catch(() => {});
+          }
+
+          // Remember that an account lives on this device (never a token, just
+          // the number), so a session that dies later can offer to sign back in
+          // rather than offering to make a second account.
+          if (event === 'SIGNED_IN' && session?.user?.phone) {
+            rememberAccount(session.user.phone);
+          }
+
+
+          // Apple ban check — same safety net as checkAuth. Belt-and-suspenders
+          // against the tiny window where SIGNED_IN fires after a fresh Apple
+          // sign-in but before signInWithApple's own ban check has a chance to
+          // run. Also catches any reauthentication flow that bypasses socialAuth.
+          const isBanned = await withTimeout(isBannedAppleUser(session.user), 4000, false);
+          if (!isCurrent()) return;
+          if (isBanned) {
+            if (verificationVisit) cancelVerificationDestination(verificationVisit);
+            await withTimeout(supabase.auth.signOut(), 3000, undefined as any);
+            if (!isCurrent()) return;
+            authedUserIdRef.current = null;
+            setAuthedUserId(null);
+            const unauth = unauthedRoute();
+            lastNavRef.current = { dest: unauth, ts: Date.now() };
+            authedDestRef.current = unauth;
+            router.replace(unauth as any);
+            return;
+          }
+
+          // Verify-code owns its 600ms success hold and destination proposal.
+          // Approve this visit's ban check without preempting that hold; the
+          // root handoff above commits the proposal and waits for the tabs gate.
+          approveVerificationDestination(verificationVisit, session.user.id);
+          if (verificationVisit || verifyCodeSelfRoutingRef.current || pathnameRef.current === '/verify-code') {
+            // Claim the identity while verification finishes, so
+            // the post-verify SIGNED_IN re-emits are recognized as re-emits
+            // and don't bounce the user back through authedDest.
+            authedUserIdRef.current = session.user.id;
+            setAuthedUserId(session.user.id);
+            setAuthResolved(true);
+            return;
+          }
+
+          // Re-emitted SIGNED_IN for the user already in the app (foreground /
+          // session recovery), NOT a deliberate login. Do not re-run the phone
+          // gate / re-route mid-session. The 5s lastNavRef dedup below is too
+          // short to catch a refire minutes into a session.
+          if (authedUserIdRef.current === session.user.id) {
+            setAuthedUserId(session.user.id);
+            setAuthResolved(true);
+            return;
+          }
+
+          try {
+            // Reuse the shared auth-profile cache (seeded by cold-start checkAuth)
+            // so SIGNED_IN doesn't fire a duplicate select within the 60s stale
+            // window. Falls back to a network fetch if the cache is empty/stale.
+            const [data, needsPhone] = await Promise.all([
+              withTimeout(getAuthProfile(queryClient, session.user.id), 4000, null),
+              fetchNeedsPhoneMigration(),
+            ]);
+            if (!isCurrent()) return;
+            const dest = authedDest({
+              onboarding_status: data?.onboarding_status,
+              referral_source: data?.referral_source,
+              needs_phone_migration: needsPhone,
+            });
+            const now = Date.now();
+            // Genuine fresh login committed — claim the identity so any
+            // SIGNED_IN re-emit later this session is treated as a re-emit.
+            authedUserIdRef.current = session.user.id;
+            if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
+              authedDestRef.current = dest;
+              setAuthedUserId(session.user.id);
+              setAuthResolved(true);
+              return;
+            }
+            lastNavRef.current = { dest, ts: now };
+            authedDestRef.current = dest;
+            setAuthedUserId(session.user.id);
+            router.replace(dest as any);
+            setTimeout(() => { if (isCurrent()) setAuthResolved(true); }, 80);
+          } catch {
+            if (!isCurrent()) return;
+            // Profile fetch failed — navigate to plans as fallback so user isn't stuck
+            authedUserIdRef.current = session.user.id;
+            setAuthedUserId(session.user.id);
+            lastNavRef.current = { dest: '/(tabs)/plans', ts: Date.now() };
+            authedDestRef.current = '/(tabs)/plans';
+            router.replace('/(tabs)/plans' as any);
+            setTimeout(() => { if (isCurrent()) setAuthResolved(true); }, 80);
+          }
+        })().catch((error) => {
+          if (isCurrent()) logError(error, 'layout.authStateHandoff');
         });
-        const now = Date.now();
-        // Genuine fresh login committed — claim the identity so any
-        // SIGNED_IN re-emit later this session is treated as a re-emit.
-        authedUserIdRef.current = session.user.id;
-        if (dest === lastNavRef.current.dest && now - lastNavRef.current.ts < 5000) {
-          authedDestRef.current = dest;
-          setAuthedUserId(session.user.id);
-          setAuthResolved(true);
-          return;
-        }
-        lastNavRef.current = { dest, ts: now };
-        authedDestRef.current = dest;
-        setAuthedUserId(session.user.id);
-        router.replace(dest as any);
-        setTimeout(() => setAuthResolved(true), 80);
-      } catch {
-        // Profile fetch failed — navigate to plans as fallback so user isn't stuck
-        authedUserIdRef.current = session.user.id;
-        setAuthedUserId(session.user.id);
-        lastNavRef.current = { dest: '/(tabs)/plans', ts: Date.now() };
-        authedDestRef.current = '/(tabs)/plans';
-        router.replace('/(tabs)/plans' as any);
-        setTimeout(() => setAuthResolved(true), 80);
-      }
+      }, 0);
+      deferredAuthTimers.add(timer);
     });
 
     return () => {
       cancelled = true;
+      retryAuthCheckRef.current = null;
       clearTimeout(authWatchdog);
+      deferredAuthTimers.forEach(clearTimeout);
+      deferredAuthTimers.clear();
       subscription.unsubscribe();
     };
-  }, []);
+  }, [resetAccountOwnedUi]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -1105,14 +1436,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         <Stack.Screen name="event-album/[topicId]" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="tickets/index" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="tickets/order/[id]" options={{ headerShown: false, gestureEnabled: true }} />
-        <Stack.Screen name="community/[id]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="community" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="organization/[id]" options={{ headerShown: false, gestureEnabled: true }} />
-        <Stack.Screen name="community-thread/[id]" options={{ headerShown: false, gestureEnabled: true }} />
-        <Stack.Screen name="community-topic/[id]" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="community-thread" options={{ headerShown: false, gestureEnabled: true }} />
+        <Stack.Screen name="community-topic" options={{ headerShown: false, gestureEnabled: true }} />
       </Stack>
-      {!authResolved && (
+      {(!authResolved || authCheckFailed) && (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment }}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
+          {authCheckFailed ? <View style={{ padding: 24, alignItems: 'center', gap: 16 }}>
+            <Text accessibilityRole="alert" style={{ color: Colors.terracotta, fontSize: 18, textAlign: 'center' }}>We couldn’t check your account.</Text>
+            <Text style={{ fontSize: 16, textAlign: 'center' }}>Check your connection and try again.</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Retry account check" onPress={() => retryAuthCheckRef.current?.()}
+              style={{ minHeight: 48, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24, backgroundColor: Colors.terracotta }}>
+              <Text style={{ color: '#fff', fontSize: 16 }}>Try again</Text>
+            </Pressable>
+          </View> : <ActivityIndicator size="large" color={Colors.terracotta} />}
         </View>
       )}
       {/* Root modals, in precedence order, mutually exclusive and serialized by
@@ -1139,26 +1477,21 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       {authedUserId && surveyCheckDone && reviewCheckDone && !surveyPlan && !reviewSheetPending && !modalLocked && (
         <MarkEarnedModal userId={authedUserId} />
       )}
-      {showPushPrimer && authedUserId && !surveyPlan && !reviewSheetPending && !modalLocked && (
+      {pushPrimerVisible && (
         <PushPrimerModal
-          visible={showPushPrimer}
-          variant={pushPrimerVariant}
-          onEnable={async () => {
-            setShowPushPrimer(false);
-            // Only root caller of the system prompt; always passes the real
-            // userId so the device_tokens upsert runs on grant.
-            await registerForPushNotifications({
-              prompt: true,
-              userId: authedUserId,
-            }).catch(() => {});
-          }}
-          onDismiss={() => {
-            setShowPushPrimer(false);
-            AsyncStorage.setItem(
-              PUSH_PRIMER_SNOOZE_KEY,
-              String(Date.now()),
-            ).catch(() => {});
-          }}
+          visible
+          {...(renderedPushPrimerVisit?.reason ? {
+            ...planNotificationPromptCopy(renderedPushPrimerVisit.reason),
+            enableLabel: renderedPushPrimerVisit.settings ? 'Open settings' : 'Turn on notifications',
+            enableAccessibilityLabel: renderedPushPrimerVisit.settings ? 'Open settings' : 'Turn on notifications',
+            pendingLabel: renderedPushPrimerVisit.settings ? 'Opening…' : 'Turning on…',
+            pendingAccessibilityLabel: renderedPushPrimerVisit.settings ? 'Opening settings' : 'Turning on notifications',
+          } : {})}
+          pending={pushPrimerPending}
+          feedback={pushPrimerFeedback}
+          appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: primerFonts } : undefined}
+          onEnable={enablePushPrimer}
+          onDismiss={dismissPushPrimer}
         />
       )}
       {layoutAlert && (

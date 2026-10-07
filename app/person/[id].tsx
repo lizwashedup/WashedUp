@@ -2,7 +2,8 @@ import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useLocalSearchParams, Redirect } from 'expo-router';
 import Colors from '../../constants/Colors';
-import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
+import { YOURS_PAGE_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
 import KeepPage from '../../components/yours/keep/KeepPage';
 
@@ -15,6 +16,7 @@ import KeepPage from '../../components/yours/keep/KeepPage';
 export default function PersonRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: userId, isLoading } = useAuthUserId();
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
 
   if (!YOURS_PAGE_ENABLED) {
     return <Redirect href="/(tabs)/friends" />;
@@ -28,7 +30,7 @@ export default function PersonRoute() {
     );
   }
 
-  return <KeepPage userId={userId} targetId={id} />;
+  return <KeepPage userId={userId} targetId={id} appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined} />;
 }
 
 const styles = StyleSheet.create({

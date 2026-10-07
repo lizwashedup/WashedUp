@@ -132,3 +132,15 @@ describe('getRsvpCount', () => {
     await expect(getRsvpCount('event-1')).resolves.toBe(5);
   });
 });
+
+
+describe('owned attendance read recovery',()=>{
+ const row=(data:any,error:any=null)=>{const q:any={select:jest.fn().mockReturnThis(),eq:jest.fn().mockReturnThis(),maybeSingle:jest.fn().mockResolvedValue({data,error})};mockFrom.mockReturnValue(q);return q;};
+ it('does not call a failed account read signed-out attendance',async()=>{mockGetUser.mockResolvedValue({data:{user:null},error:Error('offline')});await expect(getMyRsvp('event-1','user-1')).rejects.toThrow('offline');expect(mockFrom).not.toHaveBeenCalled();});
+ it('does not turn a failed membership read into not going',async()=>{row(null,Error('offline'));await expect(getMyRsvp('event-1','user-1')).rejects.toThrow('offline');});
+ it('does not reuse cached data returned alongside an error',async()=>{row({status:'going'},Error('offline'));await expect(getMyRsvp('event-1','user-1')).rejects.toThrow('offline');});
+ it('rejects an unrecognized saved status',async()=>{row({status:'unknown'});await expect(getMyRsvp('event-1','user-1')).rejects.toThrow('could not be checked');});
+ it('rejects a different account before reading or updating attendance',async()=>{await expect(getMyRsvp('event-1','other')).rejects.toThrow('account changed');await expect(setRsvp('event-1',true,'other')).rejects.toThrow('account changed');expect(mockFrom).not.toHaveBeenCalled();});
+ it('rejects an account change during a read',async()=>{row({status:'going'});mockGetUser.mockResolvedValueOnce({data:{user:{id:'user-1'}}}).mockResolvedValueOnce({data:{user:{id:'other'}}});await expect(getMyRsvp('event-1','user-1')).rejects.toThrow('account changed');});
+ it('returns the actual saved status on a successful explicit read after failure',async()=>{row(null,Error('offline'));await expect(getMyRsvp('event-1','user-1')).rejects.toThrow();row({status:'going'});await expect(getMyRsvp('event-1','user-1')).resolves.toBe('going');});
+});

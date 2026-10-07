@@ -1,3 +1,4 @@
+import { LOCAL_DEVELOPMENT_ONLY } from '../constants/LocalDevelopment';
 /**
  * GOOGLE_MAPS_API_KEY - the ONE place the client Maps/Places key comes from.
  *
@@ -13,6 +14,6 @@
  * key is client-exposed by design. Lock it to the app bundle IDs in the
  * Google Cloud console; never put a server-side key here.
  */
-export const GOOGLE_MAPS_API_KEY =
+export const GOOGLE_MAPS_API_KEY = LOCAL_DEVELOPMENT_ONLY ? '' :
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
   'AIzaSyApjwAgT5x1pw5NgqSvrACmZaKapYuXgCw';

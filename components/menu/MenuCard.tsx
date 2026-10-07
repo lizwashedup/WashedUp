@@ -26,8 +26,8 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 
 export interface AnchorRect {
@@ -36,6 +36,8 @@ export interface AnchorRect {
   width: number;
   height: number;
 }
+
+type MenuAppearance = { fonts: AfterglowFontFamilies };
 
 type IconCmp = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
@@ -80,7 +82,9 @@ function MenuRowItem({
   row,
   index,
   onClose,
+  appearance,
 }: {
+  appearance?: MenuAppearance;
   row: MenuRow;
   index: number;
   onClose: () => void;
@@ -96,19 +100,19 @@ function MenuRowItem({
         }}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
-        style={[styles.row, pressed && styles.rowPressed]}
+        style={[styles.row, pressed && styles.rowPressed, appearance && pressed && { backgroundColor: AfterglowColors.avatar }]}
         android_ripple={{ color: Colors.warmTint }}
         accessibilityRole="button"
         accessibilityLabel={`${row.label}. ${row.subtitle}.`}
       >
         <View style={styles.iconBox}>
-          <Icon size={ICON} color={row.muted ? Colors.secondary : Colors.terracotta} strokeWidth={1.75} />
+          <Icon size={ICON} color={appearance ? (row.muted ? AfterglowColors.muted : AfterglowColors.clay) : (row.muted ? Colors.secondary : Colors.terracotta)} strokeWidth={1.75} />
         </View>
         <View style={styles.rowText}>
-          <Text style={[styles.rowLabel, row.muted && styles.rowLabelMuted]} numberOfLines={1}>
+          <Text style={[styles.rowLabel, row.muted && styles.rowLabelMuted, appearance && { ...AfterglowType.title, fontFamily: appearance.fonts.semibold, color: row.muted ? AfterglowColors.muted : AfterglowColors.ink }]} numberOfLines={1}>
             {row.label}
           </Text>
-          <Text style={styles.rowSub} numberOfLines={1}>
+          <Text style={[styles.rowSub, appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.regular, color: AfterglowColors.muted }]} numberOfLines={1}>
             {row.subtitle}
           </Text>
         </View>
@@ -125,7 +129,9 @@ export default function MenuCard({
   placement,
   rows,
   anchorAvatar,
+  appearance,
 }: {
+  appearance?: MenuAppearance;
   visible: boolean;
   onClose: () => void;
   /** Fires once the dismiss animation finishes and the modal has unmounted.
@@ -217,6 +223,7 @@ export default function MenuCard({
         <View
           style={[
             styles.faceClone,
+            appearance && { borderColor: AfterglowColors.clay, backgroundColor: AfterglowColors.avatar },
             {
               top: anchor.y,
               left: anchor.x,
@@ -230,19 +237,19 @@ export default function MenuCard({
           {anchorAvatar.photoUrl ? (
             <Image source={{ uri: anchorAvatar.photoUrl }} style={styles.faceImg} contentFit="cover" />
           ) : (
-            <Text style={styles.faceInitial}>{faceInitial}</Text>
+            <Text style={[styles.faceInitial, appearance && { fontFamily: appearance.fonts.semibold, color: AfterglowColors.ink }]}>{faceInitial}</Text>
           )}
         </View>
       )}
 
       <Animated.View
-        style={[styles.card, cardPos, clipStyle, cardStyle]}
+        style={[styles.card, appearance && { backgroundColor: AfterglowColors.white, borderRadius: 6, borderWidth: 1, borderColor: AfterglowColors.line }, cardPos, clipStyle, cardStyle]}
         accessibilityViewIsModal
       >
         {rows.map((row, i) => (
           <React.Fragment key={row.key}>
-            {row.dividerBefore && <View style={styles.divider} />}
-            <MenuRowItem row={row} index={i} onClose={onClose} />
+            {row.dividerBefore && <View style={[styles.divider, appearance && { backgroundColor: AfterglowColors.subtleLine }]} />}
+            <MenuRowItem row={row} index={i} onClose={onClose} appearance={appearance} />
           </React.Fragment>
         ))}
       </Animated.View>
@@ -258,7 +265,7 @@ const styles = StyleSheet.create({
     paddingVertical: CARD_PAD_V,
     backgroundColor: Colors.cream,
     borderRadius: RADIUS,
-    shadowColor: '#000',
+    shadowColor: Colors.shadowBlack,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.18,
     shadowRadius: 16,

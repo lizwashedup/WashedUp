@@ -3,20 +3,24 @@
  * from the typed hooks and hosts the sticky header/tabs + shared sheets.
  * Only mounted when YOURS_PAGE_ENABLED is true.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
+import { supabase } from '../../lib/supabase';
 import { markRequestsSeen, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
-import { COMMUNITIES_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { COPY } from './state/constants';
-import { useAuthUserId } from './state/useAuthUserId';
-import { useGetOrCreateDm } from '../../hooks/useGetOrCreateDm';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { useObservedUser } from '../../hooks/useObservedUser';
+import { useGetOrCreateDm, isObsoleteDmOperation } from '../../hooks/useGetOrCreateDm';
 import { useYoursGrid } from '../../hooks/useYoursGrid';
 import { useIncomingRequests } from '../../hooks/useIncomingRequests';
 import { usePlanHistoryBacklog } from '../../hooks/usePlanHistoryBacklog';
@@ -25,6 +29,8 @@ import { openInviteComposer } from '../../lib/yours/invite';
 import { hapticSelection } from '../../lib/haptics';
 import { AlbumsGrid } from '../albums/AlbumsGrid';
 import YoursHeader from './header/YoursHeader';
+import { PageAction } from '../creator/pages/PageFrame';
+import { CreatorSpaceEntry } from '../creator/pages/CreatorSpaceEntry';
 import YoursTabs, { type YoursTab } from './header/YoursTabs';
 import PeopleScreen from './people/PeopleScreen';
 import MyPlansView from './screens/MyPlansView';
@@ -74,39 +80,125 @@ function AddPill({ onPress }: { onPress: () => void }) {
 }
 
 export default function YoursScreen() {
-  const { data: userId, isLoading: userLoading } = useAuthUserId();
+  const viewer = useObservedUser();
+  const userLoading = viewer.isLoading;
+  const userId = userLoading || viewer.error ? undefined : (viewer.viewerId ?? undefined);
   const uid = userId ?? '';
-  const { data: people = [], isLoading: gridLoading } = useYoursGrid(userId);
+  const identityRetryRef = useRef(false);
+  const retryIdentity = async () => {
+    if (identityRetryRef.current || viewer.isLoading || !viewer.isCurrent()) return;
+    identityRetryRef.current = true;
+    try { await viewer.retry(); }
+    finally { identityRetryRef.current = false; }
+  };
+  const peopleRead = useYoursGrid(userId);
+  const { data: people = [], isLoading: gridLoading } = peopleRead;
   const { data: requests = [] } = useIncomingRequests(userId);
-  const { data: backlog = [] } = usePlanHistoryBacklog(userId);
+  const backlogRead = usePlanHistoryBacklog(userId);
+  const { data: backlog = [] } = backlogRead;
   const { ensureReferralCode } = useReferral();
   const getOrCreateDm = useGetOrCreateDm();
 
-  // Long-press a face: bloom the shared MenuCard from the avatar (Message, Make
-  // a plan, Start a circle, then a divider and the passive View profile). With
-  // circles off, fall back to the original behavior (open their keep page).
-  const [menu, setMenu] = useState<{ person: YoursGridPerson; anchor: AnchorRect } | null>(null);
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const appearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
+  const [tab, setTab] = useState<YoursTab>('myPlans');
+  const focused = useIsFocused();
+  const mountedRef = useRef(true);
+  const scope = useMemo(() => ({ uid, tab, focused }), [uid, tab, focused, viewer.epoch]);
+  const lifetimeRef = useRef(scope);
+  // Only a committed visit retires the visible screen's handlers. A concurrent
+  // section render can be suspended or abandoned while People stays on screen.
+  // Auth events below still invalidate the previous account synchronously.
+  useLayoutEffect(() => { lifetimeRef.current = scope; }, [scope]);
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
+  type PersonMenu = { person: YoursGridPerson; anchor: AnchorRect; scope: typeof scope; consumed: boolean };
+  const [menu, setMenu] = useState<PersonMenu | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<PersonMenu | null>(null);
+  const dmIntentRef = useRef<object | null>(null);
 
+  const isCurrentSection = (expected: typeof scope) => mountedRef.current && viewer.isCurrent() && lifetimeRef.current === expected
+    && expected.uid === uid && !!uid && expected.focused;
+  const isCurrent = (expected: typeof scope) => isCurrentSection(expected) && expected.tab === 'people';
+  const closeMenu = (expected: PersonMenu | null) => {
+    if (menuRef.current !== expected) return;
+    setMenuOpen(false);
+    // MenuCard closes immediately before invoking the selected row. Allow
+    // that same event, but retire callbacks retained after a plain dismissal.
+    void Promise.resolve().then(() => { if (menuRef.current === expected) menuRef.current = null; });
+  };
   const handleLongPressPerson = (p: YoursGridPerson, anchor: AnchorRect) => {
+    if (!isCurrent(scope) || !peopleRef.current.some(person => person.user_id === p.user_id)) return;
+    dmIntentRef.current = null;
     if (!GROUPS_ENABLED) {
       router.push(`/person/${p.user_id}` as never);
       return;
     }
-    setMenu({ person: p, anchor });
+    const next = { person: p, anchor, scope, consumed: false };
+    menuRef.current = next;
+    setMenu(next);
     setMenuOpen(true);
   };
-
-  const openDm = (p: YoursGridPerson) => {
-    if (getOrCreateDm.isPending) return; // guard a double-tap mid-open
-    getOrCreateDm.mutate(p.user_id, {
-      onSuccess: (circleId) => router.push(`/(tabs)/chats/circle/${circleId}` as never),
-      onError: () => Alert.alert('', COPY.keepMessageError),
-    });
+  const runMenuAction = (expected: PersonMenu, action: (person: YoursGridPerson) => void) => {
+    if (menuRef.current !== expected || expected.consumed || !isCurrent(expected.scope)
+      || !peopleRef.current.some(person => person.user_id === expected.person.user_id)) return;
+    expected.consumed = true;
+    dmIntentRef.current = null;
+    setMenuOpen(false);
+    action(expected.person);
+  };
+  const openDm = async (p: YoursGridPerson) => {
+    if (dmIntentRef.current) return;
+    const intent = {};
+    const openingScope = lifetimeRef.current;
+    dmIntentRef.current = intent;
+    const current = () => dmIntentRef.current === intent && isCurrent(openingScope)
+      && peopleRef.current.some(person => person.user_id === p.user_id);
+    try {
+      const circleId = await getOrCreateDm.mutateAsync(p.user_id);
+      if (!current()) return;
+      if (typeof circleId !== 'string' || !circleId.trim()) throw new Error('DM not confirmed');
+      router.push(`/(tabs)/chats/circle/${circleId}` as never);
+    } catch (error) {
+      if (!isObsoleteDmOperation(error) && current()) Alert.alert('', COPY.keepMessageError);
+    } finally {
+      if (dmIntentRef.current === intent) dmIntentRef.current = null;
+    }
   };
 
-  const [tab, setTab] = useState<YoursTab>('myPlans');
   const [query, setQuery] = useState('');
+  const [peopleRecovery, setPeopleRecovery] = useState<{ scope: typeof scope; attempt: object; busy: boolean; failed?: boolean }>();
+  const retryRef = useRef<object | null>(null);
+  const recovery = peopleRecovery?.scope === scope ? peopleRecovery : undefined;
+  const peopleFailure = !!(peopleRead.error || (!people.length && backlogRead.error) || recovery?.failed);
+  const retryPeople = async () => {
+    if (!isCurrent(scope) || retryRef.current) return;
+    const attempt = {}; retryRef.current = attempt;
+    setPeopleRecovery({ scope, attempt, busy: true });
+    try {
+      const refreshed = Promise.all([peopleRead.refetch(), ...(!people.length ? [backlogRead.refetch()] : [])]).then(results => {
+        // Reads can finish after the caller's deadline. Only their confirmed
+        // success may clear this attempt's feedback in its still-current visit.
+        if (isCurrent(scope) && results.every(result => result.isSuccess)) {
+          setPeopleRecovery(old => old?.scope === scope && old.attempt === attempt ? undefined : old);
+        }
+      });
+      await requestWithDeadline(refreshed, 12000);
+    } catch {
+      if (isCurrent(scope) && retryRef.current === attempt) setPeopleRecovery({ scope, attempt, busy: false, failed: true });
+    } finally {
+      if (retryRef.current === attempt) {
+        retryRef.current = null;
+        if (isCurrent(scope)) setPeopleRecovery(old => old?.scope === scope ? { ...old, busy: false } : old);
+      }
+    }
+  };
+  const openPaths = () => { if (isCurrentSection(scope)) setPathsOpen(true); };
+  const openRequestsSheet = () => { if (isCurrentSection(scope)) setRequestsOpen(true); };
+  const openAcceptedPerson = (id: string) => {
+    if (isCurrent(scope) && peopleRef.current.some(person => person.user_id === id)) router.push(`/person/${id}` as never);
+  };
   const [pathsOpen, setPathsOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
   // The requester to float to the top of the list, captured from a notification
@@ -114,6 +206,42 @@ export default function YoursScreen() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    menuRef.current = null;
+    dmIntentRef.current = null;
+    retryRef.current = null;
+    setMenuOpen(false);
+    if (!focused) { setPathsOpen(false); setRequestsOpen(false); setProfileTarget(null); }
+  }, [uid, tab, focused]);
+  useEffect(() => {
+    const clearPeopleState = () => {
+      menuRef.current = null;
+      dmIntentRef.current = null;
+      setMenu(null);
+      setMenuOpen(false);
+      setQuery('');
+      setPathsOpen(false);
+      setRequestsOpen(false);
+      setHighlightId(null);
+      setProfileTarget(null);
+      setIntroVariant(null);
+    };
+    clearPeopleState();
+    mountedRef.current = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const nextUid = session?.user.id ?? '';
+      if (event !== 'SIGNED_OUT' && nextUid === lifetimeRef.current.uid) return;
+      lifetimeRef.current = { ...lifetimeRef.current, uid: nextUid };
+      clearPeopleState();
+    });
+    return () => {
+      mountedRef.current = false;
+      menuRef.current = null;
+      dmIntentRef.current = null;
+      subscription.unsubscribe();
+    };
+  }, [uid]);
 
   // Opening the Requests surface marks the loop "seen": clears the Yours tab
   // count badge (independent of accept/decline) and re-shows only for a request
@@ -133,11 +261,12 @@ export default function YoursScreen() {
     requesterId?: string;
   }>();
   // Deep-link into the Circles tab (the Chats > Circles empty state routes here
-  // with ?tab=circles). Consume once per mount, mirroring the openRequests
-  // guard below, so it never re-asserts over a later manual tab tap. Circles is
+  // with ?tab=circles). Consume each explicit intent once, then re-arm after
+  // its parameter clears; manual tab choices remain untouched. Circles is
   // flag-gated; only this one value is emitted anywhere.
   const tabConsumedRef = useRef(false);
   useEffect(() => {
+    if (!tabParam) { tabConsumedRef.current = false; return; }
     if (tabConsumedRef.current) return;
     if (tabParam === 'circles' && GROUPS_ENABLED) {
       tabConsumedRef.current = true;
@@ -173,32 +302,42 @@ export default function YoursScreen() {
   }, [openRequests, requests.length, requesterId]);
 
   const invite = async () => {
+    if (!isCurrent(scope)) return;
+    const current = () => isCurrent(scope);
     try {
-      const code = await ensureReferralCode(uid);
-      await openInviteComposer(code);
+      const code = await ensureReferralCode(uid, { isCurrent: current });
+      if (!current()) return;
+      await openInviteComposer(code, current);
     } catch {
       /* surfaced elsewhere; invite is best-effort */
     }
   };
 
-  // Create-circle entry point: the 3-step create flow at /circle/new (gated).
-  const openCreateCircle = () => {
-    router.push('/circle/new' as never);
+  const selectTab = (next: YoursTab) => {
+    if (next !== tab) { setPathsOpen(false); setRequestsOpen(false); setProfileTarget(null); }
+    setTab(next);
   };
 
-  const state: 'loading' | 'populated' | 'fresh' | 'empty' = useMemo(() => {
+  // Create-circle entry point: the 3-step create flow at /circle/new (gated).
+  const openCreateCircle = () => {
+    if (isCurrentSection(scope)) router.push('/circle/new' as never);
+  };
+
+  const state: 'loading' | 'unavailable' | 'populated' | 'fresh' | 'empty' = useMemo(() => {
     if (userLoading || (gridLoading && people.length === 0)) return 'loading';
     if (people.length > 0) return 'populated';
+    if (peopleFailure) return 'unavailable';
+    if (backlogRead.isLoading) return 'loading';
     if (backlog.length > 0) return 'fresh';
     return 'empty';
-  }, [userLoading, gridLoading, people.length, backlog.length]);
+  }, [userLoading, gridLoading, people.length, backlog.length, peopleFailure, backlogRead.isLoading]);
 
   // One-time Yours-tab education pop-up (see lib/yours/tabsIntroSeen.ts).
   // Skipped while a requests deep-link is about to auto-open its own sheet,
   // so the two bottom sheets never fight for the screen on first mount.
   const [introVariant, setIntroVariant] = useState<YoursIntroVariant | null>(null);
   useEffect(() => {
-    if (!uid || requestsOpen) return;
+    if (!uid || requestsOpen || state === 'unavailable') return;
     const variant = resolveYoursIntroVariant(state);
     if (!variant) return;
     let cancelled = false;
@@ -218,29 +357,31 @@ export default function YoursScreen() {
   // The "Your People" body for the active state. Albums tab and loading
   // are handled outside this function so the tabs stay visible.
   const renderPeopleBody = () => {
+    if (state === 'loading') return <View style={styles.center}><ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading your people" /></View>;
+    if (state === 'unavailable') return <View style={styles.fill} />;
     if (state === 'populated') {
       return (
         <PeopleScreen
+          appearance={appearance}
           people={people}
           query={query}
-          onQueryChange={setQuery}
+          onQueryChange={value => { if (isCurrent(scope)) setQuery(value); }}
           searchResults={
             <PeopleSearchResults
+              appearance={appearance}
               userId={uid}
               query={query}
               people={people}
-              onOpenPerson={(id) => router.push(`/person/${id}` as never)}
-              onOpenMinimal={(id) => setProfileTarget(id)}
+              onOpenPerson={openAcceptedPerson}
+              onOpenMinimal={(id) => { if (isCurrent(scope)) setProfileTarget(id); }}
             />
           }
           pendingRequests={requests.length}
-          onRequestsPress={() => setRequestsOpen(true)}
-          onPersonPress={(p: YoursGridPerson) =>
-            router.push(`/person/${p.user_id}` as never)
-          }
+          onRequestsPress={openRequestsSheet}
+          onPersonPress={(p: YoursGridPerson) => openAcceptedPerson(p.user_id)}
           onLongPressPerson={handleLongPressPerson}
-          onAddPeople={() => setPathsOpen(true)}
-          onCreateCircle={() => router.push('/circle/new' as never)}
+          onAddPeople={openPaths}
+          onCreateCircle={openCreateCircle}
         />
       );
     }
@@ -248,7 +389,7 @@ export default function YoursScreen() {
       return (
         <FreshStartView
           backlogCount={backlog.length}
-          onOpenBacklog={() => setPathsOpen(true)}
+          onOpenBacklog={openPaths}
           onInvite={invite}
         />
       );
@@ -257,28 +398,26 @@ export default function YoursScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <YoursHeader />
+    <SafeAreaView style={[styles.container, appearance && { backgroundColor: AfterglowColors.paper }]} edges={['top']}>
+      <YoursHeader appearance={appearance} />
+      {CREATOR_PAGES_ENABLED && !!uid && <CreatorSpaceEntry userId={uid} />}
 
-      {state === 'loading' ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.terracotta} />
-        </View>
-      ) : (
-        <>
-          {/* Tabs always render once we know the state — per spec, Your
-              People + Albums are always visible. */}
-          <View style={styles.tabRow}>
-            <View style={{ flex: 1 }}>
-              <YoursTabs active={tab} onChange={setTab} />
+      <View style={styles.tabRow}>
+        <YoursTabs appearance={appearance} active={tab} onChange={selectTab} />
+      </View>
+      {userLoading ? <View style={styles.center}>
+        <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading Yours" />
+      </View> : !uid ? <View style={styles.peopleRecovery}>
+        <Text accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
+          Yours couldn’t load. Try again.
+        </Text>
+        <PageAction quiet compact singleLine title="Try again" onPress={() => { void retryIdentity(); }} />
+      </View> : <>
+          {tab === 'people' && state !== 'populated' && (
+            <View style={{ paddingHorizontal: 20, paddingTop: 12, alignItems: 'flex-end' }}>
+              <PageAction primary compact singleLine title="Add people" onPress={openPaths} />
             </View>
-            {/* Persistent + add pill. In populated state PeopleScreen's
-                "add people" CTA handles add, so the pill hides to avoid
-                a duplicate affordance. */}
-            {tab === 'people' && state !== 'populated' && (
-              <AddPill onPress={() => setPathsOpen(true)} />
-            )}
-          </View>
+          )}
 
           {/* Incoming-requests banner lives at the Yours level (above the tab
               content, visible on ANY tab). Yours now defaults to My Plans, so
@@ -291,12 +430,21 @@ export default function YoursScreen() {
               who has a pending incoming request. */}
           {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
             <RequestBanner
+              appearance={appearance}
               count={requests.length}
-              onPress={() => setRequestsOpen(true)}
+              onPress={openRequestsSheet}
             />
           )}
 
-          {tab === 'people' && renderPeopleBody()}
+          {tab === 'people' && <>
+            {peopleFailure && <View style={styles.peopleRecovery}>
+              <Text accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
+                {people.length ? 'Your people couldn’t refresh. Your saved connections are still here.' : 'Your people couldn’t load. Try again.'}
+              </Text>
+              <PageAction quiet compact singleLine title={recovery?.busy ? 'Trying…' : 'Try again'} disabled={!!recovery?.busy} onPress={() => { void retryPeople(); }} />
+            </View>}
+            {renderPeopleBody()}
+          </>}
           {tab === 'myPlans' && (
             <View style={styles.fill}>
               <MyPlansView userId={uid} />
@@ -306,15 +454,16 @@ export default function YoursScreen() {
             <View style={styles.fill}>
               <CirclesDirectory
                 userId={uid}
+                appearance={appearance}
                 hasPeople={people.length > 0}
                 onOpenCircle={(id) =>
                   // Open the circle PAGE (identity, members, plans, action row),
                   // not the chat - the page is the circle's front door; chat is
                   // one action inside it (reachable from the page header).
-                  router.push(`/circle/${id}` as never)
+                  isCurrentSection(scope) && router.push(`/circle/${id}` as never)
                 }
                 onCreate={openCreateCircle}
-                onAddPeople={() => setPathsOpen(true)}
+                onAddPeople={openPaths}
               />
             </View>
           )}
@@ -323,8 +472,8 @@ export default function YoursScreen() {
               <MyCommunitiesList
                 // The community PAGE is the front door (decision 7); chat is
                 // one action inside it, mirroring how circles open.
-                onOpen={(id) => router.push(`/community/${id}` as never)}
-                onBrowse={() => router.push('/(tabs)/explore' as never)}
+                onOpen={(id) => { if (isCurrentSection(scope)) router.push(`/community/${id}` as never); }}
+                onBrowse={() => { if (isCurrentSection(scope)) router.push('/(tabs)/explore' as never); }}
               />
             </View>
           )}
@@ -333,12 +482,13 @@ export default function YoursScreen() {
               <AlbumsGrid userId={uid} />
             </View>
           )}
-        </>
-      )}
+        </>}
 
       {!!uid && (
         <PathsSheet
+          appearance={appearance}
           visible={pathsOpen}
+          viewer={viewer}
           onClose={() => setPathsOpen(false)}
           userId={uid}
           backlogCount={backlog.length}
@@ -351,6 +501,7 @@ export default function YoursScreen() {
 
       {!!uid && requestsOpen && (
         <RequestStack
+          appearance={appearance}
           visible={requestsOpen}
           onClose={() => {
             setRequestsOpen(false);
@@ -364,6 +515,7 @@ export default function YoursScreen() {
 
       {!!uid && (
         <ProfileCardSheet
+          appearance={appearance}
           visible={!!profileTarget}
           onClose={() => setProfileTarget(null)}
           userId={uid}
@@ -385,8 +537,9 @@ export default function YoursScreen() {
       )}
 
       <MenuCard
+        appearance={appearance}
         visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
+        onClose={() => closeMenu(menu)}
         anchor={menu?.anchor ?? null}
         placement="avatar"
         anchorAvatar={
@@ -402,7 +555,7 @@ export default function YoursScreen() {
                   icon: MessageCircle,
                   label: COPY.menuMessage,
                   subtitle: COPY.menuMessageSub,
-                  onPress: () => openDm(menu.person),
+                  onPress: () => runMenuAction(menu, person => { void openDm(person); }),
                 },
                 {
                   key: 'plan',
@@ -412,18 +565,16 @@ export default function YoursScreen() {
                   // Open the composer with this person pre-attached as a removable
                   // invite chip (the locked rule: a plan from a person is never one
                   // they're not on). Never the generic /post dump.
-                  onPress: () => router.push(buildComposerWithPerson(
-                    menu.person.user_id,
-                    menu.person.first_name_display,
-                    menu.person.profile_photo_url,
-                  ) as never),
+                  onPress: () => runMenuAction(menu, person => router.push(buildComposerWithPerson(
+                    person.user_id, person.first_name_display, person.profile_photo_url,
+                  ) as never)),
                 },
                 {
                   key: 'circle',
                   icon: Users,
                   label: COPY.menuStartCircle,
                   subtitle: COPY.menuStartCircleSub,
-                  onPress: () => router.push(`/circle/new?seed=${menu.person.user_id}` as never),
+                  onPress: () => runMenuAction(menu, person => router.push(`/circle/new?seed=${person.user_id}` as never)),
                 },
                 {
                   key: 'profile',
@@ -434,7 +585,7 @@ export default function YoursScreen() {
                   dividerBefore: true,
                   // The dedicated individual profile page ("just {name}"),
                   // distinct from the keep page at /person/[id].
-                  onPress: () => router.push(`/profile/${menu.person.user_id}` as never),
+                  onPress: () => runMenuAction(menu, person => router.push(`/profile/${person.user_id}` as never)),
                 },
               ]
             : []
@@ -448,11 +599,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fill: { flex: 1 },
-  tabRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 16,
-  },
+  tabRow: { flexShrink: 0 },
+  peopleRecovery: { marginHorizontal: 20, marginTop: 12, marginBottom: 4, padding: 12, gap: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
+  recoveryText: { ...AfterglowType.body, fontFamily: Fonts.sans, color: AfterglowColors.ink },
   addPill: {
     flexDirection: 'row',
     alignItems: 'center',

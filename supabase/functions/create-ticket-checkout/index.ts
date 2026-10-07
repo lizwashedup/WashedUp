@@ -9,6 +9,7 @@ import {
   applicationFeeCents,
   planAddonLineItems,
   planPriorSessionReuse,
+  providerCheckoutKey,
 } from '../_shared/ticketCheckout.ts';
 /**
  * create-ticket-checkout — the buyer's pay door (money loop step 1,
@@ -33,12 +34,10 @@ import {
  *      RPC's returned hold_expires_at (now + 35 min, above Stripe's 30-min
  *      session floor) — hold and session expire together, never Stripe's 24h
  *      default, no charged-after-hold window.
- *  (c) STALE-REUSE FLOOR: a reused key can return a prior order whose hold
- *      has under 30 minutes left; Stripe would reject that expires_at. We
- *      check the floor BEFORE Stripe (plus catch Stripe's own expires_at
- *      rejection as backstop), release the stale hold, cancel the stale
- *      pending order, and return the friendly expired-checkout line so a
- *      fresh tap (new key) starts clean.
+ *  (c) SESSION RECOVERY: inspect a saved provider session before applying
+ *      the creation-only floor. Unknown create/expire responses preserve the
+ *      pending order. A confirmed expired session may release the old hold;
+ *      new creation uses one provider idempotency key per saved order.
  *  (+) RPC errors are no longer passed through raw when they are plumbing
  *      (PGRST* schema-cache dumps confused clients); business refusals keep
  *      their curated messages.
@@ -82,13 +81,14 @@ const ALLOWED_ORIGINS = [
 ];
 // Stripe requires a Checkout session's expires_at to be 30 min to 24 h after
 // creation (F13). The buffer absorbs edge-vs-Stripe clock skew: anything
-// closer than floor + buffer is treated as an expired checkout up front.
+// closer than floor + buffer cannot start a NEW session. Existing sessions
+// are reconciled first; a missing saved ID does not prove creation failed.
 const STRIPE_SESSION_FLOOR_SEC = 30 * 60;
 const FLOOR_SKEW_BUFFER_SEC = 60;
 // LIZ COPY (approved 2026-07-27): shown when a stale reused checkout
 // can no longer make Stripe's session window.
 const EXPIRED_CHECKOUT_LINE = 'this checkout took too long and expired. head back and pick your tickets again.';
-function json(status, body) {
+function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -107,11 +107,7 @@ Deno.serve(async (req)=>{
     error: 'method not allowed'
   });
   const stripeKey = Deno.env.get('STRIPE_TICKET_SECRET_KEY') ?? '';
-  if (!stripeKey || !stripeKeyIsTest(stripeKey) && !stripeKeyIsLive(stripeKey)) {
-    return json(503, {
-      error: 'ticketing payments are not configured yet.'
-    });
-  }
+  const paymentsConfigured = stripeKeyIsTest(stripeKey) || stripeKeyIsLive(stripeKey);
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const service = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', {
     auth: {
@@ -132,10 +128,56 @@ Deno.serve(async (req)=>{
   });
   const buyer = userData.user;
   const body = await req.json().catch(()=>({}));
-  const tierId = body?.tier_id ?? '';
-  const qty = Number.isInteger(body?.qty) ? body.qty : Number(body?.qty);
   const origin = ALLOWED_ORIGINS.includes(body?.origin) ? body.origin : ALLOWED_ORIGINS[0];
   const nativeReturn = body?.return_mode === 'native';
+  const resumeOnly = body?.order_id !== undefined;
+  let b: {
+    order_id: string; hold_id: string; hold_expires_at: string; reference_code: string;
+    is_free: boolean; organizer_stripe_account_id: string | null;
+    unit_face_cents: number; face_cents: number; processing_cents: number;
+    commission_cents: number; total_cents: number; commission_bps_applied: number;
+    stripe_checkout_session_id: string | null;
+  };
+  let qty: number;
+  if (resumeOnly) {
+    const orderId = body.order_id;
+    if (typeof orderId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      return json(400, { error: 'choose the purchase you want to continue.' });
+    }
+    // Resume an owned purchase, not a new quote. No question/answer/promo
+    // writes, extra stock claims or creator payout re-resolution occur here.
+    try {
+      const { data: saved, error: orderError } = await service.from('ticket_orders')
+        .select('id,event_id,tier_id,hold_id,buyer_user_id,qty,status,reference_code,unit_face_cents,face_cents,processing_cents,commission_cents,total_cents,commission_bps_applied,stripe_checkout_session_id')
+        .eq('id', orderId).eq('buyer_user_id', buyer.id).maybeSingle();
+      if (orderError) return json(503, { code: 'checkout_recovery_pending', error: 'this purchase could not be checked. try again.' });
+      if (!saved || saved.id !== orderId || saved.buyer_user_id !== buyer.id) return json(404, { error: 'this purchase is not available for this account.' });
+      if (saved.status !== 'pending') {
+        if (!['paid', 'canceled', 'refunded'].includes(saved.status)) return json(409, { code: 'checkout_recovery_pending' });
+        return json(200, { order_id: saved.id, status: saved.status });
+      }
+      // Public event visibility is checked as the caller. Existing orders
+      // remain readable, but withdrawn/ended events cannot resume payment.
+      const { data: event, error: eventError } = await userClient.from('explore_events')
+        .select('id,status,end_time').eq('id', saved.event_id).maybeSingle();
+      if (eventError) return json(503, { code: 'checkout_recovery_pending' });
+      if (!event || event.id !== saved.event_id || event.status !== 'Live' || (event.end_time && Date.parse(event.end_time) <= Date.now())) {
+        return json(409, { code: 'checkout_event_unavailable', order_id: saved.id, error: 'this event is not accepting payments. your saved purchase is still available.' });
+      }
+      const { data: hold, error: holdError } = await service.from('ticket_holds')
+        .select('id,event_id,tier_id,buyer_user_id,qty,status,expires_at')
+        .eq('id', saved.hold_id).eq('buyer_user_id', buyer.id).maybeSingle();
+      if (holdError || !hold || hold.id !== saved.hold_id || hold.event_id !== saved.event_id || hold.tier_id !== saved.tier_id || hold.buyer_user_id !== buyer.id || hold.qty !== saved.qty || hold.status !== 'active') {
+        return json(409, { code: 'checkout_recovery_pending', order_id: saved.id });
+      }
+      qty = saved.qty;
+      b = { ...saved, order_id: saved.id, hold_expires_at: hold.expires_at, is_free: saved.face_cents === 0, organizer_stripe_account_id: null };
+    } catch {
+      return json(503, { code: 'checkout_recovery_pending' });
+    }
+  } else {
+  const tierId = body?.tier_id ?? '';
+  qty = Number.isInteger(body?.qty) ? body.qty : Number(body?.qty);
   if (!tierId || !Number.isFinite(qty) || qty < 1) {
     return json(400, {
       error: 'pick a ticket and a quantity.'
@@ -156,9 +198,16 @@ Deno.serve(async (req)=>{
     if (body.add_ons.length > 20) return json(400, {
       error: 'that is too many extras.'
     });
-    const cleaned = body.add_ons.map((a)=>({
+    // Preserve the creator's option ID; the transactional RPC validates its
+    // event/add-on binding and snapshots its label. Options never set prices.
+    if (body.add_ons.some((a: { variation_id?: unknown } | null) => a?.variation_id !== undefined &&
+        (typeof a.variation_id !== 'string' || !a.variation_id.trim() || a.variation_id.length > 128))) {
+      return json(400, { error: 'choose an available option for each extra.' });
+    }
+    const cleaned: Array<{ add_on_id: string; qty: number; variation_id?: string }> = body.add_ons.map((a: { add_on_id?: unknown; qty?: unknown; variation_id?: string } | null)=>({
         add_on_id: String(a?.add_on_id ?? ''),
-        qty: Number(a?.qty)
+        qty: Number(a?.qty),
+        ...(a?.variation_id === undefined ? {} : { variation_id: a.variation_id })
       }));
     if (cleaned.some((a)=>!a.add_on_id || !Number.isInteger(a.qty) || a.qty < 1)) {
       return json(400, {
@@ -176,8 +225,8 @@ Deno.serve(async (req)=>{
     if (body.answers.length > 600) return json(400, {
       error: 'that is too many answers.'
     });
-    const cleaned = body.answers.map((a)=>{
-      const entry = {
+    const cleaned: Array<{ question_id: string; value: unknown; attendee_index?: number }> = body.answers.map((a: { question_id?: unknown; value?: unknown; attendee_index?: unknown } | null)=>{
+      const entry: { question_id: string; value: unknown; attendee_index?: number } = {
         question_id: String(a?.question_id ?? ''),
         value: a?.value
       };
@@ -195,7 +244,10 @@ Deno.serve(async (req)=>{
   }
   const { data: prof } = await service.from('profiles').select('first_name_display').eq('id', buyer.id).maybeSingle();
   const buyerName = prof?.first_name_display?.trim() || (buyer.email ? buyer.email.split('@')[0] : 'guest');
-  const { data: begun, error: rpcErr } = await service.rpc('begin_ticket_checkout', {
+  // The free-only wrapper uses the same transaction and pricing/admission rules.
+  // A paid result raises inside that transaction, so no paid hold/order can
+  // commit while this courier lacks provider configuration. No quote race.
+  const { data: begun, error: rpcErr } = await service.rpc(paymentsConfigured ? 'begin_ticket_checkout' : 'begin_free_ticket_checkout', {
     p_tier_id: tierId,
     p_qty: qty,
     p_buyer_user_id: buyer.id,
@@ -206,6 +258,9 @@ Deno.serve(async (req)=>{
     p_answers: answers
   });
   if (rpcErr) {
+    if (!paymentsConfigured && (rpcErr.message === 'ticketing payments are not configured yet.' || (rpcErr.code ?? '').startsWith('PGRST'))) {
+      return json(503, { error: 'ticketing payments are not configured yet.' });
+    }
     // plumbing errors (schema cache, signature mismatch) are OURS, not the
     // buyer's; keep the raw dump out of clients and in the logs
     if ((rpcErr.code ?? '').startsWith('PGRST')) {
@@ -220,7 +275,8 @@ Deno.serve(async (req)=>{
       error: rpcErr.message ?? 'could not start checkout.'
     });
   }
-  const b = Array.isArray(begun) ? begun[0] : begun;
+  b = Array.isArray(begun) ? begun[0] : begun;
+  }
   if (!b?.order_id) return json(500, {
     error: 'checkout did not start.'
   });
@@ -238,6 +294,9 @@ Deno.serve(async (req)=>{
       reference_code: b.reference_code
     });
   }
+  // Owned terminal receipts and genuinely free settlement need no provider.
+  // Paid resume preserves its existing order until configuration is restored.
+  if (!paymentsConfigured) return json(503, { order_id: b.order_id, error: 'ticketing payments are not configured yet.' });
   const stripe = new Stripe(stripeKey, {
     apiVersion: '2025-08-27.basil',
     httpClient: Stripe.createFetchHttpClient()
@@ -249,81 +308,70 @@ Deno.serve(async (req)=>{
   // hold, so that second charge is captured by Stripe and never reconciled or
   // refunded. Null on every first pass; set only on a replayed order.
   const priorSessionId = typeof b.stripe_checkout_session_id === 'string' && b.stripe_checkout_session_id.startsWith('cs_') ? b.stripe_checkout_session_id : null;
-  // releases the hold and cancels the pending order so a fresh tap (with a
-  // fresh key) starts clean; used by (c) and by session-create failure. A
-  // prior session is expired at Stripe first: an open session outliving its
-  // canceled order is payable money with nothing left to settle onto.
-  async function unwindPending() {
-    if (priorSessionId) {
-      try {
-        await stripe.checkout.sessions.expire(priorSessionId);
-      } catch (err) {
-        console.error('create-ticket-checkout: could not expire stale session', priorSessionId, err instanceof Error ? err.message : '');
-      }
+  const recoveryPending = () => json(409, {
+    code: 'checkout_recovery_pending',
+    order_id: b.order_id,
+    error: 'this checkout is still being checked. keep this order and check its status again.'
+  });
+  // Only call after a same-ID provider receipt confirms expiry. A failed
+  // expiry request is not permission to cancel a potentially payable order.
+  async function finishConfirmedExpiry() {
+    try {
+      const { error: holdError } = await service.from('ticket_holds').update({
+        status: 'released'
+      }).eq('id', b.hold_id).eq('status', 'active');
+      if (holdError) return recoveryPending();
+      const { data: canceled, error: orderError } = await service.from('ticket_orders').update({
+        status: 'canceled'
+      }).eq('id', b.order_id).eq('status', 'pending').eq('stripe_checkout_session_id', priorSessionId)
+        .select('id,status').maybeSingle();
+      if (orderError || canceled?.id !== b.order_id || canceled?.status !== 'canceled') return recoveryPending();
+      return json(409, { code: 'checkout_expired', order_id: b.order_id, error: EXPIRED_CHECKOUT_LINE });
+    } catch {
+      console.error('create-ticket-checkout: expired-order cleanup uncertain');
+      return recoveryPending();
     }
-    await service.from('ticket_holds').update({
-      status: 'released'
-    }).eq('id', b.hold_id).eq('status', 'active');
-    await service.from('ticket_orders').update({
-      status: 'canceled'
-    }).eq('id', b.order_id).eq('status', 'pending');
   }
-  // (b) pin the session to the hold's real expiry (35-min TTL from 87 v3)
   const holdExpiresSec = Math.floor(new Date(b.hold_expires_at).getTime() / 1000);
-  // (c) a stale reused checkout whose hold can no longer make Stripe's
-  // 30-min session floor is expired NOW, before Stripe sees it
-  if (isHoldTooStaleForSession(b.hold_expires_at, Date.now(), STRIPE_SESSION_FLOOR_SEC, FLOOR_SKEW_BUFFER_SEC)) {
-    await unwindPending();
-    return json(409, {
-      code: 'checkout_expired',
-      error: EXPIRED_CHECKOUT_LINE
-    });
-  }
-  // (g) REUSE, NEVER RE-CREATE: this order already carries a Stripe session,
-  // so hand that same one back instead of minting a second payable session.
   if (priorSessionId) {
     let prior: Awaited<ReturnType<typeof stripe.checkout.sessions.retrieve>>;
     try {
       prior = await stripe.checkout.sessions.retrieve(priorSessionId);
-    } catch (err) {
-      console.error('create-ticket-checkout: prior session unreadable', priorSessionId, err instanceof Error ? err.message : '');
-      return json(409, {
-        error: 'this checkout is still being set up. give it a moment and try again.'
-      });
+    } catch {
+      console.error('create-ticket-checkout: prior session unreadable');
+      return recoveryPending();
     }
+    if (prior.id !== priorSessionId) return recoveryPending();
     const priorAction = planPriorSessionReuse(prior, b.total_cents);
     if (priorAction === 'already_paid') {
-      // already paid: the drain settles it from the webhook. Creating a new
-      // session here IS the double charge, so refuse and let it confirm.
       return json(409, {
+        order_id: b.order_id,
         error: 'this checkout already went through. give it a moment to confirm.'
       });
     }
-    if (priorAction === 'expired') {
-      await unwindPending();
-      return json(409, {
-        code: 'checkout_expired',
-        error: EXPIRED_CHECKOUT_LINE
-      });
+    if (priorAction === 'expired') return await finishConfirmedExpiry();
+    if (priorAction === 'unknown' || !Number.isFinite(holdExpiresSec)) return recoveryPending();
+    if (priorAction === 'reusable' && holdExpiresSec > Math.floor(Date.now() / 1000)) {
+      return json(200, { url: prior.url, order_id: b.order_id, reference_code: b.reference_code });
     }
-    if (priorAction === 'reusable') {
-      return json(200, {
-        url: prior.url,
-        order_id: b.order_id,
-        reference_code: b.reference_code
-      });
-    }
-    // 'replace': open but unusable (no url, or it does not price THIS
-    // order) — expire it before its replacement exists, never leave two
-    // payable sessions alive.
+    // An open mismatched or overdue session must become unpayable first.
+    // Do not create a replacement for this saved order.
     try {
-      await stripe.checkout.sessions.expire(priorSessionId);
-    } catch (err) {
-      console.error('create-ticket-checkout: could not expire mismatched session', priorSessionId, err instanceof Error ? err.message : '');
-      return json(409, {
-        error: 'this checkout is still being set up. give it a moment and try again.'
-      });
+      const expired = await stripe.checkout.sessions.expire(priorSessionId);
+      if (expired.id !== priorSessionId || planPriorSessionReuse(expired, b.total_cents) !== 'expired') {
+        return recoveryPending();
+      }
+    } catch {
+      console.error('create-ticket-checkout: provider expiry uncertain');
+      return recoveryPending();
     }
+    return await finishConfirmedExpiry();
+  }
+  if (resumeOnly || !b.organizer_stripe_account_id) return recoveryPending();
+  if (isHoldTooStaleForSession(b.hold_expires_at, Date.now(), STRIPE_SESSION_FLOOR_SEC, FLOOR_SKEW_BUFFER_SEC)) {
+    // A prior response or DB acknowledgement could have been lost. Never
+    // infer that no payable session exists from the absent saved ID.
+    return recoveryPending();
   }
   // doc 114: add-on money is FOLDED INTO face_cents by the RPC, so
   // unit_face_cents * qty no longer covers the face. The remainder is the
@@ -331,7 +379,7 @@ Deno.serve(async (req)=>{
   // exactly that amount. It is derived from the RPC's own numbers, never from
   // what the client asked for.
   const addonTotal = b.face_cents - b.unit_face_cents * qty;
-  let addonLines = [];
+  let addonLines: ReturnType<typeof planAddonLineItems>['lines'] = [];
   if (addonTotal > 0) {
     const { data: lines } = await service.from('order_add_ons').select('qty, unit_price_cents, name_snapshot').eq('order_id', b.order_id);
     const planned = planAddonLineItems(addonTotal, lines ?? []);
@@ -391,32 +439,29 @@ Deno.serve(async (req)=>{
       cancel_url: nativeReturn
         ? `${origin}/e/?checkout=cancelled&order=${b.order_id}&native=1`
         : `${origin}/e?checkout=cancelled`
-    });
-  } catch (err) {
-    await unwindPending();
-    // (c) backstop: Stripe rejected the pinned expires_at (clock skew got
-    // past the proactive check) — same friendly expiry, not a scary 502
-    const msg = err?.message ?? '';
-    if (msg.includes('expires_at')) {
-      return json(409, {
-        code: 'checkout_expired',
-        error: EXPIRED_CHECKOUT_LINE
-      });
-    }
-    // seat-required fix (2026-07-27): Stripe's raw message stays in the logs,
-    // never in the response body
-    console.error('create-ticket-checkout: session create failed', msg);
-    return json(502, {
-      error: 'the payment could not be set up. try again.',
-      detail: null
-    });
+    }, { idempotencyKey: providerCheckoutKey(b.order_id) });
+  } catch {
+    // Provider errors can arrive after creation. Preserve the original
+    // order/hold and retry only with its same provider key; never unwind.
+    console.error('create-ticket-checkout: provider creation uncertain');
+    return recoveryPending();
   }
-  await service.from('ticket_orders').update({
-    stripe_checkout_session_id: session.id
-  }).eq('id', b.order_id);
-  return json(200, {
-    url: session.url,
-    order_id: b.order_id,
-    reference_code: b.reference_code
-  });
+  if (typeof session.id !== 'string' || !session.id.startsWith('cs_')) return recoveryPending();
+  // Bind before returning a payable URL. Concurrent retries use the same
+  // provider key; only an empty binding may be filled by this invocation.
+  try {
+    const { error: bindError } = await service.from('ticket_orders').update({
+      stripe_checkout_session_id: session.id
+    }).eq('id', b.order_id).eq('buyer_user_id', buyer.id).eq('status', 'pending').is('stripe_checkout_session_id', null);
+    if (bindError) return recoveryPending();
+    const { data: saved, error: readError } = await service.from('ticket_orders')
+      .select('id,status,stripe_checkout_session_id').eq('id', b.order_id).eq('buyer_user_id', buyer.id).maybeSingle();
+    if (readError || saved?.id !== b.order_id || saved?.status !== 'pending' || saved?.stripe_checkout_session_id !== session.id) {
+      return recoveryPending();
+    }
+  } catch {
+    return recoveryPending();
+  }
+  if (planPriorSessionReuse(session, b.total_cents) !== 'reusable') return recoveryPending();
+  return json(200, { url: session.url, order_id: b.order_id, reference_code: b.reference_code });
 });

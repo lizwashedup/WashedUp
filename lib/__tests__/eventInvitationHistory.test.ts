@@ -1,0 +1,16 @@
+const mockRpc=jest.fn();
+jest.mock('../supabase',()=>({supabase:{rpc:(...args:unknown[])=>mockRpc(...args)}}));
+jest.mock('../creatorTicketRead',()=>({scopedTicketRequest:async(_scope:unknown,request:()=>unknown)=>request()}));
+import {loadEventInvitationHistory,readInvitationHistoryPage} from '../eventInvitationHistory';
+import {AttendeeMessageHistoryDenied} from '../attendeeMessageHistory';
+const event='8ecc2930-0000-4000-8000-000000000001',page='8ecc2930-0000-4000-8000-000000000002';
+const row={id:'8ecc2930-0000-4000-8000-000000000003',event_id:event,audience:'followers',body:'Meet by the sea',recipient_count:3,created_at:'2026-09-16T19:00:00.123456+00:00'};
+const scope={userId:'creator',isCurrent:()=>true};
+beforeEach(()=>mockRpc.mockReset().mockResolvedValue({data:{rows:[row],next:null},error:null}));
+it('reuses compact history rows without exposing unexpected private fields',()=>{const parsed=readInvitationHistoryPage({rows:[{...row,creator_user_id:'secret',request_id:'private'}],next:null},event);expect(parsed?.rows[0]).toEqual({id:row.id,event_id:event,subject:'Page followers',body:row.body,recipient_count:3,created_at:row.created_at,queued_at:row.created_at});expect(JSON.stringify(parsed)).not.toContain('secret');});
+it.each([{event_id:page},{audience:'all'},{recipient_count:-1},{body:''},{created_at:'bad'},{id:'bad'}])('rejects malformed rows %j',patch=>{expect(readInvitationHistoryPage({rows:[{...row,...patch}],next:null},event)).toBeNull();});
+it('rejects duplicate rows and a cursor not corresponding to the last full page',()=>{expect(readInvitationHistoryPage({rows:[row,row],next:null},event)).toBeNull();expect(readInvitationHistoryPage({rows:[row],next:{id:row.id,created_at:row.created_at}},event)).toBeNull();});
+it('preserves precise cursor values across a full page',()=>{const rows=Array.from({length:20},(_,i)=>({...row,id:`8ecc2930-0000-4000-8000-${String(i+1).padStart(12,'0')}`}));const next={id:rows[19].id,created_at:row.created_at};expect(readInvitationHistoryPage({rows,next},event)?.next).toEqual(next);});
+it('uses a single account-scoped exact page RPC with original cursor precision',async()=>{const cursor={id:row.id,created_at:row.created_at};await loadEventInvitationHistory(event,page,scope,cursor);expect(mockRpc).toHaveBeenCalledWith('get_event_invitation_history',{p_event_id:event,p_page_id:page,p_before_at:row.created_at,p_before_id:row.id});});
+it('distinguishes permission revocation from ordinary read failure',async()=>{mockRpc.mockResolvedValueOnce({data:null,error:{code:'42501'}});await expect(loadEventInvitationHistory(event,page,scope)).rejects.toBeInstanceOf(AttendeeMessageHistoryDenied);mockRpc.mockResolvedValueOnce({data:null,error:{code:'offline'}});await expect(loadEventInvitationHistory(event,page,scope)).rejects.toThrow('could not be loaded');});
+it('invalid cursor fails before reaching the database',async()=>{await expect(loadEventInvitationHistory(event,page,scope,{id:row.id,created_at:'invalid'})).rejects.toThrow('Invalid');expect(mockRpc).not.toHaveBeenCalled();});

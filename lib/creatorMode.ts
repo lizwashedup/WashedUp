@@ -159,9 +159,11 @@ export function coCreatorRoleTag(role: CommunityMemberRole): string {
   }
 }
 
-export async function getCreatorAccess(): Promise<CreatorAccess> {
+export async function getCreatorAccess(expectedUserId?: unknown): Promise<CreatorAccess> {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError) throw authError;
+  // Existing React Query callers pass a query context; only an explicit ID scopes this read.
+  if (typeof expectedUserId === 'string' && user?.id !== expectedUserId) throw new Error('Creator account changed.');
   if (!user) return { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false, isRevoked: false };
 
   // admin view-as (doc 00 7-13): force the event-host-only shape at the one

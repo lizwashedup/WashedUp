@@ -7,6 +7,7 @@ import {
   applicationFeeCents,
   planAddonLineItems,
   planPriorSessionReuse,
+  providerCheckoutKey,
 } from '../_shared/ticketCheckout.ts';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -185,6 +186,15 @@ Deno.test('planPriorSessionReuse: an open session pricing a DIFFERENT total is n
   assert(action === 'replace', 'a price mismatch must never be silently reused');
 });
 
-Deno.test('planPriorSessionReuse: an unrecognized status falls through to replace', () => {
-  assert(planPriorSessionReuse({ status: 'some_future_stripe_status' }, 1000) === 'replace', 'unknown status defaults to replace, not reuse');
+Deno.test('planPriorSessionReuse: an unrecognized status stays unknown', () => {
+  assert(planPriorSessionReuse({ status: 'some_future_stripe_status' }, 1000) === 'unknown', 'unknown status cannot authorize replacement');
+});
+
+Deno.test('providerCheckoutKey: the same saved order always owns the same provider key', () => {
+  assert(providerCheckoutKey('order-a') === providerCheckoutKey('order-a'), 'same order');
+  assert(providerCheckoutKey('order-a') !== providerCheckoutKey('order-b'), 'different orders');
+});
+Deno.test('planPriorSessionReuse: empty URL is not payable and null status stays unknown', () => {
+  assert(planPriorSessionReuse({ status: 'open', url: '', amount_total: 1000 }, 1000) === 'replace', 'empty URL');
+  assert(planPriorSessionReuse({ status: null }, 1000) === 'unknown', 'null status');
 });

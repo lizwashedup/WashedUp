@@ -161,11 +161,20 @@ export const COPY = {
     "They won't be notified. You'll quietly be removed from each other's people.",
   privacyToggle: (name: string) => `Hide my upcoming plans from ${name}`,
 
-  pingPrompt: 'Let your people know',
-  pingButton: 'Ping them',
-  pingSheetPrompt: 'Who should know about this',
+  pingPrompt: 'Invite people',
+  pingButton: 'Send invites',
+  pingSheetPrompt: 'Invite people',
   pingSeeAll: 'See all',
   pingSkip: 'Not now',
+  pingBack: 'Back',
+  pingHelp: 'Choose people you’d like to bring along.',
+  pingSending: 'Sending…',
+  pingSelected: (n: number) => `${n} selected`,
+  pingPerson: 'Person',
+  pingPersonConfirmed: (name: string) => `${name}, invite confirmed`,
+  pingChoosePeople: 'Choose someone from your people to invite.',
+  pingUnconfirmed: (unresolved: number, confirmed: number) =>
+    `${confirmed > 0 ? `${confirmed} ${confirmed === 1 ? 'invite' : 'invites'} confirmed. ` : ''}Couldn’t confirm ${unresolved} ${unresolved === 1 ? 'invite' : 'invites'}. ${unresolved === 1 ? 'That person is' : 'Those people are'} still selected. Try again or continue.`,
 
   surveyHow: 'How was it?',
   surveyGood: 'Really good',
@@ -354,7 +363,7 @@ export const COPY = {
   circleNameThis: 'Name this circle',
   circleNameSheetTitle: 'Name this circle',
   circleNameSheetSub: 'Give it a name so it reads as a circle, not a list of names.',
-  circleNameSheetSave: 'Save the name',
+  circleNameSheetSave: 'Save',
   circleNameSheetError: "Couldn't save the name just now. Try again.",
 
   // ── Create-circle flow (3 steps) ────────────────────────────────────────

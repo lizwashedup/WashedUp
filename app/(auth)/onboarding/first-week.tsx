@@ -1,14 +1,7 @@
 /**
- * Final onboarding step: "your first week" (spec a2). Mounted ONLY by the
- * post-photo transition (photo step navigates here with ?from=onboarding
- * after onboarding_status flips to 'complete'). Existing users, deep links,
- * and unfinished onboarding all redirect: this screen never blocks anyone.
- *
- * "later" and Android back both land on Plans (Liz, 2026-09-02: onboarding
- * exit should always be Plans, not Scene -- supersedes spec a2's original
- * Scene destination for this path). The wishlist capture writes
- * (saveAreaWishlist), then moves to the confirmation screen, which already
- * exits to Plans on its own continue/back.
+ * Compatibility screen for saved first-week onboarding navigation. New
+ * signups open Plans directly. Saved transitions retain their existing gate
+ * and wishlist behavior; Later and hardware Back now also open Plans.
  */
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
@@ -19,7 +12,7 @@ import { YourFirstWeekScreen } from '../../../components/firstJoin/YourFirstWeek
 import { getUserBounded } from '../../../lib/authGate';
 import { FIRST_JOIN_COPY as COPY } from '../../../lib/firstJoin/copy';
 import { onboardingDest } from '../../../lib/authRouting';
-import { resolveFirstWeekAccess, PLANS_ROUTE, SCENE_ROUTE } from '../../../lib/firstJoin/onboardingGate';
+import { resolveFirstWeekAccess, PLANS_ROUTE } from '../../../lib/firstJoin/onboardingGate';
 import { saveAreaWishlist } from '../../../lib/firstJoin/wishlist';
 import { supabase } from '../../../lib/supabase';
 
@@ -39,7 +32,7 @@ export default function FirstWeekStep() {
       const { user } = await getUserBounded();
       if (cancelled) return;
       if (!user) {
-        router.replace(SCENE_ROUTE);
+        router.replace(PLANS_ROUTE);
         return;
       }
       const { data: profile } = await supabase
@@ -66,7 +59,7 @@ export default function FirstWeekStep() {
     };
   }, [from]);
 
-  // Hardware back never re-enters onboarding; it lands on Plans (Liz, 2026-09-02).
+  // Hardware back never re-enters onboarding; it lands on Plans (Liz, 2026-09-02 and September 18).
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       router.replace(PLANS_ROUTE);

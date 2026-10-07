@@ -1,12 +1,12 @@
 // Waitlist Exceptions — creator manager (Phase 2).
 //
 // FIFO list: only the next eligible waitlister is shown in the clear with a
-// Grant action. Everyone behind them is blurred (avatar + name masked) so the
+// Grant action. Later waiting identities are masked so the
 // creator invites in order rather than shopping the list. People already let
-// in via an exception are listed for context. Backend (Phase 1) is live and
-// frozen; this screen only calls the existing RPCs.
+// in via an exception are listed for context. Existing RPCs remain unchanged;
+// checked-in definitions do not establish their deployed state.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,22 +20,14 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {useCreatorWaitlist} from '../../hooks/useCreatorWaitlist';
+import {useObservedUser} from '../../hooks/useObservedUser';
+import {useAfterglowFonts} from '../../hooks/useAfterglowFonts';
+import {COMMUNITY_CHAT_GROUPING_ENABLED} from '../../constants/FeatureFlags';
 import { ArrowLeft, User } from 'lucide-react-native';
-import { hapticLight, hapticSuccess } from '../../lib/haptics';
-import {
-  fetchWaitlistManager,
-  grantWaitlistException,
-  closeWaitlist,
-  reopenWaitlist,
-  waitlistAlertMessage,
-  isStaleOrderError,
-  type WaitlistManagerRow,
-} from '../../lib/waitlistExceptions';
-import { WAITLIST_MANAGER_KEY } from '../../constants/QueryKeys';
-import { BrandedAlert } from '../../components/BrandedAlert';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import {type WaitlistManagerRow} from '../../lib/waitlistExceptions';
+import Colors, {AfterglowColors as C} from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType as T, type AfterglowFontFamilies } from '../../constants/Typography';
 
 type ListItem =
   | { t: 'section'; key: string; label: string }
@@ -45,25 +37,21 @@ type ListItem =
 export default function WaitlistManagerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
-  const queryClient = useQueryClient();
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message: string } | null>(null);
-
-  const { data, isLoading, isError, error, refetch, isRefetching } = useQuery({
-    queryKey: WAITLIST_MANAGER_KEY(id),
-    queryFn: () => fetchWaitlistManager(id),
-    enabled: !!id,
-    staleTime: 30_000,
-    // The 30s staleTime keeps the shared plan-detail "Waitlist (N)" count
-    // cheap, but this screen must always open on fresh state (a slot may have
-    // been refunded or a new person may have asked to join since last view).
-    refetchOnMount: 'always',
-  });
+  const identity=useObservedUser();
+  const {fonts}=useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const appearance=useMemo(()=>COMMUNITY_CHAT_GROUPING_ENABLED?{fonts}:undefined,[fonts]);
+  const s=useMemo(()=>appearance?managerAppearance(legacyStyles,fonts):legacyStyles,[appearance,fonts]);
+  const manager=useCreatorWaitlist({eventId:id,viewerId:identity.viewerId??null,epoch:identity.epoch,isCurrent:identity.isCurrent});
+  const {data,error,loading:isRefetching}=manager;
+  const isLoading=identity.isLoading||(!data&&!error&&!manager.attempt);
+  const isError=!!error&&!data;
+  const refetch=manager.refresh;
 
   const slotsUsed = data?.slotsUsed ?? 0;
   const closed = data?.closed ?? false;
   const capReached = slotsUsed >= 3;
 
-  const { waitlist, accepted, nextEligibleUserId, listData } = useMemo(() => {
+  const { waitlist, nextEligibleUserId, listData } = useMemo(() => {
     const rows = data?.rows ?? [];
     const wl = rows
       .filter((r) => r.kind === 'waitlist')
@@ -97,30 +85,6 @@ export default function WaitlistManagerScreen() {
     return { waitlist: wl, accepted: acc, nextEligibleUserId: nextId, listData: items };
   }, [data?.rows]);
 
-  const grantMutation = useMutation({
-    mutationFn: (userId: string) => grantWaitlistException(id, userId),
-    onSuccess: () => {
-      hapticSuccess();
-      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id) });
-      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
-    },
-    onError: (e) => {
-      setAlertInfo({ title: 'Hmm', message: waitlistAlertMessage(e, 'Could not save the spot. Try again.') });
-      if (isStaleOrderError(e)) refetch();
-    },
-  });
-
-  const closeMutation = useMutation({
-    mutationFn: () => (closed ? reopenWaitlist(id) : closeWaitlist(id)),
-    onSuccess: () => {
-      hapticLight();
-      queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id) });
-    },
-    onError: (e) => {
-      setAlertInfo({ title: 'Hmm', message: waitlistAlertMessage(e) });
-    },
-  });
-
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace(`/plan/${id}` as any);
@@ -128,40 +92,39 @@ export default function WaitlistManagerScreen() {
 
   const Header = (
     <View style={s.headerCard}>
+      {data?.ended&&<Text style={s.capWarn}>This plan has ended. Invitations are no longer available.</Text>}
       <View style={s.slotRow}>
         <Text style={s.slotCount}>{slotsUsed} / 3</Text>
-        <Text style={s.slotLabel}>exception spots used</Text>
+        <Text style={s.slotLabel}>extra spots used</Text>
       </View>
       <Text style={s.slotCaption}>
-        Exception spots let you pull people off the waitlist into a full plan.
+        Save up to 3 extra spots, one person at a time. They have 48 hours to join.
       </Text>
       {capReached && (
-        <Text style={s.capWarn}>All 3 spots used. You can still reopen one if someone passes.</Text>
+        <Text style={s.capWarn}>All 3 spots are in use. A spot becomes available again if someone passes or their invite expires.</Text>
       )}
       {!capReached && !closed && waitlist.length > 0 && !nextEligibleUserId && (
         <Text style={s.slotCaption}>
-          Everyone waiting already has an invite out or has responded. Nothing to do right now.
+          Everyone waiting already has an invite out or has responded. You’re up to date.
         </Text>
       )}
       <TouchableOpacity
-        style={s.closeBtn}
-        onPress={() => closeMutation.mutate()}
-        disabled={closeMutation.isPending}
+        style={[s.closeBtn, !manager.canAct && { opacity: 0.5 }]}
+        onPress={() => {void manager.setClosed(!closed);}}
+        disabled={!manager.canAct}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityState={{ busy: closeMutation.isPending }}
-        accessibilityLabel={closed ? 'Reopen the waitlist' : 'Close the waitlist'}
+        accessibilityState={{ busy: manager.busy, disabled: !manager.canAct }}
+        accessibilityLabel={closed ? 'Resume extra invitations' : 'Pause extra invitations'}
       >
-        <Text style={s.closeBtnText}>
-          {closeMutation.isPending
-            ? (closed ? 'Reopening…' : 'Closing…')
-            : (closed ? 'Reopen waitlist' : 'Close waitlist')}
+        <Text style={s.closeBtnText} numberOfLines={1}>
+          {closed ? 'Resume invites' : 'Pause invites'}
         </Text>
       </TouchableOpacity>
       <Text style={s.closeCaption}>
         {closed
-          ? 'Closed for new exception invites. People can still join the waitlist.'
-          : 'Closing stops new exception invites. People can still join the waitlist.'}
+          ? 'Extra invitations are paused. People can still join the waitlist.'
+          : 'Pausing stops extra invitations. People can still join the waitlist.'}
       </Text>
     </View>
   );
@@ -175,9 +138,9 @@ export default function WaitlistManagerScreen() {
       const r = item.row;
       return (
         <View style={s.row}>
-          <Avatar photo={r.photo} blurred={false} />
+          <Avatar styles={s} photo={r.photo} blurred={false} />
           <View style={s.rowBody}>
-            <Text style={s.rowName} numberOfLines={1}>{r.first_name}</Text>
+            <Text style={s.rowName} numberOfLines={1}>{r.first_name||'Member'}</Text>
             <Text style={s.rowContext} numberOfLines={1}>Joined the plan</Text>
           </View>
           <View style={s.pillJoined}>
@@ -191,13 +154,13 @@ export default function WaitlistManagerScreen() {
 
     if (isNext) {
       const granting =
-        grantMutation.isPending && grantMutation.variables === row.user_id;
-      const grantEnabled = !capReached && !closed && !grantMutation.isPending;
+        manager.busy && manager.attempt?.action.kind==='grant' && manager.attempt.action.userId===row.user_id;
+      const grantEnabled = !capReached && !closed && manager.canAct;
       return (
         <View style={[s.row, s.nextRow]}>
-          <Avatar photo={row.photo} blurred={false} />
+          <Avatar styles={s} photo={row.photo} blurred={false} />
           <View style={s.rowBody}>
-            <Text style={s.rowName} numberOfLines={1}>{row.first_name}</Text>
+            <Text style={s.rowName} numberOfLines={1}>{row.first_name||'Member'}</Text>
             {!!row.context && (
               <Text style={s.rowContext} numberOfLines={1}>{row.context}</Text>
             )}
@@ -208,17 +171,17 @@ export default function WaitlistManagerScreen() {
           <TouchableOpacity
             style={[s.grantBtn, !grantEnabled && s.grantBtnDisabled]}
             disabled={!grantEnabled}
-            onPress={() => grantMutation.mutate(row.user_id)}
+            onPress={() => {void manager.grant(row.user_id);}}
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityState={{ disabled: !grantEnabled, busy: granting }}
-            accessibilityLabel={`Save ${row.first_name} a spot in the plan`}
+            accessibilityLabel={`Save ${row.first_name||'Member'} a spot in the plan`}
           >
             {granting ? (
               <ActivityIndicator size="small" color={Colors.white} />
             ) : (
-              <Text style={[s.grantBtnText, !grantEnabled && s.grantBtnTextDisabled]}>
-                Save them a spot
+              <Text numberOfLines={1} style={[s.grantBtnText, !grantEnabled && s.grantBtnTextDisabled]}>
+                Save a spot
               </Text>
             )}
           </TouchableOpacity>
@@ -232,14 +195,14 @@ export default function WaitlistManagerScreen() {
     if (row.exception_status !== 'waiting') {
       return (
         <View style={s.row}>
-          <Avatar photo={row.photo} blurred={false} />
+          <Avatar styles={s} photo={row.photo} blurred={false} />
           <View style={s.rowBody}>
-            <Text style={s.rowName} numberOfLines={1}>{row.first_name}</Text>
+            <Text style={s.rowName} numberOfLines={1}>{row.first_name||'Member'}</Text>
             {!!row.context && (
               <Text style={s.rowContext} numberOfLines={1}>{row.context}</Text>
             )}
           </View>
-          <StatusPill status={row.exception_status} />
+          <StatusPill styles={s} status={row.exception_status} />
         </View>
       );
     }
@@ -247,13 +210,12 @@ export default function WaitlistManagerScreen() {
     // Unseen waiter behind the next person: identity masked to keep the
     // creator inviting in FIFO order rather than shopping the list.
     return (
-      <View style={s.row}>
-        <Avatar photo={row.photo} blurred />
+      <View style={s.row} accessible accessibilityLabel={`Person ${row.queue_position} in the waitlist. Identity appears when they are next.`}>
+        <Avatar styles={s} photo={null} blurred />
         <View style={s.rowBody}>
-          <View style={[s.maskBar, { width: '58%' }]} />
-          <View style={[s.maskBar, s.maskBarSm, { width: '82%' }]} />
+          <Text style={s.rowName}>Person {row.queue_position}</Text>
           {isHintRow && (
-            <Text style={s.hintText}>Invite the person above first.</Text>
+            <Text style={s.hintText}>Their name appears when they’re next.</Text>
           )}
         </View>
       </View>
@@ -261,18 +223,23 @@ export default function WaitlistManagerScreen() {
   }
 
   // ── Error / loading states ────────────────────────────────────────────────
-  const errMsg = String((error as { message?: unknown } | null)?.message ?? '');
-  const isAuthErr = errMsg.includes('not_authorized') || errMsg.includes('not_found');
+  const errMsg = error??'';
+  const isAuthErr = manager.accessError;
+
+  if(!identity.isLoading&&!identity.viewerId){
+    return <SafeAreaView style={s.container} edges={['top','bottom']}><TopBar styles={s} onBack={goBack}/><View style={s.centered}>
+      <Text style={s.emptyTitle}>Sign in to manage this waitlist.</Text>
+      <TouchableOpacity accessibilityRole="button" style={s.goBackBtn} onPress={()=>router.push('/(auth)/login')}><Text numberOfLines={1} style={s.goBackBtnText}>Sign in</Text></TouchableOpacity>
+    </View></SafeAreaView>;
+  }
 
   if (isError && isAuthErr) {
     return (
       <SafeAreaView style={s.container} edges={['top', 'bottom']}>
-        <TopBar onBack={goBack} />
+        <TopBar styles={s} onBack={goBack} />
         <View style={s.centered}>
           <Text style={s.emptyTitle}>
-            {errMsg.includes('not_found')
-              ? "This plan isn't available anymore."
-              : 'Only the plan creator can manage the waitlist.'}
+            {errMsg}
           </Text>
           <TouchableOpacity style={s.goBackBtn} onPress={goBack} activeOpacity={0.7}>
             <Text style={s.goBackBtnText}>Go back</Text>
@@ -286,7 +253,13 @@ export default function WaitlistManagerScreen() {
     // Only the top edge here: the FlatList contentContainer adds the bottom
     // safe-area inset itself, so including 'bottom' would double-pad it.
     <SafeAreaView style={s.container} edges={['top']}>
-      <TopBar onBack={goBack} />
+      <TopBar styles={s} onBack={goBack} />
+      {(error||manager.attempt)&&<View style={s.recovery}>
+        <Text style={s.slotCaption} accessibilityLiveRegion="polite">{manager.busy?'Saving your change…':error??'Check the waitlist before making another change.'}</Text>
+        {!manager.busy&&<TouchableOpacity accessibilityRole="button" disabled={isRefetching} style={s.goBackBtn} onPress={()=>{void manager.retry();}}>
+          <Text numberOfLines={1} style={s.goBackBtnText}>{isRefetching?'Checking…':manager.attempt?.phase==='unknown'?'Check waitlist':'Try again'}</Text>
+        </TouchableOpacity>}
+      </View>}
       {isLoading ? (
         <View style={s.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -294,9 +267,7 @@ export default function WaitlistManagerScreen() {
       ) : isError ? (
         <View style={s.centered}>
           <Text style={s.emptyTitle}>We couldn't load the waitlist.</Text>
-          <TouchableOpacity style={s.goBackBtn} onPress={() => refetch()} activeOpacity={0.7}>
-            <Text style={s.goBackBtnText}>Try again</Text>
-          </TouchableOpacity>
+
         </View>
       ) : (
         <FlatList
@@ -313,7 +284,7 @@ export default function WaitlistManagerScreen() {
                   you can save them a spot.
                 </Text>
                 {closed && (
-                  <Text style={s.emptyBody}>Your waitlist is closed for new invites.</Text>
+                  <Text style={s.emptyBody}>Extra invitations are paused.</Text>
                 )}
               </View>
             ) : null
@@ -329,22 +300,17 @@ export default function WaitlistManagerScreen() {
           }
         />
       )}
-      <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
-        onClose={() => setAlertInfo(null)}
-      />
+
     </SafeAreaView>
   );
 }
 
-function TopBar({ onBack }: { onBack: () => void }) {
+function TopBar({ onBack, styles:s=legacyStyles }: { onBack: () => void; styles?:typeof legacyStyles }) {
   return (
     <View style={s.topBar}>
       <TouchableOpacity
         onPress={onBack}
-        style={s.backBtn}
+        style={s.backBtn} accessibilityRole="button" accessibilityLabel="Back to plan"
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
         <ArrowLeft size={22} color={Colors.darkWarm} strokeWidth={2} />
@@ -355,7 +321,7 @@ function TopBar({ onBack }: { onBack: () => void }) {
   );
 }
 
-function Avatar({ photo, blurred }: { photo: string | null; blurred: boolean }) {
+function Avatar({ photo, blurred, styles:s=legacyStyles }: { photo: string | null; blurred: boolean; styles?:typeof legacyStyles }) {
   if (!photo) {
     return (
       <View style={[s.avatar, s.avatarFallback]}>
@@ -384,7 +350,7 @@ function Avatar({ photo, blurred }: { photo: string | null; blurred: boolean }) 
   return <Image source={{ uri: photo }} style={s.avatar} contentFit="cover" />;
 }
 
-function StatusPill({ status }: { status: WaitlistManagerRow['exception_status'] }) {
+function StatusPill({ status, styles:s=legacyStyles }: { status: WaitlistManagerRow['exception_status']; styles?:typeof legacyStyles }) {
   if (status === 'invited') {
     return (
       <View style={s.pillInvited}>
@@ -416,7 +382,8 @@ function StatusPill({ status }: { status: WaitlistManagerRow['exception_status']
   return null;
 }
 
-const s = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
+  recovery:{paddingHorizontal:20,paddingBottom:16},
   container: { flex: 1, backgroundColor: Colors.cream },
   topBar: {
     flexDirection: 'row',
@@ -629,3 +596,28 @@ const s = StyleSheet.create({
     lineHeight: 20,
   },
 });
+
+function managerAppearance(base:typeof legacyStyles,fonts:AfterglowFontFamilies):typeof legacyStyles {
+ const result:any={};
+ for(const [key,value] of Object.entries(base)){
+  const style:any={...value};
+  if(style.fontFamily){style.fontFamily=style.fontFamily===Fonts.displayBold?fonts.display:[Fonts.sansBold,Fonts.sansSemibold].includes(style.fontFamily)?fonts.semibold:fonts.regular;}
+  if(style.color)style.color=[Colors.terracotta,Colors.errorBrand].includes(style.color)?C.clay:style.color===Colors.white?C.white:style.color===Colors.darkWarm?C.ink:C.muted;
+  if(style.borderColor)style.borderColor=style.borderColor===Colors.terracotta?C.clay:C.line;
+  if(style.borderBottomColor)style.borderBottomColor=C.subtleLine;
+  if(style.backgroundColor)style.backgroundColor=style.backgroundColor===Colors.terracotta?C.clay:style.backgroundColor===Colors.cardBg?C.white:style.backgroundColor===Colors.inputBg?C.avatar:C.paper;
+  if(style.shadowOpacity)style.shadowOpacity=0;
+  result[key]=style;
+ }
+ Object.assign(result,{
+  backBtn:{...result.backBtn,width:44,height:44},topTitle:{...result.topTitle,...T.contextTitle,fontFamily:fonts.semibold},
+  headerCard:{...result.headerCard,borderRadius:10,padding:20},slotCount:{...result.slotCount,...T.screenTitle},
+  slotRow:{...result.slotRow,flexWrap:'wrap',gap:4},slotLabel:{...result.slotLabel,...T.body},
+  slotCaption:{...result.slotCaption,...T.body},closeCaption:{...result.closeCaption,...T.caption},closeBtn:{...result.closeBtn,minHeight:44,justifyContent:'center'},
+  rowName:{...result.rowName,...T.title},rowContext:{...result.rowContext,...T.body},rowBody:{...result.rowBody,minWidth:0},
+  nextRow:{...result.nextRow,flexWrap:'wrap',backgroundColor:C.white},grantBtn:{...result.grantBtn,width:'100%',borderRadius:6,minHeight:48,alignItems:'center',justifyContent:'center',marginTop:12},
+  grantBtnText:{...result.grantBtnText,...T.title},goBackBtn:{...result.goBackBtn,borderRadius:6,minHeight:48,alignItems:'center',justifyContent:'center'},
+  emptyTitle:{...result.emptyTitle,...T.identity},emptyBody:{...result.emptyBody,...T.body},hintText:{...result.hintText,...T.caption},
+ });
+ return StyleSheet.create(result) as typeof legacyStyles;
+}

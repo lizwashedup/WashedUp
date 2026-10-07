@@ -20,6 +20,20 @@
  *   - Quota & billing must be active (Places API requires a billing account)
  */
 const appJson = require('./app.json');
+const easJson = require('./eas.json');
+// Local Xcode archives need the same channel EAS Build normally injects.
+// Explicit private builds can select their own channel without changing source.
+const explicitUpdateChannel = process.env.WASHEDUP_UPDATE_CHANNEL?.trim();
+const buildProfile = process.env.EAS_BUILD_PROFILE?.trim();
+const profileChannel = buildProfile ? easJson.build?.[buildProfile]?.channel : undefined;
+if (buildProfile && !profileChannel && !explicitUpdateChannel) {
+  throw new Error('The selected EAS build profile must define its update channel.');
+}
+const updateChannel = explicitUpdateChannel || profileChannel || 'production';
+if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(updateChannel)) {
+  throw new Error('The update channel contains unsupported characters.');
+}
+
 
 const googleMapsApiKey =
   process.env.GOOGLE_MAPS_API_KEY ||
@@ -64,21 +78,19 @@ module.exports = {
       // (ios/ is gitignored, so the manual edit doesn't reach EAS). Fixes the
       // iOS "Install pods" failure on cloud builds.
       './plugins/withIosModularHeaders',
-      // expo-camera powers door check-in's ticket scan (spec 100 P0 #5). The
-      // permission string is the iOS/Android prompt shown at first use.
-      // LIZ COPY (taste gate).
-      ['expo-camera', { cameraPermission: 'washedup uses the camera to scan tickets at your door.' }],
+      './plugins/withIosSceneLifecycle',
+      // Keep camera wording aligned with image-picker's chat/profile capture
+      // and expo-camera's event check-in; both use the same OS permission.
+      ['expo-camera', { cameraPermission: 'Use your camera to take photos for chats and your profile, and scan event tickets.' }],
     ],
     updates: {
+      requestHeaders: { 'expo-channel-name': updateChannel },
       url: 'https://u.expo.dev/9584097f-8f32-4fce-ae36-e87c1ffd50cc',
-      // Wait up to 8s at the native splash for a newer bundle before falling
-      // back to the cached one. Default is 0, which boots the cached (possibly
-      // broken) bundle immediately and only applies a fix on the NEXT launch —
-      // a trap for users frozen on launch, who force-quit before the
-      // background download finishes and never receive the fix. With this, a
-      // launch on a weak/old bundle pulls and applies the fix in-place.
+      // Boot the embedded/cached bundle immediately. Updates still download in
+      // the background and apply on the next launch, without holding every
+      // startup at the splash screen while the network is slow or unavailable.
       // NOTE: native config — only takes effect in a new build, not over OTA.
-      fallbackToCacheTimeout: 8000,
+      fallbackToCacheTimeout: 0,
     },
     runtimeVersion: otaRuntimeVersion || {
       policy: 'fingerprint',

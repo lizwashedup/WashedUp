@@ -1,3 +1,4 @@
+import { CommunityReplyComposer } from './CommunityReplyComposer';
 /**
  * One broadcast in the community container: the leader's voice, a small
  * reaction row (react-not-reply is the low-pressure default), and a reply
@@ -5,7 +6,7 @@
  * Functionally minimal per decision 15a.
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Image } from 'expo-image';
 import {
   View,
@@ -15,74 +16,38 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, LineHeights, AfterglowType, AfterglowFallbackFonts, type AfterglowFontFamilies } from '../../constants/Typography';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
-import { friendlyError } from '../../lib/friendlyError';
-import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import {
   composeIntroCard,
-  getBroadcastReplies,
-  sendBroadcastReply,
-  toggleBroadcastReaction,
   type CommunityBroadcast,
+  type CommunityOperationScope,
 } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import LinkifiedText from '../LinkifiedText';
-
-const REACTION_SET = ['❤️', '🔥', '👏'];
+import { ReactionChips } from '../chat/ReactionChips';
+import ReactionEmojiPicker from '../chat/ReactionEmojiPicker';
+import { reactionKeyForEmoji } from '../../lib/communityReactionChips';
+import { useCommunityMessageInteractions } from './CommunityMessageActions';
 
 interface Props {
+  onViewMember?: (id: string) => void;
+  onViewReactions?: () => void;
   broadcast: CommunityBroadcast;
+  appearance?: { fonts: AfterglowFontFamilies };
   /** Broadcasts are the community speaking; attribution is its name, never a person. */
   communityName: string;
   onError: (title: string, message: string) => void;
   mentionNames?: Set<string>;
+  scope?: CommunityOperationScope;
 }
 
-export function BroadcastCard({ broadcast, communityName, onError, mentionNames }: Props) {
-  const queryClient = useQueryClient();
-  const [showReplies, setShowReplies] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
-
-  const { data: replies = [], isLoading: repliesLoading } = useQuery({
-    queryKey: ['broadcast-replies', broadcast.id],
-    queryFn: () => getBroadcastReplies(broadcast.id),
-    enabled: showReplies,
-  });
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['community-broadcasts'] });
-    queryClient.invalidateQueries({ queryKey: ['broadcast-replies', broadcast.id] });
-  };
-
-  const handleReact = async (emoji: string) => {
-    const current = broadcast.reactions.find((r) => r.emoji === emoji);
-    try {
-      hapticLight();
-      await toggleBroadcastReaction(broadcast.id, emoji, !current?.mine);
-      invalidate();
-    } catch (e) {
-      onError('That did not land', friendlyError(e, 'Try again in a moment.'));
-    }
-  };
-
-  const handleReply = async () => {
-    if (!draft.trim() || sending) return;
-    setSending(true);
-    try {
-      await sendBroadcastReply(broadcast.id, draft);
-      hapticSuccess();
-      setDraft('');
-      invalidate();
-    } catch (e) {
-      onError('That did not send', friendlyError(e, 'Try again in a moment.'));
-    } finally {
-      setSending(false);
-    }
-  };
+export function BroadcastCard({ broadcast, communityName, onError, mentionNames, scope, appearance, onViewReactions, onViewMember }: Props) {
+  const { showReplies, draft, sending, replies, repliesLoading, repliesError, showReactionPicker, replyComposer,
+    changeDraft, send: handleReply, react: handleReact, toggleReplies, retryReplies,
+    openReactionPicker, closeReactionPicker, currentAction, repliesHaveOlder, repliesLoadingOlder, loadOlderReplies,
+  } = useCommunityMessageInteractions(broadcast, onError, scope, 'per-emoji');
 
   // an intro is the community introducing a new member (kind='intro'):
   // same reactions and reply thread, its own clothes, client-composed text.
@@ -90,74 +55,89 @@ export function BroadcastCard({ broadcast, communityName, onError, mentionNames 
   const isIntro = broadcast.kind === 'intro';
   const intro = isIntro && broadcast.payload ? composeIntroCard(broadcast.payload) : null;
 
+  const revisedBody = appearance && { ...AfterglowType.body, fontFamily: appearance.fonts.regular, color: AfterglowColors.ink };
+  const revisedCaption = appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.regular, color: AfterglowColors.muted };
+  const revisedAction = appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.medium, color: AfterglowColors.clay };
   return (
-    <View style={[styles.card, isIntro && styles.cardIntro]}>
-      {!!communityName && <Text style={styles.attribution}>{communityName}</Text>}
+    <View style={[styles.card, isIntro && styles.cardIntro, appearance && { backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderLeftColor: AfterglowColors.clay }]}>
+      {!!communityName && <Text style={[styles.attribution, revisedAction]}>{communityName}</Text>}
       {/* LIZ COPY */}
-      {isIntro && <Text style={styles.introEyebrow}>just joined</Text>}
+      {isIntro && <Text style={[styles.introEyebrow, revisedCaption]}>just joined</Text>}
       {!!broadcast.image_url && <Image source={{ uri: broadcast.image_url }} style={styles.image} contentFit="cover" />}
-      <LinkifiedText text={intro ? intro.lead : broadcast.body} style={styles.body} mentionNames={mentionNames} />
-      {!!intro?.qa && <LinkifiedText text={intro.qa} style={styles.body} mentionNames={mentionNames} />}
-      <Text style={styles.meta}>{formatTimestampLA(broadcast.created_at)}</Text>
+      <LinkifiedText text={intro ? intro.lead : broadcast.body} style={[styles.body, revisedBody]} mentionNames={mentionNames} />
+      {!!intro?.qa && <LinkifiedText text={intro.qa} style={[styles.body, revisedBody]} mentionNames={mentionNames} />}
+      <Text style={[styles.meta, revisedCaption]}>{formatTimestampLA(broadcast.created_at)}</Text>
 
-      <View style={styles.reactionRow}>
-        {REACTION_SET.map((emoji) => {
-          const r = broadcast.reactions.find((x) => x.emoji === emoji);
-          return (
-            <TouchableOpacity
-              key={emoji}
-              style={[styles.reactionChip, r?.mine && styles.reactionChipMine]}
-              onPress={() => handleReact(emoji)}
-              hitSlop={6}
-            >
-              <Text style={styles.reactionText}>
-                {emoji}
-                {r && r.count > 0 ? ` ${r.count}` : ''}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-        <TouchableOpacity onPress={() => setShowReplies((v) => !v)} hitSlop={6}>
-          <Text style={styles.repliesLink}>
+      <ReactionChips
+        onViewReactions={onViewReactions}
+        appearance={appearance}
+        reactions={broadcast.reactions}
+        onReact={(key) => { void handleReact(key); }}
+        onAddReaction={openReactionPicker}
+        style={styles.reactionRow}
+      >
+        <TouchableOpacity onPress={toggleReplies} hitSlop={6} accessibilityRole="button" accessibilityLabel="Reply to this message">
+          <Text style={[styles.repliesLink, revisedAction]}>
             {broadcast.reply_count > 0 ? `replies (${broadcast.reply_count})` : 'reply'}
           </Text>
         </TouchableOpacity>
-      </View>
+      </ReactionChips>
+      {showReactionPicker && <ReactionEmojiPicker
+        visible
+        onSelect={(emoji) => currentAction(() => {
+          closeReactionPicker();
+          void handleReact(reactionKeyForEmoji(emoji, broadcast.reactions));
+        })()}
+        onClose={closeReactionPicker}
+      />}
 
       {showReplies && (
         <View style={styles.thread}>
+          {repliesHaveOlder && <TouchableOpacity onPress={loadOlderReplies} disabled={repliesLoadingOlder}
+            style={styles.earlierReplies} accessibilityRole="button" accessibilityLabel="Load earlier replies">
+            {repliesLoadingOlder ? <ActivityIndicator size="small" color={Colors.terracotta} /> : <Text style={[styles.repliesLink, revisedAction]}>Earlier replies</Text>}
+          </TouchableOpacity>}
           {repliesLoading ? (
             <ActivityIndicator size="small" color={Colors.terracotta} />
+          ) : repliesError && !replies.length ? (
+            <TouchableOpacity onPress={retryReplies} accessibilityRole="button" accessibilityLabel="Retry loading replies">
+              <Text style={[styles.repliesLink, revisedAction]}>Replies couldn’t load. Tap to retry.</Text>
+            </TouchableOpacity>
           ) : (
             replies.map((r) => (
               <View key={r.id} style={styles.replyRow}>
-                <Text style={styles.replySender}>{r.sender_name ?? 'someone'}</Text>
-                <Text style={styles.replyBody}>{r.body}</Text>
+                <Text style={[styles.replySender, revisedAction]}>{r.sender_name ?? 'someone'}</Text>
+                <LinkifiedText text={r.body} mentionDocument={r.mention_data} onMentionPress={onViewMember ? id => { if (!scope || scope.isCurrent()) onViewMember(id); } : undefined} style={[styles.replyBody, revisedBody]}/>
               </View>
             ))
           )}
-          <View style={styles.replyComposer}>
+          {repliesError && replies.length > 0 && <TouchableOpacity onPress={retryReplies} style={styles.earlierReplies} accessibilityRole="button" accessibilityLabel="Retry loading replies">
+            <Text style={[styles.repliesLink, revisedAction]}>Replies may be out of date. Tap to retry.</Text>
+          </TouchableOpacity>}
+          {replyComposer ? <CommunityReplyComposer state={replyComposer} fonts={appearance?.fonts ?? AfterglowFallbackFonts}/> : <View style={styles.replyComposer}>
             <TextInput
-              style={styles.replyInput}
+              style={[styles.replyInput, revisedBody, appearance && { backgroundColor: AfterglowColors.paper, borderColor: AfterglowColors.line }]}
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={changeDraft}
               placeholder="say something back"
-              placeholderTextColor={Colors.inkSoft}
+              placeholderTextColor={appearance ? AfterglowColors.muted : Colors.inkSoft}
               maxLength={2000}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             <TouchableOpacity
-              style={[styles.replySend, (!draft.trim() || sending) && styles.replySendOff]}
+              style={[styles.replySend, appearance && { backgroundColor: AfterglowColors.clay }, (!draft.trim() || sending) && styles.replySendOff]}
               onPress={handleReply}
               disabled={!draft.trim() || sending}
+              accessibilityRole="button"
+              accessibilityLabel="Send reply"
             >
               {sending ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.replySendText}>send</Text>
+                <Text style={[styles.replySendText, appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.semibold, color: AfterglowColors.white }]}>send</Text>
               )}
             </TouchableOpacity>
-          </View>
+          </View>}
         </View>
       )}
     </View>
@@ -194,17 +174,8 @@ const styles = StyleSheet.create({
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, lineHeight: LineHeights.bodyMD },
   image: { width: '100%', height: 180, borderRadius: 12, backgroundColor: Colors.inputBg, marginBottom: 8 },
   meta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
-  reactionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
-  reactionChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.inputBg,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  reactionChipMine: { borderColor: Colors.terracotta, borderWidth: 1.5 },
-  reactionText: { fontSize: FontSizes.bodySM },
+  reactionRow: { marginTop: 10 },
+  earlierReplies: { minHeight: 44, justifyContent: 'center' },
   repliesLink: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,

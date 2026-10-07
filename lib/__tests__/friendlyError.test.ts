@@ -44,7 +44,16 @@ describe('friendlyError', () => {
     expect(friendlyError({ message: '' }, FALLBACK)).toBe(FALLBACK);
   });
 
-  it('passes through a plain string error as-is when it is not raw-DB-shaped', () => {
-    expect(friendlyError('Network request failed', FALLBACK)).toBe('Network request failed');
+  it('passes through actionable plain-language errors', () => {
+    expect(friendlyError('This plan is full.', FALLBACK)).toBe('This plan is full.');
+  });
+
+  it.each(['Edge Function returned a non-2xx status code', 'Failed to send a request to the Edge Function', 'Relay Error invoking the Edge Function'])('keeps caller recovery instructions instead of SDK details: %s', message => {
+    expect(friendlyError(new Error(message), 'Check the saved upload before retrying.')).toBe('Check the saved upload before retrying.');
+  });
+
+  it.each(['Network request failed', 'TypeError: Network request failed', 'Failed to fetch', 'TypeError: Failed to fetch', 'NetworkError when attempting to fetch resource.', 'AbortError: The operation was aborted.'])('uses the caller recovery instructions for %s', message => {
+    expect(friendlyError(message, FALLBACK)).toBe(FALLBACK);
+    expect(friendlyError({ message }, 'Delivery is not confirmed. Check the original first.')).toBe('Delivery is not confirmed. Check the original first.');
   });
 });

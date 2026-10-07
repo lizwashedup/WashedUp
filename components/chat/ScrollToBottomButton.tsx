@@ -9,7 +9,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 // when the user scrolls up, with a terracotta badge counting messages that
 // arrived below the fold. Fades + scales in/out via Reanimated.
 
-const BUTTON_SIZE = 40;
+const BUTTON_SIZE = 44;
 const ICON_SIZE = 22;
 const RIGHT_INSET = 16;
 const BADGE_SIZE = 20;
@@ -50,12 +50,18 @@ export default function ScrollToBottomButton({
     <Animated.View
       style={[styles.wrap, { bottom: bottomOffset }, animatedStyle]}
       pointerEvents={visible ? 'box-none' : 'none'}
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+      aria-hidden={!visible}
     >
       <Pressable
         style={styles.button}
         onPress={onPress}
+        disabled={!visible}
+        accessible={visible}
+        tabIndex={visible ? 0 : -1}
         accessibilityRole="button"
-        accessibilityLabel="Scroll to latest messages"
+        accessibilityLabel={count > 0 ? `Scroll to latest messages, ${count} new ${count === 1 ? 'message' : 'messages'}` : 'Scroll to latest messages'}
       >
         <Ionicons name="chevron-down" size={ICON_SIZE} color={Colors.asphalt} />
         {count > 0 && (

@@ -20,6 +20,9 @@ import { ALBUM } from '../../constants/YoursDesign';
 import { FlashList } from '@shopify/flash-list';
 import { supabase } from '../../lib/supabase';
 import { logError } from '../../lib/logger';
+import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { PageAction } from '../../components/creator/pages/PageFrame';
 import { withTimeout } from '../../lib/withTimeout';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -66,6 +69,7 @@ type Attendee = {
 };
 
 type AlbumPayload = {
+  unavailable?: boolean;
   album: {
     id: string;
     event_id: string;
@@ -93,7 +97,7 @@ type AlbumPayload = {
   } | null;
 };
 
-async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
+async function fetchAlbumByEvent(eventId: string, viewerId: string, isCurrent: () => boolean): Promise<AlbumPayload> {
   // Phase 1: auth + the independent event-keyed queries, in parallel (these
   // used to run as 4 serial round trips). RLS scopes them via the session.
   const [userRes, albumRes, eventRes, membersRes] = await Promise.all([
@@ -102,11 +106,14 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     supabase.from('events').select('id, title, start_time, location_text').eq('id', eventId).maybeSingle(),
     supabase.from('event_members').select('user_id').eq('event_id', eventId).eq('status', 'joined'),
   ]);
+  if (!isCurrent()) throw new Error('Album visit changed.');
+  for (const result of [userRes, albumRes, eventRes, membersRes]) if (result.error) throw result.error;
   const user = userRes.data.user;
-  if (!user) throw new Error('not authenticated');
+  if (!user || user.id !== viewerId) throw new Error('Account changed.');
   const albumRow = albumRes.data;
   const eventRow = eventRes.data;
   const userIds = (membersRes.data ?? []).map((m) => m.user_id);
+  if (!eventRow) return { unavailable: true, album: null, uploads: [], attendees: [], myUserId: user.id, myHeartedIds: new Set(), myMetadata: null };
 
   // Phase 2: attendee profiles (needs member ids) and uploads + signed URLs
   // (needs the album id) run concurrently. uploader_name is stitched on after
@@ -115,10 +122,12 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     (async () => {
       const map = new Map<string, { first_name_display: string | null; profile_photo_url: string | null }>();
       if (userIds.length === 0) return map;
-      const { data: profs } = await supabase
+      const { data: profs, error: profilesError } = await supabase
         .from('profiles')
         .select('id, first_name_display, profile_photo_url')
         .in('id', userIds);
+      if (profilesError) throw profilesError;
+      if (!isCurrent()) throw new Error('Album visit changed.');
       for (const p of profs ?? []) {
         map.set(p.id, {
           first_name_display: p.first_name_display ?? null,
@@ -131,13 +140,15 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
       if (!albumRow) {
         return [] as Array<AlbumUpload & { uploader_name: string | null; signed_display_url: string | null; signed_thumb_url: string | null }>;
       }
-      const { data: rawUploads } = await supabase
+      const { data: rawUploads, error: uploadsError } = await supabase
         .from('album_uploads')
         .select('id, user_id, media_url, thumbnail_url, display_url, content_type, heart_count, created_at')
         .eq('plan_album_id', albumRow.id)
         .is('deleted_at', null)
         .order('created_at', { ascending: true });
 
+      if (uploadsError) throw uploadsError;
+      if (!isCurrent()) throw new Error('Album visit changed.');
       return Promise.all(
         (rawUploads ?? []).map(async (u) => {
           const path = u.display_url || u.media_url;
@@ -159,6 +170,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
           // Photos get a small transformed thumbnail for the grid tile (the perf
           // win). Videos reuse the full signed URL; video frame extraction is a
           // Phase 4 concern. Any failure falls back to the full URL.
+          if (!isCurrent()) throw new Error('Album visit changed.');
           if (u.content_type === 'photo') {
             try {
               const { data: thumbData, error: thumbErr } = await withTimeout(
@@ -185,6 +197,7 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
     })(),
   ]);
 
+  if (!isCurrent()) throw new Error('Album visit changed.');
   const attendees: Attendee[] = userIds.map((uid) => ({
     user_id: uid,
     first_name_display: profilesById.get(uid)?.first_name_display ?? null,
@@ -198,25 +211,28 @@ async function fetchAlbumByEvent(eventId: string): Promise<AlbumPayload> {
   const [myHeartedIds, myMetadata] = await Promise.all([
     (async () => {
       if (uploads.length === 0) return new Set<string>();
-      const { data: hearts } = await supabase
+      const { data: hearts, error: heartsError } = await supabase
         .from('album_hearts')
         .select('upload_id')
         .eq('user_id', user.id)
         .in('upload_id', uploads.map((u) => u.id));
+      if (heartsError) throw heartsError;
       return new Set((hearts ?? []).map((h) => h.upload_id));
     })(),
     (async (): Promise<AlbumPayload['myMetadata']> => {
       if (!albumRow) return null;
-      const { data: meta } = await supabase
+      const { data: meta, error: metadataError } = await supabase
         .from('album_user_metadata')
         .select('custom_name, memory_note, notifications_muted, cover_upload_id')
         .eq('plan_album_id', albumRow.id)
         .eq('user_id', user.id)
         .maybeSingle();
+      if (metadataError) throw metadataError;
       return meta ?? null;
     })(),
   ]);
 
+  if (!isCurrent()) throw new Error('Album visit changed.');
   return {
     album: albumRow ? {
       id: albumRow.id,
@@ -240,8 +256,32 @@ function formatDate(iso: string): string {
 }
 
 export default function AlbumDetailScreen() {
-  const { eventId } = useLocalSearchParams<{ eventId: string }>();
+  const params = useLocalSearchParams<{ eventId: string }>();
+  const eventId = typeof params.eventId === 'string' ? params.eventId : '';
+  const identity = useObservedUser();
   const router = useRouter();
+  const identityRetry = useRef<object | null>(null);
+  const retryIdentity = () => {
+    if (!identity.isCurrent() || identityRetry.current) return;
+    const attempt = {};
+    identityRetry.current = attempt;
+    void identity.retry().finally(() => { if (identityRetry.current === attempt) identityRetry.current = null; });
+  };
+  if (identity.isLoading) return <SafeAreaView style={styles.loadingWrap}><ActivityIndicator accessibilityLabel="Loading album" color={Colors.terracotta} /></SafeAreaView>;
+  if (!eventId || identity.error || !identity.viewerId) return <SafeAreaView style={styles.loadingWrap}>
+    <Text style={styles.emptyText}>{identity.error ? 'We couldn’t check your account.' : !identity.viewerId ? 'Sign in to see this album.' : COPY.albumOpenFailed}</Text>
+    {!!identity.error && <PageAction primary compact singleLine title="Try again" onPress={retryIdentity} />}
+    <TouchableOpacity onPress={() => { if (identity.isCurrent()) router.back(); }} style={styles.backTextBtn}><Text style={styles.backText}>Go back</Text></TouchableOpacity>
+  </SafeAreaView>;
+  return <AlbumVisit key={`${identity.viewerId}:${identity.epoch}:${eventId}`} eventId={eventId} identity={identity} />;
+}
+
+function AlbumVisit({ eventId, identity }: { eventId: string; identity: ObservedUser }) {
+  const router = useRouter();
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const isCurrent = useCallback(() => mounted.current && identity.isCurrent(), [identity.isCurrent]);
+  const retryLock = useRef(false);
 
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   // Optimistic per-upload state. Keyed by upload_id. Lets the heart icon
@@ -272,33 +312,52 @@ export default function AlbumDetailScreen() {
   const reSignAttempted = useRef<Set<string>>(new Set());
   const reSignImage = useCallback(async (uploadId: string, path: string, isThumb: boolean) => {
     const key = `${uploadId}:${isThumb ? 'thumb' : 'full'}`;
-    if (!path || reSignAttempted.current.has(key)) return;
+    if (!isCurrent() || !path || reSignAttempted.current.has(key)) return;
     reSignAttempted.current.add(key);
     const { data, error } = await supabase.storage
       .from('album-media')
       .createSignedUrl(path, SIGNED_URL_TTL, isThumb ? { transform: THUMB_TRANSFORM } : undefined);
-    if (!error && data?.signedUrl) {
+    if (isCurrent() && !error && data?.signedUrl) {
       setReSignedUrls((m) => ({ ...m, [key]: data.signedUrl }));
     }
-  }, []);
+  }, [isCurrent]);
   const nameInputRef = useRef<TextInput>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['album', eventId],
-    queryFn: () => fetchAlbumByEvent(String(eventId)),
-    enabled: !!eventId,
+  const { data, isLoading, isPending, isFetching, isError, refetch } = useQuery({
+    queryKey: ['album', eventId, identity.viewerId, identity.epoch],
+    queryFn: async ({ signal }) => {
+      let active = true;
+      const current = () => active && isCurrent() && !signal.aborted;
+      try {
+        if (!current()) throw new Error('Album visit changed.');
+        // Includes both existing best-effort 8s signing passes, with a finite
+        // budget for the required database reads around them.
+        const result = await requestWithDeadline(fetchAlbumByEvent(eventId, identity.viewerId!, current), 24_000);
+        if (!current()) throw new Error('Album visit changed.');
+        return result;
+      } finally { active = false; }
+    },
+    enabled: !!eventId && !!identity.viewerId,
+    retry: false,
   });
+  const retryAlbum = () => {
+    if (!isCurrent() || isFetching || retryLock.current) return;
+    retryLock.current = true;
+    void refetch({ cancelRefetch: false }).catch(() => {
+      // The query renders initial or cached-content recovery.
+    }).finally(() => { retryLock.current = false; });
+  };
 
   // Refetch when the screen regains focus — covers returning from the upload
   // flow with new uploads, and refreshes signed URLs that may have aged out.
-  useFocusEffect(useCallback(() => { void refetch(); }, [refetch]));
+  useFocusEffect(useCallback(() => { if (isCurrent()) void refetch({ cancelRefetch: false }); }, [refetch, isCurrent]));
 
   // Mark album viewed (clears unread badge) when data resolves.
   useEffect(() => {
-    if (data?.album?.id) {
+    if (isCurrent() && data?.album?.id) {
       void supabase.rpc('mark_album_viewed', { p_plan_album_id: data.album.id });
     }
-  }, [data?.album?.id]);
+  }, [data?.album?.id, isCurrent]);
 
   // Hydrate metadata drafts from server when payload changes.
   useEffect(() => {
@@ -321,6 +380,7 @@ export default function AlbumDetailScreen() {
     if ((noteDraft ?? '') === (savedNote ?? '')) return;
 
     const t = setTimeout(async () => {
+      if (!isCurrent()) return;
       const { error } = await supabase.rpc('set_album_user_metadata', {
         p_plan_album_id: data.album!.id,
         p_custom_name: savedName ?? '',
@@ -328,6 +388,7 @@ export default function AlbumDetailScreen() {
         p_notifications_muted: muted,
         p_cover_upload_id: savedCover,
       });
+      if (!isCurrent()) return;
       if (!error) {
         setSavedNote(noteDraft);
       } else {
@@ -335,9 +396,10 @@ export default function AlbumDetailScreen() {
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [noteDraft, savedNote, savedName, data?.album?.id, muted, savedCover]);
+  }, [noteDraft, savedNote, savedName, data?.album?.id, muted, savedCover, isCurrent]);
 
   const toggleMute = useCallback(async () => {
+    if (!isCurrent()) return;
     if (!data?.album?.id) return;
     const next = !muted;
     setMuted(next);
@@ -348,26 +410,29 @@ export default function AlbumDetailScreen() {
       p_notifications_muted: next,
       p_cover_upload_id: savedCover,
     });
+    if (!isCurrent()) return;
     if (error) {
       setMuted(!next);
       Alert.alert('Could not update notifications', 'Please try again.');
     }
-  }, [data?.album?.id, muted, savedName, savedNote, savedCover]);
+  }, [data?.album?.id, muted, savedName, savedNote, savedCover, isCurrent]);
 
   // Enter name-edit mode. Idempotent: rapid taps while already editing are
   // no-ops, so the pencil cannot thrash. Seeds the draft from the committed
   // name and focuses the field on the next frame.
   const startEditName = useCallback(() => {
+    if (!isCurrent()) return;
     if (isEditingName) return;
     setNameDraft(savedName ?? '');
     setIsEditingName(true);
-    requestAnimationFrame(() => nameInputRef.current?.focus());
-  }, [isEditingName, savedName]);
+    requestAnimationFrame(() => { if (isCurrent()) nameInputRef.current?.focus(); });
+  }, [isEditingName, savedName, isCurrent]);
 
   // Commit the edited name. Mirrors toggleMute/setAsCover: sends all five
   // params so a rename never clobbers note/mute/cover. No-op (just exits edit
   // mode) when nothing changed. Clearing the name reverts to the plan title.
   const commitName = useCallback(async () => {
+    if (!isCurrent()) return;
     if (savingName) return;
     const next = (nameDraft ?? '').trim();
     if (!data?.album?.id || next === (savedName ?? '')) {
@@ -384,6 +449,7 @@ export default function AlbumDetailScreen() {
         p_notifications_muted: muted,
         p_cover_upload_id: savedCover,
       });
+      if (!isCurrent()) return;
       if (error) {
         Alert.alert('Could not save', 'Your album name did not save. Please try again.');
         return;
@@ -392,11 +458,12 @@ export default function AlbumDetailScreen() {
       setIsEditingName(false);
       Keyboard.dismiss();
     } finally {
-      setSavingName(false);
+      if (isCurrent()) setSavingName(false);
     }
-  }, [savingName, nameDraft, data?.album?.id, savedName, savedNote, muted, savedCover]);
+  }, [savingName, nameDraft, data?.album?.id, savedName, savedNote, muted, savedCover, isCurrent]);
 
   const handleShareViewedPhoto = useCallback(async () => {
+    if (!isCurrent()) return;
     if (sharing) return;
     if (viewerIndex == null) return;
     setSharing(true);
@@ -405,6 +472,7 @@ export default function AlbumDetailScreen() {
       // with the current viewer photo + plan title. Brief delay lets the
       // image asset settle before capture.
       await new Promise((r) => setTimeout(r, 300));
+      if (!isCurrent()) return;
       const uri = await captureRef(shareCanvasRef as any, {
         format: 'jpg',
         quality: 0.95,
@@ -412,21 +480,25 @@ export default function AlbumDetailScreen() {
       });
       // iOS supports `url` for file shares; Android falls back to text+url.
       // expo-sharing would handle Android files better — defer to 1.0.4.
+      if (!isCurrent()) return;
       await Share.share(
         Platform.OS === 'ios'
           ? { url: uri }
           : { message: 'Check out our album from washedup', url: uri },
       );
     } catch (err) {
+      if (!isCurrent()) return;
       Alert.alert('Could not share', 'Please try again.');
     } finally {
-      setSharing(false);
+      if (isCurrent()) setSharing(false);
     }
-  }, [sharing, viewerIndex]);
+  }, [sharing, viewerIndex, isCurrent]);
 
   const showHeaderMenu = useCallback(() => {
+    if (!isCurrent()) return;
     const muteLabel = muted ? 'Unmute notifications' : 'Mute notifications';
     const onPick = (idx: number) => {
+      if (!isCurrent()) return;
       if (idx === 0) void toggleMute();
     };
     if (Platform.OS === 'ios') {
@@ -440,7 +512,7 @@ export default function AlbumDetailScreen() {
         { text: 'Cancel', style: 'cancel' },
       ]);
     }
-  }, [muted, toggleMute]);
+  }, [muted, toggleMute, isCurrent]);
 
   const coverUri = useMemo(() => {
     const uploads = data?.uploads ?? [];
@@ -470,21 +542,25 @@ export default function AlbumDetailScreen() {
   }, [optimisticHearted, data]);
 
   const toggleHeart = useCallback(async (uploadId: string) => {
+    if (!isCurrent()) return;
     const wasHearted = isHearted(uploadId);
     setOptimisticHearted((prev) => ({ ...prev, [uploadId]: !wasHearted }));
     try {
       const fn = wasHearted ? 'remove_album_heart' : 'record_album_heart';
       const { error } = await supabase.rpc(fn, { p_upload_id: uploadId });
+      if (!isCurrent()) return;
       if (error) throw error;
       void refetch();
     } catch (err) {
+      if (!isCurrent()) return;
       // Revert optimistic state on failure.
       setOptimisticHearted((prev) => ({ ...prev, [uploadId]: wasHearted }));
       Alert.alert('Could not update heart', 'Please try again.');
     }
-  }, [isHearted, refetch]);
+  }, [isHearted, refetch, isCurrent]);
 
   const hideFromView = useCallback(async (uploadId: string) => {
+    if (!isCurrent()) return;
     setOptimisticHiddenIds((prev) => {
       const next = new Set(prev); next.add(uploadId); return next;
     });
@@ -492,6 +568,7 @@ export default function AlbumDetailScreen() {
       .from('album_visibility')
       .update({ hidden_by_viewer: true })
       .eq('upload_id', uploadId);
+    if (!isCurrent()) return;
     if (error) {
       setOptimisticHiddenIds((prev) => {
         const next = new Set(prev); next.delete(uploadId); return next;
@@ -500,13 +577,15 @@ export default function AlbumDetailScreen() {
       return;
     }
     void refetch();
-  }, [refetch]);
+  }, [refetch, isCurrent]);
 
   const deleteOwnUpload = useCallback(async (uploadId: string) => {
+    if (!isCurrent()) return;
     setOptimisticHiddenIds((prev) => {
       const next = new Set(prev); next.add(uploadId); return next;
     });
     const { error } = await supabase.rpc('soft_delete_album_upload', { p_upload_id: uploadId });
+    if (!isCurrent()) return;
     if (error) {
       setOptimisticHiddenIds((prev) => {
         const next = new Set(prev); next.delete(uploadId); return next;
@@ -515,12 +594,13 @@ export default function AlbumDetailScreen() {
       return;
     }
     void refetch();
-  }, [refetch]);
+  }, [refetch, isCurrent]);
 
   // Personal cover: tap toggles this photo as the caller's album cover.
   // Persisted alongside the rest of album_user_metadata so name/note/mute
   // are preserved (the RPC upserts every column).
   const setAsCover = useCallback(async (uploadId: string) => {
+    if (!isCurrent()) return;
     if (!data?.album?.id) return;
     const next = savedCover === uploadId ? null : uploadId;
     const prev = savedCover;
@@ -532,15 +612,17 @@ export default function AlbumDetailScreen() {
       p_notifications_muted: muted,
       p_cover_upload_id: next,
     });
+    if (!isCurrent()) return;
     if (error) {
       setSavedCover(prev);
       Alert.alert('Could not update cover', 'Please try again.');
       return;
     }
     void refetch();
-  }, [data?.album?.id, savedCover, savedName, savedNote, muted, refetch]);
+  }, [data?.album?.id, savedCover, savedName, savedNote, muted, refetch, isCurrent]);
 
   const showTileActions = useCallback((uploadId: string, isOwn: boolean, isPhoto: boolean) => {
+    if (!isCurrent()) return;
     // Spec includes a "Save to phone" option here. Deferred to 1.0.4 — needs
     // expo-media-library (native module). Once installed, add a third option
     // that fetches the original signed URL and writes it to the photo album
@@ -550,6 +632,7 @@ export default function AlbumDetailScreen() {
     const ownActionLabel = isOwn ? 'Delete' : 'Hide from my view';
 
     const runOwnAction = () => {
+      if (!isCurrent()) return;
       if (isOwn) {
         Alert.alert(
           'Delete this for everyone?',
@@ -583,7 +666,7 @@ export default function AlbumDetailScreen() {
       const destructiveIndex = actions.findIndex((a) => a.destructive);
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
-        (idx) => { if (idx < actions.length) actions[idx].run(); },
+        (idx) => { if (isCurrent() && idx < actions.length) actions[idx].run(); },
       );
     } else {
       Alert.alert('Photo options', undefined, [
@@ -595,7 +678,7 @@ export default function AlbumDetailScreen() {
         { text: 'Cancel', style: 'cancel' as const },
       ]);
     }
-  }, [isHearted, toggleHeart, hideFromView, deleteOwnUpload, savedCover, setAsCover]);
+  }, [isHearted, toggleHeart, hideFromView, deleteOwnUpload, savedCover, setAsCover, isCurrent]);
 
   const attendeeSummary = useMemo(() => {
     if (!data?.attendees) return '';
@@ -607,30 +690,23 @@ export default function AlbumDetailScreen() {
     return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
   }, [data]);
 
-  if (isLoading) {
+  if (!data && (isLoading || isPending)) {
     return (
       <SafeAreaView style={styles.loadingWrap}>
-        <ActivityIndicator color={Colors.terracotta} />
+        <ActivityIndicator accessibilityLabel="Loading album" color={Colors.terracotta} />
       </SafeAreaView>
     );
   }
 
-  // Catches three failure modes that all otherwise wedge the screen on a
-  // forever-spinner: cold-start push deep-link with no eventId param, a
-  // thrown error inside fetchAlbumByEvent, or any other path where data
-  // never materialized. Friendly bail-out instead of infinite loading.
-  if (!eventId || isError || !data) {
+  // A read failure is different from a confirmed missing or empty album.
+  if (!data || (isError && !data.album)) {
     return (
       <SafeAreaView style={styles.loadingWrap}>
         <Text style={styles.emptyText}>{COPY.albumOpenFailed}</Text>
-        {/* Retry only helps when there's an eventId to re-query; a missing
-            deep-link param can't be refetched, so it just offers Go back. */}
         {!!eventId && (
-          <TouchableOpacity onPress={() => void refetch()} style={styles.retryBtn} activeOpacity={0.85}>
-            <Text style={styles.retryBtnText}>{COPY.albumRetry}</Text>
-          </TouchableOpacity>
+          <PageAction primary compact singleLine title={isFetching ? 'Retrying…' : 'Try again'} disabled={isFetching} onPress={retryAlbum} />
         )}
-        <TouchableOpacity onPress={() => router.back()} style={styles.backTextBtn}>
+        <TouchableOpacity onPress={() => { if (isCurrent()) router.back(); }} style={styles.backTextBtn}>
           <Text style={styles.backText}>Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -640,8 +716,8 @@ export default function AlbumDetailScreen() {
   if (!data.album) {
     return (
       <SafeAreaView style={styles.loadingWrap}>
-        <Text style={styles.emptyText}>This album hasn't started yet.</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backTextBtn}>
+        <Text style={styles.emptyText}>{data.unavailable ? 'This album is unavailable.' : "This album hasn't started yet."}</Text>
+        <TouchableOpacity onPress={() => { if (isCurrent()) router.back(); }} style={styles.backTextBtn}>
           <Text style={styles.backText}>Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -686,10 +762,10 @@ export default function AlbumDetailScreen() {
           />
           <SafeAreaView edges={['top']} style={styles.heroOverlay}>
             <View style={styles.heroBar}>
-              <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Back to albums" onPress={() => { if (isCurrent()) router.back(); }} hitSlop={12} style={styles.backBtn}>
                 <Ionicons name="chevron-back" size={26} color={Colors.white} />
               </Pressable>
-              <Pressable onPress={showHeaderMenu} hitSlop={12} style={styles.backBtn}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Album options" onPress={showHeaderMenu} hitSlop={12} style={styles.backBtn}>
                 <Ionicons name="ellipsis-horizontal" size={22} color={Colors.white} />
               </Pressable>
             </View>
@@ -703,6 +779,10 @@ export default function AlbumDetailScreen() {
           </View>
         </View>
 
+        {isError && <View style={styles.recovery}>
+          <Text style={styles.recoveryText}>Couldn’t refresh. Your album is still here.</Text>
+          <PageAction compact singleLine title={isFetching ? 'Retrying…' : 'Try again'} disabled={isFetching} onPress={retryAlbum} />
+        </View>}
         {/* Attendee row */}
         <View style={styles.section}>
           <FlatList
@@ -728,7 +808,7 @@ export default function AlbumDetailScreen() {
             {myPhotoCount < ALBUM.uploadPhotoCap && (
               <TouchableOpacity
                 style={styles.addYoursPill}
-                onPress={() => router.push(`/album/upload/${eventId}` as any)}
+                onPress={() => { if (isCurrent()) router.push(`/album/upload/${eventId}` as any); }}
                 activeOpacity={0.85}
               >
                 <Ionicons name="add" size={ALBUM.ctaIconSize} color={Colors.white} />
@@ -799,7 +879,7 @@ export default function AlbumDetailScreen() {
         {myPhotoCount === 0 && visibleUploads.length > 0 && (
           <TouchableOpacity
             style={styles.addBanner}
-            onPress={() => router.push(`/album/upload/${eventId}` as any)}
+            onPress={() => { if (isCurrent()) router.push(`/album/upload/${eventId}` as any); }}
             activeOpacity={0.85}
           >
             <Ionicons name="camera-outline" size={ALBUM.ctaIconSize} color={Colors.terracotta} />
@@ -825,7 +905,8 @@ export default function AlbumDetailScreen() {
       <View style={styles.tileCell}>
         <Pressable
           style={styles.tile}
-          onPress={() => setViewerIndex(idx)}
+          accessibilityRole="button" accessibilityLabel={`View ${u.content_type} ${idx + 1}`}
+          onPress={() => { if (isCurrent()) setViewerIndex(idx); }}
           onLongPress={() => showTileActions(u.id, isOwn, u.content_type === 'photo')}
           delayLongPress={250}
         >
@@ -868,7 +949,7 @@ export default function AlbumDetailScreen() {
   const albumFooter = (
     <TouchableOpacity
       style={styles.addBtn}
-      onPress={() => router.push(`/album/upload/${eventId}` as any)}
+      onPress={() => { if (isCurrent()) router.push(`/album/upload/${eventId}` as any); }}
       activeOpacity={0.85}
     >
       <Ionicons name="add" size={18} color={Colors.white} />
@@ -918,7 +999,7 @@ export default function AlbumDetailScreen() {
                 />
               )}
               <SafeAreaView edges={['top']} style={styles.viewerHeader}>
-                <Pressable onPress={() => setViewerIndex(null)} hitSlop={12} style={styles.viewerClose}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Close photo" onPress={() => setViewerIndex(null)} hitSlop={12} style={styles.viewerClose}>
                   <Ionicons name="close" size={28} color={Colors.white} />
                 </Pressable>
               </SafeAreaView>
@@ -944,7 +1025,7 @@ export default function AlbumDetailScreen() {
                 </View>
                 <View style={styles.viewerNav}>
                   <Pressable
-                    onPress={() => setViewerIndex((i) => (i === null || i <= 0 ? i : i - 1))}
+                    accessibilityRole="button" accessibilityLabel="Previous photo" onPress={() => setViewerIndex((i) => (i === null || i <= 0 ? i : i - 1))}
                     disabled={viewerIndex <= 0}
                     style={[styles.viewerNavBtn, viewerIndex <= 0 && styles.viewerNavBtnDisabled]}
                     hitSlop={8}
@@ -955,7 +1036,7 @@ export default function AlbumDetailScreen() {
                     {viewerIndex + 1} / {visibleUploads.length}
                   </Text>
                   <Pressable
-                    onPress={() => setViewerIndex((i) => (i === null || i >= visibleUploads.length - 1 ? i : i + 1))}
+                    accessibilityRole="button" accessibilityLabel="Next photo" onPress={() => setViewerIndex((i) => (i === null || i >= visibleUploads.length - 1 ? i : i + 1))}
                     disabled={viewerIndex >= visibleUploads.length - 1}
                     style={[styles.viewerNavBtn, viewerIndex >= visibleUploads.length - 1 && styles.viewerNavBtnDisabled]}
                     hitSlop={8}
@@ -981,6 +1062,8 @@ export default function AlbumDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  recovery: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  recoveryText: { flex: 1, minWidth: 0, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
   root: { flex: 1, backgroundColor: Colors.parchment },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.parchment, gap: 12 },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },

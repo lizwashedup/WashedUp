@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 
 // The chat attachment menu, rendered as an INLINE panel that takes the
 // keyboard's place beneath a still-visible input bar (WhatsApp pattern), not a
@@ -16,10 +16,15 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 export type AttachmentKey =
   | 'photos'
   | 'camera'
+  | 'gif'
   | 'document'
   | 'location'
   | 'contact'
   | 'poll';
+
+export interface AttachmentPanelAppearance {
+  fonts: AfterglowFontFamilies;
+}
 
 interface AttachmentPanelProps {
   onSelect: (key: AttachmentKey) => void;
@@ -28,6 +33,11 @@ interface AttachmentPanelProps {
   // Home-indicator floor so the bottom grid row clears the indicator when the
   // panel falls back to a default height (no keyboard observed yet).
   bottomInset: number;
+  // Opt in from the staged conversation only. This does not own panel layout
+  // or picker behavior; omitting it keeps the existing appearance.
+  appearance?: AttachmentPanelAppearance;
+  // The caller owns platform/provider availability. Legacy menus omit this.
+  showGif?: boolean;
 }
 
 interface AttachmentItem {
@@ -52,27 +62,36 @@ const ATTACHMENT_ITEMS: AttachmentItem[] = [
   { key: 'location', label: 'Location', icon: 'location-outline' },
 ];
 
-export default function AttachmentPanel({ onSelect, height, bottomInset }: AttachmentPanelProps) {
+export default function AttachmentPanel({ onSelect, height, bottomInset, appearance, showGif = false }: AttachmentPanelProps) {
+  const stagedStyles = React.useMemo(
+    () => appearance ? createAttachmentAppearance(appearance.fonts) : undefined,
+    [appearance?.fonts],
+  );
+  const items: AttachmentItem[] = showGif ? [...ATTACHMENT_ITEMS, { key: 'gif', label: 'GIFs', icon: 'film-outline' }] : ATTACHMENT_ITEMS;
   return (
-    <View style={[styles.panel, { height, paddingBottom: bottomInset }]}>
+    <View style={[styles.panel, stagedStyles?.panel, { height, paddingBottom: bottomInset }]}>
       <View style={styles.grid}>
-        {ATTACHMENT_ITEMS.map((item) => (
-          <TouchableOpacity
-            key={item.key}
-            style={styles.item}
-            activeOpacity={0.7}
-            onPress={() => onSelect(item.key)}
-            accessibilityRole="button"
-            accessibilityLabel={item.label}
-          >
-            <View style={styles.iconCircle}>
-              <Ionicons name={item.icon} size={ICON_SIZE} color={Colors.terracotta} />
-            </View>
-            <Text style={styles.label} numberOfLines={1}>
-              {item.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {items.map((item) => {
+          // The current library picker accepts images only.
+          const label = appearance && item.key === 'photos' ? 'Photos' : item.label;
+          return (
+            <TouchableOpacity
+              key={item.key}
+              style={[styles.item, stagedStyles?.item, showGif && { width: '25%' }]}
+              activeOpacity={0.7}
+              onPress={() => onSelect(item.key)}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+            >
+              <View style={[styles.iconCircle, stagedStyles?.icon]} accessible={appearance ? false : undefined}>
+                <Ionicons name={item.icon} size={ICON_SIZE} color={appearance ? AfterglowColors.clay : Colors.terracotta} />
+              </View>
+              <Text style={[styles.label, stagedStyles?.label]} numberOfLines={appearance ? undefined : 1}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </View>
   );
@@ -111,3 +130,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+function createAttachmentAppearance(fonts: AfterglowFontFamilies) {
+  return StyleSheet.create({
+    panel: {
+      backgroundColor: AfterglowColors.paper,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: AfterglowColors.subtleLine,
+    },
+    item: {
+      minWidth: 44,
+      minHeight: 44,
+      paddingHorizontal: 4,
+    },
+    icon: {
+      borderRadius: 6,
+      backgroundColor: AfterglowColors.white,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: AfterglowColors.line,
+    },
+    label: {
+      ...AfterglowType.body,
+      fontFamily: fonts.medium,
+      color: AfterglowColors.ink,
+      alignSelf: 'stretch',
+      flexShrink: 1,
+    },
+  });
+}

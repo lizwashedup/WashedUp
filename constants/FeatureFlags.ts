@@ -611,3 +611,17 @@ export const REFUND_AUTHORITY_ENABLED =
  */
 export const MESSAGE_TEST_SEND_ENABLED =
   process.env.EXPO_PUBLIC_MESSAGE_TEST_SEND_ENABLED === 'true';
+
+/** Explicitly enabled only in the coordinated release environment.
+ * Existing mixed introduction history, room provisioning, mute preferences,
+ * full visual parity and device behavior must be verified before release. */
+export const COMMUNITY_CHAT_GROUPING_ENABLED =
+  process.env.EXPO_PUBLIC_COMMUNITY_CHAT_GROUPING_ENABLED === 'true';
+
+/** Page review/publication requires the coordinated backend release schema.
+ * Do not enable in a release until the documented release gates are complete. */
+export const CREATOR_PAGES_ENABLED =
+  process.env.EXPO_PUBLIC_CREATOR_PAGES_ENABLED === 'true';
+
+/** Requires the reconciled atomic Scene messaging chain and recipient worker. Default off; no rollout change here. */
+export const ATTENDEE_MESSAGE_SEND_ENABLED = process.env.EXPO_PUBLIC_ATTENDEE_MESSAGE_SEND_ENABLED === 'true';

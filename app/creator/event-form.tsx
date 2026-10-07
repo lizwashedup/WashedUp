@@ -1,3 +1,13 @@
+import {getPageEventSaveState} from '../../lib/creatorPageEventSave';
+import {RequestDeadlineError,requestWithDeadline} from '../../lib/requestWithDeadline';
+import { eventCategories } from '../../lib/eventCategories';
+import { CreatorEventCategoryFields } from '../../components/creator/pages/CreatorEventDraftFields';
+import {useCreatorPageEventTemplate} from '../../hooks/useCreatorPageEventTemplate';
+import CreatorEventEntryGate from '../../components/creator/pages/CreatorEventEntryGate';
+import {mediaUUID} from '../../lib/creatorPageEventMedia';
+import { EventMediaImage } from '../../components/events/EventMediaImage';
+import {createPageEventMediaGuard} from '../../lib/eventMediaGuard';
+import {useCreatorPageCover} from '../../hooks/useCreatorPageCover';
 /**
  * Creator mode: post or edit an event (doc 08 events organ). Create asks
  * attribution once (from the community or just you, locked after, batch 15
@@ -9,7 +19,7 @@
  * minimal per decision 15a.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,15 +31,19 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect, Stack, Redirect } from 'expo-router';
+import { rememberSavedCreatorEvent } from '../../lib/creatorEventReturn';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { ArrowLeft, Check, Plus, ChevronRight } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import Colors, { CreatorSurfaceColors } from '../../constants/Colors';
+import { FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
+import { GoldSurfaceFill } from '../../components/creator/GoldSurfaceFill';
+import ProfileButton from '../../components/ProfileButton';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { DescriptionBlocksEditor } from '../../components/creator/DescriptionBlocksEditor';
@@ -38,21 +52,22 @@ import { COVER_ASPECT, COVER_ASPECT_LABEL, EventAction, EventSpacing, EventSurfa
 import EditorialTitleField from '../../components/composer/EditorialTitleField';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
-import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, laWallTimeToUTC } from '../../lib/laDate';
+import { formatEventDateLA, getLAWallParts, isBeforeTodayLA, isValidLAWallTime, laWallTimeToUTC } from '../../lib/laDate';
 import CollapsibleCalendar from '../../components/composer/CollapsibleCalendar';
 import TimePicker from '../../components/composer/TimePicker';
 import { type CalendarDay } from '../../components/calendar/WashedUpCalendar';
 import EventPlaceSearch from '../../components/creator/EventPlaceSearch';
 import { EventLocationMap } from '../../components/creator/EventLocationMap';
 import { getCreatorAccess, canManageEvents, creatorLandingRoute } from '../../lib/creatorMode';
-import { CO_CREATOR_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { CO_CREATOR_INVITES_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
+import { useWorkspace } from '../../lib/workspaceContext';
 import { supabase } from '../../lib/supabase';
-import { getMyPayoutState, getTiers, isPayoutReady, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
+import { getMyPayoutState, getTiers, isPayoutReady, getRefundAccess, refundLiveOrdersOnCancel, type CancelRefundSummary } from '../../lib/ticketing';
 import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferType } from '../../lib/offerTypes';
 import { runPaidTicketSetupHandoff } from '../../lib/paidTicketFlow';
 import {
-  announceEventToMembers,
+  announceEventToMembers as existingAnnounceEventToMembers,
   createOperatorEvent,
   EVENT_CATEGORIES,
   getEventTemplate,
@@ -61,21 +76,27 @@ import {
   probeConfirmationMessage,
   probeOfferType,
   probeTicketCapacityRpc,
-  saveEventTemplate,
-  setEventOfferType,
-  setEventTicketCapacity,
-  setOperatorEventCoords,
-  updateOperatorEvent,
+  saveEventTemplate as existingSaveEventTemplate,
+  setEventOfferType as existingSetEventOfferType,
+  setEventTicketCapacity as existingSetEventTicketCapacity,
+  setOperatorEventCoords as existingSetOperatorEventCoords,
+  updateOperatorEvent as updateExistingOperatorEvent,
   type OperatorEventFields,
+  type OperatorEventRow,
 } from '../../lib/creatorEvents';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { useCreatorPageEventStatus } from '../../hooks/useCreatorPageEventStatus';
+import { assertPageEventStatusAccount, type PageEventStatus } from '../../lib/creatorPageEventStatus';
+import { useCreatorPageEventSave } from '../../hooks/useCreatorPageEventSave';
+import { loadCreatorPageEventReadiness, pageEventPublishGuidance } from '../../lib/creatorPageEventReadiness';
+import CreatorPageEventGate from '../../components/creator/pages/CreatorPageEventGate';
+import { publishCreatorPageEvent, CreatorPageScopeExpired, type CreatorPageScope } from '../../lib/creatorPageReview';
+import type { CreatorPageEventContext } from '../../lib/creatorPageEventContext';
+
 // doc 78 law 2 / doc 80 section D: a real drop-zone, not a pill over
 // emptiness. The ratio is LOCKED at portrait 4:5 and read from the one
 // shared constant, so cover surfaces can never disagree.
-const FORM_HORIZONTAL_PADDING = 40;
 const POSTER_ASPECT = COVER_ASPECT;
-const POSTER_HEIGHT = Math.round((SCREEN_WIDTH - FORM_HORIZONTAL_PADDING) / POSTER_ASPECT);
 
 // law 19: long enough that typing does not thrash the RPC, short enough
 // that an organizer never loses gallery or body work to a refresh
@@ -89,11 +110,84 @@ function parseDateString(s: string): CalendarDay | null {
   return m ? { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) } : null;
 }
 
-export default function EventFormScreen() {
+export default function EventFormRoute() {
+  const { pageId, id, team, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ pageId?: string; id?: string; team?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
+  if (pageId !== undefined || team !== undefined) {
+    const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+    if (!CREATOR_PAGES_ENABLED || !uuid(pageId) || !uuid(id) || (team !== undefined && team !== '1')) {
+      return <Redirect href="/(tabs)/friends" />;
+    }
+    return <CreatorPageEventGate pageId={pageId} eventId={id} team={team === '1'}>
+      {(page, scope, event) => <EventFormScreen pageContext={page} pageScope={scope} pageEvent={event} />}
+    </CreatorPageEventGate>;
+  }
+  if (CREATOR_PAGES_ENABLED && (id !== undefined || duplicateFrom !== undefined || templateId !== undefined)) {
+    const kind = id !== undefined ? 'edit' : duplicateFrom !== undefined ? 'duplicate' : 'template';
+    const selected = id ?? duplicateFrom ?? templateId;
+    if (!mediaUUID(selected)) return <Redirect href="/(tabs)/friends" />;
+    return <CreatorEventEntryGate intent={{kind, id: selected}} openPhotos={openPhotos === '1'} returnToTickets={returnToTickets === '1'}><EventFormScreen /></CreatorEventEntryGate>;
+  }
+  return <EventFormScreen />;
+}
+
+function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: CreatorPageEventContext; pageScope?: CreatorPageScope; pageEvent?: OperatorEventRow }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => eventFormStyles(fonts), [fonts]);
+  const appearance = useMemo(() => ({ fonts, sunset: true }), [fonts]);
+  // A page context comes only from the authorized saved-page/event gate, never route text.
+  const assertPageVisit = () => { if (pageScope && !pageScope.isCurrent()) throw new CreatorPageScopeExpired(); };
+  const withPageScope = async <T,>(action: () => Promise<T>, readOnly = false): Promise<T> => {
+    assertPageVisit();
+    if (pageScope && (publicationUncertain.current || !pageSave.canWrite() || !pageStatus.canWrite() || !pageTemplate.canEdit()) && !readOnly) throw new Error('Check the saved event status before continuing.');
+    if (pageScope) {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      assertPageVisit();
+      if (error) throw error;
+      if (user?.id !== pageScope.userId) throw new CreatorPageScopeExpired();
+      if (!readOnly && (!pageSave.canWrite() || !pageStatus.canWrite() || !pageTemplate.canEdit())) throw new Error('Check the complete event save before continuing.');
+    }
+    const result = await action();
+    assertPageVisit();
+    return result;
+  };
+  const updateOperatorEvent: typeof updateExistingOperatorEvent = (...args) => withPageScope(() => updateExistingOperatorEvent(...args));
+  const setOperatorEventCoords: typeof existingSetOperatorEventCoords = (...args) => withPageScope(() => existingSetOperatorEventCoords(...args));
+  const setEventOfferType: typeof existingSetEventOfferType = (...args) => withPageScope(() => existingSetEventOfferType(...args));
+  const setEventTicketCapacity: typeof existingSetEventTicketCapacity = (...args) => withPageScope(() => existingSetEventTicketCapacity(...args));
+  const announceEventToMembers: typeof existingAnnounceEventToMembers = (...args) => withPageScope(() => existingAnnounceEventToMembers(...args));
   const router = useRouter();
+  const leaveEditor = () => {
+    if (!router.canGoBack() && returnToTickets === '1' && id) router.replace(`/creator/tickets?id=${id}` as never);
+    else if (pageContext && !router.canGoBack()) router.replace((pageContext.entry === 'team' ? `/creator/page-events?id=${pageContext.pageId}` : `/creator/page?id=${pageContext.pageId}`) as never);
+    else router.back();
+  };
   const queryClient = useQueryClient();
   const { id, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
   const editing = !!id;
+  const pageSave = useCreatorPageEventSave(pageContext?.pageId, id, pageScope);
+  const editorScroll = React.useRef<ScrollView>(null);
+  const pageStatus = useCreatorPageEventStatus(pageContext?.pageId, id, pageScope);
+  const pageTemplate = useCreatorPageEventTemplate(pageContext?.pageId, id, pageScope);
+  const pageTemplateBlocked = () => !!pageContext && !pageTemplate.canEdit();
+  const pageStatusWritable = !pageContext || pageStatus.canWrite() && pageTemplate.ready;
+  const mediaWritable=React.useRef<()=>boolean>(()=>false);
+  mediaWritable.current=()=>!publicationUncertain.current&&!explicitSaveRef.current&&pageSave.canWrite()&&pageStatus.canWrite()&&pageTemplate.canEdit();
+  const pageMediaGuard=React.useMemo(()=>pageContext&&id&&pageScope
+    ? createPageEventMediaGuard(pageContext.pageId,id,pageScope,()=>mediaWritable.current(),async()=>{await autosaveInFlightRef.current?.catch(()=>undefined);}) : undefined,
+    [pageContext?.pageId,id,pageScope]);
+  const posterLock=React.useRef(false);
+
+  const [pageSettingsSeeded, setPageSettingsSeeded] = useState(false);
+  useEffect(() => {
+    if (!pageContext || !pageSave.current || pageSettingsSeeded) return;
+    if (isOfferType(pageSave.current.offerType)) setOfferType(pageSave.current.offerType);
+    setOfferTypeColumnOpen(true);
+    setAfterPurchaseOpen(true);
+    setAfterPurchaseMsg(pageSave.current.fields.confirmation_message ?? '');
+    setTicketCapacity(pageSave.current.ticketCapacity === null ? '' : String(pageSave.current.ticketCapacity));
+    setTicketCapacityRpcOpen(pageSave.current.canManageTickets);
+    setPageSettingsSeeded(true);
+  }, [pageContext, pageSave.current, pageSettingsSeeded]);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -101,6 +195,16 @@ export default function EventFormScreen() {
   // complete field set; undefined until an edit seeds it
   const [blocks, setBlocks] = useState<DescriptionBlock[] | undefined>(undefined);
   const [imageUrl, setImageUrl] = useState('');
+  const privateCover=useCreatorPageCover(pageContext?.pageId,id,pageScope,pageMediaGuard,setImageUrl,
+    reference=>setImageUrl(current=>current===reference?(pageSave.current?.fields.image_url??''):current),pageSave.current?.fields.image_url);
+  const bodyMediaWork=React.useRef<object|null>(null);
+  const [bodyMediaBusy,setBodyMediaBusy]=useState(false);
+  const beginBodyMediaWork=React.useCallback(()=>{
+    if(posterLock.current||privateCover.isBusy()||bodyMediaWork.current||explicitSaveRef.current||pageTemplateBlocked())return null;
+    const owned={};bodyMediaWork.current=owned;setBodyMediaBusy(true);
+    return ()=>{if(bodyMediaWork.current===owned){bodyMediaWork.current=null;setBodyMediaBusy(false);}};
+  },[privateCover.isBusy,pageTemplate.canEdit]);
+  const coverInProgress=()=>!!pageContext&&(posterLock.current||privateCover.isBusy()||!!bodyMediaWork.current);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   // §3.3 end: its own LA wall date + time, composed into end_time on save.
@@ -119,7 +223,7 @@ export default function EventFormScreen() {
   // Rides its own RPC after create/save, never the full-overwrite payload
   // (same shape as coords).
   const [ticketCapacity, setTicketCapacity] = useState('');
-  const [category, setCategory] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
   // C-18: the four decided-sellable offer types only (lib/offerTypes.ts);
   // class_pack/subscription render as disabled "coming soon" chips, never
   // selectable. Defaults to ticketed_event, matching the draft migration's
@@ -133,7 +237,15 @@ export default function EventFormScreen() {
   const [externalUrl, setExternalUrl] = useState('');
   const [ticketPrice, setTicketPrice] = useState('');
   const [publicName, setPublicName] = useState('');
-  const [fromCommunity, setFromCommunity] = useState(true);
+  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  const community = useLedCommunity(access);
+  const workspace = useWorkspace(access);
+  // New events follow the selected authorized workspace. Saved/template
+  // ownership and an explicit selection still take precedence.
+  const [chosenCommunity, setFromCommunity] = useState<boolean | null>(null);
+  const fromCommunity = chosenCommunity ?? workspace !== 'organization';
+  const selectedCategories=eventCategories({categories}, (pageContext ? pageContext.kind==='community' : fromCommunity));
+  const category=selectedCategories[0]??'';
   const [pinToChat, setPinToChat] = useState(true);
   const [eventStatus, setEventStatus] = useState<string>('Live');
   const [eventCommunityId, setEventCommunityId] = useState<string | null>(null);
@@ -146,6 +258,7 @@ export default function EventFormScreen() {
   // doc 111 door probe: edit loads the stored message with it; create just
   // asks whether the column exists yet
   useEffect(() => {
+    if (pageContext) return;
     probeConfirmationMessage(editing ? id : null).then(({ open, value }) => {
       setAfterPurchaseOpen(open);
       if (value !== null) setAfterPurchaseMsg(value);
@@ -156,6 +269,7 @@ export default function EventFormScreen() {
   // A missing column reads as door-closed and offerType just stays at its
   // default; an edit on an already-tagged event seeds the real value.
   useEffect(() => {
+    if (pageContext) return;
     probeOfferType(editing ? id : null).then(({ open, value }) => {
       setOfferTypeColumnOpen(open);
       if (value && isOfferType(value)) setOfferType(value);
@@ -168,6 +282,7 @@ export default function EventFormScreen() {
   // per-event, unlike the probes above.
   const [ticketCapacityRpcOpen, setTicketCapacityRpcOpen] = useState(false);
   useEffect(() => {
+    if (pageContext) return;
     probeTicketCapacityRpc().then(setTicketCapacityRpcOpen);
   }, []);
 
@@ -202,6 +317,9 @@ export default function EventFormScreen() {
   const [seeded, setSeeded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pagePublicationUncertain, setPagePublicationUncertainState] = useState(false);
+  const publicationUncertain = React.useRef(false);
+  const setPagePublicationUncertain = (value: boolean) => { publicationUncertain.current = value; setPagePublicationUncertainState(value); };
   // §3.0 preview: a dedicated in-flight flag so a double-tap cannot fire two
   // draft-creates, without touching the main save button's spinner
   const [previewing, setPreviewing] = useState(false);
@@ -210,10 +328,17 @@ export default function EventFormScreen() {
   // disabled; its own flag so a double-tap cannot fire two draft-creates
   const [unlockingMedia, setUnlockingMedia] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const scrollToRecovery = useCallback(() => {
+    if (pageScope?.isCurrent() && (pageSave.error || pageSave.conflict || pageStatus.error || pageStatus.conflict || pageStatus.outcome || pageStatus.refundsNeedReview || pageStatus.retryReady || pageTemplate.error || pageTemplate.stale || pageTemplate.saved || pageTemplate.retired || pageTemplate.retryReady || pagePublicationUncertain)) editorScroll.current?.scrollTo({y: 0, animated: false});
+  }, [pageScope, pageSave.error, pageSave.conflict, pageStatus.error, pageStatus.conflict, pageStatus.outcome, pageStatus.refundsNeedReview, pageStatus.retryReady, pageTemplate.error, pageTemplate.stale, pageTemplate.saved, pageTemplate.retired, pageTemplate.retryReady, pagePublicationUncertain]);
+  useEffect(() => {
+    if (alertInfo) return;
+    const frame = requestAnimationFrame(scrollToRecovery);
+    return () => cancelAnimationFrame(frame);
+  }, [alertInfo, scrollToRecovery]);
+
   const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'problem'>('idle');
 
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = useLedCommunity(access);
 
   const { data: template } = useQuery({
     queryKey: ['event-template', templateId],
@@ -228,7 +353,7 @@ export default function EventFormScreen() {
       setImageUrl(f.image_url ?? '');
       setVenue(f.venue ?? '');
       setVenueAddress(f.venue_address ?? '');
-      setCategory(f.category ?? '');
+      setCategories(eventCategories(f));
       setExternalUrl(f.external_url ?? '');
       setTicketPrice(f.ticket_price ?? '');
       setPublicName(f.public_name ?? '');
@@ -241,11 +366,16 @@ export default function EventFormScreen() {
   // duplicate = same clothes, fresh date: seed everything but date and time,
   // then run the normal create path (publish, chat born, tell-your-members)
   const sourceId = editing ? id : duplicateFrom || undefined;
-  const { data: existing } = useQuery({
+  const { data: queriedEvent } = useQuery({
     queryKey: ['operator-event', sourceId],
     queryFn: () => getOperatorEvent(sourceId!),
-    enabled: !!sourceId,
+    enabled: !!sourceId && !pageContext,
   });
+
+  const existing = pageContext
+    ? pageSave.current && pageEvent ? { ...pageEvent, ...pageSave.current.fields, status: pageSave.current.status,
+      latitude: pageSave.current.latitude, longitude: pageSave.current.longitude, ticket_capacity: pageSave.current.ticketCapacity } : undefined
+    : queriedEvent;
 
   // the event's own room, if one exists yet -- same lookup app/event/[id].tsx
   // already uses. Only Live community events reliably have a topic row.
@@ -278,7 +408,7 @@ export default function EventFormScreen() {
       // C-21: same reasoning as the pin -- a duplicate of a capped event
       // starts capped the same way, the organizer can still change it
       setTicketCapacity(existing.ticket_capacity != null ? String(existing.ticket_capacity) : '');
-      setCategory(existing.category);
+      setCategories(eventCategories(existing));
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
       setPublicName(existing.public_name);
@@ -315,7 +445,7 @@ export default function EventFormScreen() {
       }
       // C-21: the stored RSVP cap, if any
       setTicketCapacity(existing.ticket_capacity != null ? String(existing.ticket_capacity) : '');
-      setCategory(existing.category);
+      setCategories(eventCategories(existing));
       setExternalUrl(existing.external_url);
       setTicketPrice(existing.ticket_price);
       setPublicName(existing.public_name);
@@ -382,6 +512,10 @@ export default function EventFormScreen() {
         complain('Check the date and time', 'That combination did not parse.');
         return null;
       }
+      if (!isValidLAWallTime(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]))) {
+        complain('Choose another time', 'That date or time does not exist in Los Angeles. Pick a different time.');
+        return null;
+      }
       startTime = laWallTimeToUTC(
         Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]),
         Number(tm[1]), Number(tm[2]),
@@ -409,6 +543,10 @@ export default function EventFormScreen() {
         complain('Check the end date', 'Use the YYYY-MM-DD shape, like 2026-07-20.');
         return null;
       }
+      if (!isValidLAWallTime(Number(edm[1]), Number(edm[2]) - 1, Number(edm[3]), Number(etm[1]), Number(etm[2]))) {
+        complain('Choose another end time', 'That date or time does not exist in Los Angeles. Pick a different time.');
+        return null;
+      }
       const endInstant = laWallTimeToUTC(
         Number(edm[1]), Number(edm[2]) - 1, Number(edm[3]),
         Number(etm[1]), Number(etm[2]),
@@ -430,6 +568,7 @@ export default function EventFormScreen() {
       venue,
       venue_address: venueAddress,
       category,
+      categories:selectedCategories,
       external_url: externalUrl,
       ticket_price: ticketPrice,
       public_name: publicName,
@@ -441,11 +580,12 @@ export default function EventFormScreen() {
       // doc 111: rides only when the SQL-96 door is open (undefined = the
       // param is never sent); the loaded value always travels back, so the
       // full-overwrite contract holds
-      confirmation_message: afterPurchaseOpen ? (afterPurchaseMsg.trim() || null) : undefined,
+      confirmation_message: afterPurchaseOpen ? (pageContext ? afterPurchaseMsg.trim() : afterPurchaseMsg.trim() || null) : undefined,
     };
   };
 
   const afterSave = () => {
+    if (pageContext && pageScope && id) rememberSavedCreatorEvent(pageContext.pageId, id, pageScope);
     queryClient.invalidateQueries({ queryKey: ['creator-events-tab'] });
     queryClient.invalidateQueries({ queryKey: ['operator-event', id] });
   };
@@ -454,6 +594,7 @@ export default function EventFormScreen() {
   // saves. Best-effort by design, a pin never blocks a save; a fresh row
   // with no pick has nothing to store or clear, so skip the round trip.
   const syncCoords = async (eventId: string) => {
+    if (pageContext) return; // The complete page save already includes coordinates.
     if (!editing && !coords) return;
     try {
       await setOperatorEventCoords(eventId, coords?.lat ?? null, coords?.lng ?? null);
@@ -467,6 +608,7 @@ export default function EventFormScreen() {
   // the column live; before that it would just fail on every save for no
   // reason, so skip the round trip entirely.
   const syncOfferType = async (eventId: string) => {
+    if (pageContext) return; // Atomic page save owns this choice.
     if (!offerTypeColumnOpen) return;
     try {
       await setEventOfferType(eventId, offerType);
@@ -479,6 +621,7 @@ export default function EventFormScreen() {
   // than a column probe (the column is already live; only the RPC might not
   // be -- see the probe's own comment in lib/creatorEvents.ts).
   const syncTicketCapacity = async (eventId: string) => {
+    if (pageContext) return; // Atomic page save owns this choice.
     if (!ticketCapacityRpcOpen) return;
     try {
       await setEventTicketCapacity(eventId, ticketCapacity.trim() ? parseInt(ticketCapacity, 10) : null);
@@ -488,13 +631,25 @@ export default function EventFormScreen() {
     }
   };
 
+  const saveEventFields = async (eventId: string, fields: OperatorEventFields, forTemplate = false) => {
+    if (!pageContext) { await updateOperatorEvent(eventId, fields, null); return; }
+    assertPageVisit();
+    if (!forTemplate && pageTemplateBlocked()) throw new Error('Check the original template attempt before editing.');
+    if (!pageSettingsSeeded || eventId !== id) throw new Error('Wait for this event’s saved settings before saving.');
+    if (!pageStatus.canWrite()) throw new Error('Check the pending event action before editing.');
+    const saved = await pageSave.save({ fields, offerType, ticketCapacity: ticketCapacity.trim() ? Number(ticketCapacity) : null,
+      latitude: coords?.lat ?? null, longitude: coords?.lng ?? null });
+    assertPageVisit();
+    return saved;
+  };
+
   const offerAnnounce = (eventId: string) => {
     // LIZ COPY (taste call 9): opt-in, never automatic
     setAlertInfo({
       title: 'tell your members?',
       message: 'a short note lands in their notifications. once per event.',
       buttons: [
-        { text: 'not now', style: 'cancel', onPress: () => router.back() },
+        { text: 'not now', style: 'cancel', onPress: () => leaveEditor() },
         {
           text: 'tell them',
           onPress: async () => {
@@ -505,7 +660,7 @@ export default function EventFormScreen() {
               showError('That did not send', friendlyError(e, 'Try again from the event.'));
               return;
             }
-            router.back();
+            leaveEditor();
           },
         },
       ],
@@ -551,28 +706,30 @@ export default function EventFormScreen() {
   };
 
   const handleSave = async () => {
+    if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields({ requireDate: true });
-    if (!fields || saving) return;
+    if (!fields || saving || explicitSaveRef.current) return;
     if (offerType === 'ticketed_event' && !fields.end_time) {
       showError('add an end time', 'paid tickets need to know when the event ends so payouts can be released.');
       return;
     }
     explicitSaveRef.current = true;
+    if (pageContext) Keyboard.dismiss();
     setSaving(true);
     try {
       if (editing && id) {
         await autosaveInFlightRef.current?.catch(() => undefined);
-        await updateOperatorEvent(id, fields, null);
+        await saveEventFields(id, fields);
         await syncCoords(id);
         await syncOfferType(id);
         await syncTicketCapacity(id);
         hapticSuccess();
         afterSave();
         if (returnToTickets === '1') {
-          router.back();
+          leaveEditor();
           return;
         }
-        await warnIfNothingOnSale(id, () => router.back());
+        await warnIfNothingOnSale(id, () => leaveEditor());
       } else {
         const communityId = fromCommunity && community ? community.id : null;
         // Ticketed creation is a guided draft-first flow. An event must exist
@@ -593,11 +750,11 @@ export default function EventFormScreen() {
         if (communityId) {
           offerAnnounce(newId);
         } else {
-          await warnIfNothingOnSale(newId, () => router.back());
+          await warnIfNothingOnSale(newId, () => leaveEditor());
         }
       }
     } catch (e) {
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       explicitSaveRef.current = false;
       setSaving(false);
@@ -626,13 +783,28 @@ export default function EventFormScreen() {
 
   const autosaveSignature = JSON.stringify([
     title, description, imageUrl, date, time, endDate, endTime, venue, venueAddress,
-    category, ticketPrice, publicName, pinToChat, blocks,
+    category, categories, fromCommunity, pageContext?.kind, ticketPrice, publicName, pinToChat, blocks,
+    ...(pageContext ? [offerType, ticketCapacity, coords, externalUrl, afterPurchaseOpen, afterPurchaseMsg] : []),
   ]);
+  const latestAutosaveSignature = React.useRef(autosaveSignature); latestAutosaveSignature.current = autosaveSignature;
   const lastSavedRef = React.useRef<string | null>(null);
   const autosaveInFlightRef = React.useRef<Promise<void> | null>(null);
   const explicitSaveRef = React.useRef(false);
   useEffect(() => {
-    if (!isDraft || !id || saving || !seeded) return;
+    if (!pageContext || !pageSave.outcome || !pageSave.confirmedInput) return;
+    const fields = collectFields({ silent: true });
+    const input = pageSave.confirmedInput;
+    if (fields && JSON.stringify(fields) === JSON.stringify(input.fields) && offerType === input.offerType
+      && (ticketCapacity.trim() ? Number(ticketCapacity) : null) === input.ticketCapacity
+      && (coords?.lat ?? null) === input.latitude && (coords?.lng ?? null) === input.longitude) {
+      lastSavedRef.current = autosaveSignature;
+      setAutosaveState('saved');
+    }
+    // Read-only recovery of a saved attempt must not schedule that save again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSave.outcome]);
+  useEffect(() => {
+    if (!isDraft || !id || saving || !seeded || !pageStatusWritable || pagePublicationUncertain || (pageContext && (!pageSettingsSeeded || !pageSave.ready))) return;
     if (lastSavedRef.current === null) {
       lastSavedRef.current = autosaveSignature;
       return;
@@ -643,37 +815,43 @@ export default function EventFormScreen() {
       const fields = collectFields({ silent: true });
       if (!fields) return;
       const olderAutosave = autosaveInFlightRef.current;
+      let didSave = false;
       const autosave = (async () => {
         await olderAutosave?.catch(() => undefined);
         if (explicitSaveRef.current) return;
-        await updateOperatorEvent(id, fields, null);
+        await saveEventFields(id, fields);
+        didSave = true;
       })();
       autosaveInFlightRef.current = autosave;
       try {
         setAutosaveState('saving');
         await autosave;
+        if (!didSave) return;
         lastSavedRef.current = autosaveSignature;
-        setAutosaveState('saved');
+        setAutosaveState(latestAutosaveSignature.current === autosaveSignature ? 'saved' : 'idle');
       } catch {
         // never a blocking alert on a background save; the explicit save
         // button remains the honest path and will surface the real error
-        setAutosaveState('problem');
+        // A matching server receipt remains saved if only local cleanup failed.
+        setAutosaveState(lastSavedRef.current === autosaveSignature && latestAutosaveSignature.current === autosaveSignature ? 'saved' : 'problem');
       } finally {
         if (autosaveInFlightRef.current === autosave) autosaveInFlightRef.current = null;
       }
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autosaveSignature, isDraft, id, saving, seeded]);
+  }, [autosaveSignature, isDraft, id, saving, seeded, pagePublicationUncertain, pageSettingsSeeded, pageSave.ready, pageStatusWritable]);
   const handleSaveDraft = async () => {
+    if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields();
-    if (!fields || saving) return;
+    if (!fields || saving || explicitSaveRef.current) return;
     explicitSaveRef.current = true;
+    if (pageContext) Keyboard.dismiss();
     setSaving(true);
     try {
       if (editing && id) {
         await autosaveInFlightRef.current?.catch(() => undefined);
-        await updateOperatorEvent(id, fields, null);
+        await saveEventFields(id, fields);
         await syncCoords(id);
       } else {
         const communityId = fromCommunity && community ? community.id : null;
@@ -682,9 +860,9 @@ export default function EventFormScreen() {
       }
       hapticSuccess();
       afterSave();
-      router.back();
+      leaveEditor();
     } catch (e) {
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       explicitSaveRef.current = false;
       setSaving(false);
@@ -699,7 +877,8 @@ export default function EventFormScreen() {
    * event writer.
    */
   const handleOpenTickets = async (setupMode = false) => {
-    if (!id || saving) return;
+    if (coverInProgress() || pageTemplateBlocked()) return;
+    if (!id || saving || explicitSaveRef.current || (pageContext && !pageSave.current?.canManageTickets)) return;
     const fields = collectFields({ requireDate: true });
     if (!fields) return;
     if (!fields.end_time) {
@@ -707,12 +886,13 @@ export default function EventFormScreen() {
       return;
     }
     explicitSaveRef.current = true;
+    if (pageContext) Keyboard.dismiss();
     setSaving(true);
     try {
       setAutosaveState('saving');
       await runPaidTicketSetupHandoff({
         pendingAutosave: autosaveInFlightRef.current,
-        saveEvent: () => updateOperatorEvent(id, fields, null),
+        saveEvent: async () => { await saveEventFields(id, fields); },
         syncEventState: async () => {
           await syncCoords(id);
           await syncOfferType(id);
@@ -725,7 +905,7 @@ export default function EventFormScreen() {
       setAutosaveState('saved');
     } catch (e) {
       setAutosaveState('problem');
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       explicitSaveRef.current = false;
       setSaving(false);
@@ -733,86 +913,254 @@ export default function EventFormScreen() {
   };
 
   const handlePublishDraft = async () => {
+    if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields({ requireDate: true });
-    if (!fields || !id || saving) return;
+    if (!fields || !id || saving || explicitSaveRef.current || publicationUncertain.current) return;
+    if (pageContext && !pageContext.isPublished) {
+      showError('Publish your page first', 'Your event can stay a draft while your page is reviewed. After approval, publish your page, then publish this saved event.');
+      return;
+    }
     if (offerType === 'ticketed_event' && !fields.end_time) {
       showError('add an end time', 'paid tickets need to know when the event ends so payouts can be released.');
       return;
     }
     explicitSaveRef.current = true;
+    if (pageContext) Keyboard.dismiss();
     setSaving(true);
+    let publicationDispatched = false;
+    let pageEventSaved = false;
+    let active = true;
+    const operation = pageScope ? {userId: pageScope.userId, isCurrent: () => active && pageScope.isCurrent()} : undefined;
+    const assertPublishing = () => { assertPageVisit(); if (operation && !operation.isCurrent()) throw new CreatorPageScopeExpired(); };
     try {
-      // Build 42 closes the disconnected create-to-sell gap. A ticketed event
-      // cannot publish until it has a real paid tier on sale. The tier read
-      // throws on failure, so this remains fail-closed.
-      const tiers = await getTiers(id);
-      const paidTiers = tiers.filter((tier) => tier.price_cents > 0);
-      const paidOnSale = paidTiers.some((tier) => tier.status === 'on_sale');
-      if (offerType === 'ticketed_event' && !paidOnSale) {
-        setAlertInfo({
-          title: paidTiers.length === 0 ? 'add your ticket and price' : 'put your ticket on sale',
-          message: paidTiers.length === 0
-            ? 'ticketed events need a paid ticket before they can go live.'
-            : 'your paid ticket is still a draft. put it on sale, then publish.',
-          buttons: [
-            { text: 'not now', style: 'cancel' },
-            { text: 'set it up', onPress: () => { void handleOpenTickets(true); } },
-          ],
-        });
-        return;
-      }
-      if (paidTiers.length > 0) {
-        const { data: { user } } = await supabase.auth.getUser();
-        const payout = user ? await getMyPayoutState(user.id) : null;
-        if (!isPayoutReady(payout)) {
-          showError(
-            /* copy to the taste gate */
-            'payouts first',
-            'this event has a paid ticket. finish payout setup on the tickets screen and publish right after.',
-          );
-          return;
+      const publish = async () => {
+        if (!pageContext) {
+          // Build 42 closes the disconnected create-to-sell gap. A ticketed event
+          // cannot publish until it has a real paid tier on sale. The tier read
+          // throws on failure, so this remains fail-closed.
+          const tiers = await getTiers(id);
+          const paidTiers = tiers.filter((tier) => tier.price_cents > 0);
+          const paidOnSale = paidTiers.some((tier) => tier.status === 'on_sale');
+          if (offerType === 'ticketed_event' && !paidOnSale) {
+            setAlertInfo({
+              title: paidTiers.length === 0 ? 'add your ticket and price' : 'put your ticket on sale',
+              message: paidTiers.length === 0
+                ? 'ticketed events need a paid ticket before they can go live.'
+                : 'your paid ticket is still a draft. put it on sale, then publish.',
+              buttons: [
+                { text: 'not now', style: 'cancel' },
+                { text: 'set it up', onPress: () => { void handleOpenTickets(true); } },
+              ],
+            });
+            return;
+          }
+          if (paidTiers.length > 0) {
+            const { data: { user } } = await supabase.auth.getUser();
+            const payout = user ? await getMyPayoutState(user.id) : null;
+            if (!isPayoutReady(payout)) {
+              showError(
+                /* copy to the taste gate */
+                'payouts first',
+                'this event has a paid ticket. finish payout setup on the tickets screen and publish right after.',
+              );
+              return;
+            }
+          }
         }
-      }
-      await autosaveInFlightRef.current?.catch(() => undefined);
-      await updateOperatorEvent(id, fields, 'Live');
-      await syncCoords(id);
-      hapticSuccess();
-      afterSave();
-      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
-      if (eventCommunityId) {
-        offerAnnounce(id);
-      } else {
-        router.back();
-      }
+        await autosaveInFlightRef.current?.catch(() => undefined);
+        assertPublishing();
+        // Page readiness checks the complete saved event and its financial organizer.
+        if (pageContext) { await saveEventFields(id, fields); assertPublishing(); pageEventSaved = true; }
+        else await updateOperatorEvent(id, fields, 'Live');
+        await syncCoords(id);
+        assertPublishing();
+        if (pageContext && operation) {
+          await syncOfferType(id);
+          assertPublishing();
+          await syncTicketCapacity(id);
+          const readiness = await loadCreatorPageEventReadiness(pageContext.pageId, id, operation);
+          assertPublishing();
+          if (!readiness.publishReady) {
+            const guidance = pageEventPublishGuidance[readiness.publishReason!];
+            setAlertInfo({ ...guidance, buttons: readiness.publishReason === 'paid_ticket_required' && readiness.canManageTickets
+              ? [{ text: 'not now', style: 'cancel' }, { text: 'set it up', onPress: () => { void handleOpenTickets(true); } }]
+              : [{ text: 'OK' }] });
+            return;
+          }
+          publicationDispatched = true;
+          await publishCreatorPageEvent({ pageId: pageContext.pageId, eventId: id }, operation);
+          assertPublishing();
+        }
+        hapticSuccess();
+        afterSave();
+        queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+        if (eventCommunityId) {
+          offerAnnounce(id);
+        } else {
+          leaveEditor();
+        }
+      };
+      if (pageContext) await requestWithDeadline(publish(), 25_000);
+      else await publish();
     } catch (e) {
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      if (pageScope && !pageScope.isCurrent()) return;
+      if (publicationDispatched && pageScope?.isCurrent()) setPagePublicationUncertain(true);
+      showError(publicationDispatched ? 'Check the saved event' : pageEventSaved ? 'Could not check publication' : pageContext ? 'Check saved status' : 'That did not save', publicationDispatched ? 'We could not confirm publication. Check its saved status before continuing.' : pageEventSaved ? 'Your event was saved. Check its setup and try publishing again.' : pageContext && e instanceof RequestDeadlineError ? 'Your changes have not been confirmed. Check the saved status before continuing.' : friendlyError(e, 'Try again in a moment.'));
     } finally {
+      active = false;
       explicitSaveRef.current = false;
-      setSaving(false);
+      if (!pageScope || pageScope.isCurrent()) setSaving(false);
     }
   };
 
-  const handleSaveTemplate = async () => {
-    const fields = collectFields();
-    if (!fields || saving) return;
-    setSaving(true);
+  const checkPagePublication = async () => {
+    if (!id || !pageContext || saving || explicitSaveRef.current || !pageScope?.isCurrent()) return;
+    explicitSaveRef.current = true; setSaving(true);
+    let active = true;
+    const operation = {userId: pageScope.userId, isCurrent: () => active && pageScope.isCurrent()};
     try {
-      const communityId = editing ? eventCommunityId : (fromCommunity && community ? community.id : null);
-      await saveEventTemplate(fields.title, fields, communityId);
+      await requestWithDeadline((async () => {
+        const saved = await getPageEventSaveState(pageContext.pageId, id, operation);
+        if (!operation.isCurrent()) throw new CreatorPageScopeExpired();
+        if (saved.pageId !== pageContext.pageId || saved.eventId !== id) throw new Error('Event unavailable');
+        if (saved.status === 'Live') { afterSave(); leaveEditor(); return; }
+        if (saved.status !== 'Draft') throw new Error('This event is no longer a draft');
+        setPagePublicationUncertain(false);
+        showError('Still a private draft', 'The saved event is private. You can try publishing it again.');
+      })(), 12_000);
+    } catch { if (pageScope.isCurrent()) showError('Could not check the event', 'Publication has not been confirmed. Your saved event is kept. Check its status again.'); }
+    finally { active = false; explicitSaveRef.current = false; if (pageScope.isCurrent()) setSaving(false); }
+  };
+
+  const handleSaveTemplate = async () => {
+    if (coverInProgress() || pageTemplateBlocked()) return;
+    const fields = collectFields();
+    if (!fields || saving || explicitSaveRef.current || pageContext && (!pageSave.canWrite() || !pageStatus.canWrite() || pagePublicationUncertain)) return;
+    explicitSaveRef.current = true;
+    setSaving(true);
+    if (pageContext) Keyboard.dismiss();
+    try {
+      if (pageContext && pageScope && id) {
+        const templateResult = await pageTemplate.begin(async operation => {
+          await autosaveInFlightRef.current?.catch(() => undefined);
+          assertPageVisit();
+          if (!operation.isCurrent()) throw new CreatorPageScopeExpired();
+          const saved = await saveEventFields(id, fields, true);
+          if (!operation.isCurrent()) throw new CreatorPageScopeExpired();
+          if (!saved) throw new Error('Check the complete event save before saving a template.');
+          // The short library label never truncates the saved event title.
+          let name = '';
+          for (const character of fields.title) {
+            if (name.length + character.length > 80) break;
+            name += character;
+          }
+          return {name: name.trim(), updatedAt: saved.updatedAt};
+        });
+        assertPageVisit();
+        if (templateResult.state !== 'saved') return;
+      } else {
+        const communityId = editing ? eventCommunityId : (fromCommunity && community ? community.id : null);
+        await existingSaveEventTemplate(fields.title, fields, communityId);
+      }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['event-templates'] });
-      // LIZ COPY
-      setAlertInfo({ title: 'saved as a template', message: 'it lives on your events tab. put it on anytime.' });
+      setAlertInfo({ title: 'saved as a template', message: pageContext
+        ? 'Your saved event is now a template. It keeps its page permissions. Saving a template does not publish your event.'
+        : 'it lives on your events tab. put it on anytime.' });
     } catch (e) {
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      if (!pageScope || pageScope.isCurrent()) showError(pageContext ? 'Check saved status' : 'That did not save', pageContext && e instanceof RequestDeadlineError ? 'The template has not been confirmed. Check its saved status before continuing.' : friendlyError(e, pageContext ? 'Check its saved status before trying again.' : 'Try again in a moment.'));
     } finally {
-      setSaving(false);
+      explicitSaveRef.current = false;
+      if (!pageScope || pageScope.isCurrent()) setSaving(false);
     }
+  };
+
+  const recoverPageTemplate = async (action: 'check' | 'retry') => {
+    if (!pageScope?.isCurrent() || saving || explicitSaveRef.current || coverInProgress()) return;
+    explicitSaveRef.current = true; setSaving(true);
+    try {
+      const result = await (action === 'check' ? pageTemplate.check() : pageTemplate.retry());
+      if (pageScope.isCurrent() && result?.state === 'saved') {
+        queryClient.invalidateQueries({ queryKey: ['event-templates'] });
+      }
+    } finally {
+      explicitSaveRef.current = false;
+      if (pageScope.isCurrent()) setSaving(false);
+    }
+  };
+
+  const reviewPageTemplate = async () => {
+    if (!pageContext || !pageScope?.isCurrent() || saving || explicitSaveRef.current || coverInProgress()) return;
+    explicitSaveRef.current = true; setSaving(true);
+    try {
+      const result = await pageTemplate.review();
+      if (!pageScope.isCurrent()) return;
+      if (result?.state === 'retired') {
+        afterSave();
+        router.dismissTo((pageContext.entry === 'team' ? `/creator/page-events?id=${pageContext.pageId}` : `/creator/page?id=${pageContext.pageId}`) as never);
+      } else if (result?.state === 'saved') queryClient.invalidateQueries({queryKey: ['event-templates']});
+    } finally {
+      explicitSaveRef.current = false;
+      if (pageScope.isCurrent()) setSaving(false);
+    }
+  };
+
+  const reviewPageRefunds = async () => {
+    if (!pageScope?.isCurrent() || !id || saving || explicitSaveRef.current) return;
+    explicitSaveRef.current = true; setSaving(true);
+    let active = true;
+    const operation = {userId: pageScope.userId, isCurrent: () => active && pageScope.isCurrent()};
+    try {
+      await requestWithDeadline((async () => {
+        await assertPageEventStatusAccount(operation);
+        const access = await getRefundAccess(id, operation);
+        await assertPageEventStatusAccount(operation);
+        if (!access.canRefund) throw new Error('The event’s financial organizer needs to review the remaining ticket refunds.');
+        router.push(`/creator/attendees?id=${id}` as never);
+      })(), 12_000);
+    } catch (e) { if (pageScope.isCurrent()) showError('Refunds need review', friendlyError(e, 'Could not confirm refund access. Try checking again.')); }
+    finally { active = false; explicitSaveRef.current = false; if (pageScope.isCurrent()) setSaving(false); }
+  };
+
+  const runPageStatus = async (status: PageEventStatus, fields: OperatorEventFields) => {
+    if (!pageContext || !pageScope || !id || saving || explicitSaveRef.current || (!pageStatus.canWrite() || pageTemplateBlocked())) return;
+    explicitSaveRef.current = true; setSaving(true); Keyboard.dismiss();
+    let cancelSummary: CancelRefundSummary | null = null;
+    try {
+      await autosaveInFlightRef.current?.catch(() => undefined);
+      const saved = await saveEventFields(id, fields);
+      if (!saved) throw new Error('Check the complete event save before continuing.');
+      await pageStatus.begin({status, expectedUpdatedAt: saved.updatedAt}, async operation => {
+        if (status !== 'Cancelled') return;
+        const readiness = await loadCreatorPageEventReadiness(pageContext.pageId, id, operation);
+        if (!operation.isCurrent()) throw new CreatorPageScopeExpired();
+        if (!readiness.cancellationRequiresRefunds) return;
+        const checkFinancialOwner = async () => {
+          await assertPageEventStatusAccount(operation);
+          await loadCreatorPageEventReadiness(pageContext.pageId, id, operation);
+          const access = await getRefundAccess(id, operation);
+          await assertPageEventStatusAccount(operation);
+          // The existing bulk helper is the owner's cancellation workflow.
+          // Granted delegates use the existing per-order reason/review screen.
+          if (!access.isOwner) throw new Error('Review the ticket refunds with the financial organizer before finishing cancellation.');
+        };
+        cancelSummary = await refundLiveOrdersOnCancel(id, {beforeEach: checkFinancialOwner, scope: operation});
+        const afterRefunds = await loadCreatorPageEventReadiness(pageContext.pageId, id, operation);
+        if (cancelSummary.failedCount === 0 && afterRefunds.cancellationRequiresRefunds) throw new Error('Ticket refunds still need confirmation. Check them before finishing cancellation.');
+      });
+      assertPageVisit(); hapticLight(); afterSave();
+      // Preserve the owner's existing partial-refund follow-up instead of
+      // claiming all money has settled from the event-status receipt.
+      const summary = cancelSummary as CancelRefundSummary | null;
+      if (summary && summary.failedCount > 0) showError('some refunds need a follow-up', `${summary.refundedCount} of ${summary.refundedCount + summary.failedCount} buyers were refunded. Open who's coming to review the rest.`);
+      else leaveEditor();
+    } catch (e) { if (pageScope.isCurrent()) showError('Check this event action', e instanceof RequestDeadlineError ? 'This action took longer than expected. Check its saved status before continuing.' : friendlyError(e, 'Check its saved status before trying again.')); }
+    finally { explicitSaveRef.current = false; if (pageScope.isCurrent()) setSaving(false); }
   };
 
   const handleStatus = (status: 'Completed' | 'Cancelled') => {
     const fields = collectFields();
-    if (!fields || !id) return;
+    if (!fields || !id || saving || explicitSaveRef.current || !pageStatusWritable) return;
     // LIZ COPY, except the Cancelled disclosure line: copy to the taste gate (TK-08)
     setAlertInfo({
       title: status === 'Cancelled' ? 'cancel this event?' : 'mark it completed?',
@@ -826,6 +1174,7 @@ export default function EventFormScreen() {
           // muted confirm, never red (C13); the web console matches
           text: status === 'Cancelled' ? 'cancel it' : 'complete it',
           onPress: async () => {
+            if (pageContext) { await runPageStatus(status, fields); return; }
             try {
               let cancelSummary: CancelRefundSummary | null = null;
               if (status === 'Cancelled') cancelSummary = await refundLiveOrdersOnCancel(id);
@@ -841,10 +1190,10 @@ export default function EventFormScreen() {
               } else {
                 hapticLight();
                 afterSave();
-                router.back();
+                leaveEditor();
               }
             } catch (e) {
-              showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+              showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
             }
           },
         },
@@ -853,14 +1202,18 @@ export default function EventFormScreen() {
   };
 
   const handlePoster = async () => {
+    if(posterLock.current||privateCover.busy||bodyMediaWork.current||!!pageContext&&(explicitSaveRef.current||pageTemplateBlocked()))return;
+    posterLock.current=true;
     setUploading(true);
     try {
-      const url = await pickAndUploadEventImage();
+      const url = await pickAndUploadEventImage(pageMediaGuard,pageContext?privateCover.upload:undefined);
+      pageMediaGuard?.assertCurrent();
       if (url) setImageUrl(url);
     } catch (e) {
-      showError('That photo did not upload', friendlyError(e, 'Try again in a moment.'));
+      if(!pageScope||pageScope.isCurrent())showError('That photo did not upload', friendlyError(e, 'Try again in a moment.'));
     } finally {
-      setUploading(false);
+      posterLock.current=false;
+      if(!pageScope||pageScope.isCurrent())setUploading(false);
     }
   };
 
@@ -888,7 +1241,7 @@ export default function EventFormScreen() {
       router.replace(`/creator/event-form?id=${newId}${suffix}` as never);
     } catch (e) {
       setAutosaveState('problem');
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       setUnlockingMedia(false);
     }
@@ -900,6 +1253,7 @@ export default function EventFormScreen() {
   // silent - a row made on the user's behalf without them seeing it is the same
   // failure class as a defaulted policy they never chose.
   const handlePreview = async () => {
+    if (coverInProgress() || pageTemplateBlocked()) return;
     // re-entry guard: a double-tap on a brand-new create must not fire two
     // draft-creates (a duplicate). previewing is dedicated so the main CTA's
     // spinner is left alone.
@@ -918,14 +1272,16 @@ export default function EventFormScreen() {
       if (isDraft) {
         try {
           setAutosaveState('saving');
-          await updateOperatorEvent(id, fields, null);
+          await saveEventFields(id, fields);
           await syncCoords(id);
           setAutosaveState('saved');
         } catch {
           setAutosaveState('problem');
+          showError('Preview is not ready', 'We couldn’t confirm your latest save. Your edits are still here. Check the save status, then try preview again.');
+          return;
         }
       }
-      router.push(`/event/${id}?preview=guest` as never);
+      router.push(`/event/${id}?preview=guest${pageContext ? `&pageId=${pageContext.pageId}${pageContext.entry === 'team' ? '&team=1' : ''}` : ''}` as never);
       return;
     }
     // NEW CREATE: no autosave runs until a draft exists, so there is nothing to
@@ -943,7 +1299,7 @@ export default function EventFormScreen() {
       router.push(`/event/${newId}?preview=guest` as never);
     } catch (e) {
       setAutosaveState('problem');
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     }
     } finally {
       setPreviewing(false);
@@ -951,6 +1307,7 @@ export default function EventFormScreen() {
   };
 
   const loadingEdit = (editing || !!duplicateFrom) && !seeded;
+  const currentSaveConfirmed = !!pageContext && !!pageSave.outcome && lastSavedRef.current === autosaveSignature;
 
   // The pickers speak CalendarDay and 12-hour parts; the form's canonical
   // state stays the RPC shapes ('YYYY-MM-DD' and 'HH:MM', LA wall clock),
@@ -973,32 +1330,95 @@ export default function EventFormScreen() {
   const endTimeMinute = endTimeMatch ? endTimeMatch[2] : '00';
   const endTimePeriod: 'AM' | 'PM' = endHour24 >= 12 ? 'PM' : 'AM';
 
-  if (access && !access.hasEventHostGrant && !canManageEvents(access)) {
+  if (!pageContext && access && !access.hasEventHostGrant && !canManageEvents(access)) {
     return <Redirect href={creatorLandingRoute(access)} />;
   }
+
+  const saveRecovery = (pageContext && (!pageSave.loaded || (!pageSave.busy && pageSave.recoveryRequired) || pageSave.error || pageSave.conflict) && <View style={[styles.sectionCard, styles.recoveryCard]}>
+              <GoldSurfaceFill />
+              <Text accessibilityRole="alert" style={[styles.fieldHint, styles.recoveryCopy]}>{pageSave.conflict ? 'This event changed elsewhere. Return to the page and reopen it to review the latest version.' : pageSave.error ?? (pageSave.retryReady ? 'No confirmation yet. Retry the same changes.' : pageSave.recoveryRequired ? 'Check your original event save before continuing.' : 'Checking saved event settings…')}</Text>
+              {!pageSave.conflict && <TouchableOpacity accessibilityRole="button" accessibilityLabel={pageSave.retryReady ? 'Retry original event save' : 'Check complete event save'} disabled={pageSave.busy} style={styles.recoveryAction} onPress={() => void (pageSave.retryReady ? pageSave.retry() : pageSave.loaded || pageSave.recoveryRequired ? pageSave.check() : pageSave.refresh())}>
+                <CreatorActionFill />
+                <Text numberOfLines={1} style={styles.recoveryActionText}>{pageSave.busy ? 'Checking…' : pageSave.retryReady ? 'Retry save' : 'Check status'}</Text>
+              </TouchableOpacity>}
+              {pageSave.retryReady && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check complete event save" disabled={pageSave.busy} style={styles.recoveryRetry} onPress={() => void pageSave.check()}><Text numberOfLines={1} style={[styles.quietLink, styles.recoveryCopy]}>Check status</Text></TouchableOpacity>}
+            </View>);
+
+  const statusConfirmed = !!(pageStatus.outcome || pageStatus.alreadyClosed);
+  const finishingCancellation = pageStatus.pending?.input.status === 'Cancelled';
+  const recordedStatusCopy = pageStatus.outcome ? `Your event is ${pageStatus.outcome.status.toLowerCase()}. Your page has the latest status.` : 'This event action is recorded. Your page has the latest status.';
+  const statusNeedsCheck = !pageStatus.conflict && (!statusConfirmed || !!pageStatus.pending || !!pageStatus.error);
+  const statusRecovery = pageContext && (!pageStatus.loaded || pageStatus.error || pageStatus.conflict || (!pageStatus.busy && (pageStatus.pending || statusConfirmed))) && (
+    <View style={[styles.sectionCard, styles.recoveryCard]}>
+      <GoldSurfaceFill />
+      <Text accessibilityRole="alert" style={[styles.fieldHint, styles.recoveryCopy]}>{pageStatus.conflict
+        ? 'This event changed. Reopen it from your page to review the latest details.'
+        : pageStatus.error ?? (pageStatus.refundsNeedReview
+          ? statusConfirmed ? 'The event is cancelled. Some ticket refunds still need review.' : 'Ticket refunds still need review before this action can finish.'
+          : statusConfirmed ? recordedStatusCopy
+          : pageStatus.retryReady ? `No confirmation yet. You can ${finishingCancellation ? 'finish cancelling this event' : 'mark this event completed'} or check again.`
+          : pageStatus.pending ? 'Check this event action before continuing.' : 'Checking event actions…')}</Text>
+      {statusNeedsCheck && <TouchableOpacity accessibilityRole="button" accessibilityLabel={pageStatus.retryReady ? 'Finish original event action' : 'Check event action'} disabled={saving || pageStatus.busy} style={styles.recoveryAction} onPress={() => void (pageStatus.retryReady ? pageStatus.retry() : pageStatus.check())}>
+        <CreatorActionFill />
+        <Text numberOfLines={1} style={styles.recoveryActionText}>{pageStatus.busy ? 'Checking…' : pageStatus.retryReady ? finishingCancellation ? 'Finish cancellation' : 'Mark completed' : 'Check status'}</Text>
+      </TouchableOpacity>}
+      {pageStatus.retryReady && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check event action" disabled={saving || pageStatus.busy} style={styles.recoveryRetry} onPress={() => void pageStatus.check()}><Text style={[styles.quietLink, styles.recoveryCopy]}>Check status</Text></TouchableOpacity>}
+      {pageStatus.refundsNeedReview && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Review remaining ticket refunds" disabled={saving || pageStatus.busy} style={styles.recoveryRetry} onPress={() => void reviewPageRefunds()}><Text style={[styles.quietLink, styles.recoveryCopy]}>Review refunds</Text></TouchableOpacity>}
+      {(statusConfirmed || pageStatus.conflict) && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Return to the page" disabled={saving || pageStatus.busy} style={statusNeedsCheck ? styles.recoveryRetry : styles.recoveryAction} onPress={() => { afterSave(); leaveEditor(); }}>
+        {!statusNeedsCheck && <CreatorActionFill />}
+        <Text numberOfLines={1} style={statusNeedsCheck ? [styles.quietLink, styles.recoveryCopy] : styles.recoveryActionText}>Back to page</Text>
+      </TouchableOpacity>}
+    </View>
+  );
+
+  const templateNeedsCheck = !pageTemplate.loaded || pageTemplate.recoveryRequired || !!pageTemplate.error;
+  const templateRecovery = pageContext && (!pageTemplate.loaded || (!pageTemplate.busy && pageTemplate.recoveryRequired) || pageTemplate.error || pageTemplate.saved || pageTemplate.retired) && (
+    <View style={[styles.sectionCard, styles.recoveryCard]}>
+      <GoldSurfaceFill />
+      <Text accessibilityRole="alert" style={[styles.fieldHint, styles.recoveryCopy]}>{pageTemplate.stale || pageTemplate.retired
+        ? pageTemplate.error ?? 'This event changed before the template was saved. Go back to its page and reopen the event to review the latest version.'
+        : pageTemplate.saved
+        ? pageTemplate.recoveryRequired ? 'Your template is saved. Check once more to finish recovery on this device.' : 'Your template is saved. Your event’s publication status has not changed.'
+        : pageTemplate.error ?? (pageTemplate.retryReady ? 'No confirmation yet. Retry the same template.' : pageTemplate.recoveryRequired ? 'Check the original template attempt before continuing.' : 'Checking your template attempt…')}</Text>
+      {templateNeedsCheck && <TouchableOpacity accessibilityRole="button" accessibilityLabel={pageTemplate.retryReady ? 'Retry original template' : 'Check original template'} disabled={saving || pageTemplate.busy || coverInProgress()} style={styles.recoveryAction} onPress={() => void recoverPageTemplate(pageTemplate.retryReady ? 'retry' : 'check')}>
+        <CreatorActionFill /><Text numberOfLines={1} style={styles.recoveryActionText}>{pageTemplate.busy ? 'Checking…' : pageTemplate.retryReady ? 'Retry template' : 'Check template'}</Text>
+      </TouchableOpacity>}
+      {pageTemplate.retryReady && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check original template" disabled={saving || pageTemplate.busy || coverInProgress()} style={styles.recoveryRetry} onPress={() => void recoverPageTemplate('check')}><Text style={[styles.quietLink, styles.recoveryCopy]}>Check status</Text></TouchableOpacity>}
+      {(pageTemplate.stale || pageTemplate.retired) && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Return to page and review the latest event" disabled={saving || pageTemplate.busy || coverInProgress()} style={styles.recoveryRetry} onPress={() => void reviewPageTemplate()}><Text style={[styles.quietLink, styles.recoveryCopy]}>Back to page</Text></TouchableOpacity>}
+      {pageTemplate.saved && !templateNeedsCheck && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Return to the page after saving template" disabled={saving || pageTemplate.busy || coverInProgress()} style={styles.recoveryAction} onPress={() => { afterSave(); leaveEditor(); }}><CreatorActionFill /><Text numberOfLines={1} style={styles.recoveryActionText}>Back to page</Text></TouchableOpacity>}
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.headerBack} onPress={() => leaveEditor()} hitSlop={8}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
           {!loadingEdit && (
             /* §3.0 phone: persistent "preview as guest" (LIZ COPY, taste gate) */
-            <TouchableOpacity onPress={handlePreview} disabled={saving || previewing} hitSlop={12}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Preview as guest" style={styles.headerPreview} onPress={handlePreview} disabled={saving || previewing || coverInProgress() || pageTemplateBlocked()} hitSlop={8}>
               <Text style={styles.previewAction}>preview as guest</Text>
             </TouchableOpacity>
           )}
+          <ProfileButton compact />
         </View>
 
         {loadingEdit ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+          pageContext && (pageSave.error || pageSave.conflict) ? (
+            <ScrollView contentContainerStyle={styles.content}>
+              <Text accessibilityRole="header" style={styles.title}>Your event couldn’t load</Text>
+              {saveRecovery}
+            </ScrollView>
+          ) : <View style={styles.centered}>
+            <ActivityIndicator accessibilityLabel="Loading event" size="large" color={Colors.terracotta} />
           </View>
         ) : (
           <ScrollView
+            ref={editorScroll}
+            pointerEvents={pageContext && saving ? 'none' : 'auto'}
             contentContainerStyle={styles.content}
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             keyboardShouldPersistTaps="handled"
@@ -1014,11 +1434,11 @@ export default function EventFormScreen() {
               /* law 19: the organizer can SEE that their work is safe. Shown for
                  draft autosave AND for a preview-triggered save on a new create,
                  so a row is never written on their behalf silently */
-              <Text style={[styles.savedLine, autosaveState === 'problem' && styles.savedLineProblem]}>
+              <Text style={[styles.savedLine, autosaveState === 'problem' && !currentSaveConfirmed && styles.savedLineProblem]}>
                 {/* copy to the taste gate */}
                 {autosaveState === 'saving'
                   ? 'saving…'
-                  : autosaveState === 'saved'
+                  : autosaveState === 'saved' || currentSaveConfirmed
                     ? 'saved just now'
                     : 'not saved yet. your work is still here.'}
               </Text>
@@ -1027,19 +1447,33 @@ export default function EventFormScreen() {
             {editing && eventStatus !== 'Live' && (
               /* LIZ COPY */
               <Text style={styles.statusLine}>
-                {eventStatus === 'Draft'
-                  ? 'a draft. only you see it until you publish.'
+                {pagePublicationUncertain ? 'Your event is saved. Check whether it’s live.' : eventStatus === 'Draft'
+                  ? pageContext ? 'a private draft. publish when it’s ready.' : 'a draft. only you see it until you publish.'
                   : `this event is ${eventStatus.toLowerCase()}.`}
               </Text>
             )}
 
-            {editing && offerType === 'ticketed_event' && (ticketSetupState === 'missing' || ticketSetupState === 'draft') && (
+            {saveRecovery}
+            {statusRecovery}
+            {templateRecovery}
+            {pageContext && pagePublicationUncertain && <View style={[styles.sectionCard, styles.recoveryCard]}>
+              <GoldSurfaceFill />
+              <Text accessibilityRole="alert" style={[styles.fieldHint, styles.recoveryCopy]}>Publication has not been confirmed. Check the saved event before continuing.</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check saved event status" onPress={() => void checkPagePublication()} disabled={saving} style={styles.recoveryAction}>
+                <CreatorActionFill /><Text numberOfLines={1} style={styles.recoveryActionText}>{saving ? 'Checking…' : 'Check status'}</Text>
+              </TouchableOpacity>
+            </View>}
+
+            {pageContext && pageSettingsSeeded && !pageSave.current?.canManageTickets &&
+              <Text style={styles.permissionNote}>Event format, capacity and ticket tools need separate access.</Text>}
+            {editing && (!pageContext || pageSave.current?.canManageTickets) && offerType === 'ticketed_event' && (ticketSetupState === 'missing' || ticketSetupState === 'draft') && (
               // Audit finding (75-threshold spec item 2): durable version of
               // warnIfNothingOnSale's one-time popup -- stays visible on
               // every visit to this event until tickets are actually on sale.
               <TouchableOpacity
                 style={styles.ticketNudge}
                 onPress={() => { void handleOpenTickets(); }}
+                disabled={saving || coverInProgress()}
                 activeOpacity={0.85}
               >
                 <View style={styles.ticketNudgeBody}>
@@ -1064,11 +1498,11 @@ export default function EventFormScreen() {
 
             {/* §3.1 cover: the page's face, a real 4:5 warm-dark drop-zone */}
             {imageUrl ? (
-              <TouchableOpacity onPress={handlePoster} disabled={uploading} activeOpacity={0.9}>
-                <Image source={{ uri: imageUrl }} style={styles.cover} contentFit="cover" />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose event cover" onPress={handlePoster} disabled={uploading || bodyMediaBusy || privateCover.busy || privateCover.loading || !!pageContext && (!pageSave.ready || pageTemplateBlocked())} activeOpacity={0.9}>
+                <EventMediaImage eventId={id ?? ''} reference={imageUrl} style={styles.cover} contentFit="cover" />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.coverAdd} onPress={handlePoster} disabled={uploading} activeOpacity={0.9}>
+              <TouchableOpacity style={styles.coverAdd} accessibilityRole="button" accessibilityLabel="Choose event cover" onPress={handlePoster} disabled={uploading || bodyMediaBusy || privateCover.busy || privateCover.loading || !!pageContext && (!pageSave.ready || pageTemplateBlocked())} activeOpacity={0.9}>
                 {uploading ? (
                   <ActivityIndicator size="small" color={EventSurface.onMedia} />
                 ) : (
@@ -1083,8 +1517,22 @@ export default function EventFormScreen() {
               </TouchableOpacity>
             )}
 
+            {pageContext && (privateCover.busy || privateCover.error || privateCover.attempts.length>0) && <View>
+              {privateCover.busy && <>
+                <Text style={styles.fieldHint} accessibilityLiveRegion="polite">{privateCover.progress?.phase==='uploading'?'Uploading your cover…':'Checking your cover…'}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel cover upload" style={styles.quietLinkWrap} onPress={privateCover.cancel}><Text style={styles.quietLink} numberOfLines={1}>Cancel upload</Text></TouchableOpacity>
+              </>}
+              {!!privateCover.error && <Text style={styles.fieldHint} accessibilityRole="alert">{privateCover.error}</Text>}
+              {!privateCover.busy && privateCover.attempts.map((attempt,index)=><View key={attempt.mediaId}>
+                <Text style={styles.fieldHint}>{privateCover.attempts.length>1?`Saved cover upload ${index+1}`:'Saved cover upload'}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retry saved cover upload ${index+1}`} disabled={uploading || (!pageSave.ready || pageTemplateBlocked())} style={styles.quietLinkWrap} onPress={()=>void privateCover.retry(attempt).catch(()=>undefined)}><Text style={styles.quietLink} numberOfLines={1}>Retry upload</Text></TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Discard saved cover upload ${index+1}`} disabled={uploading || (!pageSave.ready || pageTemplateBlocked())} style={styles.quietLinkWrap} onPress={()=>void privateCover.discard(attempt).catch(()=>undefined)}><Text style={styles.quietLink} numberOfLines={1}>Discard upload</Text></TouchableOpacity>
+              </View>)}
+              {!privateCover.busy && !!privateCover.error && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check saved cover uploads" disabled={uploading || privateCover.loading} style={styles.quietLinkWrap} onPress={()=>void privateCover.refresh()}><Text style={styles.quietLink} numberOfLines={1}>Check uploads</Text></TouchableOpacity>}
+            </View>}
+
             {/* §3.2 title: a name, not a form field (shared editorial field) */}
-            <EditorialTitleField
+            <EditorialTitleField appearance={appearance}
               value={title}
               onChangeText={setTitle}
               placeholder="sunset rooftop social"
@@ -1111,7 +1559,13 @@ export default function EventFormScreen() {
                 into the event's own folder, so they wake once a draft exists. */}
             <Text style={styles.fieldLabel}>the page itself</Text>
             <Text style={styles.fieldHint}>photos, the story between them, and your good-to-know cards. this is the body of your page.</Text>
-            <DescriptionBlocksEditor
+            <DescriptionBlocksEditor appearance={appearance}
+              mediaGuard={pageMediaGuard}
+              pageId={pageContext?.pageId}
+              pageScope={pageScope}
+              savedBlocks={pageSave.current?.fields.description_blocks??undefined}
+              beginMediaWork={pageContext?beginBodyMediaWork:undefined}
+              mediaBusy={!!pageContext&&(uploading||bodyMediaBusy||privateCover.busy)}
               onUnlockMedia={!id ? handleUnlockMedia : undefined}
               autoOpenPhotos={openPhotos === '1'}
               eventId={id ?? ''}
@@ -1131,7 +1585,7 @@ export default function EventFormScreen() {
                 the placeholder instead of pinning the calendar to a month it
                 can never leave (doc 34 3.1 + 3.3) */}
             <View style={styles.pickerBlock}>
-              <CollapsibleCalendar
+              <CollapsibleCalendar appearance={appearance}
                 selected={dayIsPast ? null : parsedDay}
                 onSelect={(d) => setDate(`${d.year}-${pad2(d.month + 1)}-${pad2(d.day)}`)}
                 /* LIZ COPY */
@@ -1140,7 +1594,7 @@ export default function EventFormScreen() {
             </View>
 
             <View style={styles.pickerBlock}>
-              <TimePicker
+              <TimePicker appearance={appearance}
                 hour={timeHour}
                 minute={timeMinute}
                 period={timePeriod}
@@ -1151,7 +1605,7 @@ export default function EventFormScreen() {
                 }}
               />
               {!!timeMatch && (
-                <TouchableOpacity onPress={() => { hapticLight(); setTime(''); }} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove start time" style={styles.clearTimeAction} onPress={() => { hapticLight(); setTime(''); }}>
                   {/* LIZ COPY: a set time stays optional, so it must be removable */}
                   <Text style={styles.clearTimeLink}>no set time</Text>
                 </TouchableOpacity>
@@ -1168,7 +1622,7 @@ export default function EventFormScreen() {
                 : 'optional. sets when it wraps.'}
             </Text>
             <View style={styles.pickerBlock}>
-              <CollapsibleCalendar
+              <CollapsibleCalendar appearance={appearance}
                 selected={endDayIsPast ? null : parsedEndDay}
                 onSelect={(d) => setEndDate(`${d.year}-${pad2(d.month + 1)}-${pad2(d.day)}`)}
                 /* LIZ COPY: a blank end day is the same day as the start */
@@ -1176,7 +1630,7 @@ export default function EventFormScreen() {
               />
             </View>
             <View style={styles.pickerBlock}>
-              <TimePicker
+              <TimePicker appearance={appearance}
                 hour={endTimeHour}
                 minute={endTimeMinute}
                 period={endTimePeriod}
@@ -1187,7 +1641,7 @@ export default function EventFormScreen() {
                 }}
               />
               {!!endTimeMatch && (
-                <TouchableOpacity onPress={() => { hapticLight(); setEndTime(''); setEndDate(''); }} hitSlop={8}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove end time" style={styles.clearTimeAction} onPress={() => { hapticLight(); setEndTime(''); setEndDate(''); }}>
                   {/* LIZ COPY: free events may remove it; paid-event save will explain the requirement */}
                   <Text style={styles.clearTimeLink}>no end time</Text>
                 </TouchableOpacity>
@@ -1244,25 +1698,14 @@ export default function EventFormScreen() {
 
             <Text style={styles.sectionHeader}>the details</Text>
             <View style={styles.sectionCard}>
-            <Text style={styles.fieldLabel}>category</Text>
-            <View style={styles.chipWrap}>
-              {EVENT_CATEGORIES.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[styles.chip, category === c && styles.chipOn]}
-                  onPress={() => { hapticLight(); setCategory(category === c ? '' : c); }}
-                >
-                  <Text style={[styles.chipText, category === c && styles.chipTextOn]}>{c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <CreatorEventCategoryFields categories={categories} community={(pageContext ? pageContext.kind==='community' : fromCommunity)} ready={!saving && (!pageContext || pageSave.ready && pageStatusWritable && !pageTemplateBlocked())} onCategories={setCategories} />
 
             {/* C-18: the four decided-sellable offer types (lib/offerTypes.ts
                 isOfferTypeSellableToday). class_pack and subscription render
                 disabled with a "soon" tag and are never selectable -- that
                 stays an open founder decision, not guessed at here. */}
             <Text style={styles.fieldLabel}>offer type</Text>
-            <Text style={styles.fieldHint}>what you&apos;re actually selling. changes what buyers see at checkout.</Text>
+            <Text style={styles.fieldHint}>choose how people join, from a free gathering to a paid event or course.</Text>
             <View style={styles.chipWrap}>
               {OFFER_TYPE_OPTIONS.map((o) => {
                 const sellable = isOfferTypeSellableToday(o.value);
@@ -1271,10 +1714,10 @@ export default function EventFormScreen() {
                   <TouchableOpacity
                     key={o.value}
                     style={[styles.chip, on && styles.chipOn, !sellable && styles.chipDisabled]}
-                    onPress={() => { if (!sellable) return; hapticLight(); setOfferType(o.value); }}
-                    disabled={!sellable}
+                    onPress={() => { if (!sellable || (pageContext && (!pageSettingsSeeded || !pageSave.ready || !pageSave.current?.canManageTickets))) return; hapticLight(); setOfferType(o.value); }}
+                    disabled={!sellable || !!pageContext && (!pageSettingsSeeded || !pageSave.ready || !pageSave.current?.canManageTickets)}
                     accessibilityRole="button"
-                    accessibilityState={{ disabled: !sellable, selected: on }}
+                    accessibilityState={{ disabled: !sellable || !!pageContext && (!pageSettingsSeeded || !pageSave.ready || !pageSave.current?.canManageTickets), selected: on }}
                     accessibilityLabel={sellable ? o.label : `${o.label}, coming soon`}
                   >
                     <Text style={[styles.chipText, on && styles.chipTextOn, !sellable && styles.chipTextDisabled]}>
@@ -1295,6 +1738,8 @@ export default function EventFormScreen() {
             <TextInput
               style={styles.input}
               value={ticketCapacity}
+              editable={!pageContext || pageSettingsSeeded && pageSave.ready && !!pageSave.current?.canManageTickets}
+              accessibilityLabel="Event capacity"
               onChangeText={(v) => setTicketCapacity(v.replace(/[^0-9]/g, '').slice(0, 5))}
               keyboardType="number-pad"
               /* copy to the taste gate */
@@ -1322,11 +1767,13 @@ export default function EventFormScreen() {
             {afterPurchaseOpen && (
               <>
                 {/* LIZ COPY (proposed, taste gate) */}
-                <Text style={styles.fieldLabel}>after they buy</Text>
-                <Text style={styles.fieldHint}>lands on their confirmation and stays on their tickets. things like parking, arrival time, what to wear.</Text>
+                <Text style={styles.fieldLabel}>{offerType === 'free_event' ? 'after they join' : 'after they buy'}</Text>
+                <Text style={styles.fieldHint}>{offerType === 'free_event' ? 'help people arrive ready with parking, arrival time, or what to bring.' : 'lands on their confirmation and stays on their tickets. things like parking, arrival time, what to wear.'}</Text>
                 <TextInput
                   style={[styles.input, styles.inputTall]}
                   value={afterPurchaseMsg}
+                  accessibilityLabel="Event confirmation message"
+                  maxLength={2500}
                   onChangeText={setAfterPurchaseMsg}
                   placeholder="what should they know once they're in?"
                   placeholderTextColor={Colors.inkSoft}
@@ -1375,7 +1822,7 @@ export default function EventFormScreen() {
             )}
             {editing && (
               <Text style={styles.fieldHint}>
-                {eventCommunityId ? 'a community event, set at posting.' : 'a standalone event, set at posting.'}
+                {pageContext ? `From ${String(pageContext.name)}. This event stays with this page.` : eventCommunityId ? 'a community event, set at posting.' : 'a standalone event, set at posting.'}
               </Text>
             )}
 
@@ -1386,12 +1833,14 @@ export default function EventFormScreen() {
                 <Text style={styles.fieldHint}>your soonest upcoming event sits at the top of your community chat.</Text>
                 <View style={styles.chipWrap}>
                   <TouchableOpacity
+                    accessibilityRole="button" accessibilityLabel="Pin event in chat" accessibilityState={{selected:pinToChat}}
                     style={[styles.chip, pinToChat && styles.chipOn]}
                     onPress={() => { hapticLight(); setPinToChat(true); }}
                   >
                     <Text style={[styles.chipText, pinToChat && styles.chipTextOn]}>pin it</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
+                    accessibilityRole="button" accessibilityLabel="Keep event off chat" accessibilityState={{selected:!pinToChat}}
                     style={[styles.chip, !pinToChat && styles.chipOn]}
                     onPress={() => { hapticLight(); setPinToChat(false); }}
                   >
@@ -1401,7 +1850,11 @@ export default function EventFormScreen() {
               </>
             )}
 
-            {CO_CREATOR_INVITES_ENABLED && ((!editing && fromCommunity && !!community) || (editing && !!eventCommunityId)) && (
+            {pageContext && <TouchableOpacity style={styles.linkRow} accessibilityRole="button" accessibilityLabel="Page and team" onPress={() => { if (pageScope?.isCurrent()) router.push(`/creator/page-team?id=${pageContext.pageId}` as never); }}>
+              <View style={styles.linkRowText}><Text style={styles.linkRowTitle}>Page & team</Text><Text style={styles.linkRowHint}>Permissions apply only to {pageContext.name}.</Text></View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>}
+            {!pageContext && CO_CREATOR_INVITES_ENABLED && ((!editing && fromCommunity && !!community) || (editing && !!eventCommunityId)) && (
               <TouchableOpacity
                 style={styles.linkRow}
                 onPress={() => router.push('/creator/co-creators')}
@@ -1452,6 +1905,13 @@ export default function EventFormScreen() {
             )}
             </View>
 
+
+            {pageContext && isDraft && !pageContext.isPublished && (
+              <View style={styles.reviewCard}>
+                <Text style={styles.reviewTitle}>Your page is still private</Text>
+                <Text style={styles.reviewItem}>Keep preparing this event. After your page is approved, publish it from Creator space before publishing this event into Scene.</Text>
+              </View>
+            )}
             {isDraft && (
               <View style={styles.reviewCard}>
                 {/* copy to the taste gate: a friendly checklist, and every
@@ -1473,36 +1933,43 @@ export default function EventFormScreen() {
             )}
 
             <TouchableOpacity
+              accessibilityRole="button" accessibilityLabel={saving ? 'Saving event' : undefined}
               style={[styles.saveBtn, saving && styles.saveBtnBusy]}
-              onPress={returnToTickets === '1' ? handleSave : isDraft ? handlePublishDraft : handleSave}
-              disabled={saving}
+              activeOpacity={0.86}
+              onPress={returnToTickets === '1' ? handleSave : pageContext && isDraft && !pageContext.isPublished ? handleSaveDraft : isDraft ? handlePublishDraft : handleSave}
+              disabled={saving || coverInProgress() || !pageStatusWritable || pagePublicationUncertain || !!pageContext && (!pageSettingsSeeded || !pageSave.ready)}
             >
+              <CreatorActionFill />
               {saving ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
                 <Text style={styles.saveBtnText}>
-                  {returnToTickets === '1' ? 'save and return to tickets' : isDraft ? 'publish it' : editing ? 'save' : 'put it up'}
+                  {returnToTickets === '1' ? 'Save & return' : pageContext && isDraft && !pageContext.isPublished ? 'Save private draft' : isDraft ? (pageContext ? 'Publish into Scene' : 'publish it') : editing ? 'save' : 'put it up'}
                 </Text>
               )}
             </TouchableOpacity>
 
             {(!editing || isDraft) && (
-              <TouchableOpacity onPress={handleSaveDraft} disabled={saving} style={styles.quietLinkWrap} hitSlop={8}>
+              <TouchableOpacity accessibilityRole="button" onPress={handleSaveDraft} disabled={saving || coverInProgress() || !pageStatusWritable || !!pageContext && (!pageSave.ready || pageTemplateBlocked())} style={styles.quietLinkWrap} hitSlop={8}>
                 {/* LIZ COPY */}
                 <Text style={styles.quietLink}>{isDraft ? 'keep it a draft' : 'save it as a draft'}</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={handleSaveTemplate} disabled={saving} style={styles.quietLinkWrap} hitSlop={8}>
+            {pageContext && <Text style={styles.fieldHint}>{pagePublicationUncertain
+              ? 'Check publication before saving a template.' : isDraft
+              ? 'Saving a template also saves this draft. Your event stays private until you publish it.'
+              : 'Saving a template also saves your changes to this event. If it is live, people will see those changes.'}</Text>}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Save event as template" onPress={handleSaveTemplate} disabled={saving || coverInProgress() || pageTemplateBlocked() || !!pageContext && (!pageSave.ready || !pageStatusWritable || pagePublicationUncertain)} style={styles.quietLinkWrap} hitSlop={8}>
               {/* LIZ COPY */}
               <Text style={styles.quietLink}>save it as a template</Text>
             </TouchableOpacity>
 
             {editing && eventStatus === 'Live' && (
               <View style={styles.statusRow}>
-                <TouchableOpacity onPress={() => handleStatus('Completed')} hitSlop={6}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mark event completed" style={styles.statusAction} onPress={() => handleStatus('Completed')} disabled={saving || !pageStatusWritable} hitSlop={6}>
                   <Text style={styles.statusLink}>mark completed</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleStatus('Cancelled')} hitSlop={6}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel event" style={styles.statusAction} onPress={() => handleStatus('Cancelled')} disabled={saving || !pageStatusWritable} hitSlop={6}>
                   <Text style={styles.statusLink}>cancel this event</Text>
                 </TouchableOpacity>
               </View>
@@ -1513,31 +1980,34 @@ export default function EventFormScreen() {
 
       <BrandedAlert
         visible={!!alertInfo}
+        scrollMessage
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => setAlertInfo(null)}
+        onDismiss={() => requestAnimationFrame(scrollToRecovery)}
+        appearance={{fonts, variant: 'creator'}}
       />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function eventFormStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
-  previewAction: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  previewAction: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   content: { padding: 20, paddingBottom: 60 },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
     marginBottom: 12,
   },
-  statusLine: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary, marginBottom: 12 },
-  savedLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2, marginBottom: 12 },
+  statusLine: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.secondary, marginBottom: 12 },
+  savedLine: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.text2, marginBottom: 12 },
   // Golden Hour: same white-card/terracotta-border shape as CreatorSpaceBanner
   ticketNudge: {
     backgroundColor: Colors.white,
@@ -1551,8 +2021,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   ticketNudgeBody: { flex: 1, gap: 2 },
-  ticketNudgeTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  ticketNudgeMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  ticketNudgeTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  ticketNudgeMeta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   savedLineProblem: { color: EventAction.error },
   reviewCard: {
     backgroundColor: Colors.white,
@@ -1564,14 +2034,14 @@ const styles = StyleSheet.create({
     marginTop: EventSpacing.lg,
     marginBottom: EventSpacing.md,
   },
-  reviewTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.text1, marginBottom: EventSpacing.xs },
+  reviewTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.text1, marginBottom: EventSpacing.xs },
   reviewRow: { flexDirection: 'row', alignItems: 'center', gap: EventSpacing.sm },
-  reviewItem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2 },
+  reviewItem: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.text2 },
   reviewItemDone: { color: Colors.brandDeep },
   // doc 76 §3: sections carry the rhythm; labels stop shouting
   // terracotta on every field and go quiet and tracked
   sectionHeader: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
@@ -1587,13 +2057,21 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 4,
   },
+  recoveryCard: { marginBottom: 16, paddingBottom: 16, borderColor: CreatorSurfaceColors.goldEdge, overflow: 'hidden' },
+  recoveryAction: { minHeight: 44, maxWidth: '100%', alignSelf: 'flex-start', justifyContent: 'center', alignItems: 'center', marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24, backgroundColor: Colors.terracotta, overflow: 'hidden' },
+  recoveryActionText: { fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, color: Colors.white },
+  recoveryCopy: { color: Colors.asphalt },
+  recoveryRetry: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center', marginTop: 4, paddingHorizontal: 4 },
+  headerBack: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  headerPreview: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', alignItems: 'flex-end', marginHorizontal: 12 },
   fieldLabel: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     marginBottom: 6,
   },
-  fieldHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
+  permissionNote: { fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, fontFamily: fonts.regular, color: Colors.secondary, marginBottom: 20 },
+  fieldHint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary, marginBottom: 6 },
   // doc 111: the multiline "after they buy" message
   inputTall: { minHeight: 96, textAlignVertical: 'top' },
   input: {
@@ -1603,7 +2081,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     paddingHorizontal: 14,
     paddingVertical: 13,
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 18,
@@ -1618,25 +2096,26 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     paddingHorizontal: 14,
     paddingVertical: 13,
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 18,
   },
   pickerBlock: { marginBottom: 14 },
+  clearTimeAction: { minHeight: 44, justifyContent: 'center', alignItems: 'flex-end' },
   clearTimeLink: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodySM,
-    color: Colors.tertiary,
+    color: Colors.secondary,
     marginTop: 8,
     alignSelf: 'flex-end',
   },
   // §3.1 cover: the page's face. doc 80 makes media the ONE warm-dark
   // surface, so the empty drop-zone is dark cream-on-warm, reading as the
   // hero of a page rather than another grey form field.
-  cover: { width: '100%', height: POSTER_HEIGHT, borderRadius: 16, marginBottom: EventSpacing.md },
+  cover: { width: '100%', aspectRatio: POSTER_ASPECT, borderRadius: 16, marginBottom: EventSpacing.md },
   coverAdd: {
-    height: POSTER_HEIGHT,
+    aspectRatio: POSTER_ASPECT,
     borderRadius: 16,
     backgroundColor: EventSurface.media,
     alignItems: 'center',
@@ -1645,12 +2124,13 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 24,
   },
-  coverAddLabel: { fontFamily: Fonts.display, fontSize: FontSizes.displaySM, color: EventSurface.onMedia },
-  coverAddHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventSurface.onMediaMuted, textAlign: 'center' },
+  coverAddLabel: { fontFamily: fonts.display, fontSize: FontSizes.displaySM, color: EventSurface.onMedia },
+  coverAddHint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: EventSurface.onMediaMuted, textAlign: 'center' },
   // the seam between the open editorial page-zone and the logistics cards
   zoneDivider: { height: 1, backgroundColor: Colors.border, marginTop: EventSpacing.lg, marginBottom: EventSpacing.xs },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
+    minHeight: 44, justifyContent: 'center',
     borderRadius: 999,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -1660,7 +2140,7 @@ const styles = StyleSheet.create({
   },
   chipOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   chipDisabled: { opacity: 0.45 },
-  chipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
+  chipText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
   chipTextOn: { color: Colors.white },
   chipTextDisabled: { color: Colors.tertiary },
   linkRow: {
@@ -1675,19 +2155,22 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   linkRowText: { flex: 1, gap: 2 },
-  linkRowTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  linkRowHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
+  linkRowTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  linkRowHint: { fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.secondary },
   saveBtn: {
+    minHeight: 48, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.24, shadowRadius: 8, elevation: 3,
     backgroundColor: Colors.terracotta,
-    borderRadius: 999,
+    borderRadius: 24,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 14,
   },
   saveBtnBusy: { opacity: 0.6 },
-  saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  saveBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyLG, color: Colors.white },
   quietLinkWrap: { alignItems: 'center', marginTop: 12 },
-  quietLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  statusRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 16 },
-  statusLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.tertiary },
-});
+  quietLink: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 16 },
+  statusAction: { flexGrow: 1, flexBasis: 140, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.cardBg },
+  statusLink: { textAlign: 'center', fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.secondary },
+}); }

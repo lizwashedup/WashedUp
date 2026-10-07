@@ -1,4 +1,4 @@
-import { eventStartIso, laEventInstantIso, DEFAULT_EVENT_START_TIME } from '../laDate';
+import { eventStartIso, getLAWallParts, isValidLAWallTime, laEventInstantIso, laWallTimeToUTC, resolveOvernightLAEnd, DEFAULT_EVENT_START_TIME } from '../laDate';
 
 // eventStartIso/laEventInstantIso moved here from app/event/[id].tsx (private
 // before) so app/tickets/order/[id].tsx (Scene handoff §06/07's ticketed-
@@ -38,5 +38,33 @@ describe('eventStartIso', () => {
 
   it('falls back to the house default start time when none is given', () => {
     expect(eventStartIso('2026-07-04', null)).toBe(laEventInstantIso('2026-07-04', DEFAULT_EVENT_START_TIME));
+  });
+});
+
+describe('Plan edit time round trip', () => {
+  it.each([
+    ['2026-07-04T02:07:00.000Z', 2026, 6, 3, 19, 7],
+    ['2026-01-16T03:43:00.000Z', 2026, 0, 15, 19, 43],
+  ])('preserves LA wall date and exact minute for %s', (iso, year, month, day, hour, minute) => {
+    const wall = getLAWallParts(iso);
+    expect(wall).toEqual({ y: year, m: month, d: day, hour24: hour, minute });
+    expect(laWallTimeToUTC(wall!.y, wall!.m, wall!.d, wall!.hour24, wall!.minute).toISOString()).toBe(iso);
+  });
+});
+
+describe('LA scheduling validity', () => {
+  it('rejects the spring-forward hour that does not exist', () => {
+    expect(isValidLAWallTime(2026, 2, 8, 2, 30)).toBe(false);
+    expect(isValidLAWallTime(2026, 2, 8, 3, 30)).toBe(true);
+  });
+
+  it('keeps real fall-back times available and rejects invalid dates', () => {
+    expect(isValidLAWallTime(2026, 10, 1, 1, 30)).toBe(true);
+    expect(isValidLAWallTime(2026, 1, 30, 12, 0)).toBe(false);
+  });
+
+  it('rolls an overnight Plan by LA calendar date across spring daylight saving', () => {
+    expect(resolveOvernightLAEnd(2026, 2, 7, 23, 30, 3, 30)?.toISOString()).toBe('2026-03-08T10:30:00.000Z');
+    expect(resolveOvernightLAEnd(2026, 2, 7, 23, 30, 2, 30)).toBeNull();
   });
 });

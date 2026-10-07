@@ -14,30 +14,12 @@ import { ArrowLeft } from 'lucide-react-native';
 import { supabase } from '../lib/supabase';
 import { logError } from '../lib/logger';
 import { fetchPlans, Plan } from '../lib/fetchPlans';
+import { toPlanCardPlan } from '../lib/creatorMarks';
 import { PlanCard } from '../components/plans/PlanCard';
 import { ReportModal } from '../components/modals/ReportModal';
 import { useBlock } from '../hooks/useBlock';
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
-
-// Map Plan (from fetchPlans) to PlanCard shape
-function toPlanCardPlan(plan: Plan) {
-  return {
-    id: plan.id,
-    title: plan.title,
-    host_message: plan.host_message ?? null,
-    start_time: plan.start_time,
-    location_text: plan.location_text ?? null,
-    category: plan.category ?? null,
-    max_invites: plan.max_invites ?? 0,
-    member_count: plan.member_count ?? 0,
-    creator: {
-      first_name_display: plan.creator?.first_name_display ?? 'Creator',
-      profile_photo_url: plan.creator?.profile_photo_url ?? null,
-      plans_posted: plan.creator?.plans_posted ?? undefined,
-    },
-  };
-}
 
 export default function PlansSectionScreen() {
   const router = useRouter();

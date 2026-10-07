@@ -39,16 +39,19 @@ const KNOWN_OUTCOMES: readonly AddOrAcceptOutcome[] = [
   'already_connected',
 ];
 
-/**
- * Defensive parse of the RPC's return value. An outcome we don't recognize
- * must never be silently treated as a connection that may not exist --
- * 'requested' is the safe fallback (it just means the UI keeps showing a
- * pending state instead of falsely celebrating a connection).
- */
+export class UnconfirmedPeopleConnectionError extends Error {
+  constructor() {
+    super('We couldn’t confirm your request. Try again.');
+    this.name = 'UnconfirmedPeopleConnectionError';
+  }
+}
+
+/** The RPC returns one of three scalar text receipts. A missing or unknown
+ * receipt confirms neither a pending request nor a connection. Keep the
+ * caller in its recoverable failure state instead of inventing success. */
 export function parseAddOrAcceptOutcome(raw: unknown): AddOrAcceptOutcome {
-  return (KNOWN_OUTCOMES as readonly unknown[]).includes(raw)
-    ? (raw as AddOrAcceptOutcome)
-    : 'requested';
+  if ((KNOWN_OUTCOMES as readonly unknown[]).includes(raw)) return raw as AddOrAcceptOutcome;
+  throw new UnconfirmedPeopleConnectionError();
 }
 
 /**

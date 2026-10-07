@@ -1,8 +1,10 @@
-import React from 'react';
+import { BackToYoursButton } from './BackToYoursButton';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes } from '../../constants/Typography';
 import { hapticLight } from '../../lib/haptics';
 import type { CreatorAccess } from '../../lib/creatorMode';
 import {
@@ -23,6 +25,8 @@ interface Props {
  * creator has already chosen the Community product.
  */
 export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const current = useWorkspace(access);
   const showWorkspaceTabs = hasMultipleWorkspaces(access);
 
@@ -39,14 +43,7 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
     <View style={styles.wrap}>
       <View style={styles.labelRow}>
         <Text style={styles.label}>working as {current}</Text>
-        <TouchableOpacity
-          onPress={() => router.replace('/(tabs)/profile')}
-          accessibilityRole="button"
-          accessibilityLabel="Switch back to your personal profile"
-          hitSlop={8}
-        >
-          <Text style={styles.personalLink}>back to you</Text>
-        </TouchableOpacity>
+        <BackToYoursButton />
       </View>
       {showWorkspaceTabs && <View style={styles.tabs} accessibilityRole="tablist" accessibilityLabel="choose creator workspace">
         {(['organization', 'community'] as const).map((item) => {
@@ -58,6 +55,7 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
               onPress={() => choose(item)}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
+              aria-selected={selected}
               accessibilityLabel={item}
               activeOpacity={0.8}
             >
@@ -70,18 +68,19 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   wrap: { gap: 6, marginBottom: 12 },
-  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  labelRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   label: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.tertiary,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
+  personalButton: { minHeight: 44, justifyContent: 'center' },
   personalLink: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
   },
@@ -95,16 +94,17 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 9,
   },
   tabSelected: { backgroundColor: Colors.cardBg },
   tabText: {
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
   },
-  tabTextSelected: { fontFamily: Fonts.sansBold, color: Colors.darkWarm },
+  tabTextSelected: { fontFamily: fonts.semibold, color: Colors.darkWarm },
 });
+}

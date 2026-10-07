@@ -19,10 +19,14 @@ export async function uploadAudioToStorage(
   eventId: string,
   userId: string,
   uri: string,
+  scope?: { isCurrent: () => boolean },
 ): Promise<string> {
+  const assertCurrent = () => { if (scope && !scope.isCurrent()) throw new Error('Conversation changed'); };
+  assertCurrent();
   const base64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
+  assertCurrent();
   const arrayBuffer = decode(base64);
   const path = `${eventId}/${userId}/${Date.now()}.m4a`;
 
@@ -30,6 +34,7 @@ export async function uploadAudioToStorage(
     .from(CHAT_AUDIO_BUCKET)
     .upload(path, arrayBuffer, { contentType: 'audio/mp4', upsert: false });
 
+  assertCurrent();
   if (error) throw error;
 
   const { data } = supabase.storage.from(CHAT_AUDIO_BUCKET).getPublicUrl(path);

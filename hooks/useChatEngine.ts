@@ -28,7 +28,9 @@ import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
 import { logError } from '../lib/logger';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
+import { resolveChatSendReceipt } from '../lib/chatSendReceipt';
 import { getCachedSender, ensureSenders } from '../lib/chatEngine/senderCache';
 import type { ChatMessage, MessageReaction, ReplyTo, ConversationKey } from './useChat';
 
@@ -44,14 +46,6 @@ const REALTIME_FLUSH_MS = 80;
 
 const MESSAGE_COLS =
   'id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id, circle_id';
-
-// Monotonic optimistic-message id (same rationale as useChat's: Date.now()
-// alone collides on rapid consecutive sends).
-let optimisticSeq = 0;
-function nextOptimisticId(): string {
-  optimisticSeq += 1;
-  return `optimistic-engine-${Date.now()}-${optimisticSeq}`;
-}
 
 // Last-known blocklist per user, module-level so a thread open never waits on
 // the profiles query to hide a blocked sender (mirrors useChat's ref, but
@@ -255,6 +249,7 @@ export function useChatEngine(key: ConversationKey) {
         // optimistic rows stay until their own ack/echo reconciles them.
         const byId = new Map(prev.map(m => [m.id, m]));
         page.forEach(m => {
+          byId.delete(`optimistic-${m.id}`);
           const existing = byId.get(m.id);
           byId.set(m.id, existing ? { ...existing, ...m, sender: existing.sender ?? m.sender, reactions: existing.reactions?.length ? existing.reactions : m.reactions, reply_to: existing.reply_to ?? m.reply_to } : m);
         });
@@ -343,15 +338,9 @@ export function useChatEngine(key: ConversationKey) {
         if (blockedIdsCache[raw.user_id]) continue;
         const incoming = attachCachedSender(raw);
         if (next.some(m => m.id === incoming.id)) continue;
-        // Reconcile exactly ONE matching optimistic row from this sender
-        // (same rule as useChat: a blanket strip dropped rapid second sends).
-        const optIdx = next.findIndex(m =>
-          m.id.startsWith('optimistic-') &&
-          m.user_id === incoming.user_id &&
-          (m.content ?? '') === (incoming.content ?? '') &&
-          (m.image_url ?? null) === (incoming.image_url ?? null) &&
-          (m.reply_to_message_id ?? null) === (incoming.reply_to_message_id ?? null),
-        );
+        // Match only the client UUID. Two identical messages still represent
+        // two sends and must not be reconciled by text or media URL.
+        const optIdx = next.findIndex(m => m.id === `optimistic-${incoming.id}`);
         let msg = incoming;
         if (msg.reply_to_message_id) {
           const parent = next.find(m => m.id === msg.reply_to_message_id);
@@ -513,7 +502,7 @@ export function useChatEngine(key: ConversationKey) {
 
   const editMessage = useCallback(async (messageId: string, newContent: string) => {
     const userId = currentUserIdRef.current;
-    if (!userId) return;
+    if (!userId) return false;
 
     setMessagesSafe(prev => prev.map(m =>
       m.id === messageId ? { ...m, content: newContent } : m,
@@ -529,21 +518,24 @@ export function useChatEngine(key: ConversationKey) {
       logError(error, 'useChatEngine.editMessage');
       fetchNewestPage(true).catch((e) => logError(e, 'useChatEngine.fetchNewestPage'));
       Alert.alert('Could not edit', 'Something went wrong. Please try again.');
+      return false;
     }
+    return true;
   }, [fetchNewestPage, setMessagesSafe]);
 
   // ── Sends (optimistic, reconcile on ack) ─────────────────────────────────
-  const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string) => {
+  const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string, sendIdOverride?: string) => {
     const filter = checkContent(content);
     if (!filter.ok) {
       Alert.alert('Content not allowed', filter.reason ?? 'Please revise your message.');
-      return;
+      return false;
     }
 
     const userId = currentUserIdRef.current;
-    if (!userId) return;
+    if (!userId) return false;
 
-    const optimisticId = nextOptimisticId();
+    const sendId = sendIdOverride ?? Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     let replyTo: ReplyTo | null = null;
     if (replyToId) {
       const parentMsg = messagesRef.current.find(m => m.id === replyToId);
@@ -568,6 +560,7 @@ export function useChatEngine(key: ConversationKey) {
     setMessagesSafe(prev => [...prev, optimisticMsg]);
 
     const insertData: any = {
+      id: sendId,
       ...parentFields,
       user_id: userId,
       content: content || '',
@@ -576,16 +569,21 @@ export function useChatEngine(key: ConversationKey) {
     };
     if (replyToId && replyTo) insertData.reply_to_message_id = replyToId;
 
-    const { data: inserted, error } = await supabase.from('messages').insert(insertData).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChatEngine.sendMessage');
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => await supabase.from('messages').insert(insertData).select('id, created_at').single(),
+      async () => await supabase.from('messages').select('id, created_at')
+        .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle(),
+    );
+    if (!inserted) {
+      if (failure) logError(failure, 'useChatEngine.sendMessage');
       setMessagesSafe(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send message", 'Your message failed to send. Please try again.');
-    } else if (inserted) {
+      Alert.alert('Delivery unconfirmed', 'Check this chat before retrying your message.');
+      return false;
+    } else {
       setMessagesSafe(prev => prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));
+      return true;
     }
   }, [kind, conversationId, setMessagesSafe]);
 
@@ -594,7 +592,8 @@ export function useChatEngine(key: ConversationKey) {
     if (!userId) return;
 
     const content = JSON.stringify({ lat, lng, address });
-    const optimisticId = nextOptimisticId();
+    const sendId = Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
@@ -608,18 +607,18 @@ export function useChatEngine(key: ConversationKey) {
     };
     setMessagesSafe(prev => [...prev, optimisticMsg]);
 
-    const { data: inserted, error } = await supabase.from('messages').insert({
-      ...parentFields,
-      user_id: userId,
-      content,
-      message_type: 'location',
-    }).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChatEngine.sendLocation');
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => await supabase.from('messages').insert({
+        id: sendId, ...parentFields, user_id: userId, content, message_type: 'location',
+      }).select('id, created_at').single(),
+      async () => await supabase.from('messages').select('id, created_at')
+        .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle(),
+    );
+    if (!inserted) {
+      if (failure) logError(failure, 'useChatEngine.sendLocation');
       setMessagesSafe(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send location", 'Your location failed to send. Please try again.');
-    } else if (inserted) {
+      Alert.alert('Delivery unconfirmed', 'Check this chat before sharing your location again.');
+    } else {
       setMessagesSafe(prev => prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));
@@ -630,7 +629,8 @@ export function useChatEngine(key: ConversationKey) {
     const userId = currentUserIdRef.current;
     if (!userId) return;
 
-    const optimisticId = nextOptimisticId();
+    const sendId = Crypto.randomUUID();
+    const optimisticId = `optimistic-${sendId}`;
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       ...parentFields,
@@ -646,20 +646,19 @@ export function useChatEngine(key: ConversationKey) {
     };
     setMessagesSafe(prev => [...prev, optimisticMsg]);
 
-    const { data: inserted, error } = await supabase.from('messages').insert({
-      ...parentFields,
-      user_id: userId,
-      content: '',
-      message_type: 'audio',
-      audio_url: audioUrl,
-      duration_seconds: durationSeconds,
-    }).select('id, created_at').single();
-
-    if (error) {
-      logError(error, 'useChatEngine.sendAudio');
+    const { receipt: inserted, failure } = await resolveChatSendReceipt(
+      async () => await supabase.from('messages').insert({
+        id: sendId, ...parentFields, user_id: userId, content: '',
+        message_type: 'audio', audio_url: audioUrl, duration_seconds: durationSeconds,
+      }).select('id, created_at').single(),
+      async () => await supabase.from('messages').select('id, created_at')
+        .eq('id', sendId).eq(parentCol, conversationId).eq('user_id', userId).maybeSingle(),
+    );
+    if (!inserted) {
+      if (failure) logError(failure, 'useChatEngine.sendAudio');
       setMessagesSafe(prev => prev.filter(m => m.id !== optimisticId));
-      Alert.alert("Couldn't send voice message", 'Your voice message failed to send. Please try again.');
-    } else if (inserted) {
+      Alert.alert('Delivery unconfirmed', 'Check this chat before sending the voice message again.');
+    } else {
       setMessagesSafe(prev => prev.map(m =>
         m.id === optimisticId ? { ...m, id: inserted.id, created_at: inserted.created_at } : m,
       ));

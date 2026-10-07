@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 //    on every restore path, plus a hard check inside handleContinue itself.
 
 const mockRouterReplace = jest.fn();
-jest.mock('expo-router', () => ({ router: { replace: mockRouterReplace, push: jest.fn() } }));
+jest.mock('expo-router', () => ({ router: { replace: (...args: unknown[]) => mockRouterReplace(...args), push: jest.fn() } }));
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 
@@ -79,7 +79,7 @@ function setUser(id: string | null) {
 }
 
 function profileChain() {
-  return supabase.from('profiles') as unknown as { maybeSingle: jest.Mock };
+  return supabase.from('profiles') as unknown as { maybeSingle: jest.Mock; update: jest.Mock };
 }
 
 describe('basics.tsx onboarding-draft regressions', () => {
@@ -91,11 +91,56 @@ describe('basics.tsx onboarding-draft regressions', () => {
       () => new Promise(() => { /* hangs unless overridden below */ }),
     );
     profileChain().maybeSingle.mockResolvedValue({ data: null });
+    profileChain().update.mockClear();
+    (supabase.functions.invoke as jest.Mock).mockClear().mockResolvedValue({ error: null });
     setUser('user-a');
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  async function mountAdultDraft(email: string) {
+    (supabase.auth.getUser as jest.Mock).mockResolvedValue({ data: { user: { id: 'user-a' } } });
+    await seedDraft('user-a', 'basics', {
+      firstName: 'Test', lastName: 'Member', email, marketingOptIn: false,
+      birthdayISO: '1990-01-01', gender: 'man',
+    });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<OnboardingBasicsScreen />); });
+    return tree;
+  }
+
+  function continueButton(tree: ReturnType<typeof create>) {
+    const { TouchableOpacity, Text } = require('react-native');
+    return tree.root.findAllByType(TouchableOpacity).find((button) =>
+      button.findAllByType(Text).some((text) => text.props.children === 'continue'),
+    )!;
+  }
+
+  it.each(['', 'invalid-email'])('requires a valid onboarding email even when the other fields are complete (%s)', async (email) => {
+    const tree = await mountAdultDraft(email);
+    expect(continueButton(tree).props.disabled).toBe(true);
+    // Exercise the handler too, rather than relying only on button styling.
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(profileChain().update).not.toHaveBeenCalled();
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    const messages = tree.root.findAllByType(require('react-native').Text).map((n) => n.props.children);
+    expect(messages).toContain(email ? 'enter a valid email address.' : 'email is required.');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('saves the required email and requests Resend reconciliation while preserving an explicit marketing opt-out', async () => {
+    const tree = await mountAdultDraft('  member@example.com  ');
+    expect(continueButton(tree).props.disabled).toBe(false);
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(profileChain().update).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'member@example.com', marketing_opt_in: false, onboarding_status: 'la_check',
+    }));
+    expect(supabase.functions.invoke).toHaveBeenCalledWith('add-to-resend-audience');
+    expect(mockRouterReplace).toHaveBeenCalledWith('/onboarding/la-check');
+    await act(async () => { tree.unmount(); });
   });
 
   it('never overwrites a real draft with blanks when getUser() times out', async () => {

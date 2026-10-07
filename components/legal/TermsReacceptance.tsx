@@ -11,7 +11,7 @@
  * offline-escape rule); it simply asks again next open until accepted.
  */
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Colors from '../../constants/Colors';
+import { useObservedUser } from '../../hooks/useObservedUser';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { getMemberTermsStatus, recordMemberTermsAcceptance } from '../../lib/participationTerms';
 
@@ -33,31 +34,50 @@ export const MEMBER_TERMS_STATUS_KEY = ['member-terms-status'] as const;
 
 export function TermsReacceptance({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [acceptedLocally, setAcceptedLocally] = useState(false);
-
+  const account = useObservedUser();
+  const visit = useMemo(() => ({}), [enabled, account.viewerId, account.epoch]);
+  const committed = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committed.current = visit;
+    return () => { if (committed.current === visit) committed.current = null; };
+  }, [visit]);
+  const current = () => committed.current === visit && enabled && !!account.viewerId && account.isCurrent();
+  const [result, setResult] = useState<{ visit: object; busy: boolean; problem: string | null; accepted: boolean }>();
+  const pending = useRef<{ visit: object } | null>(null);
+  const local = result?.visit === visit ? result : undefined;
+  const busy = !!local?.busy, problem = local?.problem;
+  // Keep both account and auth lifetime in the cache identity. A pending result
+  // from the first A visit cannot become the current result after A→B→A.
+  const queryKey = [...MEMBER_TERMS_STATUS_KEY, account.viewerId, account.epoch];
+  const ready = enabled && !!account.viewerId && !account.isLoading && !account.error;
   const { data } = useQuery({
-    queryKey: MEMBER_TERMS_STATUS_KEY,
-    queryFn: getMemberTermsStatus,
-    enabled,
+    queryKey,
+    queryFn: async () => {
+      if (!current()) throw new Error('This account visit has changed.');
+      const status = await getMemberTermsStatus();
+      if (!current()) throw new Error('This account visit has changed.');
+      return status;
+    },
+    enabled: ready,
     staleTime: Infinity,
   });
 
-  const visible = enabled && !acceptedLocally && !!data?.needsAcceptance;
+  const visible = ready && !local?.accepted && !!data?.needsAcceptance;
 
   const handleAccept = async () => {
-    if (busy) return;
-    setBusy(true);
-    setProblem(null);
-    const ok = await recordMemberTermsAcceptance();
-    setBusy(false);
+    if (!current() || !visible || pending.current?.visit === visit) return;
+    const attempt = { visit };
+    pending.current = attempt;
+    setResult({ visit, busy: true, problem: null, accepted: false });
+    let ok = false;
+    try { ok = await recordMemberTermsAcceptance(); }
+    catch { /* A failed affirmative request stays available for explicit retry. */ }
+    finally { if (pending.current === attempt) pending.current = null; }
+    if (!current()) return;
+    setResult({ visit, busy: false, accepted: ok,
+      problem: ok ? null : 'that did not go through. give it another try.' });
     if (ok) {
-      setAcceptedLocally(true);
-      queryClient.invalidateQueries({ queryKey: MEMBER_TERMS_STATUS_KEY });
-    } else {
-      // LIZ COPY
-      setProblem('that did not go through. give it another try.');
+      void queryClient.invalidateQueries({ queryKey, exact: true });
     }
   };
 

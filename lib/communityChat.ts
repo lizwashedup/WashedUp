@@ -1,3 +1,6 @@
+import { validOptionalMentionDocument, trimChatMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from './chatMentionIdentity';
+import type { TopicDraftEdit } from './topicComposerDraft';
+import { requestWithDeadline } from './requestWithDeadline';
 /**
  * Community chat, member side (doc 09 section 3): the Chats communities
  * section, the community container (broadcast pinned + topics), and topic
@@ -10,8 +13,54 @@
  */
 
 import { supabase } from './supabase';
+import * as Crypto from 'expo-crypto';
 import { getTodayInLA } from './laDate';
 import { getBlockedWith } from './blocking';
+import { CHAT_NEWEST_PAGE_SIZE, olderChatFilter } from './chatPaging';
+import { resolveChatSendReceipt } from './chatSendReceipt';
+import { parseCommunityLocation, communityMessagePreview } from './communityLocationMessage';
+
+/** Optional caller-owned account/room visit. A retired visit must never revive. */
+export interface CommunityOperationScope {
+  readonly userId: string;
+  readonly isCurrent: () => boolean;
+}
+
+export class ObsoleteCommunityOperationError extends Error {
+  constructor() {
+    super('This community operation belongs to a previous visit.');
+    this.name = 'ObsoleteCommunityOperationError';
+  }
+}
+
+export function isObsoleteCommunityOperation(error: unknown): error is ObsoleteCommunityOperationError {
+  return error instanceof ObsoleteCommunityOperationError;
+}
+
+function assertCommunityScope(scope?: CommunityOperationScope): void {
+  if (scope && (!scope.userId || !scope.isCurrent())) throw new ObsoleteCommunityOperationError();
+}
+
+/** Guard rejected as well as successful responses; never start the next request
+ * for a retired caller. Requests already dispatched still need server authority. */
+async function scopedCommunityRequest<T>(scope: CommunityOperationScope | undefined, request: () => PromiseLike<T>): Promise<T> {
+  assertCommunityScope(scope);
+  try {
+    return await request();
+  } finally {
+    assertCommunityScope(scope);
+  }
+}
+
+async function communityOperationUser(scope?: CommunityOperationScope) {
+  const { data: { user }, error } = await scopedCommunityRequest(scope, () => supabase.auth.getUser());
+  assertCommunityScope(scope);
+  if (scope) {
+    if (error) throw error;
+    if (!user || user.id !== scope.userId) throw new ObsoleteCommunityOperationError();
+  }
+  return user;
+}
 
 // -- the cards (Chats tab section) ---------------------------------------------
 
@@ -68,17 +117,25 @@ export interface CommunityChatCard {
  *  (community_topics.explore_event_id) -- created at event publish time
  *  (20260707120000_event_chat_model.sql), so any confirmed attendee can
  *  look it up regardless of how they attended (RSVP or ticket purchase). */
-export async function getEventTopicId(eventId: string): Promise<string | null> {
-  const { data } = await supabase
+export async function getEventTopicId(eventId: string, strict = false): Promise<string | null> {
+  const { data, error } = await supabase
     .from('community_topics')
     .select('id')
     .eq('explore_event_id', eventId)
     .maybeSingle();
+  if (strict && error) throw error;
+  if (strict && data && (typeof data.id !== 'string' || !data.id)) throw new Error('The event chat could not be checked.');
   return (data?.id as string | undefined) ?? null;
 }
 
-export async function getCommunityChatPayload(): Promise<CommunityChatPayload> {
-  const { data, error } = await supabase.rpc('get_my_community_chat_cards');
+export async function getCommunityChatPayload(
+  scopeOrQueryContext?: CommunityOperationScope | { queryKey: readonly unknown[] },
+): Promise<CommunityChatPayload> {
+  // Existing screens pass this function directly as a React Query queryFn.
+  // Its context is not an operation scope; scoped callers pass an explicit one.
+  const scope = scopeOrQueryContext && 'isCurrent' in scopeOrQueryContext ? scopeOrQueryContext : undefined;
+  const { data, error } = await scopedCommunityRequest(scope, () => supabase.rpc('get_my_community_chat_cards'));
+  assertCommunityScope(scope);
   if (error) throw error;
   const payload = (data ?? {}) as Partial<CommunityChatPayload>;
   return {
@@ -105,6 +162,19 @@ export interface CommunityChatRowData {
   /** the community's first cover image (rooms: the event's image when it has
    *  one), doc 121 T3; null keeps the letter placeholder */
   image: string | null;
+  /** Explicit provenance for grouping. Undefined is an older/unclassified
+   * cached row; only null means a persistent community conversation. */
+  eventId?: string | null;
+  isDefault?: boolean;
+  /** Existing stream name; never infer that a mixed broadcast stream is Intros. */
+  roomName?: string | null;
+  /** Explicit server mapping; absent on legacy/unclassified rows. */
+  roomRole?: 'intros' | 'main' | 'optional';
+  /** Current individual preference and independent parent override. Unknown stays unknown. */
+  roomNotificationsOn?: boolean;
+  communityMuted?: boolean | null;
+  lastMessageId?: string | null;
+  lastMessageSource?: 'broadcast' | 'topic' | null;
 }
 
 /**
@@ -214,11 +284,13 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       title: c.name,
       secondary: null,
       // LIZ COPY
-      preview: c.latest_broadcast?.body ?? 'you are in.',
+      preview: c.latest_broadcast?.body ? communityMessagePreview(c.latest_broadcast.body) : 'you are in.',
       lastAt: c.latest_broadcast?.created_at ?? joinedAtByCommunity.get(c.community_id) ?? null,
       unread: c.unread_broadcasts,
       accent: c.accent_color,
       image: coverByCommunity.get(c.community_id) ?? null,
+      eventId: null,
+      roomName: c.main_chat_name,
     });
     for (const t of c.topics) {
       if (!t.joined) continue;
@@ -235,6 +307,9 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
           (t.explore_event_id ? "you're going. talk it out here." : 'quiet so far'),
         lastAt: t.last_message_at ?? topicJoinedAt.get(t.id) ?? null,
         unread: t.unread,
+        eventId: t.explore_event_id,
+        isDefault: t.is_default,
+        roomNotificationsOn: t.notifications_on,
         accent: c.accent_color,
         image:
           (t.explore_event_id ? imageByEvent.get(t.explore_event_id) : null) ??
@@ -256,6 +331,8 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
       preview: previewByTopic.get(at.id) ?? "you're going. talk it out here.",
       lastAt: at.last_message_at ?? at.joined_at,
       unread: at.unread,
+      eventId: at.explore_event_id,
+      roomNotificationsOn: at.notifications_on,
       accent: at.accent_color,
       image: imageByEvent.get(at.explore_event_id) ?? coverByCommunity.get(at.community_id) ?? null,
     });
@@ -267,15 +344,16 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
 
 // -- read markers ----------------------------------------------------------------
 
-export async function markBroadcastsRead(communityId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function markBroadcastsRead(communityId: string, scope?: CommunityOperationScope): Promise<void> {
+  const user = await communityOperationUser(scope);
   if (!user) return;
-  const { error } = await supabase
+  const { error } = await scopedCommunityRequest(scope, () => supabase
     .from('community_broadcast_reads')
     .upsert(
       { community_id: communityId, user_id: user.id, last_read_at: new Date().toISOString() },
       { onConflict: 'community_id,user_id' },
-    );
+    ));
+  assertCommunityScope(scope);
   if (error) throw error;
 }
 
@@ -300,6 +378,8 @@ export interface BroadcastReaction {
 }
 
 export interface IntroPayload {
+  /** Versioned standard introduction; older composed cards keep their formatting. */
+  format?: 'member_intro_v1';
   user_id: string;
   first_name: string;
   area: string | null;
@@ -308,6 +388,7 @@ export interface IntroPayload {
 }
 
 export interface CommunityBroadcast {
+  mention_data?: ChatMentionDocument | null;
   id: string;
   body: string;
   created_at: string;
@@ -329,6 +410,7 @@ export interface CommunityBroadcast {
  * Template lives here so wording changes ship OTA; the DB body is a fallback.
  */
 export function composeIntroLine(p: IntroPayload): string {
+  if (p.format === 'member_intro_v1') return `${p.first_name}: ${p.answer}`;
   const fragment = p.question.trim().replace(/[?.!]+$/, '').toLowerCase();
   const from = p.area ? `, from ${p.area}` : '';
   const punct = /[.!?]$/.test(p.answer) ? '' : '.';
@@ -349,6 +431,7 @@ export interface IntroCardText {
 }
 
 export function composeIntroCard(p: IntroPayload): IntroCardText {
+  if (p.format === 'member_intro_v1') return { lead: p.first_name, qa: p.answer };
   const fragment = p.question.trim().replace(/[?.!]+$/, '').toLowerCase();
   const from = p.area ? `, from ${p.area}` : '';
   const punct = /[.!?]$/.test(p.answer) ? '' : '.';
@@ -358,34 +441,86 @@ export function composeIntroCard(p: IntroPayload): IntroCardText {
   return { lead: `this is ${p.first_name}${from}.`, qa: `${fragment}: ${p.answer}${punct}` };
 }
 
-export async function getCommunityBroadcasts(communityId: string): Promise<CommunityBroadcast[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: rows, error } = await supabase
+export interface CommunityBroadcastPage {
+  messages: CommunityBroadcast[];
+  hasMore: boolean;
+  olderCursor: { created_at: string; id: string } | null;
+}
+
+/** Exact-source reads let the D09 reader reuse enrichment without scanning another room. */
+export interface CommunityMessageReadOptions {
+  messageIds?: readonly string[];
+  strictEnrichment?: boolean;
+  resolveReplyParents?: boolean;
+  /** Ascending context after a checked source row. The returned olderCursor
+   * remains the raw page-end cursor (therefore the newest row in this mode). */
+  after?: { cursor: { created_at: string; id: string }; sameTime?: 'all' | 'none' };
+  broadcastKind?: 'intro' | 'main';
+}
+
+export async function getCommunityBroadcasts(
+  communityId: string,
+  olderThan?: { created_at: string; id: string },
+  scope?: CommunityOperationScope,
+  options?: CommunityMessageReadOptions,
+): Promise<CommunityBroadcastPage> {
+  const user = await communityOperationUser(scope);
+  assertCommunityScope(scope);
+  const viewerId = user?.id;
+  if (options?.messageIds?.length === 0) return { messages: [], hasMore: false, olderCursor: null };
+  let query = supabase
     .from('community_broadcasts')
-    .select('id, body, created_at, sender_id, kind, payload, image_url, edited_at')
+    .select('id, body, created_at, sender_id, kind, payload, image_url, edited_at, mention_data')
     .eq('community_id', communityId)
-    .order('created_at', { ascending: false })
-    .limit(30);
+    .order('created_at', { ascending: !!options?.after })
+    .order('id', { ascending: !!options?.after })
+    .limit(CHAT_NEWEST_PAGE_SIZE);
+  if (options?.messageIds) query = query.in('id', [...options.messageIds]);
+  if (options?.after) {
+    if (olderThan) throw Error('Choose one history direction.');
+    const { cursor, sameTime } = options.after;
+    if (!/^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(cursor.id) ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)$/.test(cursor.created_at) ||
+      !Number.isFinite(Date.parse(cursor.created_at))) throw Error('This history cursor could not be checked.');
+    if (sameTime === 'all') query = query.gte('created_at', cursor.created_at);
+    else if (sameTime === 'none') query = query.gt('created_at', cursor.created_at);
+    else query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+  }
+  if (options?.broadcastKind === 'intro') query = query.eq('kind', 'intro');
+  if (options?.broadcastKind === 'main') query = query.neq('kind', 'intro');
+
+  if (olderThan) query = query.or(olderChatFilter(olderThan));
+  const { data: rows, error } = await scopedCommunityRequest(scope, () => query);
+  assertCommunityScope(scope);
   if (error) throw error;
   const fetched = rows ?? [];
-  if (fetched.length === 0) return [];
+  const oldestRaw = fetched[fetched.length - 1];
+  const pageMeta = {
+    hasMore: fetched.length === CHAT_NEWEST_PAGE_SIZE,
+    olderCursor: oldestRaw ? { created_at: oldestRaw.created_at, id: oldestRaw.id } : null,
+  };
+  if (fetched.length === 0) return { messages: [], ...pageMeta };
 
   // hide messages from anyone blocked (either direction). System cards with a
   // null sender always stay. This runs for the initial load AND every realtime
   // refetch (the thread screen invalidates this query on insert).
-  const blocked = await getBlockedWith(user?.id, fetched.map((b) => b.sender_id));
+  const blocked = await scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id)));
+  assertCommunityScope(scope);
   const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
-  if (broadcasts.length === 0) return [];
+  if (broadcasts.length === 0) return { messages: [], ...pageMeta };
 
   const ids = broadcasts.map((b) => b.id);
   const senderIds = Array.from(new Set(broadcasts.map((b) => b.sender_id).filter(Boolean))) as string[];
-  const [{ data: reactions }, { data: replies }, { data: profiles }] = await Promise.all([
+  const [{ data: reactions, error: reactionsError }, { data: replies, error: repliesError }, { data: profiles, error: profilesError }] = await scopedCommunityRequest(scope, () => Promise.all([
     supabase.from('community_broadcast_reactions').select('broadcast_id, emoji, user_id').in('broadcast_id', ids),
     supabase.from('community_broadcast_replies').select('broadcast_id').in('broadcast_id', ids),
     senderIds.length > 0
       ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', senderIds)
       : Promise.resolve({ data: [] } as any),
-  ]);
+  ]));
+  assertCommunityScope(scope);
+
+  if (options?.strictEnrichment && (reactionsError || repliesError || profilesError)) throw reactionsError || repliesError || profilesError;
 
   const nameById = new Map<string, string | null>(
     (profiles ?? []).map((p: any) => [p.id as string, (p.first_name_display ?? null) as string | null]),
@@ -402,12 +537,12 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
     const perBroadcast = reactionMap.get(r.broadcast_id) ?? new Map();
     const entry = perBroadcast.get(r.emoji) ?? { count: 0, mine: false };
     entry.count += 1;
-    if (user && r.user_id === user.id) entry.mine = true;
+    if (viewerId && r.user_id === viewerId) entry.mine = true;
     perBroadcast.set(r.emoji, entry);
     reactionMap.set(r.broadcast_id, perBroadcast);
   });
 
-  return broadcasts.map((b) => ({
+  return { messages: broadcasts.map((b) => ({
     ...b,
     sender_name: b.sender_id ? (nameById.get(b.sender_id) ?? null) : null,
     sender_photo: b.sender_id ? (photoById.get(b.sender_id) ?? null) : null,
@@ -415,7 +550,7 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
       ([emoji, e]: [string, { count: number; mine: boolean }]) => ({ emoji, count: e.count, mine: e.mine }),
     ),
     reply_count: replyCounts.get(b.id) ?? 0,
-  }));
+  })), ...pageMeta };
 }
 
 /**
@@ -423,65 +558,115 @@ export async function getCommunityBroadcasts(communityId: string): Promise<Commu
  * kind='message' rides the same stream as broadcasts and intro cards, so
  * ordering, unreads, previews, and realtime all inherit.
  */
-export async function sendCommunityMessage(communityId: string, body: string, imageUrl?: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function sendCommunityMessage(communityId: string, body: string, imageUrl?: string, sendIdOverride?: string, scope?: CommunityOperationScope, mentions?: ChatMentionDocument | null): Promise<void> {
+  const user = await requestWithDeadline(communityOperationUser(scope), 8_000);
   if (!user) throw new Error('Not signed in');
+  const senderId = user.id;
   const trimmed = body.trim();
-  if (!trimmed && !imageUrl) return;
-  const { error } = await supabase.from('community_broadcasts').insert({
-    community_id: communityId,
-    sender_id: user.id,
-    body: trimmed.slice(0, 4000),
-    image_url: imageUrl ?? null,
-    kind: 'message',
-  });
-  if (error) throw error;
+  if (!trimmed && !imageUrl) throw new Error('Write a message before sending.');
+  if (mentions !== undefined && (trimmed.length > 4000 || !validOptionalMentionDocument(body, mentions))) throw Error('Your mentions could not be confirmed. Your message is kept.');
+  const mentionData = mentions ? trimChatMentionDocument(body, mentions) : null;
+  const savedBody = trimmed.slice(0, 4000);
+  const media = !!imageUrl || !!parseCommunityLocation(savedBody);
+  const columns = media ? `id, created_at, body, image_url${mentions !== undefined ? ', mention_data' : ''}` : mentions !== undefined ? 'id, created_at, body, mention_data' : 'id, created_at';
+  const sendId = sendIdOverride ?? Crypto.randomUUID();
+  const checkedReceipt = (result: any) => result.data &&
+    ((media && (result.data.id !== sendId || result.data.body !== savedBody || result.data.image_url !== (imageUrl ?? null))) ||
+      (mentions !== undefined && (result.data.body !== savedBody || !sameChatMentionIdentity(savedBody, mentionData, result.data.mention_data))))
+      ? { data: null, error: Error(media ? 'The saved message differs. Your original is kept.' : 'The saved mention identity differs. Your message is kept.') } : result;
+  const { receipt, failure } = await resolveChatSendReceipt(
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcasts').insert({
+      id: sendId,
+      community_id: communityId,
+      sender_id: senderId,
+      body: savedBody,
+      ...(mentions !== undefined ? { mention_data: mentionData } : {}),
+      image_url: imageUrl ?? null,
+      kind: 'message',
+    }).select(columns).single()), 12_000)),
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcasts')
+      .select(columns)
+      .eq('id', sendId).eq('community_id', communityId).eq('sender_id', senderId).maybeSingle()), 8_000)),
+  );
+  // The receipt helper deliberately absorbs failures to recover lost responses.
+  // A retired scope must still reject even if it found an old successful receipt.
+  assertCommunityScope(scope);
+  if (!receipt) throw failure ?? new Error('Delivery could not be confirmed. Check this chat before trying again.');
 }
 
-export async function editCommunityMessage(messageId: string, body: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export type CommunityMessageEditContext = { communityId: string; original: TopicDraftEdit; mentions: ChatMentionDocument | null };
+
+export async function editCommunityMessage(messageId: string, body: string, scope?: CommunityOperationScope, context?: CommunityMessageEditContext): Promise<void> {
+  const user = await communityOperationUser(scope);
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+  if (context) {
+    const trimmed = body.trim();
+    const original = context.original;
+    if (!trimmed || trimmed.length > 4000 || original.id !== messageId || !context.communityId
+      || !validOptionalMentionDocument(body, context.mentions) || !validOptionalMentionDocument(original.body, original.mentions))
+      throw Error('Your edit could not be confirmed. Your message is kept.');
+    const mentionData = context.mentions ? trimChatMentionDocument(body, context.mentions) : null;
+    const originalMentions = original.mentions ?? null;
+    let query = supabase.from('community_broadcasts')
+      .update({ body: trimmed, mention_data: mentionData, edited_at: new Date().toISOString() })
+      .eq('id', messageId).eq('community_id', context.communityId).eq('sender_id', user.id).eq('kind', 'message')
+      .eq('body', original.body);
+    query = original.edited_at === null ? query.is('edited_at', null) : query.eq('edited_at', original.edited_at);
+    query = originalMentions === null ? query.is('mention_data', null) : query.eq('mention_data', JSON.stringify(originalMentions));
+    const result = await requestWithDeadline(scopedCommunityRequest(scope, () => query.select('id, body, mention_data').maybeSingle()), 12_000);
+    assertCommunityScope(scope);
+    if (result.error) throw result.error;
+    if (!result.data || result.data.id !== messageId || result.data.body !== trimmed
+      || !sameChatMentionIdentity(trimmed, mentionData, result.data.mention_data))
+      throw Error('The original message changed or your edit could not be confirmed. Your draft is kept.');
+    return;
+  }
+  const { error } = await scopedCommunityRequest(scope, () => supabase
     .from('community_broadcasts')
     .update({ body: body.trim().slice(0, 4000), edited_at: new Date().toISOString() })
     .eq('id', messageId)
     .eq('sender_id', user.id)
-    .eq('kind', 'message');
+    .eq('kind', 'message'));
+  assertCommunityScope(scope);
   if (error) throw error;
 }
 
-export async function deleteCommunityMessage(messageId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function deleteCommunityMessage(messageId: string, scope?: CommunityOperationScope): Promise<void> {
+  const user = await communityOperationUser(scope);
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+  const { error } = await scopedCommunityRequest(scope, () => supabase
     .from('community_broadcasts')
     .delete()
     .eq('id', messageId)
     .eq('sender_id', user.id)
-    .eq('kind', 'message');
+    .eq('kind', 'message'));
+  assertCommunityScope(scope);
   if (error) throw error;
 }
 
-export async function toggleBroadcastReaction(broadcastId: string, emoji: string, on: boolean): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function toggleBroadcastReaction(broadcastId: string, emoji: string, on: boolean, scope?: CommunityOperationScope): Promise<void> {
+  const user = await communityOperationUser(scope);
   if (!user) throw new Error('Not signed in');
   if (on) {
-    const { error } = await supabase
+    const { error } = await scopedCommunityRequest(scope, () => supabase
       .from('community_broadcast_reactions')
-      .insert({ broadcast_id: broadcastId, user_id: user.id, emoji });
+      .insert({ broadcast_id: broadcastId, user_id: user.id, emoji }));
+    assertCommunityScope(scope);
     if (error && (error as { code?: string }).code !== '23505') throw error; // already reacted = fine
   } else {
-    const { error } = await supabase
+    const { error } = await scopedCommunityRequest(scope, () => supabase
       .from('community_broadcast_reactions')
       .delete()
       .eq('broadcast_id', broadcastId)
       .eq('user_id', user.id)
-      .eq('emoji', emoji);
+      .eq('emoji', emoji));
+    assertCommunityScope(scope);
     if (error) throw error;
   }
 }
 
 export interface BroadcastReply {
+  mention_data?: ChatMentionDocument | null;
   id: string;
   body: string;
   created_at: string;
@@ -490,29 +675,83 @@ export interface BroadcastReply {
   sender_photo: string | null;
 }
 
-export async function getBroadcastReplies(broadcastId: string): Promise<BroadcastReply[]> {
-  const { data, error } = await supabase
-    .from('community_broadcast_replies')
-    .select('id, body, created_at, sender_id')
-    .eq('broadcast_id', broadcastId)
-    .order('created_at', { ascending: true })
-    .limit(200);
-  if (error) throw error;
-  return attachSenderProfiles(data ?? []);
+export interface BroadcastReplyPage {
+  replies: BroadcastReply[];
+  hasMore: boolean;
+  olderCursor: { created_at: string; id: string } | null;
 }
 
-export async function sendBroadcastReply(broadcastId: string, body: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+export async function getBroadcastReplies(
+  broadcastId: string, scope?: CommunityOperationScope,
+  olderThan?: { created_at: string; id: string },
+): Promise<BroadcastReplyPage> {
+  let query = supabase
     .from('community_broadcast_replies')
-    .insert({ broadcast_id: broadcastId, sender_id: user.id, body: body.trim() });
+    .select('id, body, created_at, sender_id, mention_data')
+    .eq('broadcast_id', broadcastId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(CHAT_NEWEST_PAGE_SIZE);
+  if (olderThan) query = query.or(olderChatFilter(olderThan));
+  const { data, error } = await scopedCommunityRequest(scope, () => query);
   if (error) throw error;
+  const raw = data ?? [];
+  const oldest = raw[raw.length - 1];
+  const replies = await attachSenderProfiles([...raw].reverse(), scope);
+  assertCommunityScope(scope);
+  // Advance with the raw cursor even when every sender on a page is blocked.
+  return { replies, hasMore: raw.length === CHAT_NEWEST_PAGE_SIZE,
+    olderCursor: oldest ? { created_at: oldest.created_at, id: oldest.id } : null };
+}
+
+/** Resolve reply tagging from the readable parent, never from public discovery. */
+export async function getBroadcastReplyMembers(broadcastId: string, scope?: CommunityOperationScope): Promise<CommunityChatMember[]> {
+  const user = await communityOperationUser(scope);
+  if (!user) throw Error('Not signed in');
+  const {data: parent, error} = await scopedCommunityRequest(scope, () => supabase.from('community_broadcasts')
+    .select('id,community_id,sender_id').eq('id',broadcastId).maybeSingle());
+  if (error) throw error;
+  if (!parent) throw Error('The original message is unavailable.');
+  const members = await getCommunityChatMembers(parent.community_id,scope);
+  const blocked = await scopedCommunityRequest(scope, () => getBlockedWith(user.id,[...members.map(member=>member.id),...(parent.sender_id?[parent.sender_id]:[])]));
+  if (parent.sender_id && blocked.has(parent.sender_id)) throw Error('The original message is unavailable.');
+  return members.filter(member=>!blocked.has(member.id));
+}
+
+export async function sendBroadcastReply(broadcastId: string, body: string, scope?: CommunityOperationScope, sendId?: string, mentions?: ChatMentionDocument | null): Promise<void> {
+  const user = await communityOperationUser(scope);
+  if (!user) throw new Error('Not signed in');
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.length > 4000) throw Error('Write a reply of up to 4,000 characters.');
+  if (!validOptionalMentionDocument(body, mentions)) throw Error('Your mentions could not be confirmed. Your reply is kept.');
+  const mentionData = mentions ? trimChatMentionDocument(body, mentions) : null;
+  const payload = { broadcast_id: broadcastId, sender_id: user.id, body: trimmed,
+    ...(sendId ? {id: sendId} : {}), ...(mentions !== undefined ? {mention_data: mentionData} : {}) };
+  // Existing callers keep their original contract until their durable composer is connected.
+  if (!sendId) {
+    const {error} = await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies').insert(payload));
+    if (error) throw error;
+    return;
+  }
+  const columns = 'id,created_at,body,sender_id,broadcast_id' + (mentions !== undefined ? ',mention_data' : '');
+  const checkedReceipt = (result: any) => result.data && (result.data.id !== sendId || result.data.body !== trimmed ||
+    result.data.sender_id !== user.id || result.data.broadcast_id !== broadcastId ||
+    mentions !== undefined && !sameChatMentionIdentity(trimmed, mentionData, result.data.mention_data))
+      ? {data:null,error:Error('Your original reply could not be confirmed. Your draft is kept.')} : result;
+  const {receipt, failure} = await resolveChatSendReceipt(
+    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .insert(payload).select(columns).single())),
+    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .select(columns).eq('id',sendId).eq('broadcast_id',broadcastId).eq('sender_id',user.id).maybeSingle())),
+  );
+  assertCommunityScope(scope);
+  if (!receipt) throw failure ?? Error('Delivery could not be confirmed. Your reply is kept.');
 }
 
 // -- topics (the rooms) ----------------------------------------------------------
 
 export interface TopicMessage {
+  mention_data?: ChatMentionDocument | null;
   id: string;
   body: string;
   created_at: string;
@@ -520,6 +759,10 @@ export interface TopicMessage {
   sender_name: string | null;
   sender_photo: string | null;
   image_url: string | null;
+  location_lat?: number | null;
+  location_lng?: number | null;
+  /** Local-only send status; server rows have no delivery_state column. */
+  delivery_state?: 'sending';
   reply_to_message_id: string | null;
   edited_at: string | null;
   reply_to: TopicReply | null;
@@ -583,6 +826,7 @@ export interface TopicMeta {
    * cron calculation (event_end+48h) instead of the old start-time-only one.
    */
   explore_events: {
+    title: string | null;
     status: string | null;
     host_user_id: string | null;
     event_date: string | null;
@@ -596,7 +840,7 @@ export async function getTopicMeta(topicId: string): Promise<TopicMeta | null> {
   const { data, error } = await supabase
     .from('community_topics')
     .select(
-      'id, name, archived, album_enabled, community_id, explore_event_id, explore_events(status, host_user_id, event_date, start_time, end_time, venue)',
+      'id, name, archived, album_enabled, community_id, explore_event_id, explore_events(title, status, host_user_id, event_date, start_time, end_time, venue)',
     )
     .eq('id', topicId)
     .maybeSingle();
@@ -623,6 +867,15 @@ export function computeEventRoomExpiry(meta: Pick<TopicMeta, 'explore_events'>):
   return new Date(d.getTime() + 48 * 60 * 60 * 1000);
 }
 
+export function isEventRoomClosed(
+  meta: Pick<TopicMeta, 'archived' | 'explore_events'>,
+  nowMs = Date.now(),
+): boolean {
+  if (meta.archived) return true;
+  const expiry = computeEventRoomExpiry(meta);
+  return expiry !== null && nowMs >= expiry.getTime();
+}
+
 /**
  * SC-09/C-24: true during the T-24h save-notice window -- after the room's
  * real expiry minus 24h, before the expiry itself. Once `archived` flips
@@ -637,21 +890,58 @@ export function isInSaveNoticeWindow(meta: Pick<TopicMeta, 'archived' | 'explore
   return now >= expiry.getTime() - 24 * 60 * 60 * 1000 && now < expiry.getTime();
 }
 
-export async function getTopicMessages(topicId: string): Promise<TopicMessage[]> {
-  const { data, error } = await supabase
+export const TOPIC_MESSAGE_PAGE_SIZE = 60;
+export interface TopicMessagePage {
+  messages: TopicMessage[];
+  hasMore: boolean;
+  olderCursor: { created_at: string; id: string } | null;
+}
+
+export async function getTopicMessages(
+  topicId: string,
+  olderThan?: { created_at: string; id: string },
+  scope?: CommunityOperationScope,
+  options?: CommunityMessageReadOptions,
+): Promise<TopicMessagePage> {
+  if (scope) await communityOperationUser(scope);
+  if (options?.messageIds?.length === 0) return { messages: [], hasMore: false, olderCursor: null };
+  let query = supabase
     .from('community_topic_messages')
-    .select('id, body, created_at, sender_id, image_url, reply_to_message_id, edited_at')
+    .select('id, body, created_at, sender_id, image_url, reply_to_message_id, edited_at, location_lat, location_lng, mention_data')
     .eq('topic_id', topicId)
-    .order('created_at', { ascending: true })
-    .limit(300);
+    .order('created_at', { ascending: !!options?.after })
+    .order('id', { ascending: !!options?.after })
+    .limit(TOPIC_MESSAGE_PAGE_SIZE);
+  if (options?.messageIds) query = query.in('id', [...options.messageIds]);
+  if (options?.after) {
+    if (olderThan) throw Error('Choose one history direction.');
+    const { cursor, sameTime } = options.after;
+    if (!/^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(cursor.id) ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)$/.test(cursor.created_at) ||
+      !Number.isFinite(Date.parse(cursor.created_at))) throw Error('This history cursor could not be checked.');
+    if (sameTime === 'all') query = query.gte('created_at', cursor.created_at);
+    else if (sameTime === 'none') query = query.gt('created_at', cursor.created_at);
+    else query = query.or(`created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`);
+  }
+
+  if (olderThan) {
+    query = query.or(olderChatFilter(olderThan));
+  }
+  const { data, error } = await scopedCommunityRequest(scope, () => query);
   if (error) throw error;
-  const enriched = await attachSenderProfiles(data ?? []);
-  if (enriched.length === 0) return [];
+  const raw = data ?? [];
+  const oldestRaw = raw[raw.length - 1];
+  const pageMeta = {
+    hasMore: raw.length === TOPIC_MESSAGE_PAGE_SIZE,
+    olderCursor: oldestRaw ? { created_at: oldestRaw.created_at, id: oldestRaw.id } : null,
+  };
+  const enriched = await attachSenderProfiles([...raw].reverse(), scope, options?.strictEnrichment);
+  if (enriched.length === 0) return { messages: [], ...pageMeta };
   const messageIds = enriched.map((message) => message.id);
-  const { data: reactionRows, error: reactionError } = await supabase
+  const { data: reactionRows, error: reactionError } = await scopedCommunityRequest(scope, () => supabase
     .from('community_topic_message_reactions')
     .select('message_id, user_id, reaction')
-    .in('message_id', messageIds);
+    .in('message_id', messageIds));
   if (reactionError) throw reactionError;
   const reactionsByMessage = new Map<string, TopicMessageReaction[]>();
   (reactionRows ?? []).forEach((row: any) => {
@@ -660,11 +950,26 @@ export async function getTopicMessages(topicId: string): Promise<TopicMessage[]>
     reactionsByMessage.set(row.message_id, current);
   });
   const byId = new Map(enriched.map((message) => [message.id, message]));
-  return enriched.map((message) => {
+  if (options?.resolveReplyParents) {
+    const missingParents = [...new Set(enriched.flatMap(message => message.reply_to_message_id && !byId.has(message.reply_to_message_id) ? [message.reply_to_message_id] : []))];
+    if (missingParents.length) {
+      const { data: parents, error: parentError } = await scopedCommunityRequest(scope, () => supabase
+        .from('community_topic_messages')
+        .select('id, body, created_at, sender_id, image_url, reply_to_message_id, edited_at, location_lat, location_lng, mention_data')
+        .eq('topic_id', topicId)
+        .in('id', missingParents));
+      if (parentError) throw parentError;
+      const visibleParents = await attachSenderProfiles(parents ?? [], scope, options.strictEnrichment);
+      visibleParents.forEach(parent => byId.set(parent.id, parent));
+    }
+  }
+  return { messages: enriched.map((message) => {
     const parent = message.reply_to_message_id ? byId.get(message.reply_to_message_id) : null;
     return {
       ...message,
       image_url: message.image_url ?? null,
+      location_lat: message.location_lat ?? null,
+      location_lng: message.location_lng ?? null,
       reply_to_message_id: message.reply_to_message_id ?? null,
       edited_at: message.edited_at ?? null,
       reply_to: parent
@@ -672,7 +977,26 @@ export async function getTopicMessages(topicId: string): Promise<TopicMessage[]>
         : null,
       reactions: reactionsByMessage.get(message.id) ?? [],
     };
-  });
+  }), ...pageMeta };
+}
+
+/** The first message remains available as a welcome candidate after the main
+ * chat switches to a newest-first page. No message body is exposed beyond the
+ * topic's existing membership RLS. */
+export async function getTopicFirstMessage(topicId: string): Promise<{ id: string; body: string; sender_id: string; hidden: boolean } | null> {
+  const { data, error } = await supabase
+    .from('community_topic_messages')
+    .select('id, body, sender_id')
+    .eq('topic_id', topicId)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const { data: { user } } = await supabase.auth.getUser();
+  const blocked = await getBlockedWith(user?.id, [data.sender_id]);
+  return { ...data, body: blocked.has(data.sender_id) ? '' : data.body, hidden: blocked.has(data.sender_id) };
 }
 
 export async function sendTopicMessage(topicId: string, body: string): Promise<void> {
@@ -707,14 +1031,17 @@ export async function getTopicChatMembers(topicId: string): Promise<CommunityCha
   return profilesForUserIds((data ?? []).map((row: any) => row.user_id));
 }
 
-export async function getCommunityChatMembers(communityId: string): Promise<CommunityChatMember[]> {
-  const { data, error } = await supabase
+export async function getCommunityChatMembers(communityId: string, scope?: CommunityOperationScope): Promise<CommunityChatMember[]> {
+  const { data, error } = await scopedCommunityRequest(scope, () => supabase
     .from('community_members')
     .select('user_id')
     .eq('community_id', communityId)
-    .eq('status', 'active');
+    .eq('status', 'active'));
+  assertCommunityScope(scope);
   if (error) throw error;
-  return profilesForUserIds((data ?? []).map((row: any) => row.user_id));
+  const members = await scopedCommunityRequest(scope, () => profilesForUserIds((data ?? []).map((row: any) => row.user_id)));
+  assertCommunityScope(scope);
+  return members;
 }
 
 /**
@@ -731,24 +1058,29 @@ export async function deleteTopicMessage(messageId: string): Promise<void> {
 }
 
 /** Joining a topic = subscribing to it (doc 09: push ON once joined). */
-export async function joinTopic(topicId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function joinTopic(topicId: string, scope?: CommunityOperationScope): Promise<void> {
+  const user = await communityOperationUser(scope);
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+  const { error } = await scopedCommunityRequest(scope, () => supabase
     .from('community_topic_members')
-    .upsert({ topic_id: topicId, user_id: user.id }, { onConflict: 'topic_id,user_id' });
+    .upsert({ topic_id: topicId, user_id: user.id }, { onConflict: 'topic_id,user_id' }));
   if (error) throw error;
 }
 
 export async function setTopicNotifications(topicId: string, on: boolean): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('community_topic_members')
     .update({ notifications_on: on })
     .eq('topic_id', topicId)
-    .eq('user_id', user.id);
+    .eq('user_id', user.id)
+    .select('topic_id, user_id, notifications_on')
+    .single();
   if (error) throw error;
+  if (data?.topic_id !== topicId || data?.user_id !== user.id || data?.notifications_on !== on) {
+    throw new Error('Could not confirm this chat notification setting.');
+  }
 }
 
 /**
@@ -799,16 +1131,20 @@ export async function setBroadcastMute(communityId: string, muted: boolean): Pro
   if (error) throw error;
 }
 
-export async function getMyBroadcastMute(communityId: string): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-  const { data } = await supabase
+export async function getMyBroadcastMute(communityId: string, expectedUserId?: string): Promise<boolean> {
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!user || expectedUserId && user.id !== expectedUserId) throw new Error('Sign in again to check this setting.');
+  const { data, error } = await supabase
     .from('community_members')
     .select('broadcasts_muted')
     .eq('community_id', communityId)
     .eq('user_id', user.id)
+    .eq('status', 'active')
     .maybeSingle();
-  return !!data?.broadcasts_muted;
+  if (error) throw error;
+  if (typeof data?.broadcasts_muted !== 'boolean') throw new Error('Could not check this chat notification setting.');
+  return data.broadcasts_muted;
 }
 
 // -- event chat say-hi gate (Liz 7-07: nobody creeps silently in an event room) ----
@@ -842,10 +1178,10 @@ export interface PinnedCommunityEvent {
  * The soonest upcoming Live community event with pin_to_chat on, or null.
  * Reads through the existing explore_events public-read policy.
  */
-export async function getPinnedCommunityEvent(communityId: string): Promise<PinnedCommunityEvent | null> {
+export async function getPinnedCommunityEvent(communityId: string, scope?: CommunityOperationScope): Promise<PinnedCommunityEvent | null> {
   const { y, m, d } = getTodayInLA();
   const todayStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  const { data, error } = await supabase
+  const { data, error } = await scopedCommunityRequest(scope, () => supabase
     .from('explore_events')
     .select('id, title, event_date, start_time, venue, image_url')
     .eq('community_id', communityId)
@@ -854,7 +1190,8 @@ export async function getPinnedCommunityEvent(communityId: string): Promise<Pinn
     .gte('event_date', todayStr)
     .order('event_date', { ascending: true })
     .order('start_time', { ascending: true, nullsFirst: false })
-    .limit(1);
+    .limit(1));
+  assertCommunityScope(scope);
   if (error) throw error;
   return (data?.[0] as PinnedCommunityEvent | undefined) ?? null;
 }
@@ -863,20 +1200,26 @@ export async function getPinnedCommunityEvent(communityId: string): Promise<Pinn
 
 async function attachSenderProfiles<T extends { sender_id: string }>(
   rows: T[],
+  scope?: CommunityOperationScope,
+  strictEnrichment = false,
 ): Promise<(T & { sender_name: string | null; sender_photo: string | null })[]> {
+  assertCommunityScope(scope);
   if (rows.length === 0) return [];
   // drop messages from anyone blocked (either direction) before doing anything
   // else. Covers topic messages and broadcast replies (both flow through here).
-  const { data: { user } } = await supabase.auth.getUser();
-  const blocked = await getBlockedWith(user?.id, rows.map((r) => r.sender_id));
+  const user = await communityOperationUser(scope);
+  const blocked = await scopedCommunityRequest(scope, () => getBlockedWith(user?.id, rows.map((r) => r.sender_id)));
+  assertCommunityScope(scope);
   const shown = blocked.size > 0 ? rows.filter((r) => !blocked.has(r.sender_id)) : rows;
   if (shown.length === 0) return [];
   rows = shown;
   const ids = Array.from(new Set(rows.map((r) => r.sender_id)));
-  const { data: profiles } = await supabase
+  const { data: profiles, error: profilesError } = await scopedCommunityRequest(scope, () => supabase
     .from('profiles_public')
     .select('id, first_name_display, profile_photo_url')
-    .in('id', ids);
+    .in('id', ids));
+  assertCommunityScope(scope);
+  if (strictEnrichment && profilesError) throw profilesError;
   const byId = new Map((profiles ?? []).map((p: any) => [p.id, p]));
   return rows.map((r) => ({
     ...r,

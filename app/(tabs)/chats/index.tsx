@@ -8,12 +8,14 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { ChevronDown, ChevronRight } from 'lucide-react-native';
+import { CreatorActionFill } from '../../../components/creator/CreatorActionFill';
+import { ChevronDown, ChevronRight, MessageCircle } from 'lucide-react-native';
 
 const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useQueryClient } from '@tanstack/react-query';
@@ -26,20 +28,29 @@ import {
   COMMUNITIES_ENABLED,
   GROUPS_ENABLED,
   YOURS_PAGE_ENABLED,
+  COMMUNITY_CHAT_GROUPING_ENABLED,
+  CREATOR_PAGES_ENABLED,
 } from '../../../constants/FeatureFlags';
 import { COPY } from '../../../components/yours/state/constants';
 import { hapticSelection } from '../../../lib/haptics';
-import { useAuthUserId } from '../../../components/yours/state/useAuthUserId';
-import { useLeaveCircle } from '../../../hooks/useLeaveCircle';
+import { isObsoleteCircleLeave, useLeaveCircle } from '../../../hooks/useLeaveCircle';
+import { useCommunityChatPreference } from '../../../hooks/useCommunityChatPreference';
+import { useObservedUser } from '../../../hooks/useObservedUser';
 import { BrandedAlert } from '../../../components/BrandedAlert';
-import { useQuery } from '@tanstack/react-query';
-import { getCommunityChatRows, type CommunityChatRowData } from '../../../lib/communityChat';
+import { type CommunityChatRowData } from '../../../lib/communityChat';
+import { useCommunityChatRows } from '../../../hooks/useCommunityChatRows';
 import { CommunityChatRow } from '../../../components/chats/CommunityChatRow';
+import { CommunityChatHub } from '../../../components/chats/CommunityChatHub';
+import { projectCommunityChatInbox } from '../../../lib/communityChatInbox';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
 import CircleCover from '../../../components/yours/circles/CircleCover';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
+import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
+import { ChatInboxRow } from '../../../components/chats/ChatInboxRow';
+import { ChatInboxHeading, ChatInboxFilters } from '../../../components/chats/ChatInboxHeading';
+import { getPlanChatTiming } from '../../../lib/planChatExpiry';
 
 // Chats sections (spec section 5). Only shown when GROUPS_ENABLED; otherwise the
 // list behaves exactly as it ships today (events only, no segmented control).
@@ -121,13 +132,15 @@ function chatHref(chat: ChatPreview): string {
     : `/(tabs)/chats/${chat.conversationId}`;
 }
 
-const ChatSeparator = () => <View style={styles.separator} />;
+const ChatSeparator = () => <View style={[styles.separator, COMMUNITY_CHAT_GROUPING_ENABLED && revised.separator]} />;
 
 const ChatRow = React.memo(function ChatRow({
   chat,
   onPress,
   onLongPress,
+  conversationFonts,
 }: {
+  conversationFonts?: AfterglowFontFamilies;
   chat: ChatPreview;
   onPress: () => void;
   // Circle rows only (doc 120): long-press opens the delete-chat /
@@ -135,6 +148,20 @@ const ChatRow = React.memo(function ChatRow({
   onLongPress?: () => void;
 }) {
   const hasUnread = chat.unread_count > 0;
+  if (conversationFonts) {
+    const hours = chat.kind === 'event' && !chat.is_past
+      ? getPlanChatTiming(chat.start_time, chat.end_time).remainingHours : null;
+    return <ChatInboxRow
+      identity={`${chat.kind}:${chat.conversationId}`} title={chat.title}
+      preview={chat.last_message ?? 'Be the first to say hello.'}
+      timestamp={chat.last_message_at ? formatTime(chat.last_message_at) : null}
+      image={chat.image_url} person={chat.is_dm} unread={chat.unread_count}
+      fonts={conversationFonts} onPress={onPress} onLongPress={onLongPress}
+      metadata={chat.kind === 'event' ? formatEventDate(chat.start_time) : null}
+      lifecycle={hours !== null && hours > 0 ? `Chat closes in ${hours} ${hours === 1 ? 'hour' : 'hours'}` : null}
+      past={chat.is_past}
+    />;
+  }
 
   return (
     <TouchableOpacity
@@ -194,11 +221,11 @@ const ChatRow = React.memo(function ChatRow({
               <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
             </View>
             {!chat.is_past && new Date(chat.start_time) < new Date() && (() => {
-              const hl = Math.round(48 - ((Date.now() - new Date(chat.start_time).getTime()) / (1000 * 60 * 60)));
-              if (hl <= 0) return null;
+              const hl = getPlanChatTiming(chat.start_time, chat.end_time).remainingHours;
+              if (hl === null || hl <= 0) return null;
               return (
                 <Text style={styles.countdownText}>
-                  {`chat stays active for ${hl} more hours`}
+                  {`chat stays active for ${hl} more ${hl === 1 ? 'hour' : 'hours'}`}
                 </Text>
               );
             })()}
@@ -216,30 +243,64 @@ const ChatRow = React.memo(function ChatRow({
 });
 
 export default function ChatsScreen() {
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const conversationFonts = COMMUNITY_CHAT_GROUPING_ENABLED ? fonts : undefined;
   const router = useRouter();
-  const { data: authUserId } = useAuthUserId();
-  const { chats, loading, refetch, removeChat } = useChatList(authUserId);
+  // One bounded, event-aware identity owns both reads and scoped actions.
+  const leaveViewer = useObservedUser();
+  const authUserId = leaveViewer.viewerId;
+  const { chats, loading: chatLoading, loadError: chatLoadError, refetch, removeChat } = useChatList(authUserId);
+  const loading = chatLoading && !leaveViewer.error;
+  const loadError = chatLoadError || !!leaveViewer.error;
   const [refreshing, setRefreshing] = React.useState(false);
   // Delete chat / leave circle from the list (doc 120, CHAT_DELETE_ENABLED).
-  // pendingLeave drives the confirm sheet; leaveError the failure alert.
-  const leaveCircle = useLeaveCircle(authUserId);
-  const [pendingLeave, setPendingLeave] = React.useState<ChatPreview | null>(null);
-  const [leaveError, setLeaveError] = React.useState<string | null>(null);
+  // Cached rows and destructive actions must belong to this account.
+  const leaveReady = !!leaveViewer.viewerId && leaveViewer.viewerId === authUserId && !leaveViewer.isLoading && !leaveViewer.error;
+  const leaveScope = useMemo(() => ({}), [leaveViewer.viewerId, leaveViewer.epoch, authUserId, leaveReady]);
+  const activeLeaveScope = React.useRef<typeof leaveScope | null>(null);
+  type LeaveConfirmation = { scope: typeof leaveScope; chat: ChatPreview };
+  const [leaveConfirmation, setLeaveConfirmation] = React.useState<LeaveConfirmation | null>(null);
+  const confirmationRef = React.useRef<LeaveConfirmation | null>(null);
+  const leaveAttempt = React.useRef<LeaveConfirmation | null>(null);
+  const [leaveFailure, setLeaveFailure] = React.useState<{ scope: typeof leaveScope; message: string } | null>(null);
+  const isCurrentLeave = useCallback(() => activeLeaveScope.current === leaveScope && leaveReady && leaveViewer.isCurrent(), [leaveScope, leaveReady, leaveViewer.isCurrent]);
+  React.useLayoutEffect(() => {
+    activeLeaveScope.current = leaveScope;
+    confirmationRef.current = null;
+    leaveAttempt.current = null;
+    setLeaveConfirmation(null);
+    setLeaveFailure(null);
+    return () => { if (activeLeaveScope.current === leaveScope) activeLeaveScope.current = null; };
+  }, [leaveScope]);
+  const leaveOperationScope = useMemo(() => leaveViewer.viewerId ? { userId: leaveViewer.viewerId, isCurrent: isCurrentLeave } : null, [leaveViewer.viewerId, isCurrentLeave]);
+  const leaveCircle = useLeaveCircle(leaveViewer.viewerId, leaveOperationScope);
+  const pendingLeave = leaveConfirmation?.scope === leaveScope && isCurrentLeave() ? leaveConfirmation.chat : null;
+  const leaveError = leaveFailure?.scope === leaveScope && isCurrentLeave() ? leaveFailure.message : null;
   const [pastExpanded, setPastExpanded] = React.useState(false);
   // Off prod (GROUPS_ENABLED false) this stays 'all' and the segmented control
   // is never rendered, so the list is identical to today.
   const [section, setSection] = React.useState<ChatSection>('all');
+  const [communityId, setCommunityId] = React.useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
   // Communities section (doc 09): one card per joined community, above the
   // plan chats. Query disabled when the flag is off, so today's screen is
   // byte-identical for live users.
-  const { data: communityRows = [] } = useQuery({
-    queryKey: ['community-chat-rows'],
-    queryFn: getCommunityChatRows,
-    enabled: COMMUNITIES_ENABLED,
-  });
+  const { data: communityRows = [], viewerId: communityViewerId, isLoading: communityLoading, error: communityError, refetch: refreshCommunityRows } = useCommunityChatRows(COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED && CREATOR_PAGES_ENABLED);
+  const communityInbox = useMemo(() => projectCommunityChatInbox(communityRows), [communityRows]);
+  const selectedCommunity = communityInbox.communities.find(group => group.row.communityId === communityId);
+  const [notificationsFocused, setNotificationsFocused] = React.useState(false);
+  useFocusEffect(useCallback(() => { setNotificationsFocused(true); return () => setNotificationsFocused(false); }, []));
+  const hubNotifications = useCommunityChatPreference(communityId ?? '', leaveViewer,
+    COMMUNITY_CHAT_GROUPING_ENABLED && CREATOR_PAGES_ENABLED && notificationsFocused && !!selectedCommunity && communityViewerId === leaveViewer.viewerId);
+
+  React.useEffect(() => { setCommunityId(null); }, [communityViewerId]);
+  useFocusEffect(useCallback(() => {
+    if (!COMMUNITY_CHAT_GROUPING_ENABLED || !communityId) return;
+    const back = BackHandler.addEventListener('hardwareBackPress', () => { setCommunityId(null); return true; });
+    return () => back.remove();
+  }, [communityId]));
 
   // Throttle the focus-driven chat-list refetch. It runs ~5 parallel
   // Supabase queries; firing it on *every* tab focus (the prior behavior)
@@ -297,33 +358,62 @@ export default function ChatsScreen() {
     setRefreshing(true);
     // silent: the RefreshControl spinner is the loading indicator here; the
     // loud form would blank the list to the skeleton under the user's pull
-    try { await refetch(true); } finally { setRefreshing(false); }
-  }, [refetch]);
+    try {
+      if (leaveViewer.error || leaveViewer.viewerId === undefined) {
+        await leaveViewer.retry();
+        // A newly resolved identity starts its own list read. Never refetch
+        // through this callback's old/unknown account after the retry.
+        if (!leaveViewer.viewerId || !leaveViewer.isCurrent()) return;
+      }
+      await Promise.allSettled([refetch(true), ...(COMMUNITIES_ENABLED && communityViewerId ? [refreshCommunityRows()] : [])]);
+    } finally { setRefreshing(false); }
+  }, [refetch, refreshCommunityRows, communityViewerId, leaveViewer.error, leaveViewer.viewerId, leaveViewer.retry, leaveViewer.isCurrent]);
 
-  // Confirmed delete/leave: remove the row optimistically, then call the
-  // shared leave_circle mutation (same code path as circle settings). A
-  // 'not_member' result comes back as success data, so an already-gone row
-  // just stays removed. On a real error, restore the list and say so.
-  const confirmLeave = useCallback(() => {
-    const chat = pendingLeave;
-    if (!chat || leaveCircle.isPending) return;
-    removeChat(chat.conversationId);
-    leaveCircle.mutate(chat.conversationId, {
-      onError: () => {
-        setLeaveError(chat.is_dm ? COPY.dmDeleteError : COPY.circleLeaveError);
-        refetch(true);
-      },
+  // Keep the row until this account's request confirms the membership ended.
+  // The ref blocks repeated taps before the mutation's pending render arrives.
+  const confirmLeave = useCallback(async () => {
+    const confirmation = leaveConfirmation;
+    if (!confirmation || confirmationRef.current !== confirmation || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
+    confirmationRef.current = null;
+    leaveAttempt.current = confirmation;
+    setLeaveConfirmation(null);
+    setLeaveFailure(null);
+    const current = () => isCurrentLeave() && leaveAttempt.current === confirmation;
+    try {
+      const result = await leaveCircle.mutateAsync(confirmation.chat.conversationId);
+      if (!current()) return;
+      if (result !== 'left' && result !== 'not_member') throw new Error('Could not confirm the leave.');
+      removeChat(confirmation.chat.conversationId);
+    } catch (error) {
+      if (!current() || isObsoleteCircleLeave(error)) return;
+      setLeaveFailure({ scope: leaveScope, message: confirmation.chat.is_dm ? COPY.dmDeleteError : COPY.circleLeaveError });
+    } finally {
+      if (leaveAttempt.current === confirmation) leaveAttempt.current = null;
+    }
+  }, [leaveConfirmation, isCurrentLeave, leaveCircle, removeChat, leaveScope]);
+
+  const closeLeaveConfirmation = useCallback(() => {
+    const confirmation = leaveConfirmation;
+    if (!confirmation || confirmationRef.current !== confirmation || !isCurrentLeave()) return;
+    setLeaveConfirmation(null);
+    // Alert dismissal may precede its button action in the same event. Retire
+    // the saved action after that event, so later callbacks cannot reuse it.
+    void Promise.resolve().then(() => {
+      if (confirmationRef.current === confirmation) confirmationRef.current = null;
     });
-  }, [pendingLeave, leaveCircle, removeChat, refetch]);
+  }, [leaveConfirmation, isCurrentLeave]);
 
   // Long-press affordance on circle rows only (flag-gated): DMs read as
   // "delete chat", named circles as "leave circle" (doc 120 N1/N2). Plan
   // rows never get one (N3: no delete that quietly exits a plan).
   const handleRowLongPress = useCallback((chat: ChatPreview) => {
-    if (!CHAT_DELETE_ENABLED || chat.kind !== 'circle') return;
+    if (!CHAT_DELETE_ENABLED || chat.kind !== 'circle' || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
     hapticSelection();
-    setPendingLeave(chat);
-  }, []);
+    const confirmation = { scope: leaveScope, chat };
+    confirmationRef.current = confirmation;
+    setLeaveConfirmation(confirmation);
+    setLeaveFailure(null);
+  }, [isCurrentLeave, leaveCircle.isPending, leaveScope]);
 
   // Filter by section first (plans = event chats, circles = circle chats),
   // then split active vs past within the section.
@@ -342,43 +432,81 @@ export default function ChatsScreen() {
   // rows -> exactly the shipped list, untouched order.
   type ListItem =
     | { t: 'chat'; chat: ChatPreview }
-    | { t: 'community'; row: CommunityChatRowData };
-  const listItems = useMemo<ListItem[]>(() => {
-    const chatItems: ListItem[] = activeChats.map((c) => ({ t: 'chat' as const, chat: c }));
-    const communityItems: ListItem[] =
-      COMMUNITIES_ENABLED && (section === 'all' || section === 'communities')
-        ? communityRows.map((r) => ({ t: 'community' as const, row: r }))
-        : [];
+    | { t: 'community'; row: CommunityChatRowData }
+    | { t: 'past-header'; count: number };
+  const listItems = useMemo<Exclude<ListItem, { t: 'past-header' }>[]>(() => {
+    const chatItems: Exclude<ListItem, { t: 'past-header' }>[] = activeChats.map((c) => ({ t: 'chat' as const, chat: c }));
+    const visibleCommunityRows = COMMUNITY_CHAT_GROUPING_ENABLED
+      ? [
+          ...((section === 'all' || section === 'communities') ? [
+            ...communityInbox.communities.map(group => group.row), ...communityInbox.unclassifiedRooms,
+          ] : []),
+          ...((section === 'all' || section === 'plans') ? communityInbox.eventRooms : []),
+        ]
+      : (section === 'all' || section === 'communities') ? communityRows : [];
+    const communityItems: Exclude<ListItem, { t: 'past-header' }>[] = COMMUNITIES_ENABLED
+      ? visibleCommunityRows.map(r => ({ t: 'community' as const, row: r })) : [];
     if (communityItems.length === 0) return chatItems;
     return [...chatItems, ...communityItems].sort((a, b) => {
       const ka = a.t === 'chat' ? a.chat.last_message_at ?? '' : a.row.lastAt ?? '';
       const kb = b.t === 'chat' ? b.chat.last_message_at ?? '' : b.row.lastAt ?? '';
       return kb.localeCompare(ka);
     });
-  }, [activeChats, communityRows, section]);
+  }, [activeChats, communityRows, communityInbox, section]);
   // Circle chats are persistent (never is_past), so pastChats is always empty in
   // the Circles section and its "Past Plans" footer never renders there.
   const pastChats = useMemo(() => sectionChats.filter(c => c.is_past), [sectionChats]);
+  // Past history belongs to the same virtualized list. Rendering every old
+  // conversation inside a footer mounts all its photos and rows at once.
+  const visibleItems = useMemo<ListItem[]>(() => [
+    ...listItems,
+    ...(pastChats.length ? [
+      { t: 'past-header' as const, count: pastChats.length },
+      ...(pastExpanded ? pastChats.map(chat => ({ t: 'chat' as const, chat })) : []),
+    ] : []),
+  ], [listItems, pastChats, pastExpanded]);
 
   const renderListItem = useCallback(({ item }: { item: ListItem }) => {
+    if (item.t === 'past-header') {
+      return (
+        <TouchableOpacity style={styles.pastHeader} accessibilityRole="button"
+          accessibilityLabel={`Past Plans (${item.count})`}
+          accessibilityState={{ expanded: pastExpanded }}
+          onPress={() => setPastExpanded(previous => !previous)} activeOpacity={0.7}>
+          <View style={styles.pastHeaderLeft}>
+            {pastExpanded
+              ? <ChevronDown size={16} color={conversationFonts ? AfterglowColors.muted : Colors.tertiary} />
+              : <ChevronRight size={16} color={conversationFonts ? AfterglowColors.muted : Colors.tertiary} />}
+            <Text style={[styles.pastLabel, conversationFonts && { ...AfterglowType.body, fontFamily: conversationFonts.medium, color: AfterglowColors.muted }]}>Past Plans ({item.count})</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
     if (item.t === 'community') {
       const r = item.row;
       return (
         <CommunityChatRow
           row={r}
-          onPress={() =>
+          conversationFonts={conversationFonts}
+          showCommunityContext
+          onPress={() => {
+            if (COMMUNITY_CHAT_GROUPING_ENABLED && r.kind === 'community') {
+              setCommunityId(r.communityId);
+              return;
+            }
             router.push(
               (r.kind === 'community'
                 ? `/community-thread/${r.targetId}`
                 : `/community-topic/${r.targetId}`) as any,
-            )
-          }
+            );
+          }}
         />
       );
     }
     return (
       <ChatRow
         chat={item.chat}
+        conversationFonts={conversationFonts}
         onPress={() => router.push(chatHref(item.chat) as any)}
         onLongPress={
           CHAT_DELETE_ENABLED && item.chat.kind === 'circle'
@@ -388,33 +516,98 @@ export default function ChatsScreen() {
       />
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, handleRowLongPress]);
+  }, [router, handleRowLongPress, conversationFonts, pastExpanded]);
 
-  if (loading) {
+  if (COMMUNITY_CHAT_GROUPING_ENABLED && communityId) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
+      <SafeAreaView style={[styles.container, conversationFonts && revised.container]} edges={['top']}>
+        {selectedCommunity && !communityError && communityViewerId ? (
+          <CommunityChatHub
+            group={selectedCommunity}
+            profileAction={<ProfileButton compact />}
+            notifications={CREATOR_PAGES_ENABLED ? hubNotifications : undefined}
+            onBack={() => setCommunityId(null)}
+            onViewCommunity={() => router.push(`/community/${communityId}` as any)}
+            onBrowseGroups={CREATOR_PAGES_ENABLED ? () => router.push(`/community-rooms/${communityId}` as any) : undefined}
+            onOpenRoom={r => router.push((r.kind === 'community' ? `/community-thread/${r.targetId}` : `/community-topic/${r.targetId}`) as any)}
+            refreshing={refreshing}
+            onRefresh={() => { void handleRefresh(); void hubNotifications.refresh(); }}
+          />
+        ) : (
+          <View style={styles.emptyState}>
+            {communityLoading ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading community chats" /> : (
+              <>
+                <Text style={styles.emptyTitle}>{communityError ? 'Chats couldn’t load' : 'Community chats unavailable'}</Text>
+                <Text style={styles.emptySubtitle}>{communityError ? 'Check your connection and try again.' : 'Your access may have changed. Return to Chats to see your conversations.'}</Text>
+                {!!communityError && <TouchableOpacity style={styles.noActiveButton} onPress={handleRefresh} accessibilityRole="button"><Text style={styles.noActiveButtonText}>Try again</Text></TouchableOpacity>}
+              </>
+            )}
+            <TouchableOpacity style={styles.noActiveButton} onPress={() => setCommunityId(null)} accessibilityRole="button"><Text style={styles.noActiveButtonText}>Back to Chats</Text></TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // The independent community query may finish before Plans/Circles. Only
+  // confirmed rows for this account can release the initial inbox skeleton.
+  const hasReadyCommunityRows = COMMUNITIES_ENABLED && communityRows.length > 0
+    && !!leaveViewer.viewerId && communityViewerId === leaveViewer.viewerId
+    && !leaveViewer.isLoading && !leaveViewer.error && !communityError;
+  if (loading && !hasReadyCommunityRows) {
+    return (
+      <SafeAreaView style={[styles.container, conversationFonts && revised.container]} edges={['top']}>
+        {conversationFonts ? <ChatInboxHeading fonts={conversationFonts}><ProfileButton /></ChatInboxHeading> : <View style={styles.header}>
           <Text style={styles.headerTitle}>Chats</Text>
           <ProfileButton />
-        </View>
+        </View>}
         <SkeletonChatList />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, conversationFonts && revised.container]} edges={['top']}>
+      {conversationFonts ? <ChatInboxHeading fonts={conversationFonts}><ProfileButton /></ChatInboxHeading> : <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
         <ProfileButton />
-      </View>
+      </View>}
 
       {GROUPS_ENABLED && (chats.length > 0 || communityRows.length > 0) && (
-        <ChatSegments value={section} onChange={setSection} />
+        <>{conversationFonts ? <ChatInboxFilters fonts={conversationFonts} value={section} onChange={setSection} choices={CHAT_SECTIONS} /> : <ChatSegments value={section} onChange={setSection} />}</>
+      )}
+
+      {loadError && section !== 'communities' && (
+        chats.length ? <View style={styles.communityStatus}>
+          <Text style={styles.communityStatusText} accessibilityRole="alert">Some chats may be out of date. Check your connection and try again.</Text>
+          <TouchableOpacity style={styles.communityRetry} onPress={handleRefresh} disabled={refreshing} accessibilityRole="button" accessibilityLabel="Retry loading chats">
+            <Text style={styles.communityRetryText}>{refreshing ? 'Trying…' : 'Try again'}</Text>
+          </TouchableOpacity>
+        </View> : <View style={styles.loadErrorCard}>
+          <View style={styles.loadErrorIcon}><MessageCircle size={26} color={Colors.terracotta} accessibilityElementsHidden importantForAccessibility="no" /></View>
+          <Text style={styles.loadErrorTitle} accessibilityRole="alert">Your chats couldn’t load</Text>
+          <Text style={styles.loadErrorBody}>Check your connection and try again.</Text>
+          <TouchableOpacity style={styles.loadErrorButton} onPress={handleRefresh} disabled={refreshing} accessibilityRole="button" accessibilityLabel="Retry loading chats" accessibilityState={{busy:refreshing,disabled:refreshing}}>
+            <CreatorActionFill /><Text style={styles.loadErrorButtonText}>{refreshing ? 'Trying…' : 'Try again'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {COMMUNITIES_ENABLED && section !== 'circles' && (communityLoading || communityError) && (
+        <View style={styles.communityStatus}>
+          {communityLoading ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading community chats" /> : (
+            <>
+              <Text style={styles.communityStatusText} accessibilityRole="alert">Community chats couldn’t load. Check your connection and try again.</Text>
+              <TouchableOpacity style={styles.communityRetry} onPress={() => { void refreshCommunityRows(); }} accessibilityRole="button">
+                <Text style={styles.communityRetryText}>Try again</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       )}
 
       {chats.length === 0 && communityRows.length === 0 ? (
-        <View style={styles.emptyState}>
+        loadError || (COMMUNITIES_ENABLED && (communityLoading || communityError)) ? null : <View style={styles.emptyState}>
           <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
           <Text style={styles.emptySubtitle}>
@@ -430,8 +623,8 @@ export default function ChatsScreen() {
       ) : (
         <FlatList
           decelerationRate="normal"
-          data={listItems}
-          keyExtractor={(item) => (item.t === 'chat' ? item.chat.conversationId : item.row.key)}
+          data={visibleItems}
+          keyExtractor={(item) => item.t === 'past-header' ? 'past-plans-header' : item.t === 'chat' ? `${item.chat.kind}:${item.chat.conversationId}` : item.row.key}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />
           }
@@ -446,8 +639,9 @@ export default function ChatsScreen() {
           }
           renderItem={renderListItem}
           ListEmptyComponent={
-            section === 'communities' ? (
-              communityRows.length > 0 ? null : (
+            loading && section !== 'communities' ? (
+              <View style={styles.communityStatus}><ActivityIndicator color={Colors.terracotta} accessibilityLabel={section === 'circles' ? 'Loading circle chats' : 'Loading plan chats'} /></View>
+            ) : (loadError && section !== 'communities') || (COMMUNITIES_ENABLED && section !== 'circles' && (communityLoading || communityError)) ? null : section === 'communities' ? (
                 <View style={styles.noActiveState}>
                   <Text style={styles.noActiveText}>
                     Join a community and its chat lives here.
@@ -459,7 +653,6 @@ export default function ChatsScreen() {
                     <Text style={styles.noActiveButtonText}>Browse the Scene</Text>
                   </TouchableOpacity>
                 </View>
-              )
             ) : section === 'circles' ? (
               <View style={styles.noActiveState}>
                 <Text style={styles.noActiveText}>
@@ -490,31 +683,7 @@ export default function ChatsScreen() {
               </View>
             )
           }
-          ListFooterComponent={pastChats.length > 0 ? (
-            <View>
-              <TouchableOpacity
-                style={styles.pastHeader}
-                onPress={() => setPastExpanded(prev => !prev)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.pastHeaderLeft}>
-                  {pastExpanded
-                    ? <ChevronDown size={16} color="#A09385" />
-                    : <ChevronRight size={16} color="#A09385" />}
-                  <Text style={styles.pastLabel}>Past Plans ({pastChats.length})</Text>
-                </View>
-              </TouchableOpacity>
-              {pastExpanded && pastChats.map((chat, i) => (
-                <React.Fragment key={chat.conversationId}>
-                  {i > 0 && <View style={styles.separator} />}
-                  <ChatRow
-                    chat={chat}
-                    onPress={() => router.push(chatHref(chat) as any)}
-                  />
-                </React.Fragment>
-              ))}
-            </View>
-          ) : null}
+
         />
       )}
 
@@ -533,6 +702,11 @@ export default function ChatsScreen() {
           {
             text: pendingLeave?.is_dm ? COPY.dmDeleteKeep : COPY.circleLeaveStay,
             style: 'cancel',
+            onPress: () => {
+              if (confirmationRef.current !== leaveConfirmation || !isCurrentLeave()) return;
+              confirmationRef.current = null;
+              setLeaveConfirmation(null);
+            },
           },
           {
             text: pendingLeave?.is_dm ? COPY.dmDeleteGo : COPY.circleLeaveGo,
@@ -540,18 +714,33 @@ export default function ChatsScreen() {
             onPress: confirmLeave,
           },
         ]}
-        onClose={() => setPendingLeave(null)}
+        onClose={closeLeaveConfirmation}
       />
       <BrandedAlert
         visible={leaveError != null}
         title={leaveError ?? ''}
-        onClose={() => setLeaveError(null)}
+        onClose={() => { if (isCurrentLeave()) setLeaveFailure(previous => previous === leaveFailure ? null : previous); }}
       />
     </SafeAreaView>
   );
 }
 
+const revised = StyleSheet.create({
+  container: { backgroundColor: AfterglowColors.paper },
+  separator: { backgroundColor: AfterglowColors.subtleLine },
+});
+
 const styles = StyleSheet.create({
+  loadErrorCard: { marginHorizontal:20, marginTop:24, padding:24, borderRadius:24, backgroundColor:Colors.cardBg, borderWidth:1, borderColor:Colors.border, alignItems:'flex-start', gap:12 },
+  loadErrorIcon: { width:48, height:48, borderRadius:24, backgroundColor:Colors.accentSubtle, alignItems:'center', justifyContent:'center', marginBottom:4 },
+  loadErrorTitle: { fontFamily:Fonts.sansBold, fontSize:FontSizes.bodyLG, color:Colors.asphalt },
+  loadErrorBody: { fontFamily:Fonts.sans, fontSize:FontSizes.bodyMD, color:Colors.secondary },
+  loadErrorButton: { minHeight:48, paddingHorizontal:24, borderRadius:24, justifyContent:'center', alignItems:'center', marginTop:8 },
+  loadErrorButtonText: { fontFamily:Fonts.sansBold, fontSize:FontSizes.bodyMD, color:Colors.white },
+  communityStatus: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  communityStatusText: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  communityRetry: { minHeight: 44, justifyContent: 'center' },
+  communityRetryText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   container: { flex: 1, backgroundColor: '#FAF5EC' },
   header: {
     flexDirection: 'row',

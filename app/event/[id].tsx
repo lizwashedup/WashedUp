@@ -1,3 +1,9 @@
+import ProfileButton from '../../components/ProfileButton';
+import { GoldSurfaceFill } from '../../components/creator/GoldSurfaceFill';
+import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
+import { AttendeeMessageLanding } from '../../components/notifications/AttendeeMessageLanding';
+import { EventMessagePreference } from '../../components/notifications/EventMessagePreference';
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   AppState,
@@ -7,10 +13,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Dimensions,
   Linking,
   Platform,
   Share,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -26,12 +32,18 @@ import LinkifiedText from '../../components/LinkifiedText';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { useBlock } from '../../hooks/useBlock';
-import Colors from '../../constants/Colors';
+import Colors, { SceneDetailColors as Scene } from '../../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED, SCENE_DISCOVERY_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, MEMBER_STATE_ENABLED, SCENE_DISCOVERY_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import { showAddToCalendar } from '../../lib/addToCalendar';
-import { canParticipateInSceneEvent, getMyRsvp, getRsvpCount, isCommunityEventReleaseBlocked, markNudged, setRsvp, wasNudged } from '../../lib/eventRsvp';
+import { canParticipateInSceneEvent, getMyRsvp, getRsvpCount, isCommunityEventReleaseBlocked, markNudged, wasNudged, type RsvpStatus } from '../../lib/eventRsvp';
+import { useEventRsvpRecovery } from '../../hooks/useEventRsvpRecovery';
+import type { RsvpOwner } from '../../lib/eventRsvpRecovery';
+import { recordScopedPlanAssent } from '../../lib/planParticipationScope';
+import { getEventTopicId } from '../../lib/communityChat';
 import { eventStartIso, formatEventDateLA, getTodayInLA } from '../../lib/laDate';
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
@@ -44,14 +56,15 @@ import {
 } from '../../lib/organizerFollows';
 import { eventKickerLabel } from '../../lib/sceneDiscovery';
 import { buildPlanPrefillFromEvent, canFindPeopleForEvent, getOpenLinkedPlans } from '../../lib/eventPlanHandoff';
+import {readEventLinkedPlans, type LinkedEventPlan as LinkedPlan} from '../../lib/eventLinkedPlans';
 import { getLeaderCards } from '../../lib/communityLeader';
-import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
-import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
+import { getParticipationNoticeStatus } from '../../lib/participationTerms';
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
 import { formatCents, getOrder, getPublicTicketSummary, isLowInventory } from '../../lib/ticketing';
+import { readEventTicketReturn } from '../../lib/eventTicketReturn';
 import { EventFaqCards } from '../../components/events/EventFaqCards';
 import { TicketCheckoutSheet } from '../../components/events/TicketCheckoutSheet';
 import PlanChooserSheet, { type ChooserPlan } from '../../components/plans/PlanChooserSheet';
@@ -59,10 +72,18 @@ import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPo
 import { getJoinGate } from '../../lib/communityJoin';
 import { getJoinPolicy } from '../../lib/creatorMode';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { usePublicPageScope } from '../../hooks/usePublicPageScope';
+import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
+import { loadPublishedEventPageIdentities, publishedPageRoute } from '../../lib/publishedPageIdentity';
+import { eventPageIdentity } from '../../lib/eventPageIdentity';
+import { loadPublishedOrganizationPage } from '../../lib/publishedOrganizationPage';
+import type { PageImageScope } from '../../lib/publishedPageCover';
+import { OrganizationPageFollowControls } from '../../components/creator/pages/OrganizationPageFollowControls';
+import { PublishedPageCover } from '../../components/creator/pages/PublishedPageCover';
+import CreatorPageEventGate from '../../components/creator/pages/CreatorPageEventGate';
+import type { CreatorPageEventContext } from '../../lib/creatorPageEventContext';
+
 const HERO_HEIGHT = 280;
-// the hero's generated title must clear the floating circle controls
-const HERO_CONTROLS_CLEARANCE = 56;
 // social proof threshold (doc 37): under this, never show a raw count
 const GOING_COUNT_THRESHOLD = 5;
 // §4c more-from rail: poster cards, soonest first
@@ -86,6 +107,7 @@ interface ExploreEvent {
   // Postgres numeric: arrives as a number or a numeric string depending on
   // the path; normalizeTicketPrice is the one reading (doc 34 2.3)
   ticket_price: number | string | null;
+  offer_type?: string;
   public_name: string | null;
   community_id: string | null;
   host_user_id: string | null;
@@ -94,19 +116,6 @@ interface ExploreEvent {
   status: string | null;
 }
 
-interface LinkedPlan {
-  id: string;
-  title: string;
-  start_time: string;
-  location_text: string | null;
-  member_count: number;
-  max_invites: number;
-  status: string;
-  creator_user_id: string;
-  creator_name: string | null;
-  creator_photo: string | null;
-  primary_vibe: string | null;
-}
 
 function formatFullDate(dateStr: string | null, timeStr: string | null): string {
   if (!dateStr) return '';
@@ -162,14 +171,32 @@ function venueMapsUrl(venue: string, address: string | null): string {
     : `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
-export default function EventDetailScreen() {
-  // §3.0 guest preview: the creator opens /event/[id]?preview=guest to see the
-  // real public renderer. The param is honored ONLY for the organizer (below),
-  // exactly as the community page gates ?preview to the leader.
+export default function EventDetailRoute() {
+  const { id, preview, pageId, team, notificationId } = useLocalSearchParams<{ id: string; preview?: string; pageId?: string; team?: string; notificationId?: string }>();
+  if (COMMUNITIES_ENABLED && notificationId && !preview) {
+    return <AttendeeMessageLanding eventId={id} notificationId={notificationId} />;
+  }
+  // Page hints select the existing exact-event access reader; they never grant
+  // authority. The gate retires this renderer when its account/visit changes.
+  if (CREATOR_PAGES_ENABLED && preview === 'guest' && pageId) {
+    return <CreatorPageEventGate pageId={pageId} eventId={id} team={team === '1'}>
+      {page => <EventDetailScreen previewPage={page} />}
+    </CreatorPageEventGate>;
+  }
+  return <EventDetailScreen />;
+}
+
+function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventContext }) {
+  // Reuse the public renderer. Page previews enter through the exact-event
+  // gate above; legacy previews retain the original organizer check below.
   const { id, preview } = useLocalSearchParams<{ id: string; preview?: string }>();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const [artFrameWidth, setArtFrameWidth] = useState(0);
+  const [artwork, setArtwork] = useState<{ reference: string; ratio: number } | null>(null);
   const queryClient = useQueryClient();
-  const [userId, setUserId] = useState<string | null>(null);
+  const pageContext = usePublicPageScope(id);
+  const userId = pageContext.account.viewerId ?? null;
 
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
@@ -182,13 +209,6 @@ export default function EventDetailScreen() {
   // SC-05: the event page's own join door, mirroring community/[id].tsx's
   const [joinPopupVisible, setJoinPopupVisible] = useState(false);
   const { blockUser } = useBlock();
-
-  React.useEffect(() => {
-    supabase.auth
-      .getUser()
-      .then(({ data }) => setUserId(data.user?.id ?? null))
-      .catch(() => {});
-  }, []);
 
   // Audit finding 2: paying happens in a browser, and Stripe's success page
   // is a web url this app does not claim, so nothing used to bring the buyer
@@ -234,14 +254,14 @@ export default function EventDetailScreen() {
     });
   }, [userId, blockUser, queryClient, id]);
 
-  const { data: event, isLoading } = useQuery({
-    queryKey: ['explore-event', id],
+  const { data: event, isLoading, error: eventError, isFetching: eventFetching, refetch: retryEvent } = useQuery({
+    queryKey: ['explore-event', id, CREATOR_PAGES_ENABLED],
     queryFn: async (): Promise<ExploreEvent | null> => {
-      const { data, error } = await supabase
-        .from('explore_events')
-        .select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status')
-        .eq('id', id)
-        .single();
+      const source = supabase.from('explore_events');
+      const selection = CREATOR_PAGES_ENABLED
+        ? source.select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status, offer_type')
+        : source.select('id, title, description, description_blocks, image_url, event_date, start_time, end_time, venue, venue_address, category, external_url, ticket_price, public_name, community_id, host_user_id, status');
+      const { data, error } = await selection.eq('id', id).single();
       if (error) throw error;
       return data;
     },
@@ -249,22 +269,31 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
+  // New page identity is checked before any legacy attribution. A failed or
+  // unavailable publication never turns into a different page owned by that account.
+  const readEventPage = useCallback(async (scope: PageImageScope) => {
+    const links = await loadPublishedEventPageIdentities([id], scope);
+    return { page: eventPageIdentity({ community_id: event?.community_id ?? null }, links.get(id)) };
+  }, [id, event?.community_id]);
+  const pageRead = useCreatorPageRead(CREATOR_PAGES_ENABLED && event ? pageContext.scope : null, readEventPage);
+  const publishedPage = !pageRead.error ? pageRead.data?.page : null;
+  const legacyIdentityAllowed = !CREATOR_PAGES_ENABLED || !!pageRead.data && !pageRead.error && pageRead.data.page === undefined;
+  const readRelatedPage = useCallback((scope: PageImageScope) => loadPublishedOrganizationPage(publishedPage!.pageId, scope), [publishedPage?.pageId]);
+  const relatedPageRead = useCreatorPageRead(publishedPage?.kind === 'organization' ? pageContext.scope : null, readRelatedPage);
+
   // §3.0 guest preview, gated to the organizer. host_user_id === viewer covers
   // the creator (a community event's host_user_id is the leader who posted it);
   // RLS already blocks anyone else from loading a Draft, so a non-organizer
   // with the param on a Live event just sees the normal page (param ignored).
   const isOrganizerViewer = !!userId && !!event?.host_user_id && event.host_user_id === userId;
-  const previewMode = isOrganizerViewer && preview === 'guest';
+  const previewMode = (isOrganizerViewer || !!previewPage) && preview === 'guest';
   // a non-Live event is not visible to a real guest at all, so the chrome must
   // promise how it WILL look once published, never claim this is how it looks
   const previewUnpublished = previewMode && event?.status !== 'Live';
-  // in preview the top strip already clears the status bar, so the hero
-  // controls drop the inset (mirrors the community page's controlTop)
-  const heroControlTop = previewMode ? 8 : insets.top + 8;
   const showPreviewNotice = useCallback(() => {
     hapticLight();
     // LIZ COPY (taste gate): the buttons are inert while previewing
-    setAlertInfo({ title: 'just a preview', message: 'this is how it looks to a guest. the buttons work once it goes up.' });
+    setAlertInfo({ title: 'just a preview', message: 'this is how it looks to a guest. these actions aren’t available in preview.' });
   }, []);
 
   // THE CHAT LAW (docs 09 + 21, doc 00 2026-07-21): a community event's
@@ -279,67 +308,32 @@ export default function EventDetailScreen() {
     event?.community_id,
   );
 
-  const { data: linkedPlans = [] } = useQuery({
-    queryKey: ['event-plans', id],
-    queryFn: async (): Promise<LinkedPlan[]> => {
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          id, title, start_time, location_text, member_count, max_invites, status,
-          creator_user_id, primary_vibe,
-          profiles!events_creator_user_id_fkey ( first_name_display, profile_photo_url )
-        `)
-        .eq('explore_event_id', id)
-        .in('status', ['forming', 'active', 'full'])
-        .order('start_time', { ascending: true });
+  const readLinkedPlans = useCallback((scope: PageImageScope) => readEventLinkedPlans(id!, scope), [id]);
+  const linkedRead = useCreatorPageRead(!!id && !!event && !isCommunityEvent ? pageContext.scope : null, readLinkedPlans);
+  const linkedPlans = linkedRead.data?.plans ?? [];
+  const memberCountsMap = linkedRead.data?.counts ?? {};
+  const linkedReady = !!linkedRead.data && !linkedRead.loading && !linkedRead.error && !!pageContext.scope?.isCurrent();
+  const linkedVersion = React.useMemo(() => ({}), [pageContext.scope, linkedRead.data, linkedRead.loading, linkedRead.error]);
+  const latestLinkedVersion = React.useRef(linkedVersion); latestLinkedVersion.current = linkedVersion;
+  const canUseLinkedPlans = useCallback(() => linkedReady && latestLinkedVersion.current === linkedVersion && !!pageContext.scope?.isCurrent(), [linkedReady, linkedVersion, pageContext.scope]);
+  useEffect(() => { setChooserVisible(false); setChooserPlans([]); }, [linkedVersion]);
+  const retryLinkedPlans = useCallback(() => { if (pageContext.scope?.isCurrent()) void linkedRead.refresh().catch(() => undefined); }, [pageContext.scope, linkedRead.refresh]);
 
-      if (error) throw error;
-      return (data ?? []).map((p: any) => ({
-        ...p,
-        creator_name: p.profiles?.first_name_display ?? null,
-        creator_photo: p.profiles?.profile_photo_url ?? null,
-      }));
-    },
-    enabled: !!id && !!event && !isCommunityEvent,
-    staleTime: 60_000,
-  });
-
-  // the community event's own chat: the topic row keyed by this event
-  const { data: eventTopicId = null } = useQuery({
-    queryKey: ['event-topic', id],
+  // Keep the existing event conversation, but never hide a failed lookup as absence.
+  const eventTopicRead = useQuery({
+    queryKey: ['event-topic', id, userId],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('community_topics')
-        .select('id')
-        .eq('explore_event_id', id!)
-        .maybeSingle();
-      return (data?.id as string | undefined) ?? null;
+      const scope = pageContext.scope;
+      if (!scope?.isCurrent()) throw new Error('Your account changed. Check the chat again.');
+      const topicId = await getEventTopicId(id!, true);
+      if (!scope.isCurrent()) throw new Error('Your account changed. Check the chat again.');
+      return topicId;
     },
-    enabled: isCommunityEvent && !!id,
+    enabled: isCommunityEvent && !!id && !!pageContext.scope,
     staleTime: 60_000,
+    retry: false,
   });
-
-  // Fetch actual member counts from event_members - member_count on events can be out of sync
-  const planIdsKey = linkedPlans.map((p) => p.id).sort().join(',');
-  const { data: memberCountsMap = {} } = useQuery({
-    queryKey: ['event-plans-member-counts', planIdsKey],
-    queryFn: async (): Promise<Record<string, number>> => {
-      const planIds = linkedPlans.map((p) => p.id);
-      if (planIds.length === 0) return {};
-      // Adversarial-review fix (2026-08-13): same non-self-scoped-read issue
-      // as lib/fetchPlans.ts fetchRealMemberCounts, independently duplicated
-      // here. Swapped to the same batched anon+authenticated-safe RPC.
-      const { data, error } = await supabase
-        .rpc('get_event_joined_counts', { p_event_ids: planIds });
-      if (error) throw error;
-      const counts: Record<string, number> = {};
-      (data ?? []).forEach((r: { event_id: string; joined_count: number }) => {
-        counts[r.event_id] = r.joined_count;
-      });
-      return counts;
-    },
-    enabled: linkedPlans.length > 0,
-  });
+  const eventTopicId = eventTopicRead.error ? null : eventTopicRead.data ?? null;
 
   const { data: isWishlisted = false } = useQuery({
     queryKey: ['explore-wishlist-check', id, userId],
@@ -380,11 +374,16 @@ export default function EventDetailScreen() {
   // caller's FIRST rsvp under the terms version in force. Dormant until 49
   // applies; once an assent row exists the sheet never returns.
   const [noticeVisible, setNoticeVisible] = useState(false);
-  const { data: myRsvp = null } = useQuery({
+  const rsvpRead = useQuery({
     queryKey: ['event-rsvp', id, userId],
-    queryFn: () => getMyRsvp(id!),
+    queryFn: () => getMyRsvp(id!, userId),
     enabled: sceneParticipationEnabled && !!id && !!userId,
+    retry: false,
   });
+  const myRsvp = rsvpRead.data ?? null;
+  const rsvpReadProblem = !!pageContext.account.error || !!rsvpRead.error;
+  const rsvpReadUnresolved = !previewMode && (pageContext.account.isLoading || !!pageContext.account.error
+    || !!userId && (rsvpRead.isPending || !!rsvpRead.error));
   const { data: rsvpCount = null } = useQuery({
     queryKey: ['event-rsvp-count', id],
     queryFn: () => getRsvpCount(id!),
@@ -401,7 +400,7 @@ export default function EventDetailScreen() {
       return map.get(event!.host_user_id!) ?? null;
     },
     enabled:
-      COMMUNITIES_ENABLED && !!event && !event.community_id && !!event.host_user_id && !event.public_name,
+      COMMUNITIES_ENABLED && legacyIdentityAllowed && !!event && !event.community_id && !!event.host_user_id && !event.public_name,
     staleTime: 60_000,
   });
 
@@ -418,13 +417,13 @@ export default function EventDetailScreen() {
         .maybeSingle();
       return (data as { id: string; name: string } | null) ?? null;
     },
-    enabled: COMMUNITIES_ENABLED && !!event?.community_id && !event?.public_name,
+    enabled: COMMUNITIES_ENABLED && legacyIdentityAllowed && !!event?.community_id && !event?.public_name,
     staleTime: 60_000,
   });
   const { data: eventLeaderCard = null } = useQuery({
     queryKey: ['leader-card', event?.community_id],
     queryFn: async () => (await getLeaderCards([event!.community_id!])).get(event!.community_id!) ?? null,
-    enabled: COMMUNITIES_ENABLED && !!event?.community_id && !event?.public_name,
+    enabled: COMMUNITIES_ENABLED && !!event?.community_id && (publishedPage?.kind === 'community' || legacyIdentityAllowed && !event?.public_name),
     staleTime: 60_000,
   });
 
@@ -435,7 +434,7 @@ export default function EventDetailScreen() {
   // drives the more-from rail and track-record count for BOTH kinds, so it
   // can't itself be typed as follow-only.
   const frontingTarget: { kind: 'community' | 'organizer'; id: string } | null =
-    !event || event.public_name
+    !event || (!legacyIdentityAllowed && publishedPage?.kind !== 'community') || (legacyIdentityAllowed && event.public_name)
       ? null
       : event.community_id
         ? { kind: 'community', id: event.community_id }
@@ -457,16 +456,38 @@ export default function EventDetailScreen() {
   // P3 (laws 9/10): the all-in price-from and real inventory scarcity,
   // shown beside the CTA before any checkout. Fees never surprise; a
   // sold-out tier never headlines; scarcity is real remaining only.
-  const { data: ticketSummary } = useQuery({
-    queryKey: ['public-ticket-summary', id],
-    queryFn: () => getPublicTicketSummary(id!),
-    enabled: !!id,
+  const knownPageOffer = !(publishedPage || previewPage) || ['free_event', 'ticketed_event', 'course', 'drop_in'].includes(event?.offer_type ?? '');
+  const ticketContextReady = !!event && knownPageOffer && (legacyIdentityAllowed || !!publishedPage || !!previewPage);
+  const requiresTickets = !!(publishedPage || previewPage) && event?.offer_type === 'ticketed_event';
+  const ticketRead = useQuery({
+    queryKey: ['public-ticket-summary', id, pageContext.scope?.userId, requiresTickets],
+    queryFn: () => getPublicTicketSummary(id!, requiresTickets),
+    enabled: !!id && ticketContextReady,
     staleTime: 30_000,
   });
+  const ticketSummary = ticketRead.data;
+  const readOwnedTickets = useCallback((scope: NonNullable<typeof pageContext.scope>) =>
+    readEventTicketReturn(id!, { userId: scope.userId!, isCurrent: scope.isCurrent }), [id]);
+  const ownTickets = useCreatorPageRead(!previewMode && sceneParticipationEnabled && !!id && pageContext.scope?.userId
+    ? pageContext.scope : null, readOwnedTickets);
+  const ownedTicket = !previewMode && pageContext.scope?.isCurrent() && !ownTickets.error ? ownTickets.data : null;
+  const ownTicketsUnresolved = !previewMode && sceneParticipationEnabled && !!userId && (ownTickets.loading || !!ownTickets.error);
+  const openOwnedTickets = () => {
+    if (ownedTicket && pageContext.scope?.isCurrent()) router.push(`/tickets/order/${ownedTicket.orderId}` as never);
+  };
+  const ticketReadUnresolved = !ticketContextReady || !ticketSummary || !!ticketRead.error;
+  const ticketContextProblem = CREATOR_PAGES_ENABLED && (!!pageRead.error || !!pageContext.account.error || !knownPageOffer || pageRead.data?.page === null && !previewPage);
+  const ticketProblem = !!ticketRead.error || ticketContextProblem;
+  const retryTickets = () => {
+    if (pageContext.account.error) { void pageContext.account.retry().catch(() => undefined); return; }
+    if (!knownPageOffer) { void retryEvent(); return; }
+    if (ticketContextProblem) { void pageRead.refresh().catch(() => undefined); return; }
+    void ticketRead.refetch();
+  };
 
   // P4 (doc 78 §2.8): the organizer's track record - how many events
   // they have put on (Live or Completed), the proof they are real
-  const { data: trackRecordCount = null } = useQuery({
+  const { data: legacyTrackRecordCount = null } = useQuery({
     queryKey: ['track-record', frontingTarget?.kind, frontingTarget?.id],
     queryFn: async () => {
       const col = frontingTarget!.kind === 'community' ? 'community_id' : 'host_user_id';
@@ -481,7 +502,7 @@ export default function EventDetailScreen() {
     staleTime: 60_000,
   });
 
-  const { data: moreEvents = [] } = useQuery({
+  const { data: legacyMoreEvents = [] } = useQuery({
     queryKey: ['more-from', frontingTarget?.kind, frontingTarget?.id, id],
     queryFn: async () => {
       const col = frontingTarget!.kind === 'community' ? 'community_id' : 'host_user_id';
@@ -499,6 +520,13 @@ export default function EventDetailScreen() {
     enabled: COMMUNITIES_ENABLED && !!frontingTarget && !!id,
     staleTime: 60_000,
   });
+
+  const trackRecordCount = publishedPage?.kind === 'organization'
+    ? relatedPageRead.data ? relatedPageRead.data.upcomingEvents.length + relatedPageRead.data.pastEvents.length : null
+    : legacyTrackRecordCount;
+  const moreEvents = publishedPage?.kind === 'organization'
+    ? relatedPageRead.data?.upcomingEvents.filter(row => row.id !== id).slice(0, MORE_FROM_RAIL_LIMIT) ?? []
+    : legacyMoreEvents;
 
   // §4c (doc 69 B1/B2): dormant until proposal 68 applies - a missing
   // table reads as available:false and the affordance never renders.
@@ -540,11 +568,12 @@ export default function EventDetailScreen() {
         .maybeSingle();
       return (data?.status as string | null) ?? null;
     },
-    enabled: MEMBER_STATE_ENABLED && COMMUNITIES_ENABLED && !!event?.community_id && !!userId,
+    enabled: !previewMode && MEMBER_STATE_ENABLED && COMMUNITIES_ENABLED && !!event?.community_id && !!userId,
     staleTime: 30_000,
   });
-  const viewerIsMemberHere = MEMBER_STATE_ENABLED && viewerMembershipStatus === 'active';
-  const viewerJoinPending = MEMBER_STATE_ENABLED && viewerMembershipStatus === 'pending';
+  // Guest preview must not inherit the creator's cached membership state.
+  const viewerIsMemberHere = !previewMode && MEMBER_STATE_ENABLED && viewerMembershipStatus === 'active';
+  const viewerJoinPending = !previewMode && MEMBER_STATE_ENABLED && viewerMembershipStatus === 'pending';
   // SC-05: the event page had a follow pill but no real door into the
   // community itself - gated the same way member-state already is, since
   // without that flag we can't safely know they aren't already a member.
@@ -585,26 +614,27 @@ export default function EventDetailScreen() {
   });
 
   const goToNewPlan = useCallback(() => {
-    if (!event) return;
+    if (!event || !canUseLinkedPlans()) return;
     router.push({
       pathname: '/(tabs)/post',
       params: buildPlanPrefillFromEvent(event),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event]);
+  }, [event, canUseLinkedPlans]);
 
   // PL-01: the real chooser step (spec: existing open Plans shown first,
   // then an explicit "start a new Plan" action) instead of guessing a first
   // match or skipping straight into the creation form.
   const goFindPeople = useCallback(() => {
+    if (previewMode) { showPreviewNotice(); return; }
     // item 07 is organization-event only; the chat law (item 04) keeps a
     // community event's RSVP opening its own event-room chat instead.
-    if (!event || !canFindPeopleForEvent(event)) return;
+    if (!event || !canFindPeopleForEvent(event) || !canUseLinkedPlans()) return;
     hapticMedium();
     const openPlans = getOpenLinkedPlans(
       linkedPlans.map((p) => ({
         id: p.id,
-        memberCount: memberCountsMap[p.id] ?? p.member_count,
+        memberCount: memberCountsMap[p.id],
         maxInvites: p.max_invites,
       })),
     ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
@@ -627,12 +657,13 @@ export default function EventDetailScreen() {
     );
     setChooserVisible(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, linkedPlans, memberCountsMap, goToNewPlan]);
+  }, [event, linkedPlans, memberCountsMap, goToNewPlan, previewMode, showPreviewNotice, canUseLinkedPlans]);
 
   const handleChooserSelectPlan = useCallback((planId: string) => {
+    if (!canUseLinkedPlans() || !chooserPlans.some(plan => plan.id === planId)) return;
     setChooserVisible(false);
     router.push(`/plan/${planId}`);
-  }, []);
+  }, [canUseLinkedPlans, chooserPlans]);
 
   const handleChooserStartNew = useCallback(() => {
     setChooserVisible(false);
@@ -648,6 +679,12 @@ export default function EventDetailScreen() {
     queryClient.invalidateQueries({ queryKey: ['event-topic', id] });
   }, [queryClient, id]);
 
+  const rsvpOwner = React.useMemo<RsvpOwner | null>(() => !previewMode && pageContext.scope?.userId
+    ? { userId: pageContext.scope.userId, isCurrent: pageContext.scope.isCurrent } : null, [pageContext.scope, previewMode]);
+  const noticeOwner = React.useRef<RsvpOwner | null>(null);
+  const attendanceEntry = React.useRef<RsvpOwner | null>(null);
+  useEffect(() => { noticeOwner.current = null; setNoticeVisible(false); setRsvpBusy(false); }, [rsvpOwner]);
+
   // Scene handoff §07/09/13: the post-confirmation branch. Organization
   // events promote Find people to go with (existing PL-01 behavior,
   // unchanged); community events promote Open event chat instead (the chat
@@ -657,7 +694,7 @@ export default function EventDetailScreen() {
   // if it genuinely isn't, this step is skipped rather than shown broken --
   // the calendar step above it already satisfied "exactly once."
   const showBranchNudge = useCallback(() => {
-    if (!event) return;
+    if (!event || !rsvpOwner?.isCurrent()) return;
     if (isCommunityEvent) {
       if (!eventTopicId) return;
       // LIZ COPY
@@ -665,16 +702,17 @@ export default function EventDetailScreen() {
         title: "you're in",
         message: 'the event chat is where the coordination happens.',
         buttons: [
-          { text: 'open the chat', onPress: () => router.push(`/community-topic/${eventTopicId}`) },
+          { text: 'open the chat', onPress: () => { if (rsvpOwner.isCurrent()) router.push(`/community-topic/${eventTopicId}`); } },
           { text: 'not now', style: 'cancel' },
         ],
       });
       return;
     }
+    if (!canUseLinkedPlans()) return;
     const openPlans = getOpenLinkedPlans(
       linkedPlans.map((p) => ({
         id: p.id,
-        memberCount: memberCountsMap[p.id] ?? p.member_count,
+        memberCount: memberCountsMap[p.id],
         maxInvites: p.max_invites,
       })),
     ).map((p) => linkedPlans.find((lp) => lp.id === p.id)!);
@@ -686,7 +724,7 @@ export default function EventDetailScreen() {
         title: 'a group is forming for this',
         message: 'want in? your spot at the event stands either way.',
         buttons: [
-          { text: 'see the group', onPress: goFindPeople },
+          { text: 'see the group', onPress: () => { if (rsvpOwner.isCurrent()) goFindPeople(); } },
           { text: 'just going', style: 'cancel' },
         ],
       });
@@ -696,13 +734,13 @@ export default function EventDetailScreen() {
         title: 'want people to go with?',
         message: "you're in either way. small groups form around events like this.",
         buttons: [
-          { text: 'find people', onPress: goFindPeople },
+          { text: 'find people', onPress: () => { if (rsvpOwner.isCurrent()) goFindPeople(); } },
           { text: 'just going', style: 'cancel' },
         ],
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, isCommunityEvent, eventTopicId, linkedPlans, memberCountsMap, goFindPeople]);
+  }, [event, rsvpOwner, isCommunityEvent, eventTopicId, linkedPlans, memberCountsMap, goFindPeople, canUseLinkedPlans]);
 
   // Scene handoff §06/§15: "every confirmed event offers Add to calendar
   // exactly once"; Add and Not now both complete the flow (never gated on
@@ -715,7 +753,7 @@ export default function EventDetailScreen() {
   // that tick (and past the fade-out) is what lets the second alert actually
   // render instead of flashing and disappearing.
   const showPostConfirmationSequence = useCallback(() => {
-    if (!event) return;
+    if (!event || !rsvpOwner?.isCurrent()) return;
     const startIso = eventStartIso(event.event_date, event.start_time);
     if (!startIso) {
       showBranchNudge();
@@ -729,7 +767,8 @@ export default function EventDetailScreen() {
         {
           text: 'add to calendar',
           onPress: () => {
-            showAddToCalendar(event.title, startIso, null, event.venue ?? undefined);
+            if (!rsvpOwner.isCurrent()) return;
+            showAddToCalendar(event.title, startIso, event.end_time, event.venue ?? undefined);
             setTimeout(showBranchNudge, 250);
           },
         },
@@ -737,43 +776,42 @@ export default function EventDetailScreen() {
       ],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, showBranchNudge]);
+  }, [event, rsvpOwner, showBranchNudge]);
 
+  const refreshSavedAttendance = useCallback((status: RsvpStatus) => {
+    if (!rsvpOwner?.isCurrent()) return;
+    queryClient.setQueryData(['event-rsvp', id, rsvpOwner.userId], status);
+    invalidateRsvp();
+  }, [id, rsvpOwner, queryClient, invalidateRsvp]);
+  const onRsvpConfirmed = useCallback((status: 'going' | 'cancelled') => {
+    refreshSavedAttendance(status);
+    if (status !== 'going' || !rsvpOwner?.isCurrent()) return;
+    void (async () => {
+      if (!(await wasNudged(id)) && rsvpOwner.isCurrent()) {
+        await markNudged(id);
+        if (rsvpOwner.isCurrent()) showPostConfirmationSequence();
+      }
+    })();
+  }, [id, rsvpOwner, refreshSavedAttendance, showPostConfirmationSequence]);
+  const rsvpRecovery = useEventRsvpRecovery(id, rsvpOwner, onRsvpConfirmed, refreshSavedAttendance);
   const proceedWithRsvp = useCallback(async () => {
-    if (!id) return;
+    if (!id || !rsvpOwner?.isCurrent()) return;
     setRsvpBusy(true);
     try {
-      await setRsvp(id, true);
-      hapticSuccess();
-      invalidateRsvp();
-      // Scene handoff §06/07/09: one nudge sequence per event, never again
-      // once answered. Previously excluded community events entirely (the
-      // old chat-law reading); the chat law only ever barred the FIND-PEOPLE
-      // half, not a post-confirmation nudge outright -- showBranchNudge
-      // above routes community events to Open event chat instead, never to
-      // Find people to go with.
-      if (!(await wasNudged(id))) {
-        await markNudged(id);
-        showPostConfirmationSequence();
-      }
-    } catch (err) {
-      hapticError();
-      logError(err, 'event.rsvpJoin');
-      setAlertInfo({ title: "that didn't go through", message: 'give it a moment and try again.' });
+      if (await rsvpRecovery.change(true) && rsvpOwner.isCurrent()) hapticSuccess();
     } finally {
-      setRsvpBusy(false);
+      if (rsvpOwner.isCurrent()) setRsvpBusy(false);
     }
-  }, [id, invalidateRsvp, showPostConfirmationSequence]);
+  }, [id, rsvpOwner, rsvpRecovery.change]);
 
   // the organizer name exactly as the byline renders it, for the notice and
   // its evidence snapshot (doc 13: show the organizer's display name)
   const noticeOrganizerName =
-    event?.public_name ||
-    (event?.community_id ? eventCommunity?.name : organizer?.display_name) ||
+    (legacyIdentityAllowed ? event?.public_name || (event?.community_id ? eventCommunity?.name : organizer?.display_name) : publishedPage?.name) ||
     'the organizer';
 
   const handleCountMeIn = useCallback(async () => {
-    if (!id || rsvpBusy) return;
+    if (!id || rsvpBusy || rsvpReadUnresolved || rsvpRecovery.blocked || !rsvpOwner?.isCurrent() || attendanceEntry.current === rsvpOwner) return;
     if (myRsvp === 'going') {
       // LIZ COPY
       setAlertInfo({
@@ -784,14 +822,7 @@ export default function EventDetailScreen() {
           {
             text: 'take me off',
             onPress: async () => {
-              try {
-                await setRsvp(id, false);
-                invalidateRsvp();
-              } catch (err) {
-                hapticError();
-                logError(err, 'event.rsvpLeave');
-                setAlertInfo({ title: "that didn't go through", message: "you're still on the list. give it a moment and try again." });
-              }
+              if (rsvpOwner.isCurrent()) await rsvpRecovery.change(false);
             },
           },
         ],
@@ -801,32 +832,45 @@ export default function EventDetailScreen() {
     // proposal 49: first rsvp under the terms version in force shows the
     // Independent Activity Notice; the rsvp proceeds only once the assent
     // is recorded (fail CLOSED after 49 is live; dormant before it)
-    const { needsAssent } = await getParticipationNoticeStatus();
-    if (needsAssent) {
-      setNoticeVisible(true);
-      return;
+    attendanceEntry.current = rsvpOwner;
+    setRsvpBusy(true);
+    try {
+      const { needsAssent } = await getParticipationNoticeStatus();
+      if (!rsvpOwner.isCurrent()) return;
+      if (needsAssent) {
+        noticeOwner.current = rsvpOwner;
+        setNoticeVisible(true);
+        return;
+      }
+      await proceedWithRsvp();
+    } catch {
+      if (rsvpOwner.isCurrent()) setAlertInfo({ title: 'could not check attendance', message: 'Please try again.' });
+    } finally {
+      if (attendanceEntry.current === rsvpOwner) attendanceEntry.current = null;
+      if (rsvpOwner.isCurrent()) setRsvpBusy(false);
     }
-    await proceedWithRsvp();
-  }, [id, rsvpBusy, myRsvp, invalidateRsvp, proceedWithRsvp]);
+  }, [id, rsvpOwner, rsvpBusy, rsvpReadUnresolved, rsvpRecovery.blocked, rsvpRecovery.change, myRsvp, proceedWithRsvp]);
 
   const handleNoticeAgree = useCallback(async () => {
-    if (!id) return false;
-    const ok = await recordParticipationAssent({
-      listingType: 'explore_event',
-      listingId: id,
-      organizerUserId: event?.host_user_id ?? null,
-      organizerName: noticeOrganizerName,
-      action: 'rsvp',
-    });
-    if (!ok) return false;
-    setNoticeVisible(false);
-    await proceedWithRsvp();
-    return true;
-  }, [id, event?.host_user_id, noticeOrganizerName, proceedWithRsvp]);
+    const owner = noticeOwner.current;
+    if (!id || !owner?.isCurrent() || owner !== rsvpOwner) return false;
+    try {
+      const ok = await recordScopedPlanAssent({
+        listingType: 'explore_event', listingId: id,
+        organizerUserId: event?.host_user_id ?? null, organizerName: noticeOrganizerName, action: 'rsvp',
+      }, { viewerId: owner.userId, isCurrent: owner.isCurrent });
+      if (!ok || !owner.isCurrent()) return false;
+      setNoticeVisible(false);
+      await proceedWithRsvp();
+      return true;
+    } catch { return false; }
+  }, [id, rsvpOwner, event?.host_user_id, noticeOrganizerName, proceedWithRsvp]);
 
   if (!id || isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <View style={[styles.eventHeader, { justifyContent: 'space-between', paddingVertical: 8 }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.headerButton} onPress={() => router.back()}><ArrowLeft size={20} color={Scene.text}/></TouchableOpacity><ProfileButton compact surface="scene"/></View>
         <View style={styles.centered}>
           {!id ? (
             <>
@@ -836,7 +880,7 @@ export default function EventDetailScreen() {
               </TouchableOpacity>
             </>
           ) : (
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+            <ActivityIndicator size="large" color={Scene.supporting} />
           )}
         </View>
       </SafeAreaView>
@@ -846,11 +890,30 @@ export default function EventDetailScreen() {
   if (!event) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <View style={[styles.eventHeader, { justifyContent: 'space-between', paddingVertical: 8 }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.headerButton} onPress={() => router.back()}><ArrowLeft size={20} color={Scene.text}/></TouchableOpacity><ProfileButton compact surface="scene"/></View>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>this event is not around anymore.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
-            <Text style={styles.goBackText}>go back</Text>
-          </TouchableOpacity>
+          {eventError && (eventError as { code?: string }).code !== 'PGRST116' ? (
+            <>
+              <Text style={styles.emptyText} accessibilityLiveRegion="polite">We couldn’t load this event. Please try again.</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Try again"
+                accessibilityState={{ disabled: eventFetching, busy: eventFetching }} disabled={eventFetching}
+                onPress={() => { void retryEvent(); }} style={styles.goBackBtn}>
+                {eventFetching ? <ActivityIndicator color={Scene.actionText} /> : <Text style={styles.goBackText}>Try again</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back"
+                onPress={() => router.back()} style={styles.recoveryBack}>
+                <Text style={styles.recoveryBackText}>Go back</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.emptyText}>this event is not around anymore.</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={styles.goBackBtn}>
+                <Text style={styles.goBackText}>go back</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -859,6 +922,8 @@ export default function EventDetailScreen() {
   if (isCommunityEventReleaseBlocked(COMMUNITIES_ENABLED, event.community_id)) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        <View style={[styles.eventHeader, { justifyContent: 'space-between', paddingVertical: 8 }]}><TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" style={styles.headerButton} onPress={() => router.back()}><ArrowLeft size={20} color={Scene.text}/></TouchableOpacity><ProfileButton compact surface="scene"/></View>
         <View style={styles.centered}>
           <Text style={styles.emptyText}>this event is not available in this build yet.</Text>
           <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
@@ -897,22 +962,26 @@ export default function EventDetailScreen() {
   // branch below and still showed an actionable "count me in" RSVP button
   // -- a guest could tap it and register as going via the free-RSVP path
   // even though there was zero real ticket inventory left.
-  const isSoldOut = !!ticketSummary?.allSoldOut;
+  const isSoldOut = !ticketReadUnresolved && !!ticketSummary?.allSoldOut;
 
   // the byline grammar (slice 2): public_name override wins and wears
   // neither image; a community event fronts with the COMMUNITY name and
   // the leader's FACE; a standalone listing fronts with the organizer
   // profile name and LOGO. person = face, business = logo, never both.
   const bylineName =
-    event.public_name ||
-    (event.community_id ? eventCommunity?.name ?? null : organizer?.display_name ?? null);
+    legacyIdentityAllowed ? event.public_name ||
+    (event.community_id ? eventCommunity?.name ?? null : organizer?.display_name ?? null) : publishedPage?.name ?? previewPage?.name ?? null;
   const bylineFace =
-    !event.public_name && event.community_id ? eventLeaderCard?.avatar_url ?? null : null;
+    event.community_id && (publishedPage?.kind === 'community' || legacyIdentityAllowed && !event.public_name) ? eventLeaderCard?.avatar_url ?? null : null;
   const bylineLogo =
-    !event.public_name && !event.community_id ? organizer?.logo_url ?? null : null;
+    legacyIdentityAllowed && !event.public_name && !event.community_id ? organizer?.logo_url ?? null : null;
+  const artworkRatio = artwork && artwork.reference === event.image_url ? artwork.ratio : 4 / 5;
+  const artworkWidth = Math.min(artFrameWidth || Math.max(1, windowWidth - 40), HERO_HEIGHT * artworkRatio);
+  const artworkHeight = artworkWidth / artworkRatio;
 
   const getPlanSpotsInfo = (plan: LinkedPlan): { text: string; isFull: boolean } => {
-    const actualCount = memberCountsMap[plan.id] ?? plan.member_count;
+    if (!linkedReady) return {text:'Availability not confirmed',isFull:false};
+    const actualCount = memberCountsMap[plan.id];
     const capped = capDisplayCount(actualCount);
     const totalCapacity = Math.min((plan.max_invites ?? 7) + 1, MAX_GROUP);
     const left = Math.max(0, totalCapacity - capped);
@@ -922,7 +991,8 @@ export default function EventDetailScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <LinearGradient colors={[Scene.upper, Scene.middle, Scene.lower]} locations={Scene.gradientLocations} style={styles.container}>
+      <StatusBar style="dark" />
       {previewMode && (
         /* §3.0 guest preview strip. Conditional truth: a Live event IS what a
            guest sees; a non-Live event is invisible to a real guest (RLS), so
@@ -932,39 +1002,26 @@ export default function EventDetailScreen() {
           <Text style={styles.previewBarText}>
             {previewUnpublished ? 'how your page will look once it goes up' : 'how a guest sees it'}
           </Text>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Done previewing" onPress={() => router.back()} hitSlop={10} style={styles.previewDoneAction}>
             {/* LIZ COPY: back to editing */}
             <Text style={styles.previewBarDone}>done</Text>
           </TouchableOpacity>
         </View>
       )}
-      <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false}>
-        <View style={styles.heroContainer}>
-          {event.image_url ? (
-            <Image source={{ uri: event.image_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
-          ) : (
-            // slice 2: the generated branded poster is the hero fallback -
-            // a designed card, not a photo, so its words are legible by
-            // construction; the circle controls stay (non-load-bearing marks)
-            <GeneratedPoster
-              title={event.title}
-              category={event.category}
-              venue={event.venue}
-              height={HERO_HEIGHT}
-              topPadding={insets.top + HERO_CONTROLS_CLEARANCE}
-            />
-          )}
-
+        <View style={[styles.eventHeader, { paddingTop: (previewMode ? 0 : insets.top) + 8, paddingBottom: 8 }]}>
           <TouchableOpacity
-            style={[styles.circleButton, { top: heroControlTop, left: 16 }]}
+            accessibilityRole="button" accessibilityLabel="Back" style={styles.headerButton}
             onPress={() => router.back()}
           >
-            <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2} />
+            <ArrowLeft size={20} color={Scene.text} strokeWidth={2} />
           </TouchableOpacity>
+          <Text style={styles.headerContext} numberOfLines={1}>{bylineName || "The Scene"}</Text>
 
           <TouchableOpacity
-            style={[styles.circleButton, { top: heroControlTop, right: 60 }]}
+            accessibilityRole="button" accessibilityLabel="Share event"
+            style={styles.headerButton}
             onPress={async () => {
+              if (previewMode) { showPreviewNotice(); return; }
               hapticLight();
               try {
                 await Share.share({
@@ -973,11 +1030,11 @@ export default function EventDetailScreen() {
               } catch {}
             }}
           >
-            <Share2 size={18} color={Colors.asphalt} strokeWidth={2} />
+            <Share2 size={18} color={Scene.text} strokeWidth={2} />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.circleButton, { top: heroControlTop, right: 16 }]}
+            accessibilityRole="button" accessibilityLabel="Save event" accessibilityState={{ selected: isWishlisted }} style={styles.headerButton}
             onPress={() => {
               if (previewMode) { showPreviewNotice(); return; }
               hapticLight();
@@ -986,23 +1043,28 @@ export default function EventDetailScreen() {
           >
             <Heart
               size={18}
-              color={isWishlisted ? Colors.terracotta : Colors.asphalt}
-              fill={isWishlisted ? Colors.terracotta : 'transparent'}
+              color={Scene.text}
+              fill={isWishlisted ? Scene.text : 'transparent'}
               strokeWidth={2}
             />
           </TouchableOpacity>
+          <ProfileButton compact surface="scene"/>
         </View>
+      <ScrollView decelerationRate="normal" showsVerticalScrollIndicator={false}>
+        <View style={styles.eventHeading}>
+          {!!event.event_date && <Text style={styles.dateEyebrow}>{formatEventDateLA(event.event_date, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>}
+          <Text style={styles.title}>{event.title}</Text>
+          {!!eventKickerLabel(event) && <View style={styles.detailCategoryPill}><Text style={styles.detailCategoryText}>{eventKickerLabel(event)}</Text></View>}
+        </View>
+        {!!event.image_url && <View style={styles.heroContainer} onLayout={e => setArtFrameWidth(e.nativeEvent.layout.width)}>
+          <EventMediaImage eventId={event.id} reference={event.image_url} style={{ width: artworkWidth, height: artworkHeight, borderRadius: 8 }} contentFit="contain"
+            onLoad={({ source }) => {
+              if (source.width > 0 && source.height > 0) setArtwork({ reference: event.image_url!, ratio: source.width / source.height });
+            }} />
+        </View>}
 
         <View style={styles.content}>
-          {!!eventKickerLabel(event) && (
-            <View style={[styles.detailCategoryPill, { backgroundColor: Colors.terracotta }]}>
-              <Text style={styles.detailCategoryText}>{eventKickerLabel(event)}</Text>
-            </View>
-          )}
-
-          <Text style={styles.title}>{event.title}</Text>
-
-          {COMMUNITIES_ENABLED && !!bylineName && (
+          {(COMMUNITIES_ENABLED || publishedPage?.kind === 'organization') && !!bylineName && (
             <View style={styles.putOnByRow}>
               {!!bylineFace && (
                 <Image source={{ uri: bylineFace }} style={styles.putOnByFace} contentFit="cover" />
@@ -1029,17 +1091,17 @@ export default function EventDetailScreen() {
                     hapticLight();
                     const startIso = eventStartIso(event.event_date, event.start_time);
                     if (startIso) {
-                      showAddToCalendar(event.title, startIso, null, event.venue ?? undefined);
+                      showAddToCalendar(event.title, startIso, event.end_time, event.venue ?? undefined);
                     }
                   }}
                 >
-                  <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
+                  <GoldSurfaceFill radius={12} /><View style={styles.infoCardInner}><Calendar size={18} color={Colors.asphalt} strokeWidth={2} />
                   <View style={styles.infoCardBody}>
                     <Text style={styles.infoCardText}>{formatFullDate(event.event_date, event.start_time)}</Text>
                     {/* copy to the taste gate (doc 69 Q5) */}
                     <Text style={styles.infoCardHint}>add to calendar</Text>
                   </View>
-                  <ChevronRight size={16} color={Colors.textLight} strokeWidth={2} />
+                  <ChevronRight size={16} color={Colors.asphalt} strokeWidth={2} /></View>
                 </TouchableOpacity>
               )}
               {event.venue && (
@@ -1051,7 +1113,7 @@ export default function EventDetailScreen() {
                     openUrl(venueMapsUrl(event.venue!, event.venue_address));
                   }}
                 >
-                  <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+                  <GoldSurfaceFill radius={12} /><View style={styles.infoCardInner}><MapPin size={18} color={Colors.asphalt} strokeWidth={2} />
                   <View style={styles.infoCardBody}>
                     <Text style={styles.infoCardText}>{event.venue}</Text>
                     {event.venue_address ? (
@@ -1061,20 +1123,20 @@ export default function EventDetailScreen() {
                       <Text style={styles.infoCardHint}>open in maps</Text>
                     )}
                   </View>
-                  <ChevronRight size={16} color={Colors.textLight} strokeWidth={2} />
+                  <ChevronRight size={16} color={Colors.asphalt} strokeWidth={2} /></View>
                 </TouchableOpacity>
               )}
             </View>
           ) : (
             <>
               <View style={styles.metaRow}>
-                <Calendar size={16} color={Colors.warmGray} strokeWidth={2} />
+                <Calendar size={16} color={Colors.asphalt} strokeWidth={2} />
                 <Text style={styles.metaText}>{formatFullDate(event.event_date, event.start_time)}</Text>
               </View>
 
               {event.venue && (
                 <View style={styles.metaRow}>
-                  <MapPin size={16} color={Colors.warmGray} strokeWidth={2} />
+                  <MapPin size={16} color={Colors.asphalt} strokeWidth={2} />
                   <Text style={styles.metaText}>
                     {event.venue}{event.venue_address ? ` · ${event.venue_address}` : ''}
                   </Text>
@@ -1092,7 +1154,7 @@ export default function EventDetailScreen() {
           {ticketPrice !== null && !!event.external_url
             && !ticketSummary?.onSale && !ticketSummary?.allSoldOut && (
             <View style={styles.metaRow}>
-              <Ticket size={16} color={Colors.warmGray} strokeWidth={2} />
+              <Ticket size={16} color={Scene.supporting} strokeWidth={2} />
               <Text style={styles.metaText}>{formatTicketPrice(ticketPrice)}</Text>
             </View>
           )}
@@ -1102,14 +1164,15 @@ export default function EventDetailScreen() {
               shown whenever a link exists, labeled by context */}
           {event.external_url && (
             <TouchableOpacity
+              accessibilityRole="button" accessibilityLabel={isFree ? 'Reserve a spot' : 'Get external tickets'}
               style={styles.ticketBtn}
-              onPress={() => openUrl(event.external_url!)}
+              onPress={() => { if (previewMode) { showPreviewNotice(); return; } void openUrl(event.external_url!); }}
               activeOpacity={0.85}
             >
-              <Ticket size={18} color={Colors.darkWarm} strokeWidth={2} />
+              <Ticket size={18} color={Scene.text} strokeWidth={2} />
               {/* LIZ COPY: priced vs free-with-link labels */}
               <Text style={styles.ticketBtnText}>{isFree ? 'reserve a spot' : 'get tickets'}</Text>
-              <ChevronRight size={16} color={Colors.warmGray} strokeWidth={2} />
+              <ChevronRight size={16} color={Scene.supporting} strokeWidth={2} />
             </TouchableOpacity>
           )}
 
@@ -1118,14 +1181,56 @@ export default function EventDetailScreen() {
               good-to-know cards close it either way */}
           {Array.isArray(event.description_blocks) && event.description_blocks.length > 0 ? (
             <View style={styles.descriptionSection}>
-              <EventBodyBlocks eventId={event.id} blocks={event.description_blocks} />
+              <EventBodyBlocks eventId={event.id} blocks={event.description_blocks} surface="scene" />
             </View>
           ) : (
             <View style={styles.descriptionSection}>
               {!!event.description && (
-                <LinkifiedText text={event.description} style={styles.descriptionText} />
+                <LinkifiedText text={event.description} style={styles.descriptionText} linkStyle={{ color: Scene.text }} />
               )}
-              <EventFaqCards eventId={event.id} />
+              <EventFaqCards eventId={event.id} surface="scene" />
+            </View>
+          )}
+
+          {previewPage && !previewPage.isPublished && !publishedPage && (
+            <View style={styles.entityCard}><GoldSurfaceFill radius={12} />
+              <View style={styles.entityCardBody}>
+                <Text style={styles.entityCardKicker}>{previewPage.kind}</Text>
+                <Text style={styles.entityCardName}>{previewPage.name}</Text>
+                <Text style={styles.entityCardMeta}>Your page is still private.</Text>
+              </View>
+            </View>
+          )}
+          {CREATOR_PAGES_ENABLED && !legacyIdentityAllowed && !publishedPage && !(previewPage && !previewPage.isPublished) && (
+            <View style={[styles.entityCard, { flexDirection: 'column', alignItems: 'stretch' }]}><GoldSurfaceFill radius={12} />
+              <Text accessibilityRole={pageRead.error || pageContext.account.error ? 'alert' : undefined} style={styles.entityCardMeta}>
+                {pageRead.error || pageContext.account.error ? 'The event’s page could not be checked.' : pageRead.loading || pageContext.account.isLoading ? 'Checking this event’s page…' : 'This event’s page is unavailable.'}
+              </Text>
+              {(pageRead.error || pageContext.account.error) && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check page" style={styles.followPill}
+                onPress={() => { void (pageContext.account.error ? pageContext.account.retry() : pageRead.refresh()).catch(() => undefined); }}>
+                <Text style={styles.followPillText}>Check page</Text>
+              </TouchableOpacity>}
+            </View>
+          )}
+          {publishedPage?.kind === 'organization' && (
+            <View style={[styles.entityCard, { flexDirection: 'column', alignItems: 'stretch' }]}><GoldSurfaceFill radius={12} />
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Open ${publishedPage.name}`} style={[styles.entityCardIdentity, styles.stackedEntityIdentity]}
+                onPress={() => router.push(publishedPageRoute(publishedPage) as never)}>
+                <View style={styles.entityCardBody}>
+                  <Text style={styles.entityCardKicker}>organization</Text>
+                  <Text style={styles.entityCardName}>{publishedPage.name}</Text>
+                  <Text style={styles.entityCardMeta}>{publishedPage.purpose}</Text>
+                  {trackRecordCount !== null && trackRecordCount > 0 && <Text style={styles.entityCardMeta}>{trackRecordCount} public {trackRecordCount === 1 ? 'event' : 'events'}</Text>}
+                </View>
+                <ChevronRight size={18} color={Scene.supporting} />
+              </TouchableOpacity>
+              {!!publishedPage.coverMediaId && <PublishedPageCover pageId={publishedPage.pageId} mediaId={publishedPage.coverMediaId} height={120} />}
+              <OrganizationPageFollowControls pageId={publishedPage.pageId} ownerId={publishedPage.ownerId} scope={pageContext.scope}
+                surface="scene" preview={previewMode} onPreview={showPreviewNotice} />
+              {!!relatedPageRead.error && <View><Text accessibilityRole="alert" style={styles.entityCardMeta}>This page’s other events could not be loaded.</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check events" style={styles.followPill} onPress={() => { void relatedPageRead.refresh().catch(() => undefined); }}>
+                  <Text style={styles.followPillText}>Check events</Text>
+                </TouchableOpacity></View>}
             </View>
           )}
 
@@ -1134,7 +1239,7 @@ export default function EventDetailScreen() {
               renders only when 68 is live (followState.available) and the
               viewer is signed in; the count obeys the doc-37 threshold. */}
           {COMMUNITIES_ENABLED && !!frontingTarget && !!bylineName && (
-            <View style={styles.entityCard}>
+            <View style={styles.entityCard}><GoldSurfaceFill radius={12} />
               {/* Scene handoff §12/13: tapping the organization identity
                   opens its public profile page (app/organization/[id].tsx).
                   followTarget is already organizer-only (see its definition
@@ -1143,9 +1248,10 @@ export default function EventDetailScreen() {
                   a community identity, only for an organization's. */}
               <TouchableOpacity
                 style={styles.entityCardIdentity}
-                activeOpacity={followTarget ? 0.7 : 1}
-                disabled={!followTarget}
+                activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={`Open ${bylineName}`}
                 onPress={() => {
+                  if (frontingTarget?.kind === 'community') { router.push(`/community/${frontingTarget.id}` as never); return; }
                   if (!followTarget) return;
                   hapticLight();
                   // Not yet in the generated route types (brand-new route,
@@ -1175,8 +1281,8 @@ export default function EventDetailScreen() {
                       locked by vocabulary law; the exact string goes to the
                       taste gate. NOT terracotta - the CTA owns the accent. */}
                   <View style={styles.badgeRow}>
-                    <BadgeCheck size={13} color={Colors.gold} strokeWidth={2.5} />
-                    <Text style={styles.badgeText}>application-reviewed founding partner</Text>
+                    <BadgeCheck size={13} color={Colors.asphalt} strokeWidth={2.5} />
+                    <Text style={styles.badgeText}>Reviewed creator</Text>
                   </View>
                   <View style={styles.entityCardMetaRow}>
                     {trackRecordCount !== null && trackRecordCount > 0 && (
@@ -1203,9 +1309,8 @@ export default function EventDetailScreen() {
                   viewerMembershipStatus. */}
               <View style={styles.entityCardActions}>
                 {viewerIsMemberHere ? (
-                  <View style={[styles.followPill, styles.followPillOn]}>
-                    {/* LIZ COPY */}
-                    <Text style={[styles.followPillText, styles.followPillTextOn]}>member</Text>
+                  <View>
+                    <Text style={styles.memberStatus}>You’re a member</Text>
                   </View>
                 ) : !!userId && !!followState?.available ? (
                   <TouchableOpacity
@@ -1256,7 +1361,7 @@ export default function EventDetailScreen() {
               invitation, and only when flattering (never "0 going"). */}
           {sceneParticipationEnabled && rsvpCount !== null && (
             <View style={styles.metaRow}>
-              <Users size={16} color={Colors.warmGray} strokeWidth={2} />
+              <Users size={16} color={Scene.supporting} strokeWidth={2} />
               <Text style={styles.metaText}>
                 {rsvpCount >= GOING_COUNT_THRESHOLD
                   ? `${rsvpCount} going`
@@ -1270,12 +1375,16 @@ export default function EventDetailScreen() {
           {!isCommunityEvent && (
           <View style={styles.plansSection}>
             <View style={styles.plansSectionHeader}>
-              <Users size={18} color={Colors.asphalt} strokeWidth={2} />
+              <Users size={18} color={Scene.text} strokeWidth={2} />
               {/* the lowercase law */}
             <Text style={styles.plansSectionTitle}>people going with washedup</Text>
             </View>
 
-            {linkedPlans.length === 0 ? (
+            {!linkedReady && <View style={styles.linkedPlanRecovery}>
+              <Text accessibilityRole={linkedRead.error ? 'alert' : undefined} style={styles.noPlansText}>{linkedRead.error ? 'Plans couldn’t be checked.' : 'Checking plans…'}</Text>
+              {linkedRead.error && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry linked plans" disabled={linkedRead.loading} style={styles.ticketReadRetry} onPress={retryLinkedPlans}><Text style={styles.ticketReadRetryText}>Try again</Text></TouchableOpacity>}
+            </View>}
+            {linkedReady && linkedPlans.length === 0 ? (
               <Text style={styles.noPlansText}>no one has posted a plan yet. go first.</Text>
             ) : (
               linkedPlans.map(plan => {
@@ -1284,7 +1393,8 @@ export default function EventDetailScreen() {
                   <TouchableOpacity
                     key={plan.id}
                     style={styles.planCard}
-                    onPress={() => router.push(`/plan/${plan.id}`)}
+                    accessibilityRole="button" accessibilityLabel={`View Plan: ${plan.title}`} disabled={!linkedReady}
+                    onPress={() => { if (canUseLinkedPlans()) router.push(`/plan/${plan.id}`); }}
                     activeOpacity={0.85}
                   >
                     <View style={styles.planCardTop}>
@@ -1313,7 +1423,7 @@ export default function EventDetailScreen() {
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           style={styles.planMenuBtn}
                         >
-                          <MoreHorizontal size={16} color={Colors.textLight} />
+                          <MoreHorizontal size={16} color={Scene.supporting} />
                         </TouchableOpacity>
                       )}
                       <View style={[
@@ -1324,7 +1434,7 @@ export default function EventDetailScreen() {
                           styles.planJoinBtnText,
                           isFull && styles.planJoinBtnTextFull,
                         ]}>
-                          {isFull ? 'full' : 'join'}
+                          {!linkedReady ? 'check' : isFull ? 'full' : 'view'}
                         </Text>
                       </View>
                     </View>
@@ -1337,8 +1447,10 @@ export default function EventDetailScreen() {
           </View>
           )}
 
+          {COMMUNITIES_ENABLED && !previewMode && <EventMessagePreference eventId={id} dark />}
+
           {/* §4c (doc 69 A6): the more-from rail closes the page */}
-          {COMMUNITIES_ENABLED && moreEvents.length > 0 && !!bylineName && (
+          {(COMMUNITIES_ENABLED || publishedPage?.kind === 'organization') && moreEvents.length > 0 && !!bylineName && (
             <View style={styles.moreSection}>
               {/* copy to the taste gate (doc 69 Q5) */}
               <Text style={styles.moreSectionTitle}>more put on by {bylineName}</Text>
@@ -1358,7 +1470,7 @@ export default function EventDetailScreen() {
                     }}
                   >
                     {ev.image_url ? (
-                      <Image source={{ uri: ev.image_url }} style={styles.moreCardImage} contentFit="cover" />
+                      <EventMediaImage eventId={ev.id} reference={ev.image_url} style={styles.moreCardImage} contentFit="cover" />
                     ) : (
                       <View style={styles.moreCardImage}>
                         <GeneratedPoster
@@ -1381,12 +1493,18 @@ export default function EventDetailScreen() {
               </ScrollView>
             </View>
           )}
+          {!!ownedTicket && !ticketReadUnresolved && ticketSummary?.onSale && !isSoldOut && !isCancelled && !isCompleted && (
+            <TouchableOpacity style={styles.ticketReadRetry} accessibilityRole="button" accessibilityLabel="Get more tickets"
+              onPress={() => { if (pageContext.scope?.isCurrent()) { hapticMedium(); setCheckoutVisible(true); } }}>
+              <Text style={styles.ticketReadRetryText}>Get more tickets</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
 
       <View style={[styles.stickyBarWrap, { paddingBottom: insets.bottom + 8 }]}>
         {/* P3: honest all-in price + real scarcity, before any checkout */}
-        {!!ticketSummary && (ticketSummary.onSale || ticketSummary.allSoldOut) && (
+        {!ownedTicket && !!ticketSummary && !ticketReadUnresolved && ticketSummary.onSale && !isSoldOut && !isCancelled && !isCompleted && (
           <View style={styles.priceRow}>
             {ticketSummary.allSoldOut ? (
               /* copy to the taste gate: never a sold-out tier's price */
@@ -1395,8 +1513,8 @@ export default function EventDetailScreen() {
               <>
                 {/* law 9: "fees included" stated so nothing surprises */}
                 <Text style={styles.priceFrom}>
-                  from {formatCents(ticketSummary.fromCents ?? 0)}
-                  <Text style={styles.priceFees}>  fees included</Text>
+                  {ticketSummary.fromCents === null ? 'Check ticket prices' : `from ${formatCents(ticketSummary.fromCents)}`}
+                  {ticketSummary.fromCents !== null && <Text style={styles.priceFees}>  fees included</Text>}
                 </Text>
                 {!!ticketSummary.scarcity && ticketSummary.scarcity.left > 0 && (
                   /* law 10: REAL remaining only, from the availability RPC.
@@ -1416,7 +1534,7 @@ export default function EventDetailScreen() {
             )}
           </View>
         )}
-        <View style={styles.stickyBar}>
+        <View style={[styles.stickyBar, fontScale > 1.3 && { flexDirection: 'column' }]}>
         {isCancelled ? (
           // Scene handoff §15: "Replace attendance CTAs with Cancelled and
           // show refund/contact information when relevant." Reuses the
@@ -1445,6 +1563,40 @@ export default function EventDetailScreen() {
             {/* copy to the taste gate */}
             <Text style={styles.cancelledPillText}>event ended</Text>
           </View>
+        ) : ownedTicket ? (
+          <>
+            <TouchableOpacity style={styles.rsvpButton} accessibilityRole="button" accessibilityLabel="Your tickets" onPress={openOwnedTickets}>
+              <Text style={styles.rsvpButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>Your tickets</Text>
+            </TouchableOpacity>
+            {isCommunityEvent ? (eventTopicId ? (
+              <TouchableOpacity style={styles.postPlanButton} accessibilityRole="button" accessibilityLabel="Open event chat"
+                onPress={() => { if (pageContext.scope?.isCurrent()) router.push(`/community-topic/${eventTopicId}`); }}>
+                <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>Open chat</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.ticketReadRecovery}>
+                <Text style={styles.ticketReadText}>{eventTopicRead.isPending || eventTopicRead.isFetching ? 'Checking your event chat…' : eventTopicRead.error ? 'Your event chat could not be checked.' : 'Your event chat is not available yet.'}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check event chat" style={styles.ticketReadRetry}
+                  disabled={eventTopicRead.isFetching} onPress={() => { if (pageContext.scope?.isCurrent()) void eventTopicRead.refetch(); }}>
+                  <Text style={styles.ticketReadRetryText}>{eventTopicRead.isFetching ? 'Checking…' : 'Try again'}</Text>
+                </TouchableOpacity>
+              </View>
+            )) : (
+              <TouchableOpacity style={[styles.postPlanButton, !linkedReady && {opacity:0.55}]} accessibilityRole="button" accessibilityLabel="Find people" disabled={!linkedReady && !previewMode} onPress={goFindPeople}>
+                <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>find people</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        ) : ownTicketsUnresolved ? (
+          <View style={styles.ticketReadRecovery}>
+            <Text accessibilityRole={ownTickets.error ? 'alert' : undefined} style={styles.ticketReadText}>
+              {ownTickets.error ? 'Your tickets could not be checked.' : 'Checking your tickets…'}
+            </Text>
+            {ownTickets.error ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check your tickets" style={styles.ticketReadRetry}
+              disabled={ownTickets.loading} onPress={() => { if (pageContext.scope?.isCurrent()) void ownTickets.refresh().catch(() => undefined); }}>
+              <Text style={styles.ticketReadRetryText}>Try again</Text>
+            </TouchableOpacity> : <ActivityIndicator size="small" color={Scene.text} accessibilityLabel="Checking your tickets" />}
+          </View>
         ) : isSoldOut ? (
           // Screen 49 gap: sold-out is its own honest dominant state, not
           // a silent fallthrough into the free-RSVP button (see isSoldOut).
@@ -1458,7 +1610,22 @@ export default function EventDetailScreen() {
             terracotta fill), opening the tier selector -> checkout. rsvp is
             the going-signal for FREE/tierless events, so it steps aside when
             tickets are on sale (buying is the going action). */}
-        {ticketSummary?.onSale ? (
+        {ticketReadUnresolved ? (
+          <View style={styles.ticketReadRecovery}>
+            <Text accessibilityRole={ticketProblem ? 'alert' : undefined} style={styles.ticketReadText}>
+              {ticketProblem ? 'Ticket availability could not be checked.' : 'Checking ticket availability…'}
+            </Text>
+            {ticketProblem ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check ticket availability"
+              accessibilityState={{ disabled: ticketRead.isFetching, busy: ticketRead.isFetching }} disabled={ticketRead.isFetching}
+              style={styles.ticketReadRetry} onPress={retryTickets}>
+              <Text style={styles.ticketReadRetryText}>{ticketRead.isFetching ? 'Checking…' : 'Try again'}</Text>
+            </TouchableOpacity> : <ActivityIndicator size="small" color={Scene.text} accessibilityLabel="Checking ticket availability" />}
+          </View>
+        ) : ticketSummary?.notOnSale || ticketSummary?.unavailable ? (
+          <View style={styles.ticketReadRecovery}>
+            <Text style={styles.ticketReadText}>{ticketSummary.notOnSale ? 'Tickets are not on sale right now.' : 'Tickets are unavailable right now.'}</Text>
+          </View>
+        ) : ticketSummary?.onSale ? (
           <TouchableOpacity
             style={styles.rsvpButton}
             onPress={() => {
@@ -1468,6 +1635,28 @@ export default function EventDetailScreen() {
           >
             <Text style={styles.rsvpButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>get tickets</Text>
           </TouchableOpacity>
+        ) : sceneParticipationEnabled && rsvpRecovery.blocked ? (
+          <View style={styles.ticketReadRecovery}>
+            <Text accessibilityRole={rsvpRecovery.busy ? undefined : 'alert'} style={styles.ticketReadText}>
+              {rsvpRecovery.busy ? 'Checking your attendance…' : rsvpRecovery.phase === 'unknown' ? 'Your attendance change has not been confirmed yet.' : rsvpRecovery.error}
+            </Text>
+            {rsvpRecovery.busy ? <ActivityIndicator size="small" color={Scene.text} accessibilityLabel="Checking your attendance change" /> : (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check attendance change" style={styles.ticketReadRetry} onPress={() => { void rsvpRecovery.check(); }}>
+                <Text style={styles.ticketReadRetryText}>Check status</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : sceneParticipationEnabled && rsvpReadUnresolved ? (
+          <View style={styles.ticketReadRecovery}>
+            <Text accessibilityRole={rsvpReadProblem ? 'alert' : undefined} style={styles.ticketReadText}>
+              {rsvpReadProblem ? 'Your attendance could not be checked.' : 'Checking your attendance…'}
+            </Text>
+            {rsvpReadProblem ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check attendance"
+              disabled={rsvpRead.isFetching} accessibilityState={{ disabled: rsvpRead.isFetching, busy: rsvpRead.isFetching }}
+              style={styles.ticketReadRetry} onPress={() => { if (pageContext.account.error) void pageContext.account.retry(); else void rsvpRead.refetch(); }}>
+              <Text style={styles.ticketReadRetryText}>{rsvpRead.isFetching ? 'Checking…' : 'Try again'}</Text>
+            </TouchableOpacity> : <ActivityIndicator size="small" color={Scene.text} accessibilityLabel="Checking your attendance" />}
+          </View>
         ) : sceneParticipationEnabled && (
           <TouchableOpacity
             style={[styles.rsvpButton, myRsvp === 'going' && styles.rsvpButtonGoing]}
@@ -1478,7 +1667,7 @@ export default function EventDetailScreen() {
             disabled={rsvpBusy}
           >
             {rsvpBusy ? (
-              <ActivityIndicator size="small" color={myRsvp === 'going' ? Colors.brandDeep : Colors.white} />
+              <ActivityIndicator size="small" color={myRsvp === 'going' ? Scene.text : Scene.actionText} />
             ) : (
               <Text style={[styles.rsvpButtonText, myRsvp === 'going' && styles.rsvpButtonTextGoing]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {myRsvp === 'going' ? "you're going" : 'count me in'}
@@ -1489,10 +1678,11 @@ export default function EventDetailScreen() {
         {/* the chat law: find-people never renders on a community event -
             the chat affordance takes its place once the viewer is going */}
         {isCommunityEvent ? (
-          myRsvp === 'going' && !!eventTopicId && (
+          !rsvpReadUnresolved && !rsvpRecovery.blocked && myRsvp === 'going' && (eventTopicId ? (
             <TouchableOpacity
               style={styles.postPlanButton}
               onPress={() => {
+                if (previewMode) { showPreviewNotice(); return; }
                 hapticMedium();
                 // eventTopicId is a community_topics.id, so it belongs to the
                 // TOPIC screen. Pushing it at /community-thread sent the send
@@ -1505,9 +1695,20 @@ export default function EventDetailScreen() {
               {/* copy to the taste gate (doc 69 Q5) */}
               <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>open the chat</Text>
             </TouchableOpacity>
-          )
+          ) : (
+            <View style={styles.ticketReadRecovery}>
+              <Text accessibilityRole={eventTopicRead.error ? 'alert' : undefined} style={styles.ticketReadText}>
+                {eventTopicRead.isPending || eventTopicRead.isFetching ? 'Checking your event chat…' : eventTopicRead.error ? 'Your event chat could not be checked.' : 'Your event chat is not available yet.'}
+              </Text>
+              {eventTopicRead.isPending || eventTopicRead.isFetching ? <ActivityIndicator size="small" color={Scene.text} accessibilityLabel="Checking your event chat" /> : (
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check event chat" style={styles.ticketReadRetry} onPress={() => { void eventTopicRead.refetch(); }}>
+                  <Text style={styles.ticketReadRetryText}>Try again</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))
         ) : (
-          <TouchableOpacity style={styles.postPlanButton} onPress={goFindPeople}>
+          <TouchableOpacity style={[styles.postPlanButton, !linkedReady && {opacity:0.55}]} accessibilityRole="button" accessibilityLabel="Find people" disabled={!linkedReady && !previewMode} onPress={goFindPeople}>
             <Text style={styles.postPlanButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>find people</Text>
           </TouchableOpacity>
         )}
@@ -1562,10 +1763,11 @@ export default function EventDetailScreen() {
       />
 
       <TicketCheckoutSheet
+        owner={pageContext.scope}
         visible={checkoutVisible}
         eventId={event.id}
         onClose={() => setCheckoutVisible(false)}
-        onFreeConfirmed={(orderId) => {
+        onOrderReady={(orderId) => {
           setCheckoutVisible(false);
           // C2/C3: the order-complete + your-tickets surfaces
           router.push(`/tickets/order/${orderId}` as never);
@@ -1579,12 +1781,16 @@ export default function EventDetailScreen() {
         creatorName={bylineName}
         creatorAvatar={bylineFace ?? bylineLogo}
       />
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
+  container: { flex: 1, backgroundColor: Scene.upper },
+  ticketReadRecovery: { flex: 1, gap: 4, minWidth: 120 },
+  ticketReadText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Scene.supporting },
+  ticketReadRetry: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start', paddingHorizontal: 10 },
+  ticketReadRetryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Scene.text },
   // §3.0 guest-preview strip: quiet, neutral, a "done" that returns to editing
   previewBar: {
     flexDirection: 'row',
@@ -1592,93 +1798,90 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 8,
-    backgroundColor: Colors.cardBg,
+    backgroundColor: Scene.surface,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Scene.border,
   },
-  previewBarText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  previewBarDone: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  previewBarText: { flex: 1, minWidth: 0, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Scene.supporting },
+  previewDoneAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  previewBarDone: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Scene.text },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.textMedium, textAlign: 'center' },
-  goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Colors.terracotta, borderRadius: 14 },
-  goBackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  emptyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Scene.supporting, textAlign: 'center' },
+  goBackBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: Scene.action, borderRadius: 14 },
+  recoveryBack: { minHeight: 44, marginTop: 4, paddingHorizontal: 20, justifyContent: 'center' },
+  recoveryBackText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Scene.text },
+  goBackText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Scene.actionText },
   // P2 (law 2/3): the cover sits on the warm-dark media ground so the
   // photo reads cinematic and never flashes cream while it loads
-  heroContainer: { width: SCREEN_WIDTH, height: HERO_HEIGHT, position: 'relative', backgroundColor: EventSurface.media },
-  circleButton: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.overlayWhite90,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
+  heroContainer: { marginHorizontal: 20, alignItems: 'center' },
+  eventHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 4 },
+  headerButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerContext: { flex: 1, minWidth: 0, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Scene.text },
+  eventHeading: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 18, gap: 10 },
+  dateEyebrow: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Scene.supporting, textTransform: 'uppercase', letterSpacing: 0.8 },
   content: { padding: 20, gap: 14 },
-  detailCategoryPill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  detailCategoryPill: { backgroundColor: Scene.action, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   // sentence-lowercase, no transforms (C16 + the lowercase law)
-  detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.white },
+  detailCategoryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Scene.actionText },
   // doc 76 §3: the title carries the page in the display face, with the
   // Luma/Posh air around it
   title: {
     fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayXL,
-    color: Colors.asphalt,
-    lineHeight: LineHeights.displayXL,
+    fontSize: FontSizes.displayLG,
+    color: Scene.text,
+    lineHeight: 34,
     marginBottom: 2,
   },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   infoCards: { gap: 8 },
   infoCard: {
-    backgroundColor: Colors.white,
+    backgroundColor: Scene.surface,
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.inputBg,
+    borderColor: Scene.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
+  infoCardInner: {flex:1,flexDirection:'row',alignItems:'center',gap:10},
   infoCardBody: { flex: 1, gap: 2 },
   infoCardText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  infoCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  infoCardHint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   entityCard: {
-    backgroundColor: Colors.white,
+    backgroundColor: Scene.surface,
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.inputBg,
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderColor: Scene.border,
+    flexDirection: 'column',
+    alignItems: 'stretch',
     gap: 12,
     marginTop: 8,
   },
-  entityCardIdentity: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  entityCardIdentity: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight:44 },
+  stackedEntityIdentity: { flex: undefined, flexGrow: 0, flexShrink: 0, flexBasis: 'auto', minHeight: 44 },
   entityCardImage: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
-  entityCardImageFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  entityCardInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta },
+  entityCardImageFallback: { backgroundColor: Colors.parchment, alignItems: 'center', justifyContent: 'center' },
+  entityCardInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
   entityCardBody: { flex: 1, gap: 2 },
-  entityCardKicker: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
+  entityCardKicker: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.asphalt },
   entityCardName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  entityCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.asphalt },
   entityCardMetaRow: { flexDirection: 'row', gap: 12, marginTop: 2 },
-  entityCardActions: { gap: 6, alignItems: 'flex-end' },
+  memberStatus: {fontFamily: Fonts.sansMedium,fontSize:FontSizes.caption,color:Colors.asphalt},
+  entityCardActions: { gap: 6, alignItems: 'flex-start' },
   // the founding-partner badge: gold trust marker, never the terracotta accent
   badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
-  badgeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.brandDeep },
+  badgeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.asphalt },
   // law 1: the sticky CTA is the screen's one terracotta fill, so follow
   // is a NEUTRAL secondary (border + darkWarm), not a second accent
-  followPill: { borderWidth: 1.5, borderColor: Colors.border, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
-  followPillOn: { borderColor: Colors.border, backgroundColor: Colors.inputBg },
-  followPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  followPillTextOn: { color: Colors.textMedium },
-  moreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
-  moreSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
+  followPill: { borderWidth: 1.5, borderColor: Scene.border, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+  followPillOn: { borderColor: Scene.border, backgroundColor: Scene.surface },
+  followPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Scene.text },
+  followPillTextOn: { color: Scene.supporting },
+  moreSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Scene.border, gap: 12 },
+  moreSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Scene.text },
   moreRail: { gap: 10 },
   moreCard: { width: MORE_CARD_WIDTH, gap: 6 },
   moreCardImage: {
@@ -1686,13 +1889,13 @@ const styles = StyleSheet.create({
     height: MORE_CARD_POSTER_HEIGHT,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: Colors.inputBg,
+    backgroundColor: Scene.surface,
   },
-  moreCardTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
-  moreCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
-  metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, flex: 1, lineHeight: 20 },
-  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 14 },
-  descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, lineHeight: 22 },
+  moreCardTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Scene.text },
+  moreCardMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Scene.supporting },
+  metaText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Scene.supporting, flex: 1, lineHeight: 20 },
+  descriptionSection: { marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: Scene.border, gap: 14 },
+  descriptionText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Scene.supporting, lineHeight: 22 },
   // the secondary-button pattern: outline terracotta, never competing with
   // the sticky bar's primary CTA
   // law 1: the sticky CTA owns the accent, so the legacy external link-out
@@ -1705,93 +1908,94 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     borderWidth: 1.5,
-    borderColor: Colors.border,
+    borderColor: Scene.border,
     borderRadius: 999,
     paddingVertical: 13,
     marginTop: 4,
   },
-  ticketBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Colors.inputBg, gap: 12 },
+  ticketBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Scene.text },
+  plansSection: { marginTop: 16, paddingTop: 20, borderTopWidth: 1, borderTopColor: Scene.border, gap: 12 },
   plansSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
-  noPlansText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
+  plansSectionTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Scene.text },
+  noPlansText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Scene.supporting },
   planCard: {
-    backgroundColor: Colors.white,
+    backgroundColor: Scene.surface,
     borderRadius: 12,
     padding: 14,
     gap: 6,
     borderWidth: 1,
-    borderColor: Colors.inputBg,
+    borderColor: Scene.border,
   },
   planCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   planCreatorAvatar: { width: 28, height: 28, borderRadius: 14, overflow: 'hidden' },
-  planCreatorAvatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center' as const, justifyContent: 'center' as const },
-  planCreatorInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  planCreatorName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
-  planVibePill: { backgroundColor: Colors.inputBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  planCreatorAvatarFallback: { backgroundColor: Scene.surface, alignItems: 'center' as const, justifyContent: 'center' as const },
+  planCreatorInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Scene.text },
+  planCreatorName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Scene.text },
+  planVibePill: { backgroundColor: Scene.surface, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   // sentence-lowercase, no transforms (C16 + the lowercase law)
-  planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.warmGray },
+  planVibeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Scene.supporting },
   planCardSpacer: { flex: 1 },
   planMenuBtn: { padding: 4, marginRight: 4 },
-  planJoinBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 14 },
-  planJoinBtnFull: { backgroundColor: Colors.border },
-  planJoinBtnTextFull: { color: Colors.textLight },
-  planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
-  planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.warmGray },
+  planJoinBtn: { backgroundColor: Scene.action, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 14 },
+  planJoinBtnFull: { backgroundColor: Scene.surface },
+  planJoinBtnTextFull: { color: Scene.supporting },
+  planJoinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Scene.actionText },
+  planTitle: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Scene.text },
+  planMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Scene.supporting },
   stickyBarWrap: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    backgroundColor: Colors.parchment,
+    backgroundColor: Scene.lower,
     borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
+    borderTopColor: Scene.border,
   },
   stickyBar: { flexDirection: 'row', gap: 10 },
-  priceRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 },
-  priceFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  priceFees: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  priceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 },
+  priceFrom: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Scene.text },
+  priceFees: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Scene.supporting },
   // real scarcity wears the terracotta scarcity token (doc 78 law 1)
-  priceScarcity: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: EventAction.scarcity },
+  priceScarcity: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Scene.text },
+  linkedPlanRecovery: {gap:4, alignItems:'flex-start'},
   // TK-07: same filled-pill urgency convention as PlanCard's spotsLeftBadge
   scarcityBadge: {
     backgroundColor: EventAction.scarcity, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999,
   },
   scarcityBadgeText: { fontFamily: Fonts.sansBold, fontSize: 10, color: Colors.white, lineHeight: 14 },
-  priceSoldOut: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
+  priceSoldOut: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Scene.supporting },
   // doc 78 law 8: the SINGLE accent belongs to the primary action (rsvp),
   // so find-people/chat drops to the secondary outline treatment - it was
   // wearing the loud terracotta while the real CTA sat quiet, backwards.
   postPlanButton: {
     flex: 1,
     borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    borderRadius: 999,
-    minHeight: 56,
+    borderColor: Scene.action,
+    borderRadius: 8,
+    minHeight: 48,
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.terracotta, textAlign: 'center' },
+  postPlanButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Scene.text, textAlign: 'center' },
   // Scene handoff §15 "Event cancelled": a quiet disabled pill (same shape
   // as rsvpButton, tierBlocked's opacity-only convention) replaces every
   // attendance CTA, plus one calm contact line reusing the order-complete
   // screen's established support channel.
   cancelledRow: { flex: 1, gap: 8, alignItems: 'center' },
-  cancelledPill: { alignSelf: 'stretch', backgroundColor: Colors.border, borderColor: Colors.border },
-  cancelledPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.textMedium },
+  cancelledPill: { alignSelf: 'stretch', backgroundColor: Scene.surface, borderColor: Scene.border },
+  cancelledPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Scene.supporting },
   cancelledContactText: {
-    fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline',
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Scene.text, textDecorationLine: 'underline',
   },
   // RSVP is the primary CTA: the one terracotta fill. going = the
   // documented gold confirmed-state (fill + hairline gold border +
   // brandDeep label), the house success family, never green.
   rsvpButton: {
     flex: 1,
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
+    backgroundColor: Scene.action,
+    borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    minHeight: 56,
+    borderColor: Scene.action,
+    minHeight: 48,
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1800,14 +2004,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.goingConfirmedFill,
     borderColor: Colors.gold,
   },
-  rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
-  rsvpButtonTextGoing: { color: Colors.brandDeep },
+  rsvpButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Scene.actionText },
+  rsvpButtonTextGoing: { color: Scene.text },
   putOnByRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   putOnByFace: { width: 20, height: 20, borderRadius: 10 },
   putOnByLogo: { width: 18, height: 18, borderRadius: 5 },
   putOnBy: {
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
+    color: Scene.supporting,
   },
 });

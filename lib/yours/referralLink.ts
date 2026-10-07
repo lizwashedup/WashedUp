@@ -23,9 +23,15 @@ const PENDING_KEY = 'pendingReferralCode';
 
 /** Extract the <code> from a washedup.app/r/<code> or washedupapp://r/<code> URL. */
 export function parseReferralCode(url: string): string | null {
-  if (!url || !/(^|[/.])washedup(app)?(\.app)?/i.test(url)) return null;
-  const m = url.match(/\/r\/([A-Za-z0-9_-]+)/);
-  return m ? m[1] : null;
+  if (typeof url !== 'string' || /\s/.test(url)) return null;
+  // Keep the web forms supported by lib/url.ts and the configured native
+  // scheme. The complete authority must match before a mutating claim runs.
+  const own = url.match(/^(?:https?:\/\/(?:www\.)?washedup\.app\/|washedupapp:\/\/)(.*)$/i);
+  if (!own) return null;
+  // Match the entire path, not a valid-looking prefix. Query/fragment data
+  // is not part of the code; the server and web landing share this limit.
+  const path = own[1].match(/^r\/([A-Za-z0-9_-]{1,64})\/?(?:[?#]\S*)?$/);
+  return path ? path[1] : null;
 }
 
 /**

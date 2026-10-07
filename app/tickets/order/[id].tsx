@@ -1,3 +1,4 @@
+import { EventMediaImage } from '../../../components/events/EventMediaImage';
 /**
  * C2 - order complete (doc 78 §4, doc 79 C2). A ticket reads as a moment of
  * arrival, not a receipt. Then it asks the organizer's buyer questions
@@ -22,7 +23,7 @@
  * states, not just the happy path.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -43,12 +44,20 @@ import { Check } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../../constants/EventDesign';
-import { COMMUNITIES_ENABLED, TICKET_TRANSFER_ENABLED } from '../../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, CREATOR_PAGES_ENABLED, TICKET_TRANSFER_ENABLED } from '../../../constants/FeatureFlags';
 import { hapticLight, hapticSuccess, hapticError } from '../../../lib/haptics';
 import { logError } from '../../../lib/logger';
 import { eventStartIso, formatEventDateLA } from '../../../lib/laDate';
 import { showAddToCalendar } from '../../../lib/addToCalendar';
-import { clearPendingCheckout, peekPendingCheckout } from '../../../lib/pendingLink';
+import { clearPendingCheckout, peekPendingCheckout, stashPendingDestination } from '../../../lib/pendingLink';
+import { useCreatorPageRead } from '../../../hooks/useCreatorPageRead';
+import { loadPublishedEventPageIdentities } from '../../../lib/publishedPageIdentity';
+import { eventPageIdentity } from '../../../lib/eventPageIdentity';
+import { usePublicPageScope } from '../../../hooks/usePublicPageScope';
+import type { CheckoutOwner } from '../../../lib/ticketCheckoutAttempt';
+import { readPurchaseExtras } from '../../../lib/purchaseExtras';
+import { PurchaseExtras, PurchaseExtrasNotice } from '../../../components/tickets/PurchaseExtras';
+import { PendingCheckoutActions } from '../../../components/tickets/PendingCheckoutActions';
 import { wasNudged, markNudged } from '../../../lib/eventRsvp';
 import { getEventTopicId } from '../../../lib/communityChat';
 import { getOrganizerProfiles } from '../../../lib/organizerProfile';
@@ -130,7 +139,7 @@ function ConfirmBadge({ reduceMotion }: { reduceMotion: boolean }) {
     <View style={styles.badgeWrap}>
       <Animated.View style={[styles.bloom, bloomStyle]} />
       <Animated.View style={[styles.badge, badgeStyle]}>
-        <Check size={26} color={EventAction.onPrimary} strokeWidth={3} />
+        <Check size={22} color={Colors.darkWarm} strokeWidth={3} />
       </Animated.View>
     </View>
   );
@@ -151,7 +160,7 @@ function EventHeader({
       accessibilityLabel={`Open event: ${order.event_title ?? 'your event'}`}
     >
       {order.event_image ? (
-        <Image source={{ uri: order.event_image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <EventMediaImage eventId={order.event_id} reference={order.event_image} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : null}
       {!!order.event_image && (
         <LinearGradient
@@ -220,8 +229,33 @@ function SupportLink() {
 
 export default function OrderCompleteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const page = usePublicPageScope(`ticket-order:${id}`);
+  const owner = page.scope;
+  const [entryProblem, setEntryProblem] = useState<string | null>(null);
+  if (!owner?.userId) return <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <ScrollView contentContainerStyle={styles.content}>
+      {page.account.isLoading ? <ActivityIndicator color={EventAction.primary} /> : <StatusMessage
+        title={page.account.error ? 'Purchase unavailable' : 'Your purchase is saved'}
+        body={page.account.error ? 'We could not check your account. Try again.' : 'Sign in with the account you used to get your tickets.'}>
+        <TouchableOpacity accessibilityRole="button" style={styles.cta} onPress={() => {
+          if (page.account.error) { void page.account.retry(); return; }
+          setEntryProblem(null);
+          void stashPendingDestination(`/tickets/order/${id}`).then(() => {
+            if (page.account.isCurrent()) router.push('/phone-entry' as never);
+          }).catch(() => { if (page.account.isCurrent()) setEntryProblem('We couldn’t save your return link. Try again.'); });
+        }}><Text numberOfLines={1} style={styles.ctaText}>{page.account.error ? 'Try again' : 'Sign in'}</Text></TouchableOpacity>
+        {!!entryProblem && <Text accessibilityRole="alert" style={styles.errorText}>{entryProblem}</Text>}
+      </StatusMessage>}
+    </ScrollView>
+  </SafeAreaView>;
+  return <OwnedOrderScreen key={`${owner.userId}:${id}`} id={id} owner={owner} focused={page.focused} />;
+}
+
+function OwnedOrderScreen({ id, owner, focused }: { id: string; owner: CheckoutOwner; focused: boolean }) {
   const [answers, setAnswers] = useState<AnswerDraft>({});
   const [saving, setSaving] = useState(false);
+  const answerLock = useRef(false);
+  const [confirmedSlots, setConfirmedSlots] = useState<Set<string>>(() => new Set());
   const [done, setDone] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const reduceMotion = useReduceMotionLocal();
@@ -234,10 +268,15 @@ export default function OrderCompleteScreen() {
   // an empty ticket. Scene spec 05: also keep asking while the order is
   // still genuinely 'pending' (the buyer may have only just returned from
   // Stripe, or the webhook hasn't landed), not only while seats are empty.
-  const { data: order, isLoading } = useQuery({
-    queryKey: ['ticket-order', id],
-    queryFn: () => getOrder(id!),
-    enabled: !!id,
+  const { data: order, isLoading, isError, refetch } = useQuery({
+    queryKey: ['ticket-order', owner.userId, id],
+    queryFn: async () => {
+      if (!owner.userId || !owner.isCurrent()) throw new Error('Purchase visit changed.');
+      const result = await getOrder(id, { buyerUserId: owner.userId, strict: true });
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      return result;
+    },
+    enabled: !!id && focused,
     refetchInterval: (query) => {
       const o = query.state.data as MyOrder | null | undefined;
       if (!o) return 4000;
@@ -255,9 +294,9 @@ export default function OrderCompleteScreen() {
     const terminal = view.kind === 'ready' || view.kind === 'canceled' || view.kind === 'refunded';
     if (!id || !terminal) return;
     peekPendingCheckout().then((pendingId) => {
-      if (pendingId === id) clearPendingCheckout();
+      if (owner.isCurrent() && pendingId === id) clearPendingCheckout(id, owner.isCurrent);
     });
-  }, [id, view.kind]);
+  }, [id, view.kind, owner]);
 
   useEffect(() => {
     setPendingStuck(false);
@@ -266,16 +305,37 @@ export default function OrderCompleteScreen() {
     return () => clearTimeout(t);
   }, [view.kind, id]);
 
-  // Scene handoff §07/09: same community/organization split as the RSVP
-  // path (app/event/[id].tsx) -- a ticketed community event still routes
-  // the post-purchase nudge to the event chat, never to find-people.
-  const isCommunityEvent = COMMUNITIES_ENABLED && !!order?.event_community_id;
-  const { data: eventTopicId = null } = useQuery({
-    queryKey: ['event-topic', order?.event_id],
-    queryFn: () => getEventTopicId(order!.event_id),
-    enabled: isCommunityEvent && !!order?.event_id,
+  const readExtras = useCallback((scope: CheckoutOwner) => readPurchaseExtras(order!.event_id, [id], scope), [order?.event_id, id]);
+  const extrasRead = useCreatorPageRead(order && focused && ['paid', 'refunded'].includes(order.status) ? owner : null, readExtras);
+  const purchaseExtras = extrasRead.data?.get(id) ?? [];
+  const extrasView = <>
+    <PurchaseExtrasNotice error={extrasRead.error} loading={extrasRead.loading && !extrasRead.data} onRetry={() => { void extrasRead.refresh().catch(() => undefined); }} />
+    <PurchaseExtras extras={purchaseExtras} />
+  </>;
+
+  // Carry the same immutable published page identity as Scene and event detail.
+  const readPage = useCallback(async (scope: CheckoutOwner) => {
+    const links = await loadPublishedEventPageIdentities([order!.event_id], scope);
+    return { page: eventPageIdentity({community_id:order!.event_community_id}, links.get(order!.event_id)) };
+  }, [order?.event_id, order?.event_community_id]);
+  const pageRead = useCreatorPageRead(CREATOR_PAGES_ENABLED && order ? owner : null, readPage);
+  const publishedPage = !pageRead.error ? pageRead.data?.page : null;
+  const legacyIdentityAllowed = !CREATOR_PAGES_ENABLED || !!pageRead.data && !pageRead.error && pageRead.data.page === undefined;
+  const identityReady = legacyIdentityAllowed || !!publishedPage;
+  const isCommunityEvent = COMMUNITIES_ENABLED && (publishedPage?.kind === 'community' || legacyIdentityAllowed && !!order?.event_community_id);
+  const topicRead = useQuery({
+    queryKey: ['event-topic', owner.userId, order?.event_id],
+    queryFn: async () => {
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      const topic = await getEventTopicId(order!.event_id, true);
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      return topic;
+    },
+    enabled: isCommunityEvent && !!order?.event_id && focused && view.kind === 'ready' && !isError,
     staleTime: 60_000,
   });
+  const eventTopicId = topicRead.isError ? null : topicRead.data ?? null;
+  const branchReady = identityReady && (!isCommunityEvent || topicRead.isSuccess && !!eventTopicId);
 
   // Scene handoff §06/07/09: "every confirmed event offers Add to calendar
   // exactly once; then organization -> Find people, community -> Open event
@@ -288,7 +348,7 @@ export default function OrderCompleteScreen() {
   // for one alert button was judged not worth the maintenance surface for
   // today's scope. Named here, not silently skipped.
   const showBranchNudge = useCallback(() => {
-    if (!order) return;
+    if (!order || !owner.isCurrent() || !branchReady) return;
     if (isCommunityEvent) {
       if (!eventTopicId) return;
       // LIZ COPY
@@ -296,7 +356,7 @@ export default function OrderCompleteScreen() {
         title: "you're in",
         message: 'the event chat is where the coordination happens.',
         buttons: [
-          { text: 'open the chat', onPress: () => router.push(`/community-topic/${eventTopicId}` as never) },
+          { text: 'open the chat', onPress: () => { if (owner.isCurrent()) router.push(`/community-topic/${eventTopicId}` as never); } },
           { text: 'not now', style: 'cancel' },
         ],
       });
@@ -307,18 +367,18 @@ export default function OrderCompleteScreen() {
       title: 'want people to go with?',
       message: "you're in either way. small groups form around events like this.",
       buttons: [
-        { text: 'find people', onPress: () => router.push(`/event/${order.event_id}` as never) },
+        { text: 'find people', onPress: () => { if (owner.isCurrent()) router.push(`/event/${order.event_id}` as never); } },
         { text: 'just going', style: 'cancel' },
       ],
     });
-  }, [order, isCommunityEvent, eventTopicId]);
+  }, [order, isCommunityEvent, eventTopicId, owner, branchReady]);
 
   // Same 250ms-defer requirement as the RSVP path: BrandedAlert's button
   // handler calls onPress then onClose synchronously in the same tick, so a
   // setAlertInfo call made directly inside a button's onPress gets clobbered
   // by that trailing onClose() in the same React batch without the defer.
   const showPostConfirmationSequence = useCallback(() => {
-    if (!order) return;
+    if (!order || !owner.isCurrent() || !branchReady) return;
     const startIso = eventStartIso(order.event_date, order.event_start_time);
     if (!startIso) {
       showBranchNudge();
@@ -332,6 +392,7 @@ export default function OrderCompleteScreen() {
         {
           text: 'add to calendar',
           onPress: () => {
+            if (!owner.isCurrent()) return;
             showAddToCalendar(order.event_title ?? 'your event', startIso, null, order.event_venue ?? undefined);
             setTimeout(showBranchNudge, 250);
           },
@@ -339,7 +400,7 @@ export default function OrderCompleteScreen() {
         { text: 'not now', style: 'cancel', onPress: () => setTimeout(showBranchNudge, 250) },
       ],
     });
-  }, [order, showBranchNudge]);
+  }, [order, showBranchNudge, owner, branchReady]);
 
   // Fires once per event, the moment a purchase first reaches 'ready' --
   // mirrors proceedWithRsvp's wasNudged/markNudged guard on the RSVP path,
@@ -347,52 +408,71 @@ export default function OrderCompleteScreen() {
   // an event only ever gets one nudge sequence regardless of which path
   // (RSVP or purchase) confirmed it first.
   useEffect(() => {
-    if (view.kind !== 'ready' || !order) return;
+    if (view.kind !== 'ready' || !order || !branchReady || !owner.isCurrent()) return;
     let cancelled = false;
     (async () => {
-      if (await wasNudged(order.event_id)) return;
+      if (await wasNudged(order.event_id) || cancelled || !owner.isCurrent()) return;
       await markNudged(order.event_id);
-      if (!cancelled) showPostConfirmationSequence();
+      if (!cancelled && owner.isCurrent()) showPostConfirmationSequence();
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.kind, order?.id]);
+  }, [view.kind, order?.id, branchReady, owner, showPostConfirmationSequence]);
 
-  const { data: questions = [] } = useQuery({
-    queryKey: ['order-questions', order?.event_id],
-    queryFn: () => getQuestions(order!.event_id),
-    enabled: !!order?.event_id,
+  const questionRead = useQuery({
+    queryKey: ['order-questions', owner.userId, order?.event_id],
+    queryFn: async () => {
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      const result = await getQuestions(order!.event_id, true);
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      return result;
+    },
+    enabled: !!order?.event_id && focused && view.kind === 'ready',
   });
   // TK-03: which slots this order already answered, so a re-visit of this
   // screen never re-asks a question it already has every answer for.
-  const { data: answeredByQuestion } = useQuery({
-    queryKey: ['order-answered', order?.id],
-    queryFn: () => getAnsweredQuestionIds(order!.id),
-    enabled: !!order?.id,
+  const answerRead = useQuery({
+    queryKey: ['order-answered', owner.userId, order?.id],
+    queryFn: async () => {
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      const result = await getAnsweredQuestionIds(order!.id, true);
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      return result;
+    },
+    enabled: !!order?.id && focused && view.kind === 'ready',
   });
   // doc 111: the organizer's "after they buy" note; null until SQL-96 lands
-  const { data: organizerNote } = useQuery({
-    queryKey: ['confirmation-message', order?.event_id],
-    queryFn: () => getConfirmationMessage(order!.event_id),
-    enabled: !!order?.event_id,
+  const noteRead = useQuery({
+    queryKey: ['confirmation-message', owner.userId, order?.event_id],
+    queryFn: async () => {
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      const result = await getConfirmationMessage(order!.event_id, true);
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      return result;
+    },
+    enabled: !!order?.event_id && focused && view.kind === 'ready',
     staleTime: 60_000,
   });
-  // Scene spec 05: creator identity for the band. public_name always wins
-  // and wears no avatar (the byline law); otherwise resolve the organizer's
-  // own profile. Deliberately NOT the event page's fuller 3-way resolution
-  // (community name + leader face) - a named, reported scope cut, not a
-  // silent guess.
+  // Only confirmed legacy events may use the account-profile byline.
   const { data: organizerProfiles } = useQuery({
-    queryKey: ['organizer-profile-of-order', order?.event_host_user_id],
+    queryKey: ['organizer-profile-of-order', owner.userId, order?.event_host_user_id],
     queryFn: () => getOrganizerProfiles([order!.event_host_user_id!]),
-    enabled: !!order?.event_host_user_id && !order?.event_public_name,
+    enabled: legacyIdentityAllowed && !!order?.event_host_user_id && !order?.event_public_name && focused,
     staleTime: 60_000,
   });
   const resolvedProfile = order?.event_host_user_id ? organizerProfiles?.get(order.event_host_user_id) : undefined;
-  const bylineName = order?.event_public_name || resolvedProfile?.display_name || null;
-  const bylineLogo = order?.event_public_name ? null : resolvedProfile?.logo_url ?? null;
+  const bylineName = publishedPage?.name ?? (legacyIdentityAllowed ? order?.event_public_name || resolvedProfile?.display_name || null : null);
+  const bylineLogo = legacyIdentityAllowed && !order?.event_public_name ? resolvedProfile?.logo_url ?? null : null;
 
   const qty = order?.qty ?? 1;
+  const questions = questionRead.data ?? [];
+  const organizerNote = noteRead.data;
+  const questionsReady = questionRead.isSuccess && answerRead.isSuccess;
+  const savedSlots = useMemo(() => {
+    const slots = new Set(confirmedSlots);
+    for (const [question, seats] of answerRead.data ?? []) for (const seat of seats) slots.add(cellKey(question, seat));
+    return slots;
+  }, [confirmedSlots, answerRead.data]);
 
   // Build 35 Screen 28 cleanup: begin_ticket_checkout (doc 118) already
   // refuses to create an order at all when a question that is THEN active
@@ -410,57 +490,64 @@ export default function OrderCompleteScreen() {
   //
   // TK-03: drop a question once every seat it's asked for already has a
   // saved answer. A per_attendee question with only SOME seats answered
-  // still shows (so the remaining seat isn't skipped) -- it just won't
-  // pre-fill the seats already on file, same as the checkout-time form.
+  // still shows, with only its missing seat fields rendered. Saved answers
+  // are never prefilled or submitted again from this fallback form.
   const unansweredQuestions = useMemo(() => {
     if (!order) return [];
     const askable = questions.filter((q) => isQuestionAskableAfterOrder(q, order.created_at));
-    if (!answeredByQuestion) return askable;
-    return askable.filter((q) => {
-      const seats = answeredByQuestion.get(q.id);
-      if (!seats) return true;
-      if (q.scope !== 'per_attendee') return !seats.has(null);
-      for (let i = 1; i <= qty; i++) if (!seats.has(i)) return true;
+    return askable.filter(q => {
+      if (q.scope !== 'per_attendee') return !savedSlots.has(cellKey(q.id, null));
+      for (let i = 1; i <= qty; i++) if (!savedSlots.has(cellKey(q.id, i))) return true;
       return false;
     });
-  }, [order, questions, answeredByQuestion, qty]);
+  }, [order, questions, savedSlots, qty]);
 
   const setCell = useCallback((questionId: string, seat: Seat, patch: AnswerRaw) => {
+    if (!owner.isCurrent() || answerLock.current) return;
     const key = cellKey(questionId, seat);
     setAnswers((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
-  }, []);
+  }, [owner]);
 
   // every (question, seat) pair that carries a real value
   const filledCells = useMemo(
-    () => collectCells(unansweredQuestions, answers, qty),
-    [unansweredQuestions, answers, qty],
+    () => collectCells(unansweredQuestions, answers, qty).filter(cell => !savedSlots.has(cellKey(cell.q.id, cell.seat))),
+    [unansweredQuestions, answers, qty, savedSlots],
   );
 
   const submit = useCallback(async () => {
-    if (!id || saving) return;
-    hapticLight();
-    setSaving(true);
-    setErrorText(null);
-    let failures = 0;
-    for (const cell of filledCells) {
-      const res = await recordAnswer(id, cell.q.id, cell.value, cell.seat);
-      if (!res.ok) failures += 1;
+    if (!id || answerLock.current || !questionsReady || !owner.isCurrent()) return;
+    answerLock.current = true;
+    hapticLight(); setSaving(true); setErrorText(null);
+    const known = new Set(savedSlots);
+    const checkSaved = async () => {
+      const result = await getAnsweredQuestionIds(id, true);
+      if (!owner.isCurrent()) throw new Error('Purchase visit changed.');
+      for (const [question, seats] of result) for (const seat of seats) known.add(cellKey(question, seat));
+      setConfirmedSlots(new Set(known));
+    };
+    try {
+      // Read before every attempt, including a retry after a lost acknowledgement.
+      await checkSaved();
+      for (const cell of filledCells) {
+        if (!owner.isCurrent()) return;
+        const key = cellKey(cell.q.id, cell.seat);
+        if (known.has(key)) continue;
+        let sent = false;
+        try { sent = (await recordAnswer(id, cell.q.id, cell.value, cell.seat, owner)).ok; } catch { /* read the original slot below */ }
+        if (!owner.isCurrent()) return;
+        if (sent) { known.add(key); setConfirmedSlots(new Set(known)); }
+        else await checkSaved();
+      }
+      if (filledCells.some(cell => !known.has(cellKey(cell.q.id, cell.seat)))) {
+        hapticError(); setErrorText('Some answers haven’t saved. Your saved answers are kept. Try again.');
+      } else { setDone(true); hapticSuccess(); }
+    } catch {
+      if (owner.isCurrent()) setErrorText('Couldn’t check your saved answers. Your draft is kept. Try again.');
+    } finally {
+      answerLock.current = false;
+      if (owner.isCurrent()) setSaving(false);
     }
-    setSaving(false);
-    if (failures > 0) {
-      // never swallow the failure: the answers did NOT all save
-      hapticError();
-      /* copy to the taste gate */
-      setErrorText(
-        failures === filledCells.length
-          ? 'those answers did not send. give it another try.'
-          : 'some answers did not send. give it another try.',
-      );
-      return;
-    }
-    setDone(true);
-    hapticSuccess();
-  }, [id, saving, filledCells]);
+  }, [id, questionsReady, owner, savedSlots, filledCells]);
 
   const showBand = !!order && view.kind !== 'not_found';
 
@@ -471,7 +558,20 @@ export default function OrderCompleteScreen() {
           <ActivityIndicator size="small" color={EventAction.primary} style={styles.loading} />
         )}
 
-        {view.kind === 'not_found' && (
+        {isError && !order && <StatusMessage title="Couldn’t refresh your purchase" body="Try again to check its latest status.">
+          <TouchableOpacity accessibilityRole="button" style={styles.cta} onPress={() => { if (owner.isCurrent()) void refetch(); }}>
+            <Text numberOfLines={1} style={styles.ctaText}>Try again</Text>
+          </TouchableOpacity>
+        </StatusMessage>}
+
+        {isError && !!order && <View style={styles.refreshNotice}>
+          <Text accessibilityRole="alert" style={styles.statusBody}>Couldn’t refresh this purchase.</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.refreshRetry} onPress={() => { if (owner.isCurrent()) void refetch(); }}>
+            <Text numberOfLines={1} style={styles.statusSecondaryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>}
+
+        {!isError && view.kind === 'not_found' && (
           /* support/recovery: a bad or stale link, or an RLS-blocked read.
              Never claim a real order failed when we simply cannot see one. */
           <StatusMessage
@@ -493,6 +593,16 @@ export default function OrderCompleteScreen() {
         )}
 
         {showBand && <EventHeader order={order!} bylineName={bylineName} bylineLogo={bylineLogo} />}
+        {showBand && CREATOR_PAGES_ENABLED && !identityReady && <View style={styles.identityNotice}>
+          <Text accessibilityRole={pageRead.error ? 'alert' : undefined} style={styles.identityText}>
+            {pageRead.error ? 'The event page couldn’t be checked.' : pageRead.loading ? 'Checking the event page…' : 'The event page is unavailable. Your purchase is still here.'}
+          </Text>
+          {!!pageRead.error && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry event page" style={styles.refreshRetry}
+            onPress={() => { if (owner.isCurrent()) void pageRead.refresh().catch(() => undefined); }}>
+            <Text style={styles.statusSecondaryText}>Try again</Text>
+          </TouchableOpacity>}
+        </View>}
+
 
         {view.kind === 'canceled' && (
           <StatusMessage
@@ -530,13 +640,18 @@ export default function OrderCompleteScreen() {
           </StatusMessage>
         )}
 
+        {view.kind === 'refunded' && extrasView}
+
         {view.kind === 'pending' && (
           <StatusMessage
             /* copy to the taste gate */
-            title="hang tight"
-            body="we're still confirming this one. it usually only takes a moment."
+            title="Your purchase is pending"
+            body="If you haven’t finished paying, continue your saved checkout. Already paid? Check its status here."
           >
-            <ActivityIndicator size="small" color={EventAction.primary} style={styles.loading} />
+            {!!order && <Text style={styles.amountLine}>{order.qty} {order.qty === 1 ? 'ticket' : 'tickets'} · {formatCents(order.total_cents)}</Text>}
+            {focused && <PendingCheckoutActions key={`${owner.userId}:${id}`} orderId={id} owner={owner} onRefresh={async () => {
+              const result = await refetch(); if (result.error) throw result.error;
+            }} />}
             {pendingStuck && <SupportLink />}
           </StatusMessage>
         )}
@@ -559,11 +674,16 @@ export default function OrderCompleteScreen() {
             {/* TK-05: free and paid read identically without this —
                 total_cents was never rendered here. */}
             <Text style={styles.amountLine}>
-              {order!.total_cents === 0 ? 'free' : `you paid ${formatCents(order!.total_cents)}`}
+              {order!.qty} {order!.qty === 1 ? 'ticket' : 'tickets'} · {order!.total_cents === 0 ? 'free' : `you paid ${formatCents(order!.total_cents)}`}
             </Text>
 
             {/* doc 111: the organizer speaking, quiet card, the documented
                 gold-border quote treatment (no new accents) */}
+            {noteRead.isError && <View style={styles.identityNotice}>
+              <Text accessibilityRole="alert" style={styles.identityText}>The creator’s note couldn’t be loaded.</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry creator note" style={styles.refreshRetry}
+                onPress={() => { if (owner.isCurrent()) void noteRead.refetch(); }}><Text style={styles.statusSecondaryText}>Try again</Text></TouchableOpacity>
+            </View>}
             {!!organizerNote && (
               <View style={styles.organizerNote}>
                 {/* copy to the taste gate */}
@@ -601,6 +721,7 @@ export default function OrderCompleteScreen() {
 
             {/* the door checks each seat's reference_code, so those are the only
                 codes worth printing; the order id is not a ticket. */}
+            <View style={styles.ticketPanel}>
             {order!.seats.filter((s) => !s.voided).map((s) => (
               <View key={s.id} style={styles.refRow}>
                 <Text style={styles.ref}>
@@ -625,8 +746,36 @@ export default function OrderCompleteScreen() {
                 )}
               </View>
             ))}
+            </View>
 
-            {!done && unansweredQuestions.length > 0 && (
+            {extrasView}
+
+            {isCommunityEvent && !isError && (eventTopicId ? (
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open event chat" style={styles.refreshRetry}
+                onPress={() => { if (owner.isCurrent()) { hapticLight(); router.push(`/community-topic/${eventTopicId}` as never); } }}>
+                <Text style={styles.statusSecondaryText}>Open event chat</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.identityNotice}>
+                <Text accessibilityRole={topicRead.isError ? 'alert' : undefined} style={styles.identityText}>
+                  {topicRead.isPending || topicRead.isFetching ? 'Checking your event chat…' : topicRead.isError ? 'The event chat couldn’t be checked.' : 'Your event chat is not available yet.'}
+                </Text>
+                {topicRead.isPending || topicRead.isFetching ? <ActivityIndicator size="small" color={EventAction.primary} accessibilityLabel="Checking your event chat" /> : (
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry event chat" style={styles.refreshRetry} onPress={() => { if (owner.isCurrent()) void topicRead.refetch(); }}>
+                    <Text style={styles.statusSecondaryText}>Try again</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+
+            {!done && !questionsReady && <View style={styles.identityNotice}>
+              <Text accessibilityRole={questionRead.isError || answerRead.isError ? 'alert' : undefined} style={styles.identityText}>
+                {questionRead.isError || answerRead.isError ? 'The registration questions couldn’t be checked.' : 'Checking registration questions…'}
+              </Text>
+              {(questionRead.isError || answerRead.isError) && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry registration questions" style={styles.refreshRetry}
+                onPress={() => { if (owner.isCurrent()) void Promise.all([questionRead.refetch(), answerRead.refetch()]); }}><Text style={styles.statusSecondaryText}>Try again</Text></TouchableOpacity>}
+            </View>}
+            {!done && questionsReady && unansweredQuestions.length > 0 && (
               <View style={styles.questions}>
                 {/* copy to the taste gate */}
                 <Text style={styles.qHeader}>a couple of quick things from the organizer</Text>
@@ -634,6 +783,8 @@ export default function OrderCompleteScreen() {
                   questions={unansweredQuestions}
                   qty={qty}
                   draft={answers}
+                  answeredSlots={savedSlots}
+                  disabled={saving}
                   onCellChange={setCell}
                 />
 
@@ -653,17 +804,17 @@ export default function OrderCompleteScreen() {
                     <Text style={styles.ctaText}>send it</Text>
                   )}
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setDone(true)} hitSlop={8} style={styles.skip} accessibilityRole="button">
+                <TouchableOpacity disabled={saving} onPress={() => { if (owner.isCurrent() && !answerLock.current) setDone(true); }} hitSlop={8} style={styles.skip} accessibilityRole="button">
                   {/* one gentle skip (doc 61 §4b) */}
                   <Text style={styles.skipText}>maybe later</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {(done || unansweredQuestions.length === 0) && (
+            {(done || !questionsReady || unansweredQuestions.length === 0) && (
               <TouchableOpacity
                 style={styles.cta}
-                onPress={() => router.replace('/tickets' as never)}
+                onPress={() => { if (owner.isCurrent()) router.replace('/tickets' as never); }}
                 activeOpacity={0.85}
                 accessibilityRole="button"
               >
@@ -687,7 +838,7 @@ export default function OrderCompleteScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.cream },
-  content: { padding: 24, alignItems: 'center' },
+  content: { padding: 20, paddingBottom: 28, alignItems: 'center' },
   loading: { marginTop: EventSpacing.xl },
   band: {
     alignSelf: 'stretch',
@@ -700,7 +851,7 @@ const styles = StyleSheet.create({
   },
   bandContent: { padding: 16, gap: 2 },
   bandTitle: {
-    fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: EventSurface.onMedia,
+    fontFamily: Fonts.displayBold, fontSize: FontSizes.displaySM, color: EventSurface.onMedia,
     textShadowColor: EventSurface.mediaTextShadow, textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6,
   },
   bandMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventSurface.onMediaMuted, marginTop: 2 },
@@ -713,27 +864,32 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
     textAlign: 'center', marginBottom: EventSpacing.sm,
   },
+  refreshNotice: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 },
+  refreshRetry: { minHeight: 44, paddingHorizontal: 12, justifyContent: 'center' },
   statusSecondary: { marginTop: EventSpacing.sm, alignItems: 'center' },
   statusSecondaryText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   supportLinkText: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline',
   },
   badgeWrap: {
-    width: 96, height: 96, alignItems: 'center', justifyContent: 'center',
-    marginTop: EventSpacing.md, marginBottom: EventSpacing.md,
+    width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
+    marginTop: 4, marginBottom: 4,
   },
-  bloom: { position: 'absolute', width: 96, height: 96, borderRadius: 48, backgroundColor: Colors.goingConfirmedFill },
+  bloom: { position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.goingConfirmedFill },
   badge: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: EventAction.primary,
+    width: 44, height: 44, borderRadius: 22, backgroundColor: EventAction.successFill,
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayLG, color: Colors.asphalt },
+  title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   amountLine: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
     textAlign: 'center', marginTop: 4,
   },
-  ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray, marginTop: EventSpacing.sm, letterSpacing: 1 },
-  refRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: EventSpacing.sm },
+  identityNotice: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginBottom: 8 },
+  identityText: { flex: 1, minWidth: 160, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  ticketPanel: { alignSelf: 'stretch', backgroundColor: Colors.white, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 14, paddingVertical: 6, marginTop: 16 },
+  ref: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, letterSpacing: 0.5, flexShrink: 1 },
+  refRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, paddingVertical: 8 },
   transferLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta, marginTop: EventSpacing.sm },
   settlingNote: {
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium,
@@ -746,11 +902,11 @@ const styles = StyleSheet.create({
     padding: 14, marginTop: EventSpacing.lg, gap: 4,
   },
   organizerNoteLabel: {
-    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium,
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
   organizerNoteText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.quoteText, lineHeight: 20 },
-  emailAction: { alignItems: 'center', marginTop: EventSpacing.lg },
+  emailAction: { alignItems: 'center', justifyContent: 'center', minHeight: 44, marginTop: 4 },
   emailActionText: {
     fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textDecorationLine: 'underline',
   },
@@ -759,8 +915,8 @@ const styles = StyleSheet.create({
   errorText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventAction.error },
   cta: {
     alignSelf: 'stretch', backgroundColor: EventAction.primary, borderRadius: 999,
-    minHeight: 48, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', marginTop: EventSpacing.md,
-    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 3,
+    minHeight: 44, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', marginTop: EventSpacing.md,
+    shadowColor: Colors.terracotta, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.14, shadowRadius: 8, elevation: 3,
   },
   ctaOff: { opacity: 0.5, shadowOpacity: 0 },
   ctaText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: EventAction.onPrimary },

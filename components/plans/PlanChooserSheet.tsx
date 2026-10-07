@@ -9,7 +9,7 @@ import React from 'react';
 import { View, Text, Modal, Pressable, FlatList, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X } from 'lucide-react-native';
+import { X, ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 
@@ -33,14 +33,11 @@ function PlanRow({ plan, onPress }: { plan: ChooserPlan; onPress: () => void }) 
         </View>
       )}
       <View style={styles.rowText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{plan.title}</Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>{plan.creator_name ?? 'someone'} · {plan.spotsText}</Text>
+        <Text style={styles.rowTitle}>{plan.title}</Text>
+        <Text style={styles.rowMeta}>{plan.creator_name ?? 'someone'} · {plan.spotsText}</Text>
       </View>
-      <View style={[styles.joinBtn, plan.isFull && styles.joinBtnFull]}>
-        <Text style={[styles.joinBtnText, plan.isFull && styles.joinBtnTextFull]}>
-          {plan.isFull ? 'full' : 'join'}
-        </Text>
-      </View>
+      {plan.isFull ? <Text style={styles.fullLabel}>full</Text> : <ChevronRight size={18} color={Colors.secondary} />}
+
     </Pressable>
   );
 }
@@ -67,7 +64,7 @@ export default function PlanChooserSheet({
           <View style={styles.headerRow}>
             {/* the lowercase law */}
             <Text style={styles.title}>join a group, or start your own</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="close">
+            <Pressable onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="close">
               <X size={22} color={Colors.secondary} />
             </Pressable>
           </View>
@@ -101,13 +98,11 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.inputBg },
   avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },
   initial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  rowText: { flex: 1 },
+  rowText: { flex: 1, minWidth: 0 },
   rowTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
   rowMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
-  joinBtn: { borderRadius: 999, borderWidth: 1.5, borderColor: Colors.terracotta, paddingHorizontal: 12, paddingVertical: 6 },
-  joinBtnFull: { borderColor: Colors.borderWarm },
-  joinBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  joinBtnTextFull: { color: Colors.secondary },
+  closeButton: {minWidth:44,minHeight:44,alignItems:'center',justifyContent:'center'},
+  fullLabel: {fontFamily:Fonts.sansMedium,fontSize:FontSizes.bodySM,color:Colors.secondary},
   cta: { backgroundColor: Colors.terracotta, borderRadius: 999, marginHorizontal: 20, marginTop: 8, paddingVertical: 15, alignItems: 'center' },
   ctaLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
 });

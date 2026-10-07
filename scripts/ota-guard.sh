@@ -196,7 +196,11 @@ $var"
   fi
 fi
 
-# 7. Resolve the update runtime from a real EAS build, not a local fingerprint.
+# 7. Resolve the update runtime from reviewed release evidence, not a local
+#    fingerprint. Most releases use a real EAS build record. Build 51 was a
+#    locally signed App Store archive, so its target instead pins the signed
+#    archive/source evidence and a production update already served to that
+#    exact runtime. Both paths prove that native inputs have not changed.
 #    Fingerprints include secret-backed native config. EAS secrets are
 #    intentionally unavailable to local exports, so recomputing a fingerprint
 #    locally can differ from the store binary even when the native interface is
@@ -209,13 +213,14 @@ if [ "$platform" = "ios" ]; then
     fail "$TARGET_FILE is missing -- there is no explicit iOS build target."
   fi
 
+  target_source_type="$(node -p "require('./$TARGET_FILE').sourceType || 'eas-build'" 2>/dev/null || true)"
   target_build_number="$(node -p "require('./$TARGET_FILE').buildNumber" 2>/dev/null || true)"
   target_build_id="$(node -p "require('./$TARGET_FILE').easBuildId" 2>/dev/null || true)"
   target_commit="$(node -p "require('./$TARGET_FILE').gitCommitHash" 2>/dev/null || true)"
   target_runtime="$(node -p "require('./$TARGET_FILE').runtimeVersion" 2>/dev/null || true)"
   target_app_config_sha="$(node -p "require('./$TARGET_FILE').appConfigSha256" 2>/dev/null || true)"
 
-  if [ -z "$target_build_number" ] || [ -z "$target_build_id" ] || [ -z "$target_commit" ] || [ -z "$target_runtime" ] || [ -z "$target_app_config_sha" ]; then
+  if [ -z "$target_build_number" ] || [ -z "$target_commit" ] || [ -z "$target_runtime" ] || [ -z "$target_app_config_sha" ]; then
     fail "$TARGET_FILE is incomplete. Refuse to guess a runtime target."
   fi
   if ! git cat-file -e "${target_commit}^{commit}" 2>/dev/null; then
@@ -234,27 +239,10 @@ if [ "$platform" = "ios" ]; then
 
   # These files directly determine the native binary. package.json is checked
   # separately below so harmless script-only additions do not create a fake
-  # incompatibility. app.json gets the same treatment for platform scope:
-  # this is the iOS release-candidate check, and an Android-only app.json
-  # edit (a versionCode bump, an Android permission change) cannot alter the
-  # iOS native interface. Comparing app.json wholesale blocked the 2026-09-13
-  # push-registration OTA behind PR #11's Android permission removal, so the
-  # top-level android block is stripped from BOTH sides before comparing;
-  # every iOS-relevant byte of app.json still hard-blocks on drift.
-  strip_android_block() {
-    node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);if(j.expo&&j.expo.android)delete j.expo.android;if(j.android)delete j.android;process.stdout.write(JSON.stringify(j))})"
-  }
-  target_app_json_ios="$(git show "${target_commit}:app.json" | strip_android_block)"
-  current_app_json_ios="$(strip_android_block < app.json)"
-  if [ -z "$target_app_json_ios" ] || [ -z "$current_app_json_ios" ]; then
-    fail "could not parse app.json (current or at $target_commit) for the iOS-scope comparison."
-  fi
-  if [ "$target_app_json_ios" != "$current_app_json_ios" ]; then
-    fail "app.json changed (outside the Android-only block) after iOS build $target_build_number. Create and verify a new build instead of forcing an OTA."
-  fi
-  if ! git diff --quiet "$target_commit"..HEAD -- eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
+  # incompatibility.
+  if ! git diff --quiet "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
     echo "Native-input changes since iOS build $target_build_number:" >&2
-    git diff --name-only "$target_commit"..HEAD -- eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android >&2
+    git diff --name-only "$target_commit"..HEAD -- app.json eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android >&2
     fail "native inputs changed after the target build. Create and verify a new build instead of forcing an OTA."
   fi
 
@@ -264,16 +252,56 @@ if [ "$platform" = "ios" ]; then
     fail "package dependencies changed after iOS build $target_build_number. A new native build is required."
   fi
 
-  build_json="$(npx eas-cli build:view "$target_build_id" --json 2>/dev/null || true)"
-  if [ -z "$build_json" ]; then
-    fail "could not read EAS build $target_build_id. Refuse to target an unverified runtime."
-  fi
-  remote_build_number="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.appBuildVersion||''))" "$build_json" 2>/dev/null || true)"
-  remote_runtime="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.runtime?.version||''))" "$build_json" 2>/dev/null || true)"
-  remote_commit="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.gitCommitHash||''))" "$build_json" 2>/dev/null || true)"
-  remote_status="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.status||''))" "$build_json" 2>/dev/null || true)"
-  if [ "$remote_status" != "FINISHED" ] || [ "$remote_build_number" != "$target_build_number" ] || [ "$remote_runtime" != "$target_runtime" ] || [ "$remote_commit" != "$target_commit" ]; then
-    fail "EAS build metadata does not match $TARGET_FILE. Do not publish to an inferred runtime."
+  if [ "$target_source_type" = "eas-build" ]; then
+    if [ -z "$target_build_id" ]; then
+      fail "$TARGET_FILE has sourceType=eas-build but no easBuildId."
+    fi
+    build_json="$(npx eas-cli build:view "$target_build_id" --json 2>/dev/null || true)"
+    if [ -z "$build_json" ]; then
+      fail "could not read EAS build $target_build_id. Refuse to target an unverified runtime."
+    fi
+    remote_build_number="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.appBuildVersion||''))" "$build_json" 2>/dev/null || true)"
+    remote_runtime="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.runtime?.version||''))" "$build_json" 2>/dev/null || true)"
+    remote_commit="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.gitCommitHash||''))" "$build_json" 2>/dev/null || true)"
+    remote_status="$(node -e "const b=JSON.parse(process.argv[1]);process.stdout.write(String(b.status||''))" "$build_json" 2>/dev/null || true)"
+    if [ "$remote_status" != "FINISHED" ] || [ "$remote_build_number" != "$target_build_number" ] || [ "$remote_runtime" != "$target_runtime" ] || [ "$remote_commit" != "$target_commit" ]; then
+      fail "EAS build metadata does not match $TARGET_FILE. Do not publish to an inferred runtime."
+    fi
+  elif [ "$target_source_type" = "manual-store-archive" ]; then
+    target_app_json_sha="$(node -p "require('./$TARGET_FILE').appJsonSha256" 2>/dev/null || true)"
+    target_eas_json_sha="$(node -p "require('./$TARGET_FILE').easJsonSha256" 2>/dev/null || true)"
+    target_package_json_sha="$(node -p "require('./$TARGET_FILE').packageJsonSha256" 2>/dev/null || true)"
+    target_package_lock_sha="$(node -p "require('./$TARGET_FILE').packageLockSha256" 2>/dev/null || true)"
+    target_manifest_sha="$(node -p "require('./$TARGET_FILE').productionSourceManifestSha256" 2>/dev/null || true)"
+    target_ipa_sha="$(node -p "require('./$TARGET_FILE').signedIpaSha256" 2>/dev/null || true)"
+    target_update_group="$(node -p "require('./$TARGET_FILE').verifiedProductionUpdateGroup" 2>/dev/null || true)"
+    target_update_id="$(node -p "require('./$TARGET_FILE').verifiedProductionUpdateId" 2>/dev/null || true)"
+    if [ -z "$target_app_json_sha" ] || [ -z "$target_eas_json_sha" ] || [ -z "$target_package_json_sha" ] || [ -z "$target_package_lock_sha" ] || [ -z "$target_manifest_sha" ] || [ -z "$target_ipa_sha" ] || [ -z "$target_update_group" ] || [ -z "$target_update_id" ]; then
+      fail "$TARGET_FILE is missing signed-archive provenance or production-runtime evidence."
+    fi
+
+    verify_pinned_sha() {
+      local file="$1" expected="$2" actual
+      actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+      if [ "$actual" != "$expected" ]; then
+        fail "$file no longer matches the native input pinned for iOS build $target_build_number."
+      fi
+    }
+    verify_pinned_sha app.json "$target_app_json_sha"
+    verify_pinned_sha eas.json "$target_eas_json_sha"
+    verify_pinned_sha package.json "$target_package_json_sha"
+    verify_pinned_sha package-lock.json "$target_package_lock_sha"
+
+    update_json="$(npx eas-cli update:view "$target_update_group" --json 2>/dev/null || true)"
+    if [ -z "$update_json" ]; then
+      fail "could not read verified production update group $target_update_group. Refuse to infer Build 51's runtime."
+    fi
+    update_match="$(node -e "const rows=JSON.parse(process.argv[1]);const row=(Array.isArray(rows)?rows:[rows]).find((u)=>u.platform==='ios');if(row)process.stdout.write([row.id,row.branch,row.runtimeVersion].join('|'))" "$update_json" 2>/dev/null || true)"
+    if [ "$update_match" != "$target_update_id|production|$target_runtime" ]; then
+      fail "the verified production update no longer matches Build 51's pinned runtime."
+    fi
+  else
+    fail "$TARGET_FILE has unsupported sourceType '$target_source_type'."
   fi
 
   if [ -n "${WASHEDUP_OTA_RUNTIME_VERSION:-}" ] && [ "$WASHEDUP_OTA_RUNTIME_VERSION" != "$target_runtime" ]; then

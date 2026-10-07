@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
-import { Home, MapPin, Plane } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import { Home, MapPin, Plane, X } from 'lucide-react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -13,6 +13,7 @@ import {
 import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import MarkIcon from './marks/MarkIcons';
 
 interface MiniProfileCardProps {
@@ -44,70 +45,81 @@ interface ProfileMarks {
 }
 
 export default function MiniProfileCard({ visible, userId, onClose, onReport, onBlock }: MiniProfileCardProps) {
-  const [profile, setProfile] = useState<MiniProfile | null>(null);
-  const [marks, setMarks] = useState<ProfileMarks | null>(null);
   const [identityExpanded, setIdentityExpanded] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [authEpoch, setAuthEpoch] = useState(0);
+  const revision = useRef(0), mounted = useRef(false);
+  const visit = useMemo(() => ({ visible, userId, authEpoch }), [visible, userId, authEpoch]);
+  const activeVisit = useRef(visit); activeVisit.current = visit;
+  const pendingAction = useRef<object | null>(null);
+  const [loaded, setLoaded] = useState<{ visit: typeof visit; profile: MiniProfile | null; marks: ProfileMarks | null; viewer: string | null; loading: boolean } | null>(null);
+  const owned = loaded?.visit === visit ? loaded : null;
+  const profile = owned?.profile ?? null, marks = owned?.marks ?? null;
+  const currentUserId = owned?.viewer ?? null;
+  const loading = visible && !!userId && (!owned || owned.loading);
+  const isCurrent = () => mounted.current && activeVisit.current === visit && visit.visible && !!visit.userId && revision.current === visit.authEpoch;
 
+  // Watching auth events is passive. A hidden sheet must not compete with the
+  // conversation for an auth read; verification begins only when it opens.
   useEffect(() => {
-    supabase.auth
-      .getUser()
-      .then(({ data }) => setCurrentUserId(data.user?.id ?? null))
-      .catch(() => {});
+    mounted.current = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(event => {
+      if (!mounted.current || event === 'INITIAL_SESSION') return;
+      pendingAction.current = null;
+      setAuthEpoch(++revision.current);
+    });
+    return () => { mounted.current = false; pendingAction.current = null; subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
-    if (!visible || !userId) {
-      setProfile(null);
-      setMarks(null);
-      setIdentityExpanded(false);
-      return;
-    }
+    if (!visible || !userId) return;
+    pendingAction.current = null;
+    setIdentityExpanded(false);
     let cancelled = false;
-    setLoading(true);
+    const current = () => !cancelled && isCurrent();
+    const update = (patch: Partial<NonNullable<typeof loaded>>) => {
+      if (current()) setLoaded(previous => previous?.visit === visit ? { ...previous, ...patch } : previous);
+    };
+    setLoaded({ visit, profile: null, marks: null, viewer: null, loading: true });
     (async () => {
       try {
-        // Try profiles table first (has the mini-profile fields)
-        const { data, error } = await supabase
+        const { data: auth, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
+        if (!current() || authError || !auth.user) return;
+        update({ viewer: auth.user.id });
+        // Keep the existing private-profile read and public fallback, but never
+        // publish or continue enrichment after the viewer/target/visit changes.
+        const { data, error } = await requestWithDeadline(supabase
           .from('profiles')
           .select('first_name_display, profile_photo_url, neighborhood, is_traveling, fun_fact, city, is_visitor')
-          .eq('id', userId)
-          .single();
-
-        if (!cancelled && data && !error) {
-          setProfile(data as MiniProfile);
-        } else if (!cancelled) {
-          // Fallback to profiles_public (always readable, but lacks mini-profile fields)
-          const { data: pub } = await supabase
-            .from('profiles_public')
-            .select('first_name_display, profile_photo_url, city, is_visitor')
-            .eq('id', userId)
-            .single();
-
-          if (!cancelled && pub) {
-            setProfile({
-              first_name_display: pub.first_name_display,
-              profile_photo_url: pub.profile_photo_url,
-              city: pub.city ?? null,
-              neighborhood: null,
-              is_traveling: false,
-              fun_fact: null,
-              is_visitor: (pub as any).is_visitor ?? false,
-            });
-          }
+          .eq('id', userId).single(), 12_000);
+        if (!current()) return;
+        if (data && !error) update({ profile: data as MiniProfile });
+        else {
+          const { data: pub } = await requestWithDeadline(supabase.from('profiles_public')
+            .select('first_name_display, profile_photo_url, city, is_visitor').eq('id', userId).single(), 12_000);
+          if (!current()) return;
+          if (pub) update({ profile: { first_name_display: pub.first_name_display, profile_photo_url: pub.profile_photo_url,
+            city: pub.city ?? null, neighborhood: null, is_traveling: false, fun_fact: null, is_visitor: (pub as any).is_visitor ?? false } });
         }
-
-        // Fetch marks
-        const { data: marksData } = await supabase.rpc('get_user_profile_marks', { p_user_id: userId });
-        if (!cancelled && marksData?.[0]) {
-          setMarks(marksData[0] as ProfileMarks);
-        }
-      } catch {}
-      finally { if (!cancelled) setLoading(false); }
+        const { data: marksData } = await requestWithDeadline(supabase.rpc('get_user_profile_marks', { p_user_id: userId }), 12_000);
+        if (current() && marksData?.[0]) update({ marks: marksData[0] as ProfileMarks });
+      } catch {} finally { update({ loading: false }); }
     })();
     return () => { cancelled = true; };
-  }, [visible, userId]);
+  }, [visit]);
+
+  const close = () => { pendingAction.current = null; onClose(); };
+  const moderate = (action?: (id: string, name: string) => void) => {
+    if (!action || !isCurrent() || !currentUserId || !userId || currentUserId === userId) return;
+    const attempt = {}; pendingAction.current = attempt;
+    const epoch = revision.current, target = userId, targetName = profile?.first_name_display ?? 'Member';
+    onClose();
+    // The intentional dismissal may hide this sheet. A new opening, auth event
+    // or unmount cancels its delayed sibling action, preserving modal sequencing.
+    setTimeout(() => {
+      if (!mounted.current || pendingAction.current !== attempt || revision.current !== epoch) return;
+      pendingAction.current = null; action(target, targetName);
+    }, 150);
+  };
 
   if (!visible) return null;
 
@@ -117,9 +129,14 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
   const isVisitor = profile?.is_visitor ?? false;
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
+    <Modal visible transparent animationType="fade" onRequestClose={close} statusBarTranslucent>
+      <Pressable style={styles.overlay} onPress={close} accessible={false}>
+        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()} accessible={false}
+          accessibilityViewIsModal onAccessibilityEscape={close}>
+          <TouchableOpacity style={styles.closeButton} onPress={close}
+            accessibilityRole="button" accessibilityLabel="Close profile">
+            <X size={20} color={Colors.textMedium} />
+          </TouchableOpacity>
           {loading ? (
             <ActivityIndicator size="large" color={Colors.terracotta} style={{ paddingVertical: 40 }} />
           ) : (
@@ -228,7 +245,8 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
                 <View style={styles.actionRow}>
                   {onReport && (
                     <TouchableOpacity
-                      onPress={() => { onClose(); setTimeout(() => onReport(userId, name), 150); }}
+                      accessibilityRole="button" accessibilityLabel={`Report ${name}`}
+                      onPress={() => moderate(onReport)}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.actionLinkText}>Report</Text>
@@ -236,7 +254,8 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
                   )}
                   {onBlock && (
                     <TouchableOpacity
-                      onPress={() => { onClose(); setTimeout(() => onBlock(userId, name), 150); }}
+                      accessibilityRole="button" accessibilityLabel={`Block ${name}`}
+                      onPress={() => moderate(onBlock)}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.actionLinkText}>Block</Text>
@@ -253,6 +272,10 @@ export default function MiniProfileCard({ visible, userId, onClose, onReport, on
 }
 
 const styles = StyleSheet.create({
+  closeButton: {
+    position: 'absolute', top: 4, right: 4, width: 44, height: 44,
+    alignItems: 'center', justifyContent: 'center', zIndex: 1,
+  },
   overlay: {
     flex: 1,
     backgroundColor: Colors.overlayDark,

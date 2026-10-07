@@ -1,7 +1,7 @@
 jest.mock('../supabase', () => ({ supabase: {} }));
 jest.mock('../blocking', () => ({ getBlockedWith: jest.fn() }));
 
-const { computeEventRoomExpiry, isInSaveNoticeWindow } = require('../communityChat');
+const { computeEventRoomExpiry, isEventRoomClosed, isInSaveNoticeWindow } = require('../communityChat');
 
 function eventMeta(overrides: Record<string, unknown> = {}) {
   return {
@@ -38,6 +38,18 @@ describe('computeEventRoomExpiry', () => {
   it('returns null for persistent rooms and invalid timestamps', () => {
     expect(computeEventRoomExpiry({ explore_events: null })).toBeNull();
     expect(computeEventRoomExpiry(eventMeta({ end_time: 'not-a-date' }))).toBeNull();
+  });
+});
+
+describe('isEventRoomClosed', () => {
+  it('closes at the end-plus-48-hour boundary even before the archive job runs', () => {
+    expect(isEventRoomClosed(eventMeta(), new Date('2026-08-26T20:59:59.999Z').getTime())).toBe(false);
+    expect(isEventRoomClosed(eventMeta(), new Date('2026-08-26T21:00:00.000Z').getTime())).toBe(true);
+  });
+
+  it('keeps persistent rooms open and respects the server archive flag', () => {
+    expect(isEventRoomClosed({ archived: false, explore_events: null }, Date.now())).toBe(false);
+    expect(isEventRoomClosed({ ...eventMeta(), archived: true }, Date.now())).toBe(true);
   });
 });
 

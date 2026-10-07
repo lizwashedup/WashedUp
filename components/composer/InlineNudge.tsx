@@ -4,32 +4,36 @@
  * without red and without blocking. Used for the place-skip nudge family and
  * the tonight expectation nudge.
  */
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import Colors from '../../constants/Colors';
-import { Fonts } from '../../constants/Typography';
+import Colors, { AfterglowColors } from '../../constants/Colors';
+import { Fonts, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 
 export default function InlineNudge({
   text,
   onPress,
   actionLabel,
+  appearance,
 }: {
   text: string;
   /** When set, the whole nudge becomes a one-tap action (e.g. "move this link"). */
   onPress?: () => void;
   /** Terracotta affordance text shown at the end when the nudge is tappable. */
   actionLabel?: string;
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
+  const s = useMemo(() => appearance ? { ...styles, ...nudgeAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   const body = (
-    <View style={styles.nudge}>
-      <View style={styles.dot} />
-      <Text style={styles.text}>{text}</Text>
-      {actionLabel ? <Text style={styles.action}>{actionLabel}</Text> : null}
+    <View style={s.nudge}>
+      <View style={s.dot} accessible={false} />
+      <Text style={s.text}>{text}</Text>
+      {actionLabel ? <Text style={s.action}>{actionLabel}</Text> : null}
     </View>
   );
   if (onPress) {
     return (
-      <Pressable onPress={onPress} accessibilityRole="button">
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={actionLabel ? `${actionLabel}. ${text}` : text}>
         {body}
       </Pressable>
     );
@@ -47,3 +51,11 @@ const styles = StyleSheet.create({
   text: { flex: 1, fontFamily: Fonts.sans, fontSize: 13, lineHeight: 18, color: Colors.quoteText },
   action: { fontFamily: Fonts.sansBold, fontSize: 13, color: Colors.terracotta },
 });
+
+function nudgeAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  nudge: { ...styles.nudge, minHeight: 44, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.subtleLine },
+  dot: { ...styles.dot, backgroundColor: AfterglowColors.clay },
+  text: { flex: 1, minWidth: 0, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+  action: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.clay, flexShrink: 1 },
+}); }

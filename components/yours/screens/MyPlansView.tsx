@@ -1,10 +1,11 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { ChevronDown, ChevronRight, X } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
-import { withTimeout } from '../../../lib/withTimeout';
+import { requestWithDeadline } from '../../../lib/requestWithDeadline';
+import { PageAction } from '../../creator/pages/PageFrame';
 import { hapticLight, hapticError } from '../../../lib/haptics';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -16,6 +17,8 @@ import { SaveSnackbar } from '../../SaveSnackbar';
 import { ShareSheet } from '../../ShareSheet';
 import { useBlock } from '../../../hooks/useBlock';
 import { toPlanCardPlan } from '../../../lib/creatorMarks';
+import { getPlanLifecycle } from '../../../lib/planLifecycle';
+import { usePlanClock } from '../../../hooks/usePlanClock';
 import type { Plan } from '../../../lib/fetchPlans';
 import {
   useMyPlans,
@@ -29,6 +32,8 @@ import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
 import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
 import { formatEventDateLA } from '../../../lib/laDate';
 import { BrandedAlert, type BrandedAlertButton } from '../../BrandedAlert';
+import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
 
 const WISHLISTS_TIMEOUT_MS = 8000;
 
@@ -40,6 +45,8 @@ const WISHLISTS_TIMEOUT_MS = 8000;
  * scoped to this surface's own data.
  */
 export default function MyPlansView({ userId }: { userId: string }) {
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const cardAppearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const { blockUser } = useBlock();
@@ -51,8 +58,10 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
-  const { data: myPlans = [], isLoading: myPlansLoading } = useMyPlans(userId);
-  const { data: planDrafts = [] } = useMyPlanDrafts(userId);
+  const plansQuery = useMyPlans(userId);
+  const draftsQuery = useMyPlanDrafts(userId);
+  const { data: myPlans = [] } = plansQuery;
+  const { data: planDrafts = [] } = draftsQuery;
   const [draftAlert, setDraftAlert] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const openDraft = useCallback((draft: PlanDraft) => {
@@ -101,25 +110,60 @@ export default function MyPlansView({ userId }: { userId: string }) {
       ))}
     </View>
   ) : null;
-  const { data: waitlistedPlans = [] } = useWaitlistedPlans(userId);
-  const { data: interestedPlans = [] } = useInterestedPlans(userId);
-  const { data: savedBase = [] } = useSavedPlans(userId);
+  const waitlistedQuery = useWaitlistedPlans(userId);
+  const interestedQuery = useInterestedPlans(userId);
+  const savedQuery = useSavedPlans(userId);
+  const { data: waitlistedPlans = [] } = waitlistedQuery;
+  const { data: interestedPlans = [] } = interestedQuery;
+  const { data: savedBase = [] } = savedQuery;
 
   // Wishlist cache drives the bookmark fill state + the optimistic un-save.
-  const { data: wishlistIds = [] } = useQuery<string[]>({
+  const wishlistQuery = useQuery<string[]>({
     queryKey: ['wishlists', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data } = await withTimeout(
+      const { data, error } = await requestWithDeadline(
         supabase.from('wishlists').select('event_id').eq('user_id', userId),
         WISHLISTS_TIMEOUT_MS,
-        { data: [] } as any,
       );
+      if (error) throw error;
       return (data ?? []).map((r: any) => r.event_id as string);
     },
     enabled: !!userId,
     staleTime: 30_000,
+    retry: false,
   });
+  const { data: wishlistIds = [] } = wishlistQuery;
+  const mounted = useRef(true);
+  const ownerRef = useRef({ userId });
+  if (ownerRef.current.userId !== userId) ownerRef.current = { userId };
+  const owner = ownerRef.current;
+  const isCurrent = () => mounted.current && ownerRef.current === owner;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const retryLock = useRef<{ owner: object; attempt: object } | null>(null);
+  const [recovery, setRecovery] = useState<{ owner: object; pending: boolean; failed: boolean } | null>(null);
+  const collections = [plansQuery, savedQuery, interestedQuery, waitlistedQuery, wishlistQuery,
+    ...(COMMUNITIES_ENABLED ? [draftsQuery] : [])];
+  const collectionsLoading = collections.some(query => query.isLoading || query.isPending);
+  const retryPending = recovery?.owner === owner && recovery.pending;
+  const collectionsFailed = collections.some(query => query.isError) || (recovery?.owner === owner && recovery.failed);
+  const retryCollections = () => {
+    if (!isCurrent() || retryLock.current?.owner === owner) return;
+    const attempt = {};
+    retryLock.current = { owner, attempt };
+    setRecovery({ owner, pending: true, failed: false });
+    // Retry failed/incomplete reads only; successful collections stay mounted.
+    const targets = collections.filter(query => query.isError || query.isLoading || query.isPending || query.data === undefined);
+    const reads = targets.length ? targets : collections;
+    void requestWithDeadline(Promise.all(reads.map(query => query.refetch({ cancelRefetch: false }))), 12_000)
+      .then(results => {
+        if (isCurrent() && retryLock.current?.attempt === attempt) {
+          setRecovery({ owner, pending: false, failed: results.some(result => !!result.error) });
+        }
+      }).catch(() => {
+        if (isCurrent() && retryLock.current?.attempt === attempt) setRecovery({ owner, pending: false, failed: true });
+      }).finally(() => { if (retryLock.current?.attempt === attempt) retryLock.current = null; });
+  };
 
   const wishlistMutation = useMutation({
     mutationFn: async ({ eventId, current }: { eventId: string; current: boolean }) => {
@@ -165,26 +209,27 @@ export default function MyPlansView({ userId }: { userId: string }) {
     return lookup;
   }, [myPlans]);
 
+  const planNow = usePlanClock(myPlans);
   const myPlansUpcoming = useMemo(
     () => myPlans
-      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && new Date(p.start_time) >= new Date(Date.now() - 3 * 60 * 60 * 1000))
+      .filter((p) => ['forming', 'active', 'full'].includes(p.status) && !getPlanLifecycle({ status: p.status, startTime: p.start_time, endTime: p.end_time }, planNow).isClosed)
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
-    [myPlans],
+    [myPlans, planNow],
   );
 
   const myPlansPast = useMemo(
     () => myPlans
-      .filter((p) => p.status === 'completed' || new Date(p.start_time) < new Date(Date.now() - 3 * 60 * 60 * 1000))
+      .filter((p) => getPlanLifecycle({ status: p.status, startTime: p.start_time, endTime: p.end_time }, planNow).isClosed)
       .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       .slice(0, 20),
-    [myPlans],
+    [myPlans, planNow],
   );
 
   // Filter the fetched saved events by the live wishlist cache so an optimistic
   // un-save removes the card instantly (mirrors the feed's allPlans.filter).
   const savedPlans = useMemo(
-    () => savedBase.filter((p) => wishlistedSet[p.id]),
-    [savedBase, wishlistedSet],
+    () => wishlistQuery.data === undefined ? savedBase : savedBase.filter((p) => wishlistedSet[p.id]),
+    [savedBase, wishlistedSet, wishlistQuery.data],
   );
 
   const sections = useMemo(() => {
@@ -219,6 +264,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
     ({ item }: { item: Plan }) => (
       <View style={styles.cardWrap}>
         <PlanCard
+          appearance={cardAppearance}
           plan={toPlanCardPlan(item)}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
@@ -234,11 +280,10 @@ export default function MyPlansView({ userId }: { userId: string }) {
           onReport={handleReport}
           onBlock={handleBlock}
           onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
-          isPast={item.status === 'completed'}
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans],
+    [cardAppearance, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans],
   );
 
   const renderSectionHeader = useCallback(
@@ -282,20 +327,25 @@ export default function MyPlansView({ userId }: { userId: string }) {
     [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
   );
 
+  const hasContent = sections.length > 0 || !!draftsHeader;
+  const recoveryNotice = collectionsFailed ? <View style={hasContent ? styles.recoveryRow : styles.errorState}>
+    <Text style={[styles.recoveryText, hasContent && styles.recoveryCopy]}>
+      {hasContent ? 'Some plans couldn’t refresh. Your saved details are still here.' : 'Your plans couldn’t load. Try again to see them.'}
+    </Text>
+    <PageAction primary={!hasContent} compact singleLine title={retryPending ? 'Retrying…' : 'Try again'} disabled={retryPending} onPress={retryCollections} />
+  </View> : null;
   return (
     <View style={styles.fill}>
-      {myPlansLoading ? (
+      {!hasContent && collectionsFailed ? recoveryNotice : !hasContent && (collectionsLoading || retryPending) ? (
         <SkeletonFeed />
-      ) : sections.length === 0 && !draftsHeader ? (
+      ) : !hasContent ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>You haven't joined any plans yet.</Text>
-          <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/plans')}>
-            <Text style={styles.emptyButtonText}>Browse Plans</Text>
-          </TouchableOpacity>
+          <PageAction primary compact singleLine title="Browse Plans" onPress={() => { if (isCurrent()) router.push('/(tabs)/plans'); }} />
         </View>
       ) : (
         <SectionList
-          ListHeaderComponent={draftsHeader}
+          ListHeaderComponent={<>{recoveryNotice}{collectionsLoading && !collectionsFailed && <Text style={styles.loadingText}>Loading the rest of your plans…</Text>}{draftsHeader}</>}
           decelerationRate="normal"
           sections={sections}
           keyExtractor={(item) => item.id}
@@ -404,6 +454,9 @@ const styles = StyleSheet.create({
   pastCount: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.tertiary },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary, textAlign: 'center', marginBottom: 20 },
-  emptyButton: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 999 },
-  emptyButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  errorState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 },
+  recoveryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  recoveryCopy: { flex: 1, minWidth: 0 },
+  recoveryText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
+  loadingText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, paddingVertical: 12 },
 });

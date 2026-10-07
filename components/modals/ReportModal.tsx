@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,13 +25,32 @@ const REPORT_REASONS = [
   'Other',
 ] as const;
 
+/** A captured readable room/account visit. Reporting remains available when
+ * posting has expired; callers must not substitute a composer write gate. */
+export interface ReportOperationScope {
+  userId: string;
+  isCurrent: () => boolean;
+}
+
 export interface ReportModalProps {
   visible: boolean;
   onClose: () => void;
   reportedUserId: string;
   reportedUserName: string;
   eventId?: string;
+  scope?: ReportOperationScope | null;
 }
+
+type ReportContext = {
+  reportedUserId: string;
+  eventId: string | undefined;
+  scope: ReportOperationScope | null | undefined;
+  authRevision: number;
+};
+type ReportVisit = { context: ReportContext; visible: boolean; retired: boolean };
+type ReportAttempt = { visit: ReportVisit };
+type ReportSuccess = { context: ReportContext; allowedVisit: ReportVisit };
+type ReportAlert = { title: string; message: string; visit: ReportVisit; success?: ReportSuccess };
 
 export function ReportModal({
   visible,
@@ -39,53 +58,153 @@ export function ReportModal({
   reportedUserId,
   reportedUserName,
   eventId,
+  scope,
 }: ReportModalProps) {
   const insets = useSafeAreaInsets();
-  const [selectedReason, setSelectedReason] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string } | null>(null);
+  const authUser = useRef<string | null | undefined>(undefined);
+  const authRevisionRef = useRef(0);
+  const [authRevision, setAuthRevision] = useState(0);
+  const context = useMemo<ReportContext>(() => ({ reportedUserId, eventId, scope, authRevision }), [reportedUserId, eventId, scope, authRevision]);
+  const visit = useMemo<ReportVisit>(() => ({ context, visible, retired: false }), [context, visible]);
+  const activeContext = useRef<ReportContext | null>(null);
+  const activeVisit = useRef<ReportVisit | null>(null);
+  const attemptRef = useRef<ReportAttempt | null>(null);
+  const successRef = useRef<ReportSuccess | null>(null);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selection, setSelection] = useState<{ visit: ReportVisit; reason: string } | null>(null);
+  const [attempt, setAttempt] = useState<ReportAttempt | null>(null);
+  const [alertInfo, setAlertInfo] = useState<ReportAlert | null>(null);
+
+  const contextIsCurrent = (owner: ReportContext) => activeContext.current === owner &&
+    authRevisionRef.current === owner.authRevision && owner.scope !== null &&
+    (!owner.scope || (!!owner.scope.userId && owner.scope.isCurrent() &&
+      (authUser.current === undefined || authUser.current === owner.scope.userId)));
+  const visitIsCurrent = (owner: ReportVisit) => activeVisit.current === owner &&
+    owner.visible && !owner.retired && contextIsCurrent(owner.context);
+
+  useLayoutEffect(() => {
+    const previous = activeVisit.current;
+    activeContext.current = context;
+    activeVisit.current = visit;
+    attemptRef.current = null;
+    setAttempt(null);
+    setSelection(null);
+    const success = successRef.current;
+    // Only the successful submit's own visible -> hidden transition inherits
+    // its feedback. Reopening even the same target creates a different visit.
+    if (success && success.allowedVisit === previous && success.context === context && !visible) {
+      success.allowedVisit = visit;
+    } else {
+      successRef.current = null;
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = null;
+      setAlertInfo(null);
+    }
+  }, [context, visit, visible]);
+
+  useLayoutEffect(() => () => {
+    activeContext.current = null;
+    activeVisit.current = null;
+    attemptRef.current = null;
+    successRef.current = null;
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = null;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    // Observe transitions synchronously, including A -> B -> A between renders.
+    // Legacy callers retain their submit-time getUser read; this observer never
+    // changes a session or performs another auth request inside its callback.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      const next = session?.user.id ?? null;
+      const previous = authUser.current === undefined ? activeContext.current?.scope?.userId : authUser.current;
+      authUser.current = next;
+      if (next !== previous) {
+        authRevisionRef.current++;
+        setAuthRevision(authRevisionRef.current);
+      }
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, []);
+
+  const selectedReason = selection?.visit === visit ? selection.reason : null;
+  const submitting = attempt?.visit === visit;
+  const scopeReady = scope !== null && (!scope || (!!scope.userId && scope.isCurrent() &&
+    (authUser.current === undefined || authUser.current === scope.userId)));
+  const visibleAlert = alertInfo && (alertInfo.success
+    ? successRef.current === alertInfo.success && alertInfo.success.allowedVisit === visit && contextIsCurrent(alertInfo.success.context)
+    : alertInfo.visit === visit && visitIsCurrent(visit)) ? alertInfo : null;
 
   const handleClose = () => {
-    if (submitting) return;
-    setSelectedReason(null);
+    // Dismissal remains available if account/scope eligibility is unknown.
+    if (activeVisit.current !== visit || !visible || visit.retired ||
+        authRevisionRef.current !== context.authRevision || attemptRef.current?.visit === visit) return;
+    visit.retired = true;
+    setSelection(null);
+    setAlertInfo(null);
     onClose();
   };
 
   const handleSubmit = async () => {
-    if (!selectedReason || submitting) return;
-    setSubmitting(true);
+    if (!selectedReason || !reportedUserId || !visitIsCurrent(visit) || attemptRef.current?.visit === visit) return;
+    const ownedAttempt: ReportAttempt = { visit };
+    attemptRef.current = ownedAttempt;
+    setAttempt(ownedAttempt);
+    setAlertInfo(null);
+    const ownsAttempt = () => attemptRef.current === ownedAttempt && visitIsCurrent(visit);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (!ownsAttempt()) return;
+      if (authError) throw authError;
+      if (!user || (scope && user.id !== scope.userId) ||
+          (authUser.current !== undefined && user.id !== authUser.current)) throw new Error('Account could not be confirmed');
+      // The initiating account is now fixed. Do not perform another auth read
+      // or adopt a new account before dispatching the existing reports insert.
+      const reporterId = scope?.userId ?? user.id;
+      if (authUser.current === undefined) authUser.current = reporterId;
 
       const { error } = await supabase.from('reports').insert({
-        reporter_user_id: user.id,
+        reporter_user_id: reporterId,
         reported_user_id: reportedUserId,
         reason: selectedReason,
         reported_event_id: eventId ?? null,
         details: eventId ? 'Reported from plan' : 'Reported from user search',
       });
 
+      if (!ownsAttempt()) return;
       if (error) throw error;
 
-      setSelectedReason(null);
-      onClose();
-
-      // Slight delay so the modal has time to close before the alert appears
-      setTimeout(() => {
+      const success: ReportSuccess = { context, allowedVisit: visit };
+      successRef.current = success;
+      visit.retired = true;
+      setSelection(null);
+      // Schedule before onClose, so synchronous parent unmount also cancels it.
+      successTimer.current = setTimeout(() => {
+        successTimer.current = null;
+        if (successRef.current !== success || activeVisit.current !== success.allowedVisit || !contextIsCurrent(context)) return;
         setAlertInfo({
           title: 'Report submitted',
           message: 'Thank you. We review all reports within 24 hours.',
+          visit,
+          success,
         });
       }, 350);
+      onClose();
     } catch {
-      setAlertInfo({
+      if (ownsAttempt()) setAlertInfo({
         title: 'Could not submit report',
         message: 'Please email hello@washedup.app and we\'ll look into it.',
+        visit,
       });
     } finally {
-      setSubmitting(false);
+      // A retired attempt must never unlock a newer target/account's submit.
+      if (attemptRef.current === ownedAttempt) {
+        attemptRef.current = null;
+        setAttempt(null);
+      }
     }
   };
 
@@ -135,7 +254,8 @@ export function ReportModal({
                     styles.reasonRow,
                     i < REPORT_REASONS.length - 1 && styles.reasonRowBorder,
                   ]}
-                  onPress={() => setSelectedReason(reason)}
+                  onPress={() => { if (visitIsCurrent(visit) && attemptRef.current?.visit !== visit) setSelection({ visit, reason }); }}
+                  disabled={submitting || !scopeReady}
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.reasonText, isSelected && styles.reasonTextSelected]}>
@@ -169,9 +289,9 @@ export function ReportModal({
           ]}
         >
           <TouchableOpacity
-            style={[styles.submitBtn, !selectedReason && styles.submitBtnDisabled]}
+            style={[styles.submitBtn, (!selectedReason || !scopeReady) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
-            disabled={!selectedReason || submitting}
+            disabled={!selectedReason || submitting || !scopeReady}
             activeOpacity={0.9}
           >
             {submitting ? (
@@ -186,10 +306,10 @@ export function ReportModal({
     </Modal>
 
     <BrandedAlert
-      visible={!!alertInfo}
-      title={alertInfo?.title ?? ''}
-      message={alertInfo?.message}
-      onClose={() => setAlertInfo(null)}
+      visible={!!visibleAlert}
+      title={visibleAlert?.title ?? ''}
+      message={visibleAlert?.message}
+      onClose={() => setAlertInfo(current => current === visibleAlert ? null : current)}
     />
     </>
   );

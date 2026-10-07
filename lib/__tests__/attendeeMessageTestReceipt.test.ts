@@ -1,0 +1,10 @@
+const mockRequest=jest.fn();
+jest.mock('../creatorTicketRead',()=>({scopedTicketRequest:(...args:unknown[])=>mockRequest(...args)}));
+jest.mock('../supabase',()=>({supabase:{}}));
+import {sendAttendeeMessageTestToSelf} from '../attendeeMessaging';
+const scope={userId:'creator',isCurrent:()=>true};
+beforeEach(()=>jest.clearAllMocks());
+it('accepts only a recorded notification UUID and carries initiating scope',async()=>{mockRequest.mockResolvedValue({data:'11111111-1111-4111-8111-111111111111',error:null});await sendAttendeeMessageTestToSelf('event','Subject','Body',scope);expect(mockRequest.mock.calls[0][0]).toBe(scope);});
+it.each([null,undefined,{},'not-a-receipt'])('does not call an unconfirmed test successful %#',async data=>{mockRequest.mockResolvedValue({data,error:null});await expect(sendAttendeeMessageTestToSelf('event','Subject','Body',scope)).rejects.toThrow('could not be confirmed');});
+it('enforces the existing test-only 2000-character limit before dispatch',async()=>{await expect(sendAttendeeMessageTestToSelf('event','Subject','x'.repeat(2001),scope)).rejects.toThrow('2,000');expect(mockRequest).not.toHaveBeenCalled();});
+it('surfaces backend rejection and never claims a queued test',async()=>{mockRequest.mockResolvedValue({data:null,error:Error('limit')});await expect(sendAttendeeMessageTestToSelf('event','Subject','Body',scope)).rejects.toThrow('limit');});

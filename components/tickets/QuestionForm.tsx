@@ -51,6 +51,8 @@ interface QuestionFormProps {
   /** the order's ticket count; drives how many seats a per_attendee question asks. */
   qty: number;
   draft: AnswerDraft;
+  answeredSlots?: ReadonlySet<string>;
+  disabled?: boolean;
   onCellChange: (questionId: string, seat: Seat, patch: AnswerRaw) => void;
 }
 
@@ -149,7 +151,7 @@ export function missingRequiredPrompts(
   return missing;
 }
 
-export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFormProps) {
+export function QuestionForm({ questions, qty, draft, onCellChange, answeredSlots, disabled = false }: QuestionFormProps) {
   const renderInput = (q: TicketQuestion, seat: Seat) => {
     const raw = draft[cellKey(q.id, seat)] ?? {};
     const opts = q.options ?? [];
@@ -157,6 +159,7 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
     if (q.qtype === 'short_text' || q.qtype === 'paragraph') {
       return (
         <TextInput
+          editable={!disabled}
           style={[styles.qInput, q.qtype === 'paragraph' && styles.qInputMultiline]}
           value={raw.text ?? ''}
           onChangeText={(v) => onCellChange(q.id, seat, { text: v })}
@@ -175,12 +178,13 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
             const on = raw.choice === opt;
             return (
               <TouchableOpacity
+                disabled={disabled}
                 key={opt}
                 style={[styles.chip, on && styles.chipOn]}
                 onPress={() => { hapticLight(); onCellChange(q.id, seat, { choice: on ? '' : opt }); }}
                 activeOpacity={0.85}
                 accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
+                accessibilityState={{ selected: on, disabled }}
                 accessibilityLabel={opt}
               >
                 <Text style={[styles.chipText, on && styles.chipTextOn]}>{opt}</Text>
@@ -199,6 +203,7 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
             const on = chosen.includes(opt);
             return (
               <TouchableOpacity
+                disabled={disabled}
                 key={opt}
                 style={[styles.chip, on && styles.chipOn]}
                 onPress={() => {
@@ -209,7 +214,7 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
                 }}
                 activeOpacity={0.85}
                 accessibilityRole="checkbox"
-                accessibilityState={{ checked: on }}
+                accessibilityState={{ checked: on, disabled }}
                 accessibilityLabel={opt}
               >
                 <Text style={[styles.chipText, on && styles.chipTextOn]}>{opt}</Text>
@@ -224,11 +229,12 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
     const accepted = !!raw.accepted;
     return (
       <TouchableOpacity
+                disabled={disabled}
         style={styles.termsRow}
         onPress={() => { hapticLight(); onCellChange(q.id, seat, { accepted: !accepted }); }}
         activeOpacity={0.85}
         accessibilityRole="checkbox"
-        accessibilityState={{ checked: accepted }}
+        accessibilityState={{ checked: accepted, disabled }}
         accessibilityLabel={`I agree: ${q.prompt}`}
       >
         <View style={[styles.checkbox, accepted && styles.checkboxOn]}>
@@ -253,7 +259,7 @@ export function QuestionForm({ questions, qty, draft, onCellChange }: QuestionFo
               {q.required ? 'required' : 'optional'}
             </Text>
           </View>
-          {seatsForQuestion(q, qty).map((seat) => (
+          {seatsForQuestion(q, qty).filter(seat => !answeredSlots?.has(cellKey(q.id, seat))).map((seat) => (
             <View key={cellKey(q.id, seat)} style={styles.qCell}>
               {seat !== null && (
                 /* copy to the taste gate: per-seat label for per_attendee */
@@ -273,13 +279,13 @@ const styles = StyleSheet.create({
   qPromptRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   qPrompt: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, flexShrink: 1 },
   qStateTag: {
-    fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.tertiary,
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.textMedium,
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
   qStateTagRequired: { color: Colors.secondary },
   qCell: { gap: EventSpacing.xs },
   seatLabel: {
-    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.tertiary,
+    fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.textMedium,
     letterSpacing: 0.5, textTransform: 'uppercase',
   },
   qInput: {

@@ -1,3 +1,4 @@
+import { EventMediaImage } from '../events/EventMediaImage';
 /**
  * A Scene discovery poster listing (locked decision 12: marquee, not the
  * warm Plans card). Owns the graceful no-image treatment: a dead image URL
@@ -8,11 +9,12 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import Colors from '../../constants/Colors';
+import Colors, { SceneDetailColors as Scene } from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { formatEventDateLA } from '../../lib/laDate';
+import { formatEventDateLA, formatTimestampLA } from '../../lib/laDate';
 import { GeneratedPoster } from './GeneratedPoster';
 import { eventKickerLabel, type SceneEvent } from '../../lib/sceneDiscovery';
+import { eventPageByline } from '../../lib/eventPageIdentity';
 
 const POSTER_RATIO = 0.56;
 const COMPACT_THUMB = 84;
@@ -22,28 +24,50 @@ interface EventPosterProps {
   width: number;
   onPress: () => void;
   /** slice 1 (doc 37): mixed density — one featured card, then compact */
-  variant?: 'featured' | 'compact';
+  variant?: 'featured' | 'compact' | 'grid';
 }
 
 export function EventPoster({ event: e, width, onPress, variant = 'featured' }: EventPosterProps) {
-  const [imageBroken, setImageBroken] = useState(false);
+  const [brokenReference, setBrokenReference] = useState<string | null>(null);
   const posterHeight = (width - 40) * POSTER_RATIO;
   // one corner slot, one grammar (the people-first pack): a community event
   // wears the leader's FACE, a standalone brand listing wears the organizer
   // LOGO, never both; nothing when neither resolves
-  const chipUrl = e.community_id ? e.leader_avatar_url : e.organizer_logo;
+  const chipUrl = e.community_id && (e.published_page === undefined || e.published_page?.kind === 'community')
+    ? e.leader_avatar_url : e.published_page === undefined ? e.organizer_logo : null;
+  const byline = eventPageByline(e);
+  // Saved instants use the LA clock on every device; date-only listings stay date-only.
+  const when = formatTimestampLA(e.start_time) || formatEventDateLA(e.event_date);
   const chipIsFace = !!e.community_id;
+
+  if (variant === 'grid') {
+    return <TouchableOpacity style={[styles.gridCard, { width }]} onPress={onPress} activeOpacity={0.85}
+      accessibilityRole="button" accessibilityLabel={[e.title, when, e.venue, byline].filter(Boolean).join(', ')}>
+      <View style={{ width: '100%', height: width, backgroundColor: Scene.surface }}>
+        {e.image_url && brokenReference !== e.image_url ? <EventMediaImage eventId={e.id} reference={e.image_url}
+          style={{ width: '100%', height: width }} contentFit="contain" onError={() => setBrokenReference(e.image_url)} />
+          : <GeneratedPoster title={e.title} category={e.category} venue={e.venue} height={width} surface="scene" />}
+      </View>
+      <View style={styles.gridBody}>
+        {!!eventKickerLabel(e) && <Text style={styles.gridKicker}>{eventKickerLabel(e)}</Text>}
+        <Text style={styles.gridTitle} numberOfLines={3}>{e.title}</Text>
+        {!!when && <Text style={styles.gridMeta}>{when}</Text>}
+        {!!e.venue && <Text style={styles.gridMeta} numberOfLines={2}>{e.venue}</Text>}
+        {!!byline && <Text style={styles.gridBy} numberOfLines={2}>{byline}</Text>}
+      </View>
+    </TouchableOpacity>;
+  }
 
   if (variant === 'compact') {
     return (
       <TouchableOpacity style={styles.compactCard} onPress={onPress} activeOpacity={0.85}>
         <View style={styles.compactThumbWrap}>
-          {e.image_url && !imageBroken ? (
-            <Image
-              source={{ uri: e.image_url }}
+          {e.image_url && brokenReference !== e.image_url ? (
+            <EventMediaImage
+              eventId={e.id} reference={e.image_url}
               style={styles.compactThumb}
               contentFit="cover"
-              onError={() => setImageBroken(true)}
+              onError={() => setBrokenReference(e.image_url)}
             />
           ) : (
             <GeneratedPoster title={e.title} category={e.category} venue={e.venue} height={COMPACT_THUMB} compact />
@@ -61,13 +85,13 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
           <Text style={styles.compactTitle} numberOfLines={2}>{e.title}</Text>
           <Text style={styles.posterMetaCompact} numberOfLines={1}>
             {[
-              e.event_date ? formatEventDateLA(e.event_date) : null,
+              when,
               e.venue,
             ].filter(Boolean).join(' · ')}
           </Text>
-          {!!(e.public_name || e.organizer_name) && (
+          {!!byline && (
             <Text style={styles.posterBy} numberOfLines={1}>
-              put on by {e.public_name ?? e.organizer_name}
+              put on by {byline}
             </Text>
           )}
         </View>
@@ -77,12 +101,12 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
 
   return (
     <TouchableOpacity style={styles.poster} onPress={onPress} activeOpacity={0.85}>
-      {e.image_url && !imageBroken ? (
-        <Image
-          source={{ uri: e.image_url }}
+      {e.image_url && brokenReference !== e.image_url ? (
+        <EventMediaImage
+          eventId={e.id} reference={e.image_url}
           style={[styles.posterImage, { height: posterHeight }]}
           contentFit="cover"
-          onError={() => setImageBroken(true)}
+          onError={() => setBrokenReference(e.image_url)}
         />
       ) : (
         // the generated branded fallback (doc 37): title, category, and
@@ -101,14 +125,14 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
         <Text style={styles.posterTitle} numberOfLines={2}>{e.title}</Text>
         <Text style={styles.posterMeta}>
           {[
-            e.event_date ? formatEventDateLA(e.event_date) : null,
+            when,
             e.venue,
           ].filter(Boolean).join(' · ')}
         </Text>
         {/* public_name override wins; standalone listings fall back to the
             organizer profile name (proposal 36) */}
-        {!!(e.public_name || e.organizer_name) && (
-          <Text style={styles.posterBy}>put on by {e.public_name ?? e.organizer_name}</Text>
+        {!!byline && (
+          <Text style={styles.posterBy}>put on by {byline}</Text>
         )}
       </View>
     </TouchableOpacity>
@@ -116,6 +140,12 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
 }
 
 const styles = StyleSheet.create({
+  gridCard: { backgroundColor: Scene.surface, borderRadius: 8, overflow: 'hidden' },
+  gridBody: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 14 },
+  gridTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyMD, color: Scene.text },
+  gridKicker: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Scene.supporting, marginBottom: 5 },
+  gridMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.supporting, marginTop: 6 },
+  gridBy: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Scene.supporting, marginTop: 6 },
   poster: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,

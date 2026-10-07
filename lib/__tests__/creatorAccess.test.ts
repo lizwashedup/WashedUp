@@ -90,3 +90,12 @@ describe('getCreatorAccess', () => {
     expect(mockFrom).not.toHaveBeenCalled();
   });
 });
+
+it('rejects a scoped read after the active account changed before reading private creator rows',async()=>{
+ await expect(getCreatorAccess('other-user')).rejects.toThrow('Creator account changed');expect(mockFrom).not.toHaveBeenCalled();
+});
+it('preserves existing React Query context callers while accepting explicit account ownership',async()=>{
+ mockFrom.mockImplementation(()=>queryChain({data:[],error:null}));
+ await expect(getCreatorAccess({queryKey:['creator-access']})).resolves.toMatchObject({ledCommunities:[],hasLeaderGrant:false});
+ await expect(getCreatorAccess('liz-user-1')).resolves.toMatchObject({ledCommunities:[],hasEventHostGrant:false});
+});

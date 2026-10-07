@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Keyboard, Platform, Pressable, ScrollView, StyleSheet,
   Switch, Text, TextInput, TouchableOpacity, View,
@@ -13,6 +13,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/KeyboardDoneBar';
+import { useObservedUser, type ObservedUser } from '../../../hooks/useObservedUser';
+import { requestWithDeadline } from '../../../lib/requestWithDeadline';
+import { PageAction } from '../../../components/creator/pages/PageFrame';
 import { supabase } from '../../../lib/supabase';
 import { enqueueAlbumUploadBatch, AlbumUploadInput } from '../../../lib/uploadAlbumMedia';
 
@@ -104,12 +107,13 @@ function formatExtFromName(filename: string | null | undefined): string {
   return m ? m[1].toLowerCase() : '';
 }
 
-async function fetchEventAttendees(eventId: string, myUserId: string): Promise<Attendee[]> {
+async function fetchEventAttendees(eventId: string, myUserId: string, isCurrent: () => boolean): Promise<Attendee[]> {
   const { data: members, error: mErr } = await supabase
     .from('event_members')
     .select('user_id')
     .eq('event_id', eventId)
     .eq('status', 'joined');
+  if (!isCurrent()) throw new Error('Upload visit changed.');
   if (mErr) throw mErr;
 
   const userIds = (members ?? []).map((m) => m.user_id).filter((uid) => uid !== myUserId);
@@ -119,6 +123,7 @@ async function fetchEventAttendees(eventId: string, myUserId: string): Promise<A
     .from('profiles')
     .select('id, first_name_display, profile_photo_url')
     .in('id', userIds);
+  if (!isCurrent()) throw new Error('Upload visit changed.');
   if (pErr) throw pErr;
 
   const profilesById = new Map(
@@ -136,13 +141,38 @@ async function fetchEventAttendees(eventId: string, myUserId: string): Promise<A
 }
 
 export default function AlbumUploadScreen() {
-  const { eventId } = useLocalSearchParams<{ eventId: string }>();
+  const params = useLocalSearchParams<{ eventId: string }>();
+  const eventId = typeof params.eventId === 'string' ? params.eventId : '';
   const router = useRouter();
+  const identity = useObservedUser({ allowSignedOut: true });
+  const retryLock = useRef(false);
+  const retryIdentity = () => {
+    if (!identity.isCurrent() || retryLock.current) return;
+    retryLock.current = true;
+    void identity.retry().finally(() => { retryLock.current = false; });
+  };
+  if (identity.isLoading) return <SafeAreaView style={styles.loadingWrap}><ActivityIndicator accessibilityLabel="Checking your account" color={Colors.terracotta} /></SafeAreaView>;
+  if (!eventId || identity.error || !identity.viewerId) return <SafeAreaView style={styles.loadingWrap}>
+    <Text style={styles.sectionSubtitle}>{identity.error ? 'We couldn’t check your account.' : !identity.viewerId ? 'Sign in to add photos.' : 'This plan is unavailable.'}</Text>
+    {!!identity.error && <PageAction primary compact singleLine title="Try again" onPress={retryIdentity} />}
+    <PageAction compact singleLine title="Go back" onPress={() => { if (identity.isCurrent()) router.back(); }} />
+  </SafeAreaView>;
+  return <AlbumUploadVisit key={`${identity.viewerId}:${identity.epoch}:${eventId}`} eventId={eventId} identity={identity} />;
+}
+
+function AlbumUploadVisit({ eventId, identity }: { eventId: string; identity: ObservedUser }) {
+  const router = useRouter();
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const isCurrent = useCallback(() => mounted.current && identity.isCurrent(), [identity.isCurrent]);
+  const myUserId = identity.viewerId!;
+  const pickerLock = useRef(false);
+  const submitLock = useRef(false);
+  const retryLock = useRef(false);
+  const [picking, setPicking] = useState(false);
   const insets = useSafeAreaInsets();
   const scrollRef = React.useRef<ScrollView>(null);
 
-  const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [eventTitle, setEventTitle] = useState<string>('');
   const [assets, setAssets] = useState<SelectedAsset[]>([]);
   const [excludedUserIds, setExcludedUserIds] = useState<Set<string>>(new Set());
   const [marketingConsent, setMarketingConsent] = useState(false);
@@ -153,133 +183,168 @@ export default function AlbumUploadScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [rejection, setRejection] = useState<RejectionCounts | null>(null);
 
-  // Resolve user + event title.
-  React.useEffect(() => {
-    let cancel = false;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (cancel) return;
-      setMyUserId(user?.id ?? null);
-      if (eventId) {
-        const { data: ev } = await supabase
-          .from('events').select('title').eq('id', eventId).maybeSingle();
-        if (!cancel) setEventTitle(ev?.title ?? '');
-      }
-    })();
-    return () => { cancel = true; };
-  }, [eventId]);
-
-  const { data: attendees } = useQuery({
-    queryKey: ['albumUpload.attendees', eventId, myUserId],
-    queryFn: () => fetchEventAttendees(String(eventId), myUserId!),
-    enabled: !!eventId && !!myUserId,
+  const titleQuery = useQuery({
+    queryKey: ['albumUpload.event', eventId, myUserId, identity.epoch],
+    queryFn: async ({ signal }) => {
+      if (!isCurrent() || signal.aborted) throw new Error('Upload visit changed.');
+      const { data, error } = await requestWithDeadline(
+        supabase.from('events').select('title').eq('id', eventId).maybeSingle(), 12_000,
+      );
+      if (!isCurrent() || signal.aborted) throw new Error('Upload visit changed.');
+      if (error) throw error;
+      return data;
+    },
+    retry: false,
   });
+  const audienceQuery = useQuery({
+    queryKey: ['albumUpload.attendees', eventId, myUserId, identity.epoch],
+    queryFn: async ({ signal }) => {
+      let active = true;
+      const current = () => active && isCurrent() && !signal.aborted;
+      try {
+        if (!current()) throw new Error('Upload visit changed.');
+        const result = await requestWithDeadline(fetchEventAttendees(eventId, myUserId, current), 12_000);
+        if (!current()) throw new Error('Upload visit changed.');
+        return result;
+      } finally { active = false; }
+    },
+    retry: false,
+  });
+  const attendees = audienceQuery.data;
+  const eventTitle = titleQuery.data?.title ?? '';
+  const readsBusy = titleQuery.isFetching || audienceQuery.isFetching;
+  const readsReady = !!titleQuery.data && attendees !== undefined && !titleQuery.isError && !audienceQuery.isError && !readsBusy;
+  const readyRef = useRef(false);
+  readyRef.current = readsReady;
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  const unavailable = titleQuery.isSuccess && !titleQuery.data;
+  const readFailure = titleQuery.isError || audienceQuery.isError || unavailable;
+  const retryReads = () => {
+    if (!isCurrent() || retryLock.current || readsBusy) return;
+    retryLock.current = true;
+    const attempts = [];
+    if (titleQuery.isError || !titleQuery.data) attempts.push(titleQuery.refetch({ cancelRefetch: false }));
+    if (audienceQuery.isError || attendees === undefined) attempts.push(audienceQuery.refetch({ cancelRefetch: false }));
+    void Promise.allSettled(attempts).finally(() => { retryLock.current = false; });
+  };
 
   const photoCount = useMemo(() => assets.filter((a) => a.contentType === 'photo').length, [assets]);
   const videoCount = useMemo(() => assets.filter((a) => a.contentType === 'video').length, [assets]);
 
   const pickAssets = useCallback(async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Photos access needed', 'WashedUp needs access to your photos to add them to the album.');
-      return;
-    }
-    setRejection(null);
-    const rej: RejectionCounts = { tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 0 };
-
-    // videoExportPreset is iOS-only (silently ignored on Android). Wrapping it
-    // in a Platform check makes the divergence intentional: iOS forces H.264
-    // MP4 re-export at pick time so iPhone MOV files play in cross-platform
-    // clients; Android takes the device's native export (typically H.264 MP4
-    // already on modern cameras). Server-side ffmpeg transcode for non-MP4
-    // edge cases is deferred to v1.1.
-    let result: ImagePicker.ImagePickerResult;
+    if (!isCurrent() || pickerLock.current || submitLock.current) return;
+    pickerLock.current = true;
+    setPicking(true);
     try {
-      result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images', 'videos'],
-        allowsMultipleSelection: true,
-        selectionLimit: PHOTO_CAP + VIDEO_CAP,
-        quality: 1,
-        videoMaxDuration: MAX_VIDEO_SEC,
-        exif: true,
-        ...(Platform.OS === 'ios'
-          ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
-          : {}),
-      });
-    } catch (err) {
-      // iOS AVFoundation throws "Operation Interrupted" when the re-encode is
-      // cut short (app backgrounded mid-pick, system load, etc). Surface it as
-      // an inline note rather than letting it propagate to onunhandledrejection.
-      if (__DEV__) console.warn('[AlbumUpload] picker failed:', err);
-      setRejection({ tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 1 });
-      return;
-    }
-    if (result.canceled || !result.assets) return;
-
-    const newAssets: SelectedAsset[] = [];
-    for (const a of result.assets) {
-      const isVideo = a.type === 'video';
-      const ext = formatExtFromName(a.fileName) || (isVideo ? 'mp4' : 'jpg');
-      if (isVideo && (a.duration ?? 0) > MAX_VIDEO_SEC * 1000) {
-        rej.tooLong += 1;
-        continue;
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!isCurrent()) return;
+      if (!perm.granted) {
+        Alert.alert('Photos access needed', 'WashedUp needs access to your photos to add them to the album.');
+        return;
       }
-      if (isVideo && (a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
-        rej.tooBig += 1;
-        continue;
-      }
-      if (isVideo && !a.duration) {
-        // Defense against malformed video metadata that would slip past the
-        // 60-second cap on the server (the duration column allows NULL).
-        rej.unreadable += 1;
-        continue;
-      }
-      newAssets.push({
-        uri: a.uri,
-        fileName: a.fileName ?? `upload.${ext}`,
-        contentType: isVideo ? 'video' : 'photo',
-        mediaFormat: ext,
-        fileSizeBytes: a.fileSize,
-        videoDurationSec: isVideo && a.duration ? Math.round(a.duration / 1000) : undefined,
-        width: a.width,
-        height: a.height,
-        takenAt: isVideo ? undefined : parseExifTakenAt(a.exif),
-      });
-    }
+      setRejection(null);
+      const rej: RejectionCounts = { tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 0 };
 
-    // Enforce caps after adding. Compute the merged set against the current
-    // closure value of `assets` so we can read the dropped count before the
-    // next render — using setAssets's updater would defer that to the commit
-    // phase, after we've already called setRejection.
-    const merged = [...assets, ...newAssets];
-    const photos: SelectedAsset[] = [];
-    const videos: SelectedAsset[] = [];
-    for (const item of merged) {
-      if (item.contentType === 'photo' && photos.length < PHOTO_CAP) photos.push(item);
-      else if (item.contentType === 'video' && videos.length < VIDEO_CAP) videos.push(item);
-    }
-    rej.capDropped = merged.length - (photos.length + videos.length);
-    setAssets([...photos, ...videos]);
+      // videoExportPreset is iOS-only (silently ignored on Android). Wrapping it
+      // in a Platform check makes the divergence intentional: iOS forces H.264
+      // MP4 re-export at pick time so iPhone MOV files play in cross-platform
+      // clients; Android takes the device's native export (typically H.264 MP4
+      // already on modern cameras). Server-side ffmpeg transcode for non-MP4
+      // edge cases is deferred to v1.1.
+      let result: ImagePicker.ImagePickerResult;
+      try {
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images', 'videos'],
+          allowsMultipleSelection: true,
+          selectionLimit: PHOTO_CAP + VIDEO_CAP,
+          quality: 1,
+          videoMaxDuration: MAX_VIDEO_SEC,
+          exif: true,
+          ...(Platform.OS === 'ios'
+            ? { videoExportPreset: ImagePicker.VideoExportPreset.HighestQuality }
+            : {}),
+        });
+      } catch (err) {
+        if (!isCurrent()) return;
+        // iOS AVFoundation throws "Operation Interrupted" when the re-encode is
+        // cut short (app backgrounded mid-pick, system load, etc). Surface it as
+        // an inline note rather than letting it propagate to onunhandledrejection.
+        if (__DEV__) console.warn('[AlbumUpload] picker failed:', err);
+        setRejection({ tooLong: 0, tooBig: 0, unreadable: 0, capDropped: 0, transcodeFailed: 1 });
+        return;
+      }
+      if (!isCurrent() || result.canceled || !result.assets) return;
 
-    const total = rej.tooLong + rej.tooBig + rej.unreadable + rej.capDropped;
-    setRejection(total > 0 ? rej : null);
-  }, [assets]);
+      const newAssets: SelectedAsset[] = [];
+      for (const a of result.assets) {
+        const isVideo = a.type === 'video';
+        const ext = formatExtFromName(a.fileName) || (isVideo ? 'mp4' : 'jpg');
+        if (isVideo && (a.duration ?? 0) > MAX_VIDEO_SEC * 1000) {
+          rej.tooLong += 1;
+          continue;
+        }
+        if (isVideo && (a.fileSize ?? 0) > MAX_VIDEO_BYTES) {
+          rej.tooBig += 1;
+          continue;
+        }
+        if (isVideo && !a.duration) {
+          // Defense against malformed video metadata that would slip past the
+          // 60-second cap on the server (the duration column allows NULL).
+          rej.unreadable += 1;
+          continue;
+        }
+        newAssets.push({
+          uri: a.uri,
+          fileName: a.fileName ?? `upload.${ext}`,
+          contentType: isVideo ? 'video' : 'photo',
+          mediaFormat: ext,
+          fileSizeBytes: a.fileSize,
+          videoDurationSec: isVideo && a.duration ? Math.round(a.duration / 1000) : undefined,
+          width: a.width,
+          height: a.height,
+          takenAt: isVideo ? undefined : parseExifTakenAt(a.exif),
+        });
+      }
+
+      // Use the current selection if a photo was removed while the picker was open.
+      const merged = [...assetsRef.current, ...newAssets];
+      const photos: SelectedAsset[] = [];
+      const videos: SelectedAsset[] = [];
+      for (const item of merged) {
+        if (item.contentType === 'photo' && photos.length < PHOTO_CAP) photos.push(item);
+        else if (item.contentType === 'video' && videos.length < VIDEO_CAP) videos.push(item);
+      }
+      rej.capDropped = merged.length - (photos.length + videos.length);
+      setAssets([...photos, ...videos]);
+
+      const total = rej.tooLong + rej.tooBig + rej.unreadable + rej.capDropped;
+      setRejection(total > 0 ? rej : null);
+    } catch {
+      if (isCurrent()) Alert.alert('Photos unavailable', 'Could not open your photos. Please try again.');
+    } finally {
+      pickerLock.current = false;
+      if (isCurrent()) setPicking(false);
+    }
+  }, [isCurrent]);
 
   const removeAsset = useCallback((uri: string) => {
+    if (!isCurrent() || submitLock.current) return;
     setAssets((prev) => prev.filter((a) => a.uri !== uri));
-  }, []);
+  }, [isCurrent]);
 
   const scrollToBottomOnFocus = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
-  }, []);
+    setTimeout(() => { if (isCurrent()) scrollRef.current?.scrollToEnd({ animated: true }); }, 250);
+  }, [isCurrent]);
 
   const toggleAttendee = useCallback((uid: string) => {
+    if (!isCurrent() || submitLock.current) return;
     setExcludedUserIds((prev) => {
       const next = new Set(prev);
       if (next.has(uid)) next.delete(uid); else next.add(uid);
       return next;
     });
-  }, []);
+  }, [isCurrent]);
 
   const visibleToUserIds = useMemo(() => {
     if (!attendees) return [];
@@ -287,7 +352,8 @@ export default function AlbumUploadScreen() {
   }, [attendees, excludedUserIds]);
 
   const onUpload = useCallback(async () => {
-    if (assets.length === 0 || !myUserId || !eventId) return;
+    if (!isCurrent() || !readyRef.current || pickerLock.current || submitLock.current || assets.length === 0 || !myUserId || !eventId) return;
+    submitLock.current = true;
     setSubmitting(true);
     try {
       const inputs: AlbumUploadInput[] = assets.map((a) => ({
@@ -310,39 +376,41 @@ export default function AlbumUploadScreen() {
       });
 
       // Navigate to album detail; the queue uploads in background.
-      router.replace(`/album/${eventId}` as any);
+      if (isCurrent()) router.dismissTo(`/album/${eventId}` as any);
     } catch (err) {
+      if (!isCurrent()) return;
+      submitLock.current = false;
       Alert.alert('Upload error', 'Could not start upload. Please try again.');
       setSubmitting(false);
     }
-  }, [assets, myUserId, eventId, visibleToUserIds, marketingConsent, instagram, tiktok, testimonial, router]);
-
-  if (!myUserId) {
-    return (
-      <SafeAreaView style={styles.loadingWrap}>
-        <ActivityIndicator color={Colors.terracotta} />
-      </SafeAreaView>
-    );
-  }
+  }, [assets, myUserId, eventId, visibleToUserIds, marketingConsent, instagram, tiktok, testimonial, router, isCurrent]);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerBtn}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back to album" onPress={() => { if (isCurrent()) router.back(); }} hitSlop={12} style={styles.headerBtn}>
           <Ionicons name="close" size={26} color={Colors.asphalt} />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{eventTitle || 'Plan'}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>{eventTitle || 'Add photos'}</Text>
         <View style={styles.headerBtn} />
       </View>
 
       <ScrollView ref={scrollRef} contentContainerStyle={[styles.scroll, { paddingBottom: 120 + insets.bottom }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        {readFailure && <View style={styles.recovery}>
+          <Text style={styles.recoveryText}>{unavailable ? 'This plan is unavailable.' : titleQuery.isError ? 'We couldn’t load this plan. Try again before uploading.' : 'We couldn’t check who can see your uploads. Try again before uploading.'}</Text>
+          <PageAction compact singleLine title={readsBusy ? 'Retrying…' : 'Try again'} disabled={readsBusy} onPress={retryReads} />
+        </View>}
+        {titleQuery.isPending && <View style={styles.audienceLoading}>
+          <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Checking this plan" />
+          <Text style={[styles.sectionSubtitle, { flex: 1 }]}>Checking this plan…</Text>
+        </View>}
         {/* Pitch */}
         <Text style={styles.pitch}>
           Upload your photos so you can share them with everyone.
         </Text>
 
         {/* Picker section */}
-        <TouchableOpacity style={styles.pickerBtn} onPress={pickAssets} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.pickerBtn} onPress={pickAssets} disabled={picking || submitting} accessibilityLabel="Pick photos and videos" accessibilityState={{ busy: picking, disabled: picking || submitting }} activeOpacity={0.85}>
           <Ionicons name="images-outline" size={18} color={Colors.terracotta} />
           <Text style={styles.pickerBtnText}>
             {assets.length === 0 ? 'Pick photos and videos' : 'Add more'}
@@ -386,7 +454,9 @@ export default function AlbumUploadScreen() {
           <Text style={styles.sectionSubtitle}>
             Only people who attended. Uncheck anyone you'd prefer not to share with.
           </Text>
-          {(attendees ?? []).length === 0 ? (
+          {(audienceQuery.isPending || audienceQuery.isFetching) && <View style={styles.audienceLoading}><ActivityIndicator color={Colors.terracotta} accessibilityLabel="Checking upload audience" /><Text style={[styles.sectionSubtitle, { flex: 1 }]}>Checking who can see your uploads…</Text></View>}
+          {audienceQuery.isError && <Text style={styles.sectionSubtitle}>Your audience couldn’t be checked. Uploading is paused until you retry.</Text>}
+          {attendees !== undefined && !audienceQuery.isError && !audienceQuery.isPending && !audienceQuery.isFetching && attendees.length === 0 ? (
             <Text style={styles.sectionEmpty}>It's just you! Your photos are private to you.</Text>
           ) : (
             (attendees ?? []).map((a) => {
@@ -432,7 +502,7 @@ export default function AlbumUploadScreen() {
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => WebBrowser.openBrowserAsync('https://washedup.app/photo-consent')}
+            onPress={() => { if (isCurrent()) void WebBrowser.openBrowserAsync('https://washedup.app/photo-consent'); }}
             style={styles.learnMoreWrap}
             hitSlop={8}
             accessibilityRole="link"
@@ -512,9 +582,10 @@ export default function AlbumUploadScreen() {
 
       <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity
-          style={[styles.uploadBtn, (assets.length === 0 || submitting) && styles.uploadBtnDisabled]}
+          style={[styles.uploadBtn, (assets.length === 0 || submitting || picking || !readsReady) && styles.uploadBtnDisabled]}
           onPress={onUpload}
-          disabled={assets.length === 0 || submitting}
+          disabled={assets.length === 0 || submitting || picking || !readsReady}
+          accessibilityLabel="Upload selected photos and videos"
           activeOpacity={0.9}
         >
           {submitting ? (
@@ -534,7 +605,10 @@ export default function AlbumUploadScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.parchment },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.parchment },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.parchment, padding: 24, gap: 16 },
+  recovery: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  recoveryText: { flex: 1, minWidth: 0, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  audienceLoading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 12, paddingTop: 4, paddingBottom: 12,

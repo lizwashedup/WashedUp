@@ -1,9 +1,19 @@
 {
-  "buildNumber": "43",
-  "easBuildId": "e6ff80eb-46db-4d86-a576-c03df44a5f27",
-  "gitCommitHash": "ac9d9dfe2d21b6857d07920a703c6fdf0bb11cbe",
-  "runtimeVersion": "17b471ae2a908d2805483436b15fd0059dd95572",
-  "appConfigSha256": "a6a87ec81b3831e7ef3952d781a5668fa60d1eba41f491098b3e5f0e61553250",
-  "status": "testflight_pending_ota_verification",
-  "note": "Build 43 is valid and in internal TestFlight. This target does not claim the OTA has been verified on build 43 or approved for App Store release."
+  "sourceType": "manual-store-archive",
+  "buildNumber": "51",
+  "version": "1.0.7",
+  "bundleIdentifier": "com.washedup.app",
+  "gitCommitHash": "d669069f1e873ae6ce9f24c85f979775557552ec",
+  "runtimeVersion": "2c21d65e4f9b6bad5e9823bc1886f6c3bb773ed1",
+  "appJsonSha256": "3d7d4f25587290735100564f53b3c4ed726977398cc075afa80f88ceae79cb30",
+  "appConfigSha256": "7159f0d59724cf62df35132f2912a414792b1880322d29be82be353fb1168e29",
+  "easJsonSha256": "446c17836dac2e538a2009797cd826b9ffd2783154d014044c249ff7fc954baa",
+  "packageJsonSha256": "f57d34f673b207ad0e8d196bda8d8c7a279a25db8069af6e5772972b72777e0f",
+  "packageLockSha256": "0e746690daf2ef83eb74e261b6d96b2ac42061884c7724d6d35f4ca9bd65ace6",
+  "productionSourceManifestSha256": "363d5341859bf1e25046c9f24cb52a9ad8c7563663ef243d0621f31a7b545663",
+  "signedIpaSha256": "0a50f215783e25f7b8530b72dc186a2d44fe04da2b30a11c4a37b0fe5e409b60",
+  "verifiedProductionUpdateGroup": "a2da3561-d469-4268-b926-64cd99591cd5",
+  "verifiedProductionUpdateId": "01a0fb0d-9ba2-7511-b713-28250a169115",
+  "status": "app_store_build_and_production_runtime_verified",
+  "note": "Build 51 was produced as a locally signed App Store archive, so it has no EAS build ID. Its signed archive evidence, exact native-input hashes, production runtime, currently served production update and physical-device build identity were verified before this target was pinned."
 }

@@ -9,8 +9,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import Colors from '../../../constants/Colors';
-import { Fonts } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { CIRCLE } from '../../../constants/YoursDesign';
 
 function monogramOf(name: string): string | null {
@@ -28,6 +28,7 @@ export default function CircleCover({
   radius = CIRCLE.rowCoverRadius,
   monogramSize = CIRCLE.monogramSize,
   tone = 'terracotta',
+  appearance,
 }: {
   name: string;
   coverUrl?: string | null;
@@ -41,6 +42,7 @@ export default function CircleCover({
    * "no gold for text" rule keeps the letter off gold).
    */
   tone?: 'terracotta' | 'gold';
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
   const box = { width: size, height: size, borderRadius: radius };
 
@@ -65,11 +67,12 @@ export default function CircleCover({
         styles.cover,
         styles.placeholder,
         monogram ? (tone === 'gold' ? styles.gold : null) : styles.empty,
+        appearance && { backgroundColor: AfterglowColors.avatar },
         box,
       ]}
     >
       {monogram ? (
-        <Text style={[styles.monogram, { fontSize: monogramSize }]}>{monogram}</Text>
+        <Text style={[styles.monogram, { fontSize: monogramSize }, appearance && { fontFamily: appearance.fonts.semibold, color: AfterglowColors.clay }]}>{monogram}</Text>
       ) : null}
     </View>
   );

@@ -5,7 +5,7 @@
  * says so honestly. Functionally minimal per decision 15a.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, CircleDollarSign, HelpCircle, UserPlus, UserRound, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
@@ -33,9 +33,13 @@ import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 
 export default function CreatorCommunityScreen() {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
@@ -45,21 +49,25 @@ export default function CreatorCommunityScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = useLedCommunity(access);
 
-  const { data: broadcasts = [], refetch, isRefetching } = useQuery({
+  const broadcastsQuery = useQuery({
     queryKey: ['creator-broadcasts', community?.id],
     queryFn: () => getBroadcasts(community!.id),
     enabled: !!community,
   });
-  const { data: audienceCount } = useQuery({
+  const audienceQuery = useQuery({
     queryKey: ['creator-broadcast-audience', community?.id],
     queryFn: () => getBroadcastAudienceCount(community!.id),
     enabled: !!community,
   });
-  const { data: rooms = [] } = useQuery({
+  const roomsQuery = useQuery({
     queryKey: ['creator-rooms', community?.id],
     queryFn: () => getCommunityRooms(community!.id),
     enabled: !!community,
   });
+
+  const { data: broadcasts = [], refetch, isRefetching } = broadcastsQuery;
+  const { data: audienceCount } = audienceQuery;
+  const { data: rooms = [] } = roomsQuery;
 
   const [publishing, setPublishing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -152,7 +160,7 @@ export default function CreatorCommunityScreen() {
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
-          <Text style={styles.title}>community</Text>
+          <Text style={styles.title}>Community</Text>
           <WorkspaceSwitcher access={access} />
           <CommunitySwitcher access={access} />
 
@@ -183,7 +191,7 @@ export default function CreatorCommunityScreen() {
               <UserPlus size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
                 <Text style={styles.editPageTitle}>invite members</Text>
-                <Text style={styles.editPageHint}>bring people in without mixing them with organization access.</Text>
+                <Text style={styles.editPageHint}>Bring your people into this community.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
@@ -204,11 +212,14 @@ export default function CreatorCommunityScreen() {
                 accessibilityLabel="Publish your page"
                 accessibilityState={{ disabled: publishing, busy: publishing }}
               >
+                <CreatorActionFill />
+                <View style={styles.actionContent}>
                 {publishing ? (
                   <ActivityIndicator size="small" color={Colors.white} />
                 ) : (
                   <Text style={styles.publishBtnText}>publish your page</Text>
                 )}
+                </View>
               </TouchableOpacity>
             </View>
           )}
@@ -222,11 +233,12 @@ export default function CreatorCommunityScreen() {
             <View style={styles.liveBanner}>
               {/* LIZ COPY */}
               <Text style={styles.liveBannerTitle}>your page is live</Text>
-              <Text style={styles.liveBannerBody} numberOfLines={1}>
+              <Text style={styles.liveBannerBody}>
                 {buildCommunityPublicLink(community.handle).replace('https://', '')}. anyone with the
                 link can open it.
               </Text>
               <TouchableOpacity
+                style={styles.inlineAction}
                 onPress={() => router.push('/creator/public-page' as never)}
                 hitSlop={8}
                 accessibilityRole="button"
@@ -248,13 +260,16 @@ export default function CreatorCommunityScreen() {
               <Users size={14} color={Colors.terracotta} strokeWidth={2} />
               {/* LIZ COPY: honest preview, Screen 19's audience count + channel display requirement */}
               <Text style={styles.audienceText}>
-                {audienceCount == null
+                {audienceQuery.isError ? 'Audience unavailable. Retry to check who will receive this.' : audienceCount == null
                   ? 'checking your community…'
                   : audienceCount === 0
-                    ? 'no one to send to yet -- this would go nowhere.'
-                    : `goes to ${audienceCount} active ${audienceCount === 1 ? 'member' : 'members'}, straight to their phone.`}
+                    ? 'No active members yet.'
+                    : `To ${audienceCount} active ${audienceCount === 1 ? 'member' : 'members'}`}
               </Text>
             </View>
+            {audienceQuery.isError && <TouchableOpacity style={styles.inlineAction} accessibilityRole="button" accessibilityLabel="Retry audience" disabled={audienceQuery.isFetching} onPress={() => void audienceQuery.refetch()}>
+              <Text style={styles.liveBannerLink}>{audienceQuery.isFetching ? 'Checking…' : 'Retry audience'}</Text>
+            </TouchableOpacity>}
             <TextInput
               style={styles.composerInput}
               value={draft}
@@ -274,14 +289,18 @@ export default function CreatorCommunityScreen() {
               accessibilityLabel="Send to members"
               accessibilityState={{ disabled: !draft.trim() || sending, busy: sending }}
             >
+              <CreatorActionFill />
+              <View style={styles.actionContent}>
               {sending ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
                 <Text style={styles.sendBtnText}>send to members</Text>
               )}
+              </View>
             </TouchableOpacity>
           </View>
 
+          {(broadcastsQuery.isLoading || broadcastsQuery.isError) && <CommunityReadState label="Sent updates" query={broadcastsQuery} />}
           {broadcasts.length > 0 && (
             <>
               <Text style={[styles.sectionLabel, { marginTop: 24 }]}>sent</Text>
@@ -333,6 +352,7 @@ export default function CreatorCommunityScreen() {
             the chat spaces members can join, found on your page.
           </Text>
           <View style={styles.lastCard}>
+            {(roomsQuery.isLoading || roomsQuery.isError) ? <CommunityReadState label="Chat spaces" query={roomsQuery} /> : rooms.length === 0 ? <Text style={styles.hint}>No chat spaces yet.</Text> : null}
             {rooms.map((r) => (
               <TouchableOpacity
                 key={r.id}
@@ -342,7 +362,7 @@ export default function CreatorCommunityScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Open chat space: ${r.name}`}
               >
-                <Text style={styles.roomRowName} numberOfLines={1}>{r.name}</Text>
+                <Text style={styles.roomRowName}>{r.name}</Text>
                 <Text style={styles.roomRowOpen}>open</Text>
               </TouchableOpacity>
             ))}
@@ -380,11 +400,11 @@ export default function CreatorCommunityScreen() {
               style={styles.hubRow}
               onPress={() => router.replace('/(tabs)/profile')}
               accessibilityRole="button"
-              accessibilityLabel="Switch back to your personal profile"
+              accessibilityLabel="Back to Yours"
             >
               <UserRound size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>switch back to you</Text>
+                <Text style={styles.editPageTitle}>Back to Yours</Text>
                 <Text style={styles.editPageHint}>your plans, chats, and people stay exactly where you left them.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
@@ -443,7 +463,24 @@ export default function CreatorCommunityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function CommunityReadState({ label, query }: {
+  label: string;
+  query: { isError: boolean; isFetching: boolean; refetch: () => Promise<unknown> };
+}) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  return <View style={styles.readState} accessibilityLiveRegion="polite">
+    <Text style={styles.editPageTitle}>{query.isError ? `${label} unavailable` : `Loading ${label.toLowerCase()}…`}</Text>
+    {query.isError && <TouchableOpacity style={styles.inlineAction} accessibilityRole="button" accessibilityLabel={`Retry ${label.toLowerCase()}`} disabled={query.isFetching} onPress={() => void query.refetch()}>
+      <Text style={styles.liveBannerLink}>{query.isFetching ? 'Checking…' : 'Retry'}</Text>
+    </TouchableOpacity>}
+  </View>;
+}
+
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  inlineAction: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  readState: { marginTop: 12, paddingVertical: 12, gap: 4 },
+  actionContent: { zIndex: 1, alignItems: 'center' },
   container: { flex: 1, backgroundColor: Colors.parchment },
   content: { padding: 20 },
   draftBanner: {
@@ -457,25 +494,26 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   draftBannerTitle: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 4,
   },
   draftBannerBody: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     lineHeight: LineHeights.bodySM,
     marginBottom: 10,
   },
   publishBtn: {
+    overflow: 'hidden', minHeight: 44, justifyContent: 'center',
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
     paddingVertical: 10,
     alignItems: 'center',
   },
-  publishBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  publishBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
   liveBanner: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -487,34 +525,34 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   liveBannerTitle: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 4,
   },
   liveBannerBody: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     lineHeight: LineHeights.bodySM,
     marginBottom: 10,
   },
-  liveBannerLink: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  liveBannerLink: { fontFamily: fonts.semibold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
     marginBottom: 12,
   },
   sectionLabel: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
     marginBottom: 4,
   },
-  hint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginBottom: 10 },
+  hint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM, marginBottom: 10 },
   composer: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -530,24 +568,25 @@ const styles = StyleSheet.create({
   },
   audienceText: {
     flex: 1,
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.caption,
     color: Colors.secondary,
   },
   composerInput: {
     minHeight: 70,
     textAlignVertical: 'top',
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
   },
   sendBtn: {
+    overflow: 'hidden', minHeight: 44, justifyContent: 'center',
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  sendBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  sendBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
   broadcastCard: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -556,8 +595,8 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
-  broadcastBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  broadcastMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
+  broadcastBody: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  broadcastMeta: { fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
   editPageCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -581,6 +620,7 @@ const styles = StyleSheet.create({
   },
   lastCard: { marginBottom: 40 },
   roomRow: {
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -595,16 +635,17 @@ const styles = StyleSheet.create({
   },
   roomRowName: {
     flex: 1,
-    fontFamily: Fonts.sansMedium,
+    fontFamily: fonts.medium,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
   },
-  roomRowOpen: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  editPageTextWrap: { flex: 1, gap: 2 },
-  editPageTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  editPageHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
+  roomRowOpen: { fontFamily: fonts.semibold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  editPageTextWrap: { flex: 1, minWidth: 0, gap: 4 },
+  editPageTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
+  editPageHint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
   archiveSection: { marginTop: 24, marginBottom: 40 },
   archiveBtn: {
+    minHeight: 44, justifyContent: 'center',
     borderRadius: 999,
     borderWidth: 1.5,
     borderColor: Colors.errorRed,
@@ -612,7 +653,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   archiveBtnBusy: { opacity: 0.6 },
-  archiveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
+  archiveBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
   archivedBanner: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
@@ -623,15 +664,17 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   archivedBannerTitle: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 4,
   },
   archivedBannerBody: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     lineHeight: LineHeights.bodySM,
   },
 });
+
+}

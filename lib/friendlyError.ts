@@ -29,6 +29,11 @@ function looksLikeRawDbError(message: string): boolean {
   return RAW_DB_ERROR_PATTERNS.some((re) => re.test(message));
 }
 
+// Fetch failures are transport details, not instructions for a member. Keep
+// each caller's recovery copy, including uncertain-send/payment safeguards.
+const RAW_TRANSPORT_ERROR = /^(?:(?:TypeError|NetworkError|AbortError):\s*)?(?:Network request failed|Failed to fetch|NetworkError when attempting to fetch resource\.?|The operation was aborted\.?|This operation was aborted\.?)$/i;
+const RAW_FUNCTION_ERROR = /^(?:Edge Function returned a non-2xx status code|Failed to send a request to the Edge Function|Relay Error invoking the Edge Function)$/i;
+
 export function friendlyError(err: unknown, fallback: string): string {
   const message =
     typeof err === 'string'
@@ -38,6 +43,8 @@ export function friendlyError(err: unknown, fallback: string): string {
   if (typeof message !== 'string' || message.length === 0) {
     return fallback;
   }
+
+  if (RAW_TRANSPORT_ERROR.test(message.trim()) || RAW_FUNCTION_ERROR.test(message.trim())) return fallback;
 
   if (looksLikeRawDbError(message)) {
     console.error('[friendlyError] suppressed raw error:', err);

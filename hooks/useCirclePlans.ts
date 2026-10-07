@@ -22,20 +22,40 @@ export interface CirclePlanRow {
   stranger_cap: number | null;
 }
 
-export function useCirclePlans(circleId: string | null | undefined) {
+/** Optional caller identity from useCircle; legacy consumers keep the same key. */
+export interface CirclePlansScope {
+  userId: string;
+  epoch: number;
+  isCurrent: () => boolean;
+}
+
+export function useCirclePlans(circleId: string | null | undefined, scope?: CirclePlansScope) {
   return useQuery({
-    queryKey: ['circle-plans', circleId ?? ''],
-    enabled: !!circleId,
+    queryKey: scope ? ['circle-plans', circleId ?? '', scope.userId, scope.epoch] : ['circle-plans', circleId ?? ''],
+    enabled: !!circleId && (!scope || !!scope.userId),
     staleTime: 30_000,
-    queryFn: async (): Promise<CirclePlanRow[]> => {
-      const { data, error } = await supabase
+    queryFn: async ({ signal }): Promise<CirclePlanRow[]> => {
+      const requireCurrent = () => {
+        if (signal.aborted || (scope && !scope.isCurrent())) throw new Error('This circle plan request is no longer current.');
+      };
+      requireCurrent();
+      if (scope) {
+        const { data: auth, error: authError } = await supabase.auth.getUser();
+        requireCurrent();
+        if (authError) throw authError;
+        if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
+      }
+      requireCurrent();
+      const request = supabase
         .from('events')
         .select('id, title, start_time, end_time, location_text, circle_visibility, has_own_chat, member_count, stranger_cap')
         .eq('circle_id', circleId)
         .in('status', ['forming', 'active', 'full'])
         .order('start_time', { ascending: true });
-      // Degrade to empty if the columns/feature aren't present yet.
-      if (error) return [];
+      const { data, error } = await (scope ? request.abortSignal(signal) : request);
+      requireCurrent();
+      // A failed request does not establish that this circle has no plans.
+      if (error) throw error;
       const now = Date.now();
       return ((data ?? []) as any[])
         .filter((r) => {

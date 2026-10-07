@@ -1,15 +1,17 @@
+import { PageAction } from '../../creator/pages/PageFrame';
 /**
  * SuggestionCard - the co-attendance nudge: "You, Tyler, and Sara have done 4
- * plans together. Start a circle?" A warm, recognition-over-guilt prompt (gold
- * left accent is decorative; the CTA is a normal terracotta action). Dismiss is
- * a quiet "Not now".
+ * plans together. Start a circle?" A warm, recognition-over-guilt prompt.
+ * The refined surface uses sunset gold with a terracotta action; the original
+ * appearance retains its decorative gold edge. Dismiss is a quiet "Not now".
  */
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { X } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
+import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { CIRCLE_SUGGEST } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
@@ -31,67 +33,89 @@ export default function SuggestionCard({
   suggestion,
   onStart,
   onDismiss,
+  appearance,
+  dismissPending = false,
+  dismissError = null,
 }: {
   suggestion: CircleSuggestion;
   onStart: (s: CircleSuggestion) => void;
   onDismiss: (s: CircleSuggestion) => void;
+  appearance?: { fonts: AfterglowFontFamilies };
+  dismissPending?: boolean;
+  dismissError?: string | null;
 }) {
+  const viewStyles = appearance ? { ...styles, ...afterglow(appearance.fonts) } : styles;
   const people = suggestion.people ?? []; // defensive: never crash the tab if the RPC omits it
   const faces = people.slice(0, CIRCLE_SUGGEST.maxFaces);
   const subject = oxford([COPY.circleSuggestYou, ...people.map(nameOf)]);
   const [startPressed, setStartPressed] = useState(false);
+  const body = appearance && people.length === 0
+    ? `You’ve shared ${suggestion.shared_count} ${suggestion.shared_count === 1 ? 'plan' : 'plans'} with this group.`
+    : COPY.circleSuggestBody(subject, suggestion.shared_count);
 
   return (
-    <View style={styles.card}>
-      <Pressable
+    <View style={viewStyles.card}>
+      {appearance && <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { borderRadius: 20, overflow: 'hidden' }]}>
+        <LinearGradient colors={[CreatorSurfaceColors.sunsetGoldLight, CreatorSurfaceColors.sunsetGoldMiddle, CreatorSurfaceColors.sunsetGoldWarm]} locations={[0, 0.55, 1]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      </View>}
+      {!appearance && <Pressable
+        disabled={dismissPending}
         onPress={() => onDismiss(suggestion)}
         hitSlop={10}
-        style={styles.dismiss}
+        style={viewStyles.dismiss}
         accessibilityRole="button"
         accessibilityLabel={COPY.circleSuggestNotNow}
       >
         <X size={16} color={Colors.tertiary} strokeWidth={2} />
-      </Pressable>
+      </Pressable>}
 
-      <View style={styles.faces}>
+      <View style={viewStyles.faces}>
         {faces.map((p, i) => (
-          <View key={p.user_id} style={[styles.faceWrap, i > 0 && styles.faceOverlap]}>
-            {p.profile_photo_url ? (
-              <Image source={{ uri: p.profile_photo_url }} style={styles.face} />
+          <View key={p.user_id} style={[viewStyles.faceWrap, i > 0 && viewStyles.faceOverlap]}>
+            {appearance ? <SuggestionFace key={`${p.user_id}:${p.profile_photo_url ?? ''}`} person={p} appearance={appearance}/> : p.profile_photo_url ? (
+              <Image source={{ uri: p.profile_photo_url }} style={viewStyles.face} />
             ) : (
-              <View style={[styles.face, styles.faceFallback]}>
-                <Text style={styles.faceInitial}>{nameOf(p)[0]?.toUpperCase() ?? '?'}</Text>
+              <View style={[viewStyles.face, viewStyles.faceFallback]}>
+                <Text style={viewStyles.faceInitial}>{nameOf(p)[0]?.toUpperCase() ?? '?'}</Text>
               </View>
             )}
           </View>
         ))}
       </View>
 
-      <Text style={styles.body}>{COPY.circleSuggestBody(subject, suggestion.shared_count)}</Text>
+      <Text style={viewStyles.body}>{body}</Text>
 
-      <View style={styles.actions}>
+      <View style={viewStyles.actions}>
+        {appearance ? <PageAction primary compact singleLine title={COPY.circleSuggestStart} disabled={dismissPending} onPress={() => { hapticSelection(); onStart(suggestion); }} /> : (
         <Pressable
+          disabled={dismissPending}
+          accessibilityState={{ disabled: dismissPending }}
           onPress={() => {
             hapticSelection();
             onStart(suggestion);
           }}
           onPressIn={() => setStartPressed(true)}
           onPressOut={() => setStartPressed(false)}
-          style={[styles.start, startPressed && styles.pressed]}
+          style={[viewStyles.start, startPressed && viewStyles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={COPY.circleSuggestStart}
         >
-          <Text style={styles.startLabel}>{COPY.circleSuggestStart}</Text>
+          <Text numberOfLines={1} style={viewStyles.startLabel}>{COPY.circleSuggestStart}</Text>
         </Pressable>
+        )}
         <Pressable
+          disabled={dismissPending}
+          accessibilityState={{ disabled: dismissPending, busy: dismissPending }}
           onPress={() => onDismiss(suggestion)}
-          style={styles.notNow}
+          style={viewStyles.notNow}
           accessibilityRole="button"
-          accessibilityLabel={COPY.circleSuggestNotNow}
+          accessibilityLabel={dismissPending ? 'Dismissing…' : dismissError ? 'Try again to dismiss suggestion' : COPY.circleSuggestNotNow}
         >
-          <Text style={styles.notNowLabel}>{COPY.circleSuggestNotNow}</Text>
+          {dismissPending && <ActivityIndicator color={appearance ? AfterglowColors.clay : Colors.terracotta}/>}
+          <Text numberOfLines={1} style={viewStyles.notNowLabel}>{dismissPending ? 'Dismissing…' : dismissError ? 'Try again' : COPY.circleSuggestNotNow}</Text>
         </Pressable>
       </View>
+      {dismissError && <Text accessibilityRole="alert" style={viewStyles.error}>{dismissError}</Text>}
     </View>
   );
 }
@@ -139,6 +163,24 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.85 },
   startLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
-  notNow: { paddingVertical: 10 },
+  notNow: { paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  error: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed, marginTop: 10 },
   notNowLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
 });
+
+function SuggestionFace({ person, appearance }: { person: SuggestionPerson; appearance: { fonts: AfterglowFontFamilies } }) {
+  const [failed, setFailed] = useState(false);
+  return person.profile_photo_url && !failed ? <Image source={{ uri: person.profile_photo_url }} style={styles.face} contentFit="cover" accessibilityIgnoresInvertColors onError={() => setFailed(true)}/> :
+    <View style={[styles.face, styles.faceFallback, { backgroundColor: AfterglowColors.avatar }]}><Text style={{ ...AfterglowType.caption, fontFamily: appearance.fonts.semibold, color: AfterglowColors.muted }}>{Array.from(nameOf(person))[0]?.toUpperCase() ?? '?'}</Text></View>;
+}
+function afterglow(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  card: { marginHorizontal: 20, marginTop: 8, marginBottom: 8, padding: 16, backgroundColor: AfterglowColors.white, borderRadius: 20, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge },
+  body: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+  faceWrap: { ...styles.faceWrap, borderColor: AfterglowColors.white },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 14 },
+  start: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: AfterglowColors.clay, borderRadius: 4, justifyContent: 'center' },
+  startLabel: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
+  notNow: { minHeight: 44, paddingHorizontal: 10, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  notNowLabel: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+  error: { ...AfterglowType.body, fontFamily: fonts.regular, color: Colors.errorRed, marginTop: 10 },
+}); }

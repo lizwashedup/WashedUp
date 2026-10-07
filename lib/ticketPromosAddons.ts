@@ -1,3 +1,5 @@
+import { scopedTicketRequest } from './creatorTicketRead';
+import type { CreatorPageScope } from './creatorPageReview';
 /**
  * Docs 113 + 114 client half: promo codes + add-ons. BOUND TO CANON
  * (seat-verified on prod, 2026-08-01).
@@ -70,6 +72,7 @@ export interface EventAddon {
 }
 
 export interface AddonDraft {
+  variations?: AddonVariation[];
   name: string;
   description: string | null;
   image_url: string | null;
@@ -114,12 +117,13 @@ export interface AddonSelection {
 
 // ─── creator: promo codes (organizer ALL-access + ownership WITH CHECK) ───
 
-export async function listPromoCodes(eventId: string): Promise<PromoCode[]> {
-  const { data, error } = await supabase
+export async function listPromoCodes(eventId: string, scope?: CreatorPageScope): Promise<PromoCode[]> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from(PROMO_TABLE)
     .select(PROMO_COLUMNS)
     .eq('event_id', eventId)
-    .order('code', { ascending: true });
+    .order('code', { ascending: true }));
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Event setup could not be loaded.');
   if (error) return [];
   return (data ?? []) as unknown as PromoCode[];
 }
@@ -149,12 +153,14 @@ export async function deletePromoCode(promoId: string): Promise<boolean> {
 
 // ─── creator: add-ons ──────────────────────────────────────────────────────
 
-export async function listAddons(eventId: string): Promise<EventAddon[]> {
-  const { data, error } = await supabase
+export async function listAddons(eventId: string, strict = false, scope?: CreatorPageScope): Promise<EventAddon[]> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from(ADDON_TABLE)
     .select(ADDON_COLUMNS)
     .eq('event_id', eventId)
-    .order('name', { ascending: true });
+    .order('name', { ascending: true }));
+  if (strict && (error || !Array.isArray(data))) throw error ?? new Error('Event extras could not be loaded.');
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Event setup could not be loaded.');
   if (error) return [];
   return (data ?? []) as unknown as EventAddon[];
 }
@@ -219,11 +225,12 @@ export async function setAddonVariations(
 /**
  * TK-02, buyer side: variations for a batch of add-ons in one round trip,
  * keyed by add_on_id. Isolated from listBuyerAddons/ADDON_COLUMNS on
- * purpose -- see isMissingVariationsColumn above. Empty map on any failure,
- * which reads to the buyer exactly like "no options," never an error.
+ * purpose -- see isMissingVariationsColumn above. Existing callers retain
+ * the empty-map fallback. Strict checkout reads expose other failures; the
+ * documented missing-column compatibility remains unchanged.
  */
 export async function getAddonVariationsMap(
-  addonIds: string[],
+  addonIds: string[], strict = false,
 ): Promise<Map<string, AddonVariation[]>> {
   const map = new Map<string, AddonVariation[]>();
   if (addonIds.length === 0) return map;
@@ -231,6 +238,7 @@ export async function getAddonVariationsMap(
     .from(ADDON_TABLE)
     .select('id, variations')
     .in('id', addonIds);
+  if (strict && ((error && !isMissingVariationsColumn(error.code)) || (!error && !Array.isArray(data)))) throw error ?? new Error('Extra options could not be loaded.');
   if (error || !data) return map;
   for (const row of data as { id: string; variations?: unknown }[]) {
     const raw = row.variations;
@@ -253,8 +261,8 @@ export function addonRemaining(a: EventAddon): number | null {
  * never be picked. Window bounds are instants, so a plain now-comparison is
  * timezone-safe.
  */
-export async function listBuyerAddons(eventId: string): Promise<EventAddon[]> {
-  const all = await listAddons(eventId);
+export async function listBuyerAddons(eventId: string, strict = false): Promise<EventAddon[]> {
+  const all = await listAddons(eventId, strict);
   const now = Date.now();
   return all.filter((a) => {
     if (a.status !== 'on_sale') return false;

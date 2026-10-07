@@ -22,3 +22,11 @@ jest.mock('expo-crypto', () => {
     randomUUID: () => nodeCrypto.randomUUID(),
   };
 });
+
+/**
+ * Pure-render tests load the native chat keyboard adapter transitively. The
+ * real package throws at module import when its native binding is absent, so
+ * keep the native adapter's public shape while using RN Animated values in
+ * Jest. The adapter's dedicated suite supplies its own higher-fidelity mock.
+ */
+jest.mock('react-native-keyboard-controller');

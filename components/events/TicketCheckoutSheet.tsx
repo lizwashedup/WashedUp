@@ -1,3 +1,4 @@
+import { EventMediaImage } from './EventMediaImage';
 /**
  * C1 - the buyer's tier selector and checkout handoff (doc 78 §4, doc 79
  * C1; mirror of web). Shows on-sale tiers with the ALL-IN price the buyer
@@ -17,7 +18,7 @@
  * action is pinned outside the scroll so it is always reachable.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -37,14 +38,17 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
 import { hapticLight, hapticSuccess, hapticError } from '../../lib/haptics';
 import { openUrl } from '../../lib/url';
-import { stashPendingCheckout } from '../../lib/pendingLink';
-import { supabase } from '../../lib/supabase';
+import { readCheckoutAttempt, prepareCheckoutAttempt, stopCheckoutAttempt, findCheckoutAttemptOrder, finishCheckoutAttempt, CheckoutSelectionChanged, type CheckoutAttempt, type CheckoutOwner } from '../../lib/ticketCheckoutAttempt';
+import { pendingCheckoutForEvent, stashPendingCheckout } from '../../lib/pendingLink';
 import {
   buildCheckoutBreakdown,
   computeFeePreview,
   formatCents,
   getQuestions,
+  getOrder,
   getTiers,
+  isTicketSaleOpen,
+  readPublicTierRemaining,
   startTicketCheckout,
   type TicketQuestion,
   type TicketTier,
@@ -70,10 +74,9 @@ import {
 } from '../../lib/ticketPromosAddons';
 
 // doc 109 (group tickets): a tier the buyer cannot lawfully buy renders
-// sold-out-style and is never selectable, so the server's 409 is
-// unreachable from here. Availability is real (get_ticket_tier_availability,
-// orders + holds) and fail-closed to "unknown" = buyable, the same reading
-// getPublicTicketSummary uses; the server still holds the real gate.
+// unavailable and is never selectable. Read failures show retry instead of
+// inventing availability. The server remains the final gate because orders
+// and holds may change after this read.
 interface SellableTier {
   tier: TicketTier;
   /** null = uncapped or unknown */
@@ -100,13 +103,13 @@ const CHECKOUT_REFUND_DISCLOSURE =
 const BAND_HEIGHT = 112;
 
 async function loadSellableTiers(eventId: string): Promise<SellableTier[]> {
-  const all = await getTiers(eventId);
-  const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden');
+  const all = await getTiers(eventId, true);
+  const now = Date.now();
+  const onSale = all.filter((t) => t.status === 'on_sale' && t.visibility !== 'hidden' && isTicketSaleOpen(t, now));
   return Promise.all(
     onSale.map(async (tier) => {
-      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tier.id });
-      const remaining = typeof left === 'number' ? left : null;
-      const counted = tier.quantity_cap !== null && remaining !== null;
+      const remaining = await readPublicTierRemaining(tier);
+      const counted = remaining !== null;
       const soldOut = counted && (remaining as number) <= 0;
       const underMinimum = counted && !soldOut && (remaining as number) < tierMin(tier);
       return { tier, remaining, soldOut, underMinimum };
@@ -116,10 +119,12 @@ async function loadSellableTiers(eventId: string): Promise<SellableTier[]> {
 
 interface TicketCheckoutSheetProps {
   visible: boolean;
+  /** Current account and page visit, supplied by the existing page observer. */
+  owner: CheckoutOwner | null;
   eventId: string;
   onClose: () => void;
-  /** a free ticket confirms in-session -> the caller opens order-complete */
-  onFreeConfirmed: (orderId: string) => void;
+  /** an existing or newly confirmed order -> the caller opens order-complete */
+  onOrderReady: (orderId: string) => void;
   /** Scene spec 05: the event band. The caller already has every one of
    *  these loaded for its own hero + byline, so the sheet asks for none of
    *  it again - one query for tiers/addons/questions is enough. */
@@ -144,11 +149,14 @@ interface TicketCheckoutSheetProps {
 }
 
 export function TicketCheckoutSheet({
-  visible, eventId, onClose, onFreeConfirmed,
+  visible, owner, eventId, onClose, onOrderReady,
   eventTitle, eventImage, eventDateLabel, eventVenue, creatorName, creatorAvatar,
   initialPromoCode,
 }: TicketCheckoutSheetProps) {
+  const [tierVisit, setTierVisit] = useState<object | null>(null);
   const [tiers, setTiers] = useState<SellableTier[] | null>(null);
+  const [tierReadError, setTierReadError] = useState(false);
+  const [tierReadAttempt, setTierReadAttempt] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -180,49 +188,110 @@ export function TicketCheckoutSheet({
   const [answers, setAnswers] = useState<AnswerDraft>({});
   const initialPromoAttemptedRef = useRef(false);
 
+  const visit = useMemo(() => ({}), [visible, eventId, owner]);
+  const latestVisit = useRef(visit); latestVisit.current = visit;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const currentVisit = () => mounted.current && visible && latestVisit.current === visit && !!owner?.isCurrent();
+  const [attemptState, setAttemptState] = useState<{visit: object; record: CheckoutAttempt | null; error?: boolean}>();
+  const [attemptRead, setAttemptRead] = useState(0);
+  const restoredAttempt = useRef<string | null>(null);
+  const activeAttempt = attemptState?.visit === visit ? attemptState : undefined;
+  const savedAttempt = activeAttempt?.record ?? null;
+  const recoveryReady = !!activeAttempt && !activeAttempt.error;
   useEffect(() => {
-    if (!visible) return;
-    setProblem(null);
-    setAddonQty({});
-    setAddonVariationPick({});
-    setAnswers({});
+    let active = true;
+    restoredAttempt.current = null;
+    if (!visible || !owner?.userId || !owner.isCurrent()) return;
+    readCheckoutAttempt(eventId, owner).then(record => {
+      if (active && currentVisit()) setAttemptState({visit, record});
+    }).catch(() => { if (active && currentVisit()) setAttemptState({visit, record:null, error:true}); });
+    return () => { active = false; };
+  }, [visit, attemptRead]);
+  useEffect(() => {
+    if (!savedAttempt || tierVisit !== visit || restoredAttempt.current === savedAttempt.key) return;
+    restoredAttempt.current = savedAttempt.key;
+    setSelectedId(savedAttempt.tierId); setQty(savedAttempt.qty);
+    setAddonQty(Object.fromEntries(savedAttempt.addons.map(item => [item.add_on_id, item.qty])));
+    setAddonVariationPick(Object.fromEntries(savedAttempt.addons.filter(item => item.variation_id).map(item => [item.add_on_id, item.variation_id!])));
+    // A saved code is re-quoted explicitly; never advertise an unverified total.
+    setCodeText(savedAttempt.promoCode ?? ''); setCodeFieldOpen(!!savedAttempt.promoCode);
+    setAppliedCode(null); setQuote(null);
+  }, [savedAttempt, tierVisit, visit]);
+  const quoteAttempt = useRef(0);
+  const quoteLock = useRef<number | null>(null);
+  const [detailsAttempt, setDetailsAttempt] = useState(0);
+  const [questionsLoading, setQuestionsLoading] = useState(true);
+  const [questionsError, setQuestionsError] = useState(false);
+  const [addonsLoading, setAddonsLoading] = useState(true);
+  const [addonsError, setAddonsError] = useState(false);
+
+  useEffect(() => {
+    quoteAttempt.current++; quoteLock.current = null;
+    setQuoteBusy(false);
+    setProblem(null); setAddonQty({}); setAddonVariationPick({}); setAnswers({});
+    setAddonsList([]); setAddonVariations(new Map()); setQuestions([]);
     initialPromoAttemptedRef.current = false;
-    setCodeFieldOpen(!!initialPromoCode);
-    setCodeText(initialPromoCode ?? '');
-    setAppliedCode(null);
-    setQuote(null);
-    setCodeNote(null);
-    loadSellableTiers(eventId).then((rows) => {
-      setTiers(rows);
-      // a blocked tier is never the default selection (doc 109)
-      const first = rows.find((r) => !r.soldOut && !r.underMinimum) ?? null;
-      setSelectedId(first?.tier.id ?? null);
-      setQty(first ? tierMin(first.tier) : 1);
-    });
-    listBuyerAddons(eventId).then((rows) => {
-      setAddonsList(rows);
-      getAddonVariationsMap(rows.map((a) => a.id)).then(setAddonVariations);
-    });
-    getQuestions(eventId).then(setQuestions).catch(() => setQuestions([]));
-  }, [visible, eventId, initialPromoCode]);
+    setCodeFieldOpen(!!initialPromoCode); setCodeText(initialPromoCode ?? '');
+    setAppliedCode(null); setQuote(null); setCodeNote(null);
+  }, [visit, initialPromoCode]);
+
+  useEffect(() => {
+    if (!visible || !owner?.isCurrent()) return;
+    let active = true;
+    const current = () => active && currentVisit();
+    setQuestionsLoading(true); setQuestionsError(false);
+    setAddonsLoading(true); setAddonsError(false);
+    getQuestions(eventId, true).then(rows => {
+      if (current()) setQuestions(rows);
+    }).catch(() => { if (current()) setQuestionsError(true); })
+      .finally(() => { if (current()) setQuestionsLoading(false); });
+    listBuyerAddons(eventId, true).then(async rows => {
+      const variations = await getAddonVariationsMap(rows.map(row => row.id), true);
+      if (!current()) return;
+      setAddonsList(rows); setAddonVariations(variations);
+    }).catch(() => { if (current()) setAddonsError(true); })
+      .finally(() => { if (current()) setAddonsLoading(false); });
+    return () => { active = false; };
+  }, [visit, detailsAttempt]);
+
+  useEffect(() => {
+    if (!visible || !owner?.isCurrent()) return;
+    let active = true;
+    const current = () => active && currentVisit();
+    setTiers(null); setTierVisit(null); setSelectedId(null); setTierReadError(false);
+    restoredAttempt.current=null;
+    quoteAttempt.current++; quoteLock.current=null; setQuoteBusy(false);
+    setQuote(null); setAppliedCode(null);
+    loadSellableTiers(eventId).then(rows => {
+      if (!current()) return;
+      setTiers(rows); setTierVisit(visit);
+      const first = rows.find(r => !r.soldOut && !r.underMinimum) ?? null;
+      setSelectedId(first?.tier.id ?? null); setQty(first ? tierMin(first.tier) : 1);
+    }).catch(() => { if (current()) setTierReadError(true); });
+    return () => { active = false; };
+  }, [visit, tierReadAttempt]);
 
   useEffect(() => {
     if (!visible || !initialPromoCode || !selectedId || initialPromoAttemptedRef.current) return;
     initialPromoAttemptedRef.current = true;
-    setQuoteBusy(true);
-    setCodeNote(null);
-    quoteCheckout(selectedId, 1, initialPromoCode, []).then((answer) => {
-      setQuoteBusy(false);
+    const attempt = ++quoteAttempt.current;
+    quoteLock.current = attempt;
+    setQuoteBusy(true); setCodeNote(null);
+    quoteCheckout(selectedId, qty, initialPromoCode, []).then((answer) => {
+      if (!currentVisit() || quoteAttempt.current !== attempt) return;
       if (answer?.ok && answer.promoValid) {
-        setQuote(answer);
-        setAppliedCode(initialPromoCode);
-        return;
+        setQuote(answer); setAppliedCode(initialPromoCode);
+      } else {
+        setQuote(null); setAppliedCode(null);
+        setCodeNote(answer?.promoReason ?? answer?.reason ?? "the private test price didn't load.");
       }
-      setQuote(null);
-      setAppliedCode(null);
-      setCodeNote(answer?.promoReason ?? answer?.reason ?? "the private test price didn't load.");
+    }).catch(() => {
+      if (currentVisit() && quoteAttempt.current === attempt) setCodeNote("the private test price didn't load.");
+    }).finally(() => {
+      if (currentVisit() && quoteAttempt.current === attempt) { setQuoteBusy(false); quoteLock.current = null; }
     });
-  }, [visible, initialPromoCode, selectedId]);
+  }, [visit, initialPromoCode, selectedId]);
 
   // Any change to what is being bought invalidates the server's last price.
   // The applied code goes WITH it: a code that is still advertised as
@@ -230,13 +299,15 @@ export function TicketCheckoutSheet({
   // price and the charged price can differ, which law 9 forbids. Re-apply
   // is one tap; a wrong number is a broken promise.
   const clearQuote = () => {
+    quoteAttempt.current++; quoteLock.current = null; setQuoteBusy(false);
     setQuote(null);
     setAppliedCode(null);
     setCodeNote(null);
     setCodeFieldOpen(false);
   };
 
-  const selectedRow = tiers?.find((r) => r.tier.id === selectedId) ?? null;
+  const visibleTiers = tierVisit === visit ? tiers : null;
+  const selectedRow = visibleTiers?.find((r) => r.tier.id === selectedId) ?? null;
   const selected = selectedRow?.tier ?? null;
   // the stepper's floor is the tier's minimum (doc 109); its ceiling is the
   // per-order max, never past what actually remains on a counted tier
@@ -244,7 +315,7 @@ export function TicketCheckoutSheet({
   const perOrderMax = selected?.per_order_max ?? 10;
   const qtyMax = Math.max(
     qtyMin,
-    selectedRow?.remaining != null && selected?.quantity_cap != null
+    selectedRow?.remaining != null
       ? Math.min(perOrderMax, selectedRow.remaining)
       : perOrderMax,
   );
@@ -256,9 +327,13 @@ export function TicketCheckoutSheet({
   // opens Stripe's page, so there is nothing for them to ride)
   const showExtras = !!selected && !isFree && addonsList.length > 0;
   const showPromoEntry = !!selected && !isFree;
-  const selections: AddonSelection[] = Object.entries(addonQty)
+  const selections: AddonSelection[] = isFree ? [] : Object.entries(addonQty)
     .filter(([, n]) => n > 0)
-    .map(([add_on_id, n]) => ({ add_on_id, qty: n }));
+    .map(([add_on_id, n]) => ({ add_on_id, qty: n, ...(addonVariationPick[add_on_id] ? {variation_id:addonVariationPick[add_on_id]} : {}) }));
+  const missingExtraOption = selections.some(item => {
+    const options = addonVariations.get(item.add_on_id) ?? [];
+    return options.length > 0 && !options.some(option => option.id === item.variation_id);
+  });
   const addonsFaceCents = selections.reduce((sum, s) => {
     const a = addonsList.find((x) => x.id === s.add_on_id);
     return sum + (a ? a.price_cents * s.qty : 0);
@@ -295,34 +370,25 @@ export function TicketCheckoutSheet({
   };
 
   const applyCode = async () => {
-    if (!selected || quoteBusy || !codeText.trim()) return;
-    hapticLight();
-    setQuoteBusy(true);
-    setCodeNote(null);
-    const answer = await quoteCheckout(selected.id, qty, codeText, selections);
-    setQuoteBusy(false);
-    if (answer && answer.ok && answer.promoValid) {
-      hapticSuccess();
-      setQuote(answer);
-      setAppliedCode(codeText.trim());
-      return;
+    if (!currentVisit() || busy || !selected || quoteBusy || quoteLock.current !== null || questionsLoading || questionsError || (!isFree && (addonsLoading || addonsError)) || !codeText.trim()) return;
+    const attempt = ++quoteAttempt.current, code = codeText.trim();
+    quoteLock.current = attempt;
+    hapticLight(); setQuoteBusy(true); setCodeNote(null);
+    let answer: PriceQuote | null = null;
+    try { answer = await quoteCheckout(selected.id, qty, code, selections); }
+    catch { /* The established unverified-code fallback keeps the undiscounted total. */ }
+    if (!currentVisit() || quoteAttempt.current !== attempt) return;
+    quoteLock.current = null; setQuoteBusy(false);
+    if (answer?.ok && answer.promoValid) {
+      hapticSuccess(); setQuote(answer); setAppliedCode(code); return;
     }
-    if (answer) {
-      // the server looked and said no: say what it said, change no price
-      hapticError();
-      setQuote(null);
-      setAppliedCode(null);
-      /* copy to the taste gate */
-      setCodeNote(answer.promoReason ?? answer.reason ?? "that code didn't take.");
-      return;
-    }
-    // unreachable (signed out, or a hiccup): the ruled fallback is to keep
-    // the undiscounted price and let checkout do the real pricing, so the
-    // code still rides along rather than being silently dropped
     setQuote(null);
-    setAppliedCode(codeText.trim());
-    /* copy to the taste gate */
-    setCodeNote("we'll check this code at checkout.");
+    if (answer) {
+      hapticError(); setAppliedCode(null);
+      setCodeNote(answer.promoReason ?? answer.reason ?? "that code didn't take.");
+    } else {
+      setAppliedCode(code); setCodeNote("we'll check this code at checkout.");
+    }
   };
 
   // Synchronous re-entrancy lock alongside `busy`. `busy` is React state
@@ -336,25 +402,58 @@ export function TicketCheckoutSheet({
   const goingRef = useRef(false);
 
   const handleGo = async () => {
-    if (!selected || busy || goingRef.current) return;
+    if (!currentVisit() || !owner?.userId || !recoveryReady || !selected || busy || goingRef.current || quoteBusy || quoteLock.current !== null || questionsLoading || questionsError || (!isFree && (addonsLoading || addonsError)) || missingRequired.length > 0 || missingExtraOption) return;
     goingRef.current = true;
     hapticLight();
     setBusy(true);
     setProblem(null);
     try {
+      // A native buyer may return from Stripe before the universal-link
+      // bridge wins focus, then tap "get tickets" again. The order pointer
+      // was deliberately stashed before Safari opened; resolve that order
+      // instead of opening its now-completed Stripe Checkout URL again.
+      // The order screen owns the brief pending->paid settle poll, so this is
+      // safe even when the webhook lands a beat after the buyer returns.
+      const pendingOrderId = savedAttempt ? null : await pendingCheckoutForEvent(eventId,
+        id => getOrder(id, {buyerUserId:owner.userId!, strict:true}), true);
+      if (!currentVisit()) return;
+      if (pendingOrderId) {
+        hapticSuccess();
+        onOrderReady(pendingOrderId);
+        return;
+      }
+      const attempt = await prepareCheckoutAttempt({eventId, tierId:selected.id, qty, promoCode:appliedCode,
+        addons:selections, answers:buildCheckoutAnswers(questions, answers, qty)}, owner);
+      if (!currentVisit()) return;
+      restoredAttempt.current = attempt.key;
+      setAttemptState({visit, record:attempt});
+      const existingOrder = await findCheckoutAttemptOrder(attempt, owner);
+      if (!currentVisit()) return;
+      if (existingOrder) {
+        await stashPendingCheckout(existingOrder.id, true);
+        if (!currentVisit()) return;
+        if (existingOrder.status !== 'pending') await finishCheckoutAttempt(attempt, existingOrder, owner);
+        if (currentVisit()) onOrderReady(existingOrder.id);
+        return;
+      }
       const result = await startTicketCheckout(selected.id, qty, {
+        checkoutKey: attempt.key,
+        buyerUserId: owner.userId,
         promoCode: appliedCode,
         addons: selections,
         answers: buildCheckoutAnswers(questions, answers, qty),
       });
+      if (!currentVisit()) return;
       if (result.kind === 'error') {
         hapticError();
         setProblem(result.message);
         return;
       }
       if (result.kind === 'free') {
+        await stashPendingCheckout(result.orderId, true);
+        if (!currentVisit()) return;
         hapticSuccess();
-        onFreeConfirmed(result.orderId);
+        onOrderReady(result.orderId);
         return;
       }
       // Paid: hand off to hosted Stripe Checkout. The order id was being
@@ -364,27 +463,67 @@ export function TicketCheckoutSheet({
       // happened (audit finding 2). Write the order down before we leave, and
       // whoever sees the app come back takes them to it.
       hapticSuccess();
-      await stashPendingCheckout(result.orderId);
+      await stashPendingCheckout(result.orderId, true);
+      if (!currentVisit()) return;
       openUrl(result.url);
       onClose();
+    } catch (error) {
+      if (currentVisit()) setProblem(error instanceof CheckoutSelectionChanged
+        ? 'Keep the saved ticket selection, reapply its code and re-enter the same answers to continue.'
+        : 'We couldn’t confirm checkout. Check its status before continuing.');
     } finally {
-      setBusy(false);
+      // Busy describes the transport, even if the account/page visit retired.
+      if (mounted.current) setBusy(false);
       goingRef.current = false;
     }
   };
 
-  const showFooter = tiers !== null && tiers.length > 0;
+  const checkSavedCheckout = async () => {
+    if (!savedAttempt || !owner?.userId || !currentVisit() || goingRef.current) return;
+    goingRef.current = true; setBusy(true); setProblem(null);
+    try {
+      const order = await findCheckoutAttemptOrder(savedAttempt, owner);
+      if (!currentVisit()) return;
+      if (!order) { setProblem('No order is confirmed yet. Continue this saved checkout to try again.'); return; }
+      await stashPendingCheckout(order.id, true);
+      if (!currentVisit()) return;
+      if (order.status !== 'pending') await finishCheckoutAttempt(savedAttempt, order, owner);
+      if (currentVisit()) onOrderReady(order.id);
+    } catch { if (currentVisit()) setProblem('Couldn’t check this checkout. Please try checking again.'); }
+    finally { goingRef.current = false; if (mounted.current) setBusy(false); }
+  };
+  const changeSavedSelection = async () => {
+    if (!savedAttempt || !owner?.userId || !currentVisit() || goingRef.current) return;
+    goingRef.current = true; setBusy(true); setProblem(null);
+    try {
+      const result = await stopCheckoutAttempt(savedAttempt, owner);
+      if (!currentVisit()) return;
+      if (result.state === 'stopped') {
+        setAttemptState({visit,record:null}); restoredAttempt.current=null;
+        setTierReadAttempt(value=>value+1);
+      } else {
+        await stashPendingCheckout(result.orderId, true);
+        if (currentVisit()) onOrderReady(result.orderId);
+      }
+    } catch { if (currentVisit()) setProblem('Couldn’t confirm the change. Your saved checkout is still here. Check its status or try changing again.'); }
+    finally { goingRef.current=false; if(mounted.current) setBusy(false); }
+  };
+  const showFooter = visibleTiers !== null && visibleTiers.length > 0;
+  const detailsLoading = questionsLoading || (!isFree && addonsLoading);
+  const detailsError = questionsError || (!isFree && addonsError);
+  const checkoutDisabled = !currentVisit() || !owner?.userId || !recoveryReady || !selected || busy || quoteBusy || detailsLoading || detailsError || missingRequired.length > 0 || missingExtraOption;
+  const requestClose = () => { if (!goingRef.current) onClose(); };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={requestClose} statusBarTranslucent>
+      <Pressable style={styles.overlay} onPress={requestClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           {/* Scene spec 05: the compressed warm-dark event band. Carries the
               event's own image, title, date/venue, and byline through the
               money screen - the creator's identity never disappears here. */}
           <View style={styles.band}>
             {eventImage ? (
-              <Image source={{ uri: eventImage }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              <EventMediaImage eventId={eventId} reference={eventImage} style={StyleSheet.absoluteFill} contentFit="cover" />
             ) : null}
             {/* the vignette only earns its keep over real photography; a flat
                 dark ground is already legible without one (doc 80 section A) */}
@@ -398,7 +537,7 @@ export function TicketCheckoutSheet({
             )}
             <TouchableOpacity
               style={styles.bandClose}
-              onPress={onClose}
+              onPress={requestClose}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="close"
@@ -424,15 +563,40 @@ export function TicketCheckoutSheet({
             </View>
           </View>
 
-          {tiers === null ? (
+          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {!activeAttempt && owner?.userId && <ActivityIndicator accessibilityLabel="Checking saved checkout" color={EventAction.primary} style={styles.loading} />}
+          {(savedAttempt || activeAttempt?.error) && <View style={styles.tierReadRecovery}>
+            <Text style={styles.tierReadMessage}>{activeAttempt?.error ? 'Couldn’t check your saved checkout.' : 'You have a checkout to finish.'}</Text>
+            {savedAttempt?.hasAnswers && Object.keys(answers).length === 0 && <Text style={styles.tierReadMessage}>Re-enter the same answers to continue. Your answers weren’t saved on this device.</Text>}
+            {savedAttempt?.promoCode && appliedCode !== savedAttempt.promoCode && <Text style={styles.tierReadMessage}>Reapply your saved code to confirm its price.</Text>}
+            <View style={styles.recoveryActions}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check saved checkout" disabled={busy}
+              accessibilityState={{disabled:busy}} style={styles.tierReadRetry}
+              onPress={() => activeAttempt?.error ? setAttemptRead(value=>value+1) : void checkSavedCheckout()}>
+              <Text style={styles.tierReadRetryText}>{busy ? 'Checking…' : 'Check status'}</Text>
+            </TouchableOpacity>
+            {savedAttempt && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change ticket selection"
+              disabled={busy} accessibilityState={{disabled:busy}} style={styles.tierReadRetry} onPress={()=>void changeSavedSelection()}>
+              <Text style={styles.tierReadRetryText}>Change selection</Text>
+            </TouchableOpacity>}
+            </View>
+          </View>}
+          {!!problem && <Text accessibilityRole="alert" style={[styles.problem, {paddingHorizontal:20,paddingBottom:8}]}>{problem}</Text>}
+          {tierReadError ? (
+            <View style={styles.tierReadRecovery}>
+              <Text accessibilityRole="alert" style={styles.tierReadMessage}>Tickets could not be loaded. Please try again.</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading tickets" style={styles.tierReadRetry}
+                onPress={() => setTierReadAttempt(value => value + 1)}><Text style={styles.tierReadRetryText}>Try again</Text></TouchableOpacity>
+            </View>
+          ) : visibleTiers === null ? (
             <ActivityIndicator size="small" color={EventAction.primary} style={styles.loading} />
-          ) : tiers.length === 0 ? (
+          ) : visibleTiers.length === 0 ? (
             /* copy to the taste gate */
             <Text style={styles.empty}>tickets are not on sale right now.</Text>
           ) : (
-            <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            <View pointerEvents={busy ? 'none' : 'auto'} style={styles.scrollContent}>
               <Text style={styles.kicker}>tickets</Text>
-              {tiers.map(({ tier, soldOut, underMinimum }) => {
+              {visibleTiers.map(({ tier, soldOut, underMinimum }) => {
                 const active = tier.id === selectedId;
                 const blocked = soldOut || underMinimum;
                 const each = computeFeePreview(tier.price_cents, 0).buyerTotalCents;
@@ -440,6 +604,7 @@ export function TicketCheckoutSheet({
                 return (
                   <TouchableOpacity
                     key={tier.id}
+                    accessibilityRole="button"
                     style={[styles.tier, active && styles.tierActive, blocked && styles.tierBlocked]}
                     onPress={() => {
                       hapticLight();
@@ -488,7 +653,10 @@ export function TicketCheckoutSheet({
                     <TouchableOpacity
                       onPress={() => { hapticLight(); setQty((q) => Math.max(qtyMin, q - 1)); clearQuote(); }}
                       hitSlop={8}
-                      style={styles.stepBtn}
+                      style={[styles.stepBtn, qty <= qtyMin && styles.stepBtnDisabled]}
+                      accessibilityRole="button"
+                      disabled={qty <= qtyMin}
+                      accessibilityState={{ disabled: qty <= qtyMin }}
                       accessibilityLabel="fewer tickets"
                     >
                       <Minus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
@@ -497,7 +665,10 @@ export function TicketCheckoutSheet({
                     <TouchableOpacity
                       onPress={() => { hapticLight(); setQty((q) => Math.min(qtyMax, q + 1)); clearQuote(); }}
                       hitSlop={8}
-                      style={styles.stepBtn}
+                      style={[styles.stepBtn, qty >= qtyMax && styles.stepBtnDisabled]}
+                      accessibilityRole="button"
+                      disabled={qty >= qtyMax}
+                      accessibilityState={{ disabled: qty >= qtyMax }}
                       accessibilityLabel="more tickets"
                     >
                       <Plus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
@@ -516,7 +687,8 @@ export function TicketCheckoutSheet({
                     const left = addonRemaining(a);
                     const aMax = Math.min(a.per_order_max ?? 10, left ?? Number.MAX_SAFE_INTEGER);
                     return (
-                      <View key={a.id} style={styles.addonRow}>
+                      <View key={a.id} style={styles.addonItem}>
+                      <View style={styles.addonRow}>
                         {/* TK-02: creators already capture this image (AddonEditorSheet),
                             it just never reached the buyer. */}
                         {!!a.image_url && (
@@ -529,23 +701,42 @@ export function TicketCheckoutSheet({
                         </View>
                         <View style={styles.stepper}>
                           <TouchableOpacity
-                            onPress={() => { hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.max(0, n - 1) })); clearQuote(); }}
+                            onPress={() => { if (!currentVisit() || goingRef.current || quoteLock.current !== null) return; hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.max(0, n - 1) })); clearQuote(); }}
                             hitSlop={8}
                             style={styles.stepBtn}
+                            accessibilityRole="button"
                             accessibilityLabel={`fewer ${a.name}`}
+                            disabled={busy || quoteBusy || n === 0}
                           >
                             <Minus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
                           </TouchableOpacity>
                           <Text style={styles.qtyValue}>{n}</Text>
                           <TouchableOpacity
-                            onPress={() => { hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.min(aMax, n + 1) })); clearQuote(); }}
+                            onPress={() => { if (!currentVisit() || goingRef.current || quoteLock.current !== null) return; hapticLight(); setAddonQty((m) => ({ ...m, [a.id]: Math.min(aMax, n + 1) })); clearQuote(); }}
                             hitSlop={8}
                             style={styles.stepBtn}
+                            accessibilityRole="button"
                             accessibilityLabel={`more ${a.name}`}
+                            disabled={busy || quoteBusy || n >= aMax}
                           >
                             <Plus size={16} color={Colors.darkWarm} strokeWidth={2.5} />
                           </TouchableOpacity>
                         </View>
+                      </View>
+                      {n > 0 && (addonVariations.get(a.id)?.length ?? 0) > 0 && <View style={styles.addonOptions}>
+                        <Text style={styles.addonDesc}>Choose an option</Text>
+                        <View style={styles.addonChoices}>
+                          {addonVariations.get(a.id)!.map(option => {
+                            const picked = addonVariationPick[a.id] === option.id;
+                            return <TouchableOpacity key={option.id} accessibilityRole="radio"
+                              accessibilityLabel={`${a.name}: ${option.label}`} accessibilityState={{checked:picked,disabled:busy || quoteBusy}}
+                              disabled={busy || quoteBusy} style={[styles.addonChoice,picked && styles.addonChoiceSelected]}
+                              onPress={() => { if (!currentVisit() || goingRef.current || quoteLock.current !== null) return; hapticLight(); setAddonVariationPick(value=>({...value,[a.id]:option.id})); clearQuote(); }}>
+                              <Text style={[styles.addonChoiceText,picked && styles.addonChoiceTextSelected]}>{option.label}</Text>
+                            </TouchableOpacity>;
+                          })}
+                        </View>
+                      </View>}
                       </View>
                     );
                   })}
@@ -581,8 +772,9 @@ export function TicketCheckoutSheet({
                     <View style={styles.promoRow}>
                       <TextInput
                         style={styles.promoInput}
+                        editable={!busy}
                         value={codeText}
-                        onChangeText={(v) => { setCodeText(v); setCodeNote(null); }}
+                        onChangeText={(v) => { quoteAttempt.current++; quoteLock.current = null; setQuoteBusy(false); setCodeText(v); setCodeNote(null); }}
                         placeholder="your code"
                         placeholderTextColor={Colors.textLight}
                         autoCapitalize="characters"
@@ -592,7 +784,7 @@ export function TicketCheckoutSheet({
                       <TouchableOpacity
                         style={styles.promoApplyBtn}
                         onPress={applyCode}
-                        disabled={quoteBusy || !codeText.trim()}
+                        disabled={busy || quoteBusy || questionsLoading || questionsError || addonsLoading || addonsError || !codeText.trim()}
                         accessibilityRole="button"
                       >
                         {quoteBusy ? (
@@ -608,6 +800,13 @@ export function TicketCheckoutSheet({
                 </View>
               )}
 
+              {!!selected && (detailsLoading || detailsError) && <View style={styles.detailsRecovery}>
+                {detailsLoading ? <ActivityIndicator accessibilityLabel="Loading checkout details" color={EventAction.primary} /> : <>
+                  <Text accessibilityRole="alert" style={styles.tierReadMessage}>Checkout details could not be loaded.</Text>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry checkout details" style={styles.tierReadRetry}
+                    onPress={() => setDetailsAttempt(value => value + 1)}><Text style={styles.tierReadRetryText}>Try again</Text></TouchableOpacity>
+                </>}
+              </View>}
               {/* doc 118: the organizer's questions, before the money.
                   SQL-99's read already opened live (verified 2026-08-19). */}
               {showQuestions && (
@@ -646,7 +845,6 @@ export function TicketCheckoutSheet({
                 </View>
               )}
 
-              {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
               {/* courtesy only: the server enforces required-ness. Name what is
                   missing rather than disabling in silence. */}
@@ -656,8 +854,10 @@ export function TicketCheckoutSheet({
                   still needed: {missingRequired.join(', ')}
                 </Text>
               )}
-            </ScrollView>
+              {!isFree && !!selected && <Text style={styles.refundNote}>{CHECKOUT_REFUND_DISCLOSURE}</Text>}
+            </View>
           )}
+          </ScrollView>
 
           {/* Scene spec 05: "a persistent commitment action" - pinned outside
               the scroll so the buyer never has to hunt for it, whatever the
@@ -665,9 +865,10 @@ export function TicketCheckoutSheet({
           {showFooter && (
             <View style={styles.footer}>
               <TouchableOpacity
-                style={[styles.cta, (!selected || busy || missingRequired.length > 0) && styles.ctaDisabled]}
+                style={[styles.cta, checkoutDisabled && styles.ctaDisabled]}
                 onPress={handleGo}
-                disabled={!selected || busy || missingRequired.length > 0}
+                disabled={checkoutDisabled}
+                accessibilityState={{ disabled: checkoutDisabled, busy }}
                 activeOpacity={0.85}
                 accessibilityRole="button"
               >
@@ -676,7 +877,7 @@ export function TicketCheckoutSheet({
                 ) : (
                   <Text style={styles.ctaText}>
                     {/* law 9: the all-in total, fees included, before the handoff */}
-                    {isFree || quote?.isFree ? 'reserve' : `pay ${formatCents(allIn)}`}
+                    {savedAttempt ? (isFree || quote?.isFree ? 'Continue reservation' : `Continue · ${formatCents(allIn)}`) : isFree || quote?.isFree ? 'reserve' : `pay ${formatCents(allIn)}`}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -686,7 +887,6 @@ export function TicketCheckoutSheet({
                   <Text style={styles.feesNote}>all in, fees included. you pay on the next screen.</Text>
                   {/* the §5 processing-treatment disclosure, stated AT checkout
                       (doc 96); free tiers have no money to disclose */}
-                  <Text style={styles.refundNote}>{CHECKOUT_REFUND_DISCLOSURE}</Text>
                 </>
               )}
             </View>
@@ -741,6 +941,12 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.sansSemibold, fontSize: 11, color: Colors.terracotta,
     letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8,
   },
+  detailsRecovery: { paddingVertical: 12, gap: 4 },
+  recoveryActions: {flexDirection:'row',gap:20,flexWrap:'wrap'},
+  tierReadRecovery: { padding: 20, gap: 6 },
+  tierReadMessage: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: 20, color: Colors.textMedium },
+  tierReadRetry: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
+  tierReadRetryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: EventAction.primary },
   loading: { marginVertical: EventSpacing.lg, alignSelf: 'center' },
   empty: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, margin: 20, textAlign: 'center' },
   tier: {
@@ -767,6 +973,7 @@ const styles = StyleSheet.create({
   tierPrice: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: EventSpacing.xs, marginBottom: EventSpacing.sm },
   qtyLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  stepBtnDisabled: { opacity: 0.45 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   stepBtn: {
     width: 34,
@@ -780,11 +987,14 @@ const styles = StyleSheet.create({
   qtyValue: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, minWidth: 20, textAlign: 'center' },
   problem: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error, marginTop: EventSpacing.sm },
   extras: { marginTop: EventSpacing.md, gap: EventSpacing.sm },
-  addonRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
-    padding: 12,
-  },
+  addonItem: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border, paddingVertical: 12, gap: 8 },
+  addonRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  addonOptions: { gap: 4 },
+  addonChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  addonChoice: { minHeight: 44, justifyContent: 'center', maxWidth: '100%', paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
+  addonChoiceSelected: { borderColor: Colors.terracotta, backgroundColor: Colors.inputBg },
+  addonChoiceText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  addonChoiceTextSelected: { color: Colors.terracotta, fontFamily: Fonts.sansMedium },
   addonImage: { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.inputBg },
   addonBody: { flex: 1, gap: 2 },
   addonName: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt },

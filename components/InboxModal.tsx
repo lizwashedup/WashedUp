@@ -1,3 +1,11 @@
+import { useInboxNotificationScope } from '../hooks/useInboxNotificationScope';
+import { CommunityJoinInboxRow } from './notifications/CommunityJoinInboxRow';
+import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
+import { CommunityNoticeInboxRow } from './notifications/CommunityNoticeInboxRow';
+import { PageInvitationInboxRow } from './notifications/PageInvitationInboxRow';
+import { AttendeeMessageInboxRow } from './notifications/AttendeeMessageInboxRow';
+import { loadAttendeeNoticeLinks } from '../lib/attendeeMessageNotification';
+import { PageUpdateInboxRow } from './notifications/PageUpdateInboxRow';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight } from '../lib/haptics';
 import { Image } from 'expo-image';
@@ -21,7 +29,7 @@ import Colors from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { supabase } from '../lib/supabase';
 import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
-import { YOURS_PAGE_ENABLED, COMMUNITIES_ENABLED } from '../constants/FeatureFlags';
+import { YOURS_PAGE_ENABLED, COMMUNITIES_ENABLED, CREATOR_PAGES_ENABLED } from '../constants/FeatureFlags';
 import {
   acceptWaitlistException,
   declineWaitlistException,
@@ -50,6 +58,7 @@ interface InboxModalProps {
 }
 
 export default function InboxModal({ visible, onClose, userId }: InboxModalProps) {
+  const notificationScope = useInboxNotificationScope(userId, visible);
   const queryClient = useQueryClient();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -131,11 +140,19 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
         if (!data || data.length === 0) return [];
 
+        const sceneCandidates = data.filter((n:any) => n.type === 'broadcast' && !n.event_id);
+        let sceneTargets = new Map<string,string|null>();
+        let sceneTargetsUnknown = false;
+        if (sceneCandidates.length) {
+          try { sceneTargets = await loadAttendeeNoticeLinks(sceneCandidates.map((n:any)=>n.id), {userId,isCurrent:()=>true}); }
+          catch { sceneTargetsUnknown = true; }
+        }
+
         // Resolve avatars by structured actor_user_id (set by the relevant
         // notification triggers). Old rows pre-migration carry NULL and fall
         // through to the Bell fallback in the renderer.
         const actorIds = Array.from(
-          new Set((data as any[]).map((n) => n.actor_user_id).filter(Boolean))
+          new Set((data as any[]).filter(n => n.type !== 'creator_page_update' && n.type !== 'page_team_invitation').map((n) => n.actor_user_id).filter(Boolean))
         );
         let photoMap: Record<string, string> = {};
         if (actorIds.length > 0) {
@@ -150,7 +167,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
         return (data as any[]).map((n) => ({
           ...n,
-          sender_photo: n.actor_user_id ? (photoMap[n.actor_user_id] ?? null) : null,
+          scene_update: !!sceneTargets.get(n.id) || (sceneTargetsUnknown && n.type === 'broadcast' && !n.event_id),
+          sender_photo: n.type !== 'creator_page_update' && n.type !== 'page_team_invitation' && n.actor_user_id ? (photoMap[n.actor_user_id] ?? null) : null,
         }));
       } catch { return []; }
     },
@@ -171,13 +189,18 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   }, [visible, loadingInvites, loadingNotifs, queryClient]);
 
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string, actorId?: string) => {
+    if (!notificationScope.isCurrent()) return;
     hapticLight();
     try {
-      await supabase.from('app_notifications').update({ status: action }).eq('id', notifId);
+      await supabase.from('app_notifications').update({ status: action }).eq('id', notifId).eq('user_id', userId);
+      if (!notificationScope.isCurrent()) return;
       // Don't delete waitlist row here — let cleanup_waitlist_on_join trigger handle it
       // when the user actually joins on the plan detail page
       refetchNotifs();
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
+      if (action === 'acted' && notifType === 'operator_grant') {
+        onClose(); router.push('/creator/apply'); return;
+      }
       if (action === 'acted' && notifType && YOURS_NOTIF_TYPES.has(notifType)) {
         // Single inbox: a people request / acceptance / referral-joined
         // notification routes to the Yours page. No event_id involved.
@@ -195,7 +218,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
             : '/(tabs)/friends?openRequests=1&tab=people';
           router.push(target as any);
         } else {
-          router.push('/(tabs)/friends' as any);
+          router.push((notifType === 'people_request_accepted' || notifType === 'referral_joined' ? '/(tabs)/friends?tab=people' : '/(tabs)/friends') as any);
         }
         return;
       }
@@ -247,9 +270,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         }
       }
     } catch {
-      setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
+      if (notificationScope.isCurrent()) setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
     }
-  }, [refetchNotifs, router, queryClient, userId, onClose]);
+  }, [refetchNotifs, router, queryClient, userId, onClose, notificationScope]);
 
   const handleClearAll = useCallback(async () => {
     if (!userId || appNotifications.length === 0) return;
@@ -486,6 +509,11 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               })}
 
               {appNotifications.map((notif: any) => {
+                if (CREATOR_PAGES_ENABLED && isCommunityJoinNotice(notif.type)) return <CommunityJoinInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.type === 'community_broadcast') return <CommunityNoticeInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={COMMUNITIES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.scene_update) return <AttendeeMessageInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={COMMUNITIES_ENABLED} onClose={onClose} />;
+                if (notif.type === 'page_team_invitation') return <PageInvitationInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={CREATOR_PAGES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.type === 'creator_page_update') return <PageUpdateInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={CREATOR_PAGES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
                 const isWaitlist = notif.type === 'waitlist_spot';
                 const isExceptionInvite = notif.type === 'exception_invite';
                 const goesToYours = YOURS_NOTIF_TYPES.has(notif.type);
@@ -495,7 +523,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 // the same way the Yours types above do -- see handleNotifAction.
                 const goesToCommunityRequests = notif.type === 'community_join_request';
                 const goesToCommunityEvent = COMMUNITIES_ENABLED && notif.type === 'community_event';
-                const hasAction = goesToYours || goesToCommunityRequests || goesToCommunityEvent || ((
+                const hasAction = notif.type === 'operator_grant' || goesToYours || goesToCommunityRequests || goesToCommunityEvent || ((
+                  notif.type === 'plan_cancelled' ||
                   notif.type === 'waitlist_spot' ||
                   notif.type === 'member_joined' ||
                   notif.type === 'invite_accepted' ||

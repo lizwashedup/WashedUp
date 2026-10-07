@@ -1,12 +1,11 @@
 import { ActionSheetIOS, Alert, Linking, Platform } from 'react-native';
+import { resolveCalendarInterval } from './calendarInterval';
 
 // Lazy-load expo-calendar to avoid crash when native module isn't built yet
 let Calendar: typeof import('expo-calendar') | null = null;
 try { Calendar = require('expo-calendar'); } catch {}
 
-function buildGoogleCalendarUrl(title: string, startTime: string, endTime?: string | null, location?: string): string {
-  const start = new Date(startTime);
-  const end = endTime ? new Date(endTime) : new Date(start.getTime() + 2 * 60 * 60 * 1000);
+function buildGoogleCalendarUrl(title: string, start: Date, end: Date, location?: string): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const params = new URLSearchParams({
     action: 'TEMPLATE',
@@ -20,8 +19,8 @@ function buildGoogleCalendarUrl(title: string, startTime: string, endTime?: stri
 
 async function addToAppleCalendar(
   title: string,
-  startTime: string,
-  endTime?: string | null,
+  start: Date,
+  end: Date,
   location?: string,
 ): Promise<boolean> {
   if (!Calendar) {
@@ -45,9 +44,6 @@ async function addToAppleCalendar(
       return false;
     }
 
-    const start = new Date(startTime);
-    const end = endTime ? new Date(endTime) : new Date(start.getTime() + 2 * 60 * 60 * 1000);
-
     await Calendar.createEventAsync(defaultCal.id, {
       title,
       startDate: start,
@@ -70,18 +66,31 @@ export function showAddToCalendar(
   location?: string,
   onSuccess?: () => void,
 ) {
+  const interval = resolveCalendarInterval(startTime, endTime);
+  if (!interval.ok) {
+    Alert.alert('Check the time', interval.message);
+    return;
+  }
   const options = ['Apple Calendar', 'Google Calendar', 'Cancel'];
+
+  const openGoogleCalendar = async () => {
+    try {
+      await Linking.openURL(buildGoogleCalendarUrl(title, interval.start, interval.end, location));
+      onSuccess?.();
+    } catch {
+      Alert.alert('Could not open calendar', 'Try again or choose another calendar app.');
+    }
+  };
 
   if (Platform.OS === 'ios') {
     ActionSheetIOS.showActionSheetWithOptions(
       { options, cancelButtonIndex: 2, title: 'Add to Calendar' },
       async (idx) => {
         if (idx === 0) {
-          const ok = await addToAppleCalendar(title, startTime, endTime, location);
+          const ok = await addToAppleCalendar(title, interval.start, interval.end, location);
           if (ok) onSuccess?.();
         } else if (idx === 1) {
-          Linking.openURL(buildGoogleCalendarUrl(title, startTime, endTime, location));
-          onSuccess?.();
+          await openGoogleCalendar();
         }
       },
     );
@@ -89,10 +98,7 @@ export function showAddToCalendar(
     Alert.alert('Add to Calendar', '', [
       {
         text: 'Google Calendar',
-        onPress: () => {
-          Linking.openURL(buildGoogleCalendarUrl(title, startTime, endTime, location));
-          onSuccess?.();
-        },
+        onPress: () => { void openGoogleCalendar(); },
       },
       { text: 'Cancel', style: 'cancel' },
     ]);

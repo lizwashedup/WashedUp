@@ -31,27 +31,40 @@ export function isCommunityEventReleaseBlocked(
   return Boolean(communityId) && !communitiesEnabled;
 }
 
-export async function getMyRsvp(eventId: string): Promise<RsvpStatus> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function getMyRsvp(eventId: string, expectedUserId?: string | null): Promise<RsvpStatus> {
+  const { data: { user }, error: accountError } = await supabase.auth.getUser();
+  if (accountError) throw accountError;
+  if (expectedUserId !== undefined && (user?.id ?? null) !== expectedUserId) throw new Error('Your account changed. Check your attendance again.');
   if (!user) return null;
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('explore_event_rsvps')
     .select('status')
     .eq('explore_event_id', eventId)
     .eq('user_id', user.id)
     .maybeSingle();
-  return (data?.status as RsvpStatus) ?? null;
+  if (error) throw error;
+  if (data && !['going', 'cancelled'].includes(data.status)) throw new Error('Your attendance could not be checked.');
+  const after = await supabase.auth.getUser();
+  if (after.error) throw after.error;
+  if (after.data.user?.id !== user.id) throw new Error('Your account changed. Check your attendance again.');
+  return data?.status ?? null;
 }
 
-export async function setRsvp(eventId: string, going: boolean): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function setRsvp(eventId: string, going: boolean, expectedUserId?: string | null,
+  operation?: { updatedAt: string; isCurrent(): boolean; onDispatch?(): void }): Promise<void> {
+  if (operation && !operation.isCurrent()) throw new Error('This attendance action is no longer active.');
+  const { data: { user }, error: accountError } = await supabase.auth.getUser();
+  if (operation && !operation.isCurrent()) throw new Error('This attendance action is no longer active.');
+  if (accountError) throw accountError;
   if (!user) throw new Error('Not signed in');
+  if (expectedUserId !== undefined && user.id !== expectedUserId) throw new Error('Your account changed. Check your attendance again.');
   // Capacity should eventually be enforced atomically via set_event_rsvp_atomic
   // (supabase/migrations/20260817130000_explore_event_rsvp_capacity.sql), but
   // that migration is not applied live yet -- confirmed directly against the
   // schema cache 2026-08-19 (PGRST202, function does not exist). Calling it
   // unconditionally was breaking every RSVP toggle. Reverted to the plain
   // upsert until the migration + a real capacity RPC actually ship (see C-21).
+  operation?.onDispatch?.();
   const { error } = await supabase
     .from('explore_event_rsvps')
     .upsert(
@@ -59,7 +72,7 @@ export async function setRsvp(eventId: string, going: boolean): Promise<void> {
         explore_event_id: eventId,
         user_id: user.id,
         status: going ? 'going' : 'cancelled',
-        updated_at: new Date().toISOString(),
+        updated_at: operation?.updatedAt ?? new Date().toISOString(),
       },
       { onConflict: 'explore_event_id,user_id' },
     );

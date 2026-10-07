@@ -2,11 +2,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { ALBUM } from '../../constants/YoursDesign';
+import { PageAction } from '../creator/pages/PageFrame';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { supabase } from '../../lib/supabase';
 import { PolaroidCard, PolaroidStatus } from './PolaroidCard';
 import { PolaroidEmptyIcon } from './PolaroidEmptyIcon';
@@ -189,6 +191,13 @@ type Props = { userId: string };
 
 export function AlbumsGrid({ userId }: Props) {
   const router = useRouter();
+  const mounted = useRef(true);
+  const ownerRef = useRef({ userId });
+  if (ownerRef.current.userId !== userId) ownerRef.current = { userId };
+  const owner = ownerRef.current;
+  const isCurrent = useCallback(() => mounted.current && ownerRef.current === owner, [owner]);
+  const retryLock = useRef<{ owner: object; attempt: object } | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Reactive width: read per-render via the hook (not a module-level
   // Dimensions constant, which can resolve to 0 at bundle load and collapse
   // the card width). ~2/5 of screen so a lone album sits top-left with room.
@@ -200,16 +209,28 @@ export function AlbumsGrid({ userId }: Props) {
   // sane minimum (140) so the polaroid never stretches.
   const cardW = Math.max(ALBUM.minCardWidth, Math.round(width * ALBUM.cardWidthRatio));
 
-  const { data: albums, isLoading, error, refetch, isStale: albumsStale } = useQuery({
+  const { data: albums, isLoading, isPending, isFetching, error, refetch, isStale: albumsStale } = useQuery({
     queryKey: ['albumsGrid', userId],
-    queryFn: () => fetchAlbumsForUser(userId),
+    queryFn: async ({ signal }) => {
+      if (!isCurrent() || signal.aborted) throw new Error('Account changed.');
+      const result = await requestWithDeadline(fetchAlbumsForUser(userId), 12_000);
+      if (!isCurrent() || signal.aborted) throw new Error('Account changed.');
+      return result;
+    },
+    retry: false,
     enabled: !!userId,
     staleTime: 60_000,
   });
 
   const { data: dismissedPrompt, refetch: refetchPrompt, isStale: promptStale } = useQuery({
     queryKey: ['albumsGrid.dismissedPrompt', userId],
-    queryFn: () => fetchDismissedPrompt(userId),
+    queryFn: async ({ signal }) => {
+      if (!isCurrent() || signal.aborted) throw new Error('Account changed.');
+      const result = await requestWithDeadline(fetchDismissedPrompt(userId), 12_000);
+      if (!isCurrent() || signal.aborted) throw new Error('Account changed.');
+      return result;
+    },
+    retry: false,
     enabled: !!userId,
     staleTime: 60_000,
   });
@@ -220,16 +241,27 @@ export function AlbumsGrid({ userId }: Props) {
   // every quick tab switch (2026-05-18 app-wide slowness incident). The
   // upload path invalidates these keys, so a real upload still refreshes.
   useFocusEffect(useCallback(() => {
-    if (albumsStale) void refetch();
-    if (promptStale) void refetchPrompt();
-  }, [albumsStale, promptStale, refetch, refetchPrompt]));
+    if (!isCurrent()) return;
+    if (albumsStale && !error) void refetch({ cancelRefetch: false });
+    if (promptStale) void refetchPrompt({ cancelRefetch: false });
+  }, [albumsStale, promptStale, refetch, refetchPrompt, error, isCurrent]));
+
+  const retryAlbums = () => {
+    if (!isCurrent() || !userId || isFetching || retryLock.current?.owner === owner) return;
+    const attempt = {};
+    retryLock.current = { owner, attempt };
+    void refetch({ cancelRefetch: false }).catch(() => {
+      // The query owns the visible read failure, with cached cards preserved.
+    }).finally(() => { if (retryLock.current?.attempt === attempt) retryLock.current = null; });
+  };
 
   const handleAlbumPress = useCallback((eventId: string) => {
-    router.push(`/album/${eventId}` as any);
-  }, [router]);
+    if (isCurrent()) router.push(`/album/${eventId}` as any);
+  }, [router, isCurrent]);
 
   // Manual archive: only offered for albums that still have zero photos.
   const handleArchive = useCallback((eventId: string, title: string) => {
+    if (!isCurrent()) return;
     Alert.alert(
       'Archive this album?',
       `No one added photos to ${title}. Archiving hides it from your albums.`,
@@ -239,7 +271,9 @@ export function AlbumsGrid({ userId }: Props) {
           text: 'Archive',
           style: 'destructive',
           onPress: async () => {
+            if (!isCurrent()) return;
             const { error: archiveErr } = await supabase.rpc('archive_empty_album', { p_event_id: eventId });
+            if (!isCurrent()) return;
             if (archiveErr) {
               Alert.alert('Could not archive', 'Please try again.');
               return;
@@ -249,20 +283,24 @@ export function AlbumsGrid({ userId }: Props) {
         },
       ],
     );
-  }, [refetch]);
+  }, [refetch, isCurrent]);
 
-  if (isLoading) {
+  if (!userId) return <View style={styles.center}><Text style={styles.errorText}>Sign in to see your albums.</Text></View>;
+
+  const hasAlbums = !!albums?.length;
+  if (!hasAlbums && (isLoading || isPending)) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={Colors.terracotta} />
+        <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading albums" />
       </View>
     );
   }
 
-  if (error) {
+  if (error && !hasAlbums) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>Couldn't load albums. Pull to retry.</Text>
+        <Text style={styles.errorText}>Your albums couldn’t load. Try again to see them.</Text>
+        <PageAction primary compact singleLine title={isFetching ? 'Retrying…' : 'Try again'} disabled={isFetching} onPress={retryAlbums} />
       </View>
     );
   }
@@ -277,7 +315,7 @@ export function AlbumsGrid({ userId }: Props) {
         <Text style={styles.emptySubtitle}>Go do something, then relive it here.</Text>
         <TouchableOpacity
           style={styles.emptyButton}
-          onPress={() => router.push('/(tabs)/plans' as any)}
+          onPress={() => { if (isCurrent()) router.push('/(tabs)/plans' as any); }}
           activeOpacity={0.85}
         >
           <Text style={styles.emptyButtonText}>Browse plans</Text>
@@ -288,9 +326,13 @@ export function AlbumsGrid({ userId }: Props) {
 
   return (
     <View style={styles.screen}>
+      {!!error && <View style={styles.recovery}>
+        <Text style={[styles.errorText, styles.recoveryCopy]}>Couldn’t refresh. Your albums are still here.</Text>
+        <PageAction compact singleLine title={isFetching ? 'Retrying…' : 'Try again'} disabled={isFetching} onPress={retryAlbums} />
+      </View>}
       {dismissedPrompt && (
         <Pressable
-          onPress={() => router.push(`/album/upload/${dismissedPrompt.event_id}` as any)}
+          onPress={() => { if (isCurrent()) router.push(`/album/upload/${dismissedPrompt.event_id}` as any); }}
           style={styles.dismissedBanner}
         >
           <Ionicons name="camera-outline" size={16} color={Colors.terracotta} />
@@ -331,7 +373,9 @@ export function AlbumsGrid({ userId }: Props) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40, paddingHorizontal: 24, gap: 16 },
+  recovery: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  recoveryCopy: { flex: 1, minWidth: 0 },
   errorText: {
     fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray,
   },

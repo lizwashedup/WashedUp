@@ -2,16 +2,17 @@
  * The doc 09 join popup. Everything required: the leader's welcome message
  * up top (their voice), first and last name, email, zip, the leader's intro
  * question, and the guidelines checkbox with link. Submits through
- * request_to_join_community (approval-gated, never immediate). Functionally
- * minimal per decision 15a.
+ * the existing admission contract. New creator pages supply a scoped
+ * controller for confirmed membership and interrupted-request recovery.
  */
 
 import React, { useState } from 'react';
+import { ScaledText as Text } from '../ScaledText';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { useQuery } from '@tanstack/react-query';
 import {
   Modal,
   View,
-  Text,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -23,8 +24,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, X } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import Colors, { AfterglowColors as C } from '../../constants/Colors';
+import { Fonts, FontSizes, LineHeights, AfterglowType as T, type AfterglowFontFamilies } from '../../constants/Typography';
 import { CONFIGURABLE_JOIN_QUESTIONS_ENABLED } from '../../constants/FeatureFlags';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
@@ -39,7 +40,16 @@ import {
 } from '../../lib/communityJoin';
 import { getLeaderCards } from '../../lib/communityLeader';
 
+export interface CommunityJoinFormFlow {
+  submit: (answers: JoinAnswers) => Promise<void>;
+  locked: boolean;
+  busy?: boolean;
+  message?: string;
+  footer?: React.ReactNode;
+}
 interface Props {
+  /** The verified admission controller already owns its native presentation. */
+  embedded?: boolean;
   visible: boolean;
   gate: JoinGate;
   /** proposal 91: the community's join_policy is 'open', so sending this
@@ -53,9 +63,13 @@ interface Props {
    *  editor before saving. Renders every field but never submits -- the send
    *  button is replaced with an inert "applicants see this" banner. */
   previewMode?: boolean;
+  /** Only the verified creator-page controller supplies this contract. */
+  flow?: CommunityJoinFormFlow;
 }
 
-export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onClose, onRequested, previewMode = false }: Props) {
+export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onClose, onRequested, previewMode = false, flow, embedded = false }: Props) {
+  const { fonts } = useAfterglowFonts(!!flow);
+  const styles = flow ? creatorFormStyles(fonts) : legacyStyles;
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -78,10 +92,10 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
   // itself -- a community's saved config can never surface early just
   // because the flag flips before the migration does, or vice versa.
   const effectiveConfig = {
-    askReason: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askReason,
-    askSource: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askSource,
-    askRulesConfirm: CONFIGURABLE_JOIN_QUESTIONS_ENABLED && gate.askRulesConfirm,
-    openQuestion: CONFIGURABLE_JOIN_QUESTIONS_ENABLED ? gate.openQuestion : null,
+    askReason: (!!flow || CONFIGURABLE_JOIN_QUESTIONS_ENABLED) && gate.askReason,
+    askSource: (!!flow || CONFIGURABLE_JOIN_QUESTIONS_ENABLED) && gate.askSource,
+    askRulesConfirm: (!!flow || CONFIGURABLE_JOIN_QUESTIONS_ENABLED) && gate.askRulesConfirm,
+    openQuestion: (!!flow || CONFIGURABLE_JOIN_QUESTIONS_ENABLED) ? gate.openQuestion : null,
   };
 
   // the 30a v1.3 disclosure names the operator literally through the
@@ -95,6 +109,7 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
   });
 
   const handleSend = async () => {
+    if (sending || flow?.locked) return;
     const answers: JoinAnswers = {
       first_name: firstName,
       last_name: lastName,
@@ -115,6 +130,7 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
     setProblem(null);
     setSending(true);
     try {
+      if (flow) { await flow.submit(answers); return; }
       await requestToJoinCommunity(gate.communityId, answers);
       hapticSuccess();
       onRequested();
@@ -125,12 +141,11 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
     }
   };
 
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+  const content = (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={onClose} hitSlop={12}>
+            <TouchableOpacity onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close joining form" style={flow ? { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' } : undefined}>
               <X size={22} color={Colors.asphalt} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
@@ -140,7 +155,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             </View>
           )}
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>join {gate.name}</Text>
+            <Text accessibilityRole="header" style={styles.title}>{flow?.locked ? gate.name : `join ${gate.name}`}</Text>
+            {!flow?.locked && <>
 
             {!!gate.welcomeMessage && (
               <View style={styles.welcomeCard}>
@@ -153,6 +169,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             <TextInput
               style={styles.input}
               value={firstName}
+              editable={!flow?.locked}
+              accessibilityLabel="First name"
               onChangeText={setFirstName}
               autoCapitalize="words"
               maxLength={100}
@@ -162,6 +180,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             <TextInput
               style={styles.input}
               value={lastName}
+              editable={!flow?.locked}
+              accessibilityLabel="Last name"
               onChangeText={setLastName}
               autoCapitalize="words"
               maxLength={100}
@@ -171,6 +191,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             <TextInput
               style={styles.input}
               value={email}
+              editable={!flow?.locked}
+              accessibilityLabel="Email"
               onChangeText={setEmail}
               autoCapitalize="none"
               keyboardType="email-address"
@@ -181,16 +203,21 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             <TextInput
               style={styles.input}
               value={zip}
+              editable={!flow?.locked}
+              accessibilityLabel="ZIP code"
               onChangeText={setZip}
               keyboardType="number-pad"
               maxLength={5}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
+            {flow && <Text style={styles.finePrint}>Your introduction is shared with community members after you join. Extra answers stay out of chat.</Text>}
             <Text style={styles.fieldLabel}>{introQuestion}</Text>
             <TextInput
               style={[styles.input, styles.inputMultiline]}
               value={introAnswer}
+              editable={!flow?.locked}
+              accessibilityLabel={introQuestion}
               onChangeText={setIntroAnswer}
               multiline
               maxLength={1000}
@@ -209,6 +236,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
                 <TextInput
                   style={[styles.input, styles.inputMultiline]}
                   value={reasonAnswer}
+              editable={!flow?.locked}
+              accessibilityLabel="Why do you want to join?"
                   onChangeText={setReasonAnswer}
                   multiline
                   maxLength={1000}
@@ -225,6 +254,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
                 <TextInput
                   style={styles.input}
                   value={sourceAnswer}
+              editable={!flow?.locked}
+              accessibilityLabel="How did you hear about this community?"
                   onChangeText={setSourceAnswer}
                   maxLength={500}
                   placeholder="wherever you found us"
@@ -237,6 +268,9 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
             {effectiveConfig.askRulesConfirm && (
               <TouchableOpacity
                 style={styles.checkboxRow}
+                disabled={flow?.locked}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: rulesConfirmed, disabled: !!flow?.locked }}
                 onPress={() => { hapticLight(); setRulesConfirmed((v) => !v); }}
               >
                 <View style={[styles.checkbox, rulesConfirmed && styles.checkboxOn]}>
@@ -252,6 +286,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
                 <TextInput
                   style={[styles.input, styles.inputMultiline]}
                   value={openAnswer}
+              editable={!flow?.locked}
+              accessibilityLabel={effectiveConfig.openQuestion ?? 'Answer to the community question'}
                   onChangeText={setOpenAnswer}
                   multiline
                   maxLength={1000}
@@ -264,6 +300,9 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
 
             <TouchableOpacity
               style={styles.checkboxRow}
+              disabled={flow?.locked}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: accepted, disabled: !!flow?.locked }}
               onPress={() => { hapticLight(); setAccepted((a) => !a); }}
             >
               <View style={[styles.checkbox, accepted && styles.checkboxOn]}>
@@ -296,9 +335,13 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
               phone number, raw zip code, or precise location.
             </Text>
 
-            {!!problem && <Text style={styles.problem}>{problem}</Text>}
+            </>}
+            {flow?.busy && <ActivityIndicator accessibilityLabel="Checking joining request" color={C.clay} />}
+            {!!problem && <Text accessibilityRole="alert" style={styles.problem}>{problem}</Text>}
+            {!!flow?.message && <Text accessibilityLiveRegion="polite" style={styles.welcomeText}>{flow.message}</Text>}
+            {flow?.footer}
 
-            {previewMode ? (
+            {flow?.locked ? null : previewMode ? (
               <View style={[styles.sendBtn, styles.previewSendBtn]}>
                 <Text style={styles.sendBtnText}>{joinsInstantly ? 'join' : 'ask to join'}</Text>
               </View>
@@ -306,6 +349,8 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
               <TouchableOpacity
                 style={[styles.sendBtn, sending && styles.sendBtnBusy]}
                 onPress={handleSend}
+                accessibilityRole="button"
+                accessibilityLabel={joinsInstantly ? 'Join community' : 'Request to join'}
                 disabled={sending}
               >
                 {sending ? (
@@ -320,18 +365,21 @@ export function JoinCommunityPopup({ visible, gate, joinsInstantly = false, onCl
                 open community's visitor that a person reviews them would be
                 false, and telling a gated one that they are in would be worse */}
             <Text style={styles.gateNote}>
-              {joinsInstantly
+              {flow?.locked ? '' : joinsInstantly
                 ? "you're in as soon as you send this."
                 : 'a real person approves every request.'}
             </Text>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </Modal>
   );
+  if (embedded) return visible ? content : null;
+  return <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    {content}
+  </Modal>;
 }
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 10 },
@@ -427,3 +475,26 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 });
+
+/** Selected cream/Mona treatment, restricted to the new page admission flow. */
+function creatorFormStyles(fonts: AfterglowFontFamilies) {
+  return { ...legacyStyles,
+    container: { ...legacyStyles.container, backgroundColor: C.paper },
+    title: { ...legacyStyles.title, ...T.pageTitle, fontFamily: fonts.display, color: C.ink },
+    welcomeCard: { ...legacyStyles.welcomeCard, backgroundColor: C.white, borderColor: C.line, borderLeftColor: C.clay },
+    welcomeText: { ...legacyStyles.welcomeText, ...T.body, fontFamily: fonts.regular, color: C.ink },
+    welcomeFrom: { ...legacyStyles.welcomeFrom, ...T.body, fontFamily: fonts.medium, color: C.muted },
+    fieldLabel: { ...legacyStyles.fieldLabel, ...T.body, letterSpacing: 0, fontFamily: fonts.semibold, color: C.ink },
+    input: { ...legacyStyles.input, ...T.body, minHeight: 48, fontFamily: fonts.regular, color: C.ink, backgroundColor: C.white, borderColor: C.line },
+    checkboxRow: { ...legacyStyles.checkboxRow, minHeight: 44 },
+    checkbox: { ...legacyStyles.checkbox, borderColor: C.line, backgroundColor: C.white },
+    checkboxOn: { backgroundColor: C.clay, borderColor: C.clay },
+    checkboxText: { ...legacyStyles.checkboxText, ...T.body, fontFamily: fonts.regular, color: C.ink },
+    link: { color: C.clay, fontFamily: fonts.medium },
+    finePrint: { ...legacyStyles.finePrint, ...T.caption, fontFamily: fonts.regular, color: C.muted },
+    problem: { ...legacyStyles.problem, ...T.body, fontFamily: fonts.medium },
+    sendBtn: { ...legacyStyles.sendBtn, minHeight: 48, backgroundColor: C.clay },
+    sendBtnText: { ...legacyStyles.sendBtnText, ...T.body, fontFamily: fonts.semibold, color: C.paper },
+    gateNote: { ...legacyStyles.gateNote, ...T.caption, fontFamily: fonts.regular, color: C.muted },
+  };
+}

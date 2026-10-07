@@ -1,107 +1,69 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import React from 'react';
+import { Modal, View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
-import BottomSheet from '../primitives/BottomSheet';
-import YoursAvatar from '../primitives/YoursAvatar';
 import { COPY } from '../state/constants';
-import { hapticSelection } from '../../../lib/haptics';
 import type { YoursGridPerson } from '../../../lib/yours/types';
+import InvitationPerson from './InvitationPerson';
+import { useReduceMotion } from '../a11y/useReduceMotion';
 
-/** Full ping picker. Tap faces, Ping them. */
-export default function PingSheet({
-  visible,
-  onClose,
-  people,
-  onPing,
-}: {
+/** Controlled picker: strip and full list always share the same selected people. */
+export default function PingSheet({ visible, onClose, people, selectedIds, confirmedIds, onToggle, onSend, busy, status }: {
   visible: boolean;
   onClose: () => void;
   people: YoursGridPerson[];
-  onPing: (ids: string[]) => void;
+  selectedIds: ReadonlySet<string>;
+  confirmedIds: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onSend: () => void;
+  busy: boolean;
+  status: string | null;
 }) {
-  const [sel, setSel] = useState<Set<string>>(new Set());
-
-  const toggle = (id: string) => {
-    hapticSelection();
-    setSel((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  };
-
+  const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
+  const close = () => { if (!busy) onClose(); };
   return (
-    <BottomSheet visible={visible} onClose={onClose} heightPct={0.65}>
-      <Text style={styles.prompt}>{COPY.pingSheetPrompt}</Text>
-      <ScrollView contentContainerStyle={styles.grid}>
-        {people.map((p) => (
-          <Pressable
-            key={p.user_id}
-            style={styles.cell}
-            onPress={() => toggle(p.user_id)}
-          >
-            <YoursAvatar
-              name={p.first_name_display}
-              photoUrl={p.profile_photo_url}
-              size={64}
-              bucket={sel.has(p.user_id) ? 'full' : 'none'}
-              // Same handler as the outer Pressable: YoursAvatar's own inner
-              // Pressable wins the touch when tapped directly on the face
-              // (RN gives it to the innermost responder), so without this
-              // that tap was silently swallowed. Only one of the two ever
-              // fires per tap, so this can't double-toggle.
-              onPress={() => toggle(p.user_id)}
-            />
-            <Text style={styles.name} numberOfLines={1}>
-              {p.first_name_display ?? ''}
-            </Text>
+    <Modal visible={visible} transparent animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={close}>
+      <View style={styles.overlay}>
+        <Pressable style={styles.backdrop} onPress={close} disabled={busy} accessible={false} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(16, insets.bottom) }]} accessibilityViewIsModal>
+          <View style={styles.header}>
+            <Text style={styles.prompt}>{COPY.pingSheetPrompt}</Text>
+            <Pressable onPress={close} disabled={busy} style={styles.close} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
+              <Text style={[styles.closeText, busy && styles.disabled]}>{COPY.pingBack}</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.helper}>{COPY.pingSelected(selectedIds.size)}</Text>
+          <ScrollView style={styles.list}>
+            {people.map(person => <InvitationPerson key={person.user_id} person={person}
+              selected={selectedIds.has(person.user_id)} confirmed={confirmedIds.has(person.user_id)} disabled={busy}
+              onPress={() => onToggle(person.user_id)} />)}
+          </ScrollView>
+          {!!status && <Text style={styles.status} accessibilityRole="alert" accessibilityLiveRegion="polite">{status}</Text>}
+          <Pressable style={[styles.btn, (busy || selectedIds.size === 0) && styles.disabled]}
+            disabled={busy || selectedIds.size === 0} onPress={onSend} accessibilityRole="button"
+            accessibilityState={{ disabled: busy || selectedIds.size === 0, busy }}>
+            <Text style={styles.btnText} numberOfLines={1}>{busy ? COPY.pingSending : COPY.pingButton}</Text>
           </Pressable>
-        ))}
-      </ScrollView>
-      <Pressable
-        style={[styles.btn, sel.size === 0 && styles.btnOff]}
-        disabled={sel.size === 0}
-        onPress={() => onPing(Array.from(sel))}
-      >
-        <Text style={styles.btnText}>{COPY.pingButton}</Text>
-      </Pressable>
-    </BottomSheet>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  prompt: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 16,
-  },
-  cell: { width: '23%', alignItems: 'center' },
-  name: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.micro,
-    color: Colors.secondary,
-    marginTop: 4,
-  },
-  btn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  btnOff: { opacity: 0.4 },
-  btnText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.white,
-  },
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: Colors.overlayMedium },
+  backdrop: { ...StyleSheet.absoluteFillObject },
+  sheet: { height: '75%', backgroundColor: Colors.parchment, paddingHorizontal: 20, paddingTop: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  prompt: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  close: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+  closeText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  helper: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginBottom: 8 },
+  list: { flex: 1 },
+  status: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, marginTop: 12 },
+  btn: { minHeight: 48, backgroundColor: Colors.terracotta, borderRadius: 8, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  disabled: { opacity: 0.4 },
+  btnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
 });

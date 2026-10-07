@@ -14,7 +14,7 @@ import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CommunityCard } from '../../components/scene/CommunityCard';
-import { getDiscoverableCommunities } from '../../lib/sceneDiscovery';
+import { useSceneCommunities } from '../../hooks/useSceneCommunities';
 import { getLeaderCards } from '../../lib/communityLeader';
 
 const SCREEN_PADDING = 20;
@@ -23,13 +23,10 @@ export default function CommunitiesScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  const { data: communities = [] } = useQuery({
-    queryKey: ['scene-communities'],
-    queryFn: getDiscoverableCommunities,
-  });
+  const { data: communities, identity } = useSceneCommunities();
   const communityIdsKey = communities.map((c) => c.id).sort().join(',');
   const { data: leaderCards = new Map() } = useQuery({
-    queryKey: ['leader-cards', communityIdsKey],
+    queryKey: ['leader-cards', communityIdsKey, ...identity],
     queryFn: () => getLeaderCards(communities.map((c) => c.id)),
     enabled: communities.length > 0,
   });

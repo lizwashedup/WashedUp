@@ -1,3 +1,6 @@
+import type {CreatorPageScope} from '../../lib/creatorPageReview';
+import {useCreatorPageMediaUpload} from '../../hooks/useCreatorPageMediaUpload';
+import type {EventMediaGuard} from '../../lib/eventMediaGuard';
 /**
  * The mood-board body editor (proposal 70 shape, proposal 77 door):
  * ordered text, image, and one-faq-marker blocks. CONTROLLED - the form
@@ -8,7 +11,7 @@
  * of record; this editor mirrors its limits in copy.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -17,10 +20,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
+import { EventMediaImage } from '../events/EventMediaImage';
 import { ArrowDown, ArrowUp, ImagePlus, MessageCircleQuestion, Plus, Video, X } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { Fonts, FontSizes, type AfterglowFontFamilies } from '../../constants/Typography';
 import { hapticLight, hapticError } from '../../lib/haptics';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
@@ -29,7 +32,6 @@ import {
   BLOCKS_MAX,
   GALLERY_SOFT_CAP,
   TEXT_BLOCK_MAX,
-  eventContentPublicUrl,
   pickAndUploadEventContentImages,
   type DescriptionBlock,
 } from '../../lib/eventContent';
@@ -37,6 +39,7 @@ import {
 const IMAGE_PREVIEW_HEIGHT = 140;
 
 interface DescriptionBlocksEditorProps {
+  appearance?: { fonts: AfterglowFontFamilies };
   eventId: string;
   blocks: DescriptionBlock[];
   onChange: (next: DescriptionBlock[]) => void;
@@ -51,6 +54,13 @@ interface DescriptionBlocksEditorProps {
   /** set by the unlock flow's replace (openPhotos=1): reopen the picker
    *  once so the organizer's photos tap survives the draft-create */
   autoOpenPhotos?: boolean;
+  mediaGuard?: EventMediaGuard;
+  pageId?: string;
+  pageScope?: CreatorPageScope;
+  savedBlocks?: DescriptionBlock[];
+  /** Synchronous parent lease covers the whole picker batch, including gaps between files. */
+  beginMediaWork?: ()=>null|(()=>void);
+  mediaBusy?: boolean;
 }
 
 export function DescriptionBlocksEditor({
@@ -61,30 +71,60 @@ export function DescriptionBlocksEditor({
   mediaHint,
   onUnlockMedia,
   autoOpenPhotos,
+  mediaGuard,pageId,pageScope,savedBlocks,beginMediaWork,mediaBusy=false,appearance,
 }: DescriptionBlocksEditorProps) {
+  const styles = useMemo(() => descriptionStyles(appearance?.fonts), [appearance?.fonts]);
   const [uploading, setUploading] = useState(false);
   const [uploadProblems, setUploadProblems] = useState<string[]>([]);
-  const mutate = onChange;
+  const latestBlocks=useRef(blocks);latestBlocks.current=blocks;
+  const mutate=(next:DescriptionBlock[])=>{latestBlocks.current=next;onChange(next);};
+  const visit=useMemo(()=>({}),[eventId,mediaGuard]);
+  const currentVisit=useRef(visit);currentVisit.current=visit;
+  const mounted=useRef(false),imageLock=useRef<object|null>(null),cancelledBatch=useRef<object|null>(null);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{setUploading(false);setUploadProblems([]);},[visit]);
+  const isCurrent=(owned:object)=>mounted.current&&currentVisit.current===owned;
+  const privatePhotos=useCreatorPageMediaUpload(pageId,eventId,pageScope,mediaGuard,reference=>{
+    const current=latestBlocks.current;
+    if(current.some(b=>b.type==='image'&&b.path===reference))return;
+    if(current.length>=Math.min(BLOCKS_MAX,GALLERY_SOFT_CAP))throw Error('Make room in the page before adding this photo.');
+    mutate([...current,{type:'image',path:reference}]);
+  },reference=>mutate(latestBlocks.current.filter(b=>!(b.type==='image'&&b.path===reference))),
+  (savedBlocks??[]).flatMap(b=>b.type==='image'?[b.path]:[]),'image');
+  const recovery=async(action:()=>Promise<unknown>)=>{
+    if(imageLock.current||privatePhotos.isBusy())return;
+    const release=beginMediaWork?.();if(beginMediaWork&&!release)return;
+    try{await action();}catch{/* The original saved upload remains visible with recovery feedback. */}finally{release?.();}
+  };
+
 
   const handleAddImages = useCallback(async () => {
-    if (!blocks || blocks.length >= BLOCKS_MAX || uploading) return;
-    hapticLight();
-    setUploading(true);
+    if (latestBlocks.current.length >= Math.min(BLOCKS_MAX,GALLERY_SOFT_CAP) || imageLock.current===visit || privatePhotos.isBusy() || privatePhotos.loading) return;
+    const release=beginMediaWork?.();if(beginMediaWork&&!release)return;
+    const owned=visit;imageLock.current=owned;cancelledBatch.current=null;
+    const batchCurrent=()=>{if(!isCurrent(owned)||cancelledBatch.current===owned)throw Error('This photo batch ended.');};
+    const batchGuard:EventMediaGuard={assertCurrent(){batchCurrent();mediaGuard?.assertCurrent();},async check(){batchCurrent();await mediaGuard?.check();batchCurrent();}};
+    setUploading(true);setUploadProblems([]);
     try {
+      await mediaGuard?.check();
+      if(!isCurrent(owned))return;
+      hapticLight();
       const { paths, problems } = await pickAndUploadEventContentImages(
-        eventId,
-        Math.min(BLOCKS_MAX, GALLERY_SOFT_CAP) - blocks.length,
+        eventId,Math.min(BLOCKS_MAX,GALLERY_SOFT_CAP)-latestBlocks.current.length,batchGuard,pageId?privatePhotos.upload:undefined,
       );
-      setUploadProblems(problems);
-      if (paths.length > 0) {
-        mutate([...blocks, ...paths.map((path) => ({ type: 'image' as const, path }))]);
-      }
+      await batchGuard.check();
+      if(!isCurrent(owned))return;
+      const current=latestBlocks.current,available=Math.max(0,Math.min(BLOCKS_MAX,GALLERY_SOFT_CAP)-current.length);
+      setUploadProblems(paths.length>available?[...problems,'Your newer edits filled this page. Some uploaded photos were not added.']:problems);
+      if(paths.length&&available)mutate([...current,...paths.slice(0,available).map(path=>({type:'image' as const,path}))]);
     } catch {
-      hapticError();
+      if(isCurrent(owned)){hapticError();setUploadProblems(['Photos were not added. Check your page access and try again.']);}
     } finally {
-      setUploading(false);
+      if(imageLock.current===owned)imageLock.current=null;
+      if(isCurrent(owned))setUploading(false);
+      release?.();
     }
-  }, [blocks, uploading, eventId, mutate]);
+  }, [visit,eventId,mediaGuard,onChange,pageId,beginMediaWork,privatePhotos.upload,privatePhotos.loading]);
 
   const faqMarkerPlaced = blocks.some((b) => b.type === 'faq');
   // the soft cap sits UNDER 70's hard ceiling so the counters agree
@@ -131,7 +171,7 @@ export function DescriptionBlocksEditor({
     <View style={styles.container}>
       {blocks.length === 0 && (
         /* copy to the taste gate (the empty-state invitation rule) */
-        <Text style={styles.emptyText}>nothing here yet. text and photos build the page.</Text>
+        <Text style={styles.emptyText}>Make it yours with a story, photos, and details to look forward to.</Text>
       )}
 
       {blocks.map((block, index) => (
@@ -140,6 +180,7 @@ export function DescriptionBlocksEditor({
             {block.type === 'text' && (
               <TextInput
                 style={styles.textInput}
+                accessibilityLabel={`Text block ${index + 1}`}
                 value={block.content}
                 onChangeText={(t) => {
                   const next = [...blocks];
@@ -155,8 +196,8 @@ export function DescriptionBlocksEditor({
             )}
             {block.type === 'image' && (
               <View>
-                <Image
-                  source={{ uri: eventContentPublicUrl(block.path) }}
+                <EventMediaImage
+                  eventId={eventId} reference={block.path} kind="image"
                   style={styles.imagePreview}
                   contentFit="cover"
                 />
@@ -170,6 +211,7 @@ export function DescriptionBlocksEditor({
                 ) : (
                   <TouchableOpacity
                     style={styles.makeCoverBtn}
+                    accessibilityRole="button" accessibilityLabel={`Show photo block ${index + 1} first`}
                     onPress={() => makeCover(index)}
                     activeOpacity={0.85}
                   >
@@ -192,13 +234,13 @@ export function DescriptionBlocksEditor({
             )}
           </View>
           <View style={styles.blockControls}>
-            <TouchableOpacity onPress={() => move(index, -1)} hitSlop={8} disabled={index === 0}>
+            <TouchableOpacity style={styles.blockControl} accessibilityRole="button" accessibilityLabel={`Move ${block.type} block ${index + 1} up`} accessibilityState={{disabled: index === 0}} onPress={() => move(index, -1)} disabled={index === 0}>
               <ArrowUp size={16} color={index === 0 ? Colors.border : Colors.warmGray} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => move(index, 1)} hitSlop={8} disabled={index === blocks.length - 1}>
+            <TouchableOpacity style={styles.blockControl} accessibilityRole="button" accessibilityLabel={`Move ${block.type} block ${index + 1} down`} accessibilityState={{disabled: index === blocks.length - 1}} onPress={() => move(index, 1)} disabled={index === blocks.length - 1}>
               <ArrowDown size={16} color={index === blocks.length - 1 ? Colors.border : Colors.warmGray} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => remove(index)} hitSlop={8}>
+            <TouchableOpacity style={styles.blockControl} accessibilityRole="button" accessibilityLabel={`Remove ${block.type} block ${index + 1}`} onPress={() => remove(index)}>
               <X size={16} color={EventAction.error} strokeWidth={2} />
             </TouchableOpacity>
           </View>
@@ -211,9 +253,10 @@ export function DescriptionBlocksEditor({
           obvious action either way */}
       <View style={styles.addRow}>
         <TouchableOpacity
-          style={[styles.addPill, (full || uploading || (!canAddMedia && !onUnlockMedia)) && styles.addPillDisabled]}
+          accessibilityRole="button" accessibilityLabel="Add photos"
+          style={[styles.addPill, (full || uploading || mediaBusy || privatePhotos.busy || privatePhotos.loading || (!canAddMedia && !onUnlockMedia)) && styles.addPillDisabled]}
           onPress={canAddMedia ? handleAddImages : () => onUnlockMedia?.('photos')}
-          disabled={full || uploading || (!canAddMedia && !onUnlockMedia)}
+          disabled={full || uploading || mediaBusy || privatePhotos.busy || privatePhotos.loading || (!canAddMedia && !onUnlockMedia)}
           activeOpacity={0.85}
         >
           {uploading ? (
@@ -225,6 +268,7 @@ export function DescriptionBlocksEditor({
           <Text style={styles.addPillText}>photos</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="Add text block"
           style={[styles.addPill, full && styles.addPillDisabled]}
           onPress={() => {
             if (full) return;
@@ -238,13 +282,29 @@ export function DescriptionBlocksEditor({
           <Text style={styles.addPillText}>text</Text>
         </TouchableOpacity>
         {canAddMedia ? (
-          <VideoBlockUploader
+          <VideoBlockUploader appearance={appearance}
+            key={eventId}
             eventId={eventId}
-            disabled={full || uploading}
-            onReady={(path, poster) => mutate([...blocks, { type: 'video', path, poster }])}
+            mediaGuard={mediaGuard}
+            pageId={pageId}
+            pageScope={pageScope}
+            savedBlocks={savedBlocks}
+            beginMediaWork={beginMediaWork}
+            mediaBusy={mediaBusy||uploading||privatePhotos.busy}
+            disabled={full || uploading || mediaBusy || privatePhotos.busy}
+            onReady={(path, poster) => {
+              mediaGuard?.assertCurrent();
+              const current=latestBlocks.current;
+              const existing=current.find(b=>b.type==='video'&&b.path===path);
+              if(existing?.type==='video')return (existing.poster??null)===(poster??null);
+              if(current.length>=Math.min(BLOCKS_MAX,GALLERY_SOFT_CAP))return false;
+              mutate([...current,{type:'video',path,poster}]);
+              return true;
+            }}
           />
         ) : (
           <TouchableOpacity
+            accessibilityRole="button" accessibilityLabel="Add video"
             style={[styles.addPill, (full || !onUnlockMedia) && styles.addPillDisabled]}
             onPress={() => onUnlockMedia?.('video')}
             disabled={full || !onUnlockMedia}
@@ -256,6 +316,7 @@ export function DescriptionBlocksEditor({
         )}
         {!faqMarkerPlaced && (
           <TouchableOpacity
+            accessibilityRole="button" accessibilityLabel="Add FAQ position"
             style={[styles.addPill, full && styles.addPillDisabled]}
             onPress={() => {
               if (full) return;
@@ -284,44 +345,59 @@ export function DescriptionBlocksEditor({
         <Text style={styles.limitText}>{blocks.length} of {GALLERY_SOFT_CAP} blocks</Text>
       )}
 
+      {pageId && <View>
+        {privatePhotos.busy && <>
+          <Text accessibilityLiveRegion="polite" style={styles.limitText}>{privatePhotos.progress?.phase==='uploading'?'Uploading your photo…':'Checking your photo…'}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel photo upload" onPress={()=>{if(imageLock.current)cancelledBatch.current=imageLock.current;privatePhotos.cancel();}}><Text style={styles.addPillText} numberOfLines={1}>Cancel upload</Text></TouchableOpacity>
+        </>}
+        {!!privatePhotos.error&&<Text accessibilityRole="alert" style={styles.problemText}>{privatePhotos.error}</Text>}
+        {!uploading&&!privatePhotos.busy&&privatePhotos.attempts.map((attempt,index)=><View key={attempt.mediaId}>
+          <Text style={styles.limitText}>Saved photo upload {index+1}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retry saved photo upload ${index+1}`} disabled={full||mediaBusy} onPress={()=>void recovery(()=>privatePhotos.retry(attempt))}><Text style={styles.addPillText} numberOfLines={1}>Retry upload</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Discard saved photo upload ${index+1}`} disabled={mediaBusy} onPress={()=>void recovery(()=>privatePhotos.discard(attempt))}><Text style={styles.addPillText} numberOfLines={1}>Discard upload</Text></TouchableOpacity>
+        </View>)}
+        {!!privatePhotos.error&&!privatePhotos.busy&&<TouchableOpacity accessibilityRole="button" accessibilityLabel="Check saved photo uploads" disabled={uploading||mediaBusy||privatePhotos.loading} onPress={()=>void privatePhotos.refresh()}><Text style={styles.addPillText} numberOfLines={1}>Check uploads</Text></TouchableOpacity>}
+      </View>}
+
       {uploadProblems.map((problem, i) => (
         <Text key={`p-${i}`} style={styles.problemText}>{problem}</Text>
       ))}
 
       {full && (
         /* copy to the taste gate: 70's 30-block ceiling */
-        <Text style={styles.limitText}>that is the whole page. thirty blocks is the ceiling.</Text>
+        <Text style={styles.limitText}>Your page has reached its {Math.min(BLOCKS_MAX, GALLERY_SOFT_CAP)}-block limit.</Text>
       )}
 
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+function descriptionStyles(fonts?: AfterglowFontFamilies) { return StyleSheet.create({
   container: { gap: 10 },
-  emptyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
+  emptyText: { fontFamily: fonts?.regular ?? Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textMedium },
   blockCard: {
     backgroundColor: Colors.white,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
     padding: 10,
-    flexDirection: 'row',
     gap: 8,
   },
-  blockBody: { flex: 1 },
+  blockBody: { minWidth: 0 },
   textInput: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts?.regular ?? Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
     minHeight: 48,
     textAlignVertical: 'top',
   },
   imagePreview: { width: '100%', height: IMAGE_PREVIEW_HEIGHT, borderRadius: 8, backgroundColor: Colors.inputBg },
-  faqMarkerText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  blockControls: { justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2, gap: 8 },
+  faqMarkerText: { fontFamily: fonts?.medium ?? Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.warmGray },
+  blockControls: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4 },
+  blockControl: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   addRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   addPill: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -332,9 +408,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   addPillDisabled: { opacity: 0.4 },
-  addPillText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  limitText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2 },
-  problemText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
+  addPillText: { fontFamily: fonts?.semibold ?? Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  limitText: { fontFamily: fonts?.regular ?? Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2 },
+  problemText: { fontFamily: fonts?.regular ?? Fonts.sans, fontSize: FontSizes.bodySM, color: EventAction.error },
   // doc 80 section C: the cover badge is the gold success family on
   // brandDeep text, NOT a second terracotta accent
   coverBadge: {
@@ -346,7 +422,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  coverBadgeText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
+  coverBadgeText: { fontFamily: fonts?.semibold ?? Fonts.sansBold, fontSize: FontSizes.micro, color: Colors.brandDeep },
   makeCoverBtn: {
     position: 'absolute',
     left: 8,
@@ -356,7 +432,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  makeCoverText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.darkWarm },
+  makeCoverText: { fontFamily: fonts?.medium ?? Fonts.sansMedium, fontSize: FontSizes.micro, color: Colors.darkWarm },
   videoChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -366,5 +442,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 14,
   },
-  videoChipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventSurface.onMedia },
-});
+  videoChipText: { fontFamily: fonts?.medium ?? Fonts.sansMedium, fontSize: FontSizes.bodySM, color: EventSurface.onMedia },
+}); }

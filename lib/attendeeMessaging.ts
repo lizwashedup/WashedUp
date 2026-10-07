@@ -1,27 +1,10 @@
-/**
- * Native compose-and-preview layer for Build 35's event-communications
- * cluster (Screens 6 event messages, 60 reminder settings, 61 attendee
- * composer). Mirrors washedup-web's src/lib/communities/organizerData.ts /
- * attendeeMessaging.ts naming and semantics -- Screen 6's own gap says
- * "port rather than invent" -- but deliberately does NOT port that file's
- * SEND orchestration (the daily cap, opt-out lookup, essential-reason
- * enforcement, or the attendee_message_sends / attendee_message_opt_outs
- * tables). That backend is still a DRAFT migration living in the web repo
- * (supabase/migrations/20260904060000_attendee_message_send.sql, header:
- * "DO NOT APPLY WITHOUT JOSH'S WORD"), gated behind
- * ATTENDEE_MESSAGE_SEND_ENABLED, which defaults off everywhere including on
- * web today. Building a second, independent implementation of that
- * safety-critical logic here would create two places recipient/cap logic
- * can drift apart -- exactly what attendeeMessaging.ts's own header says it
- * was written to avoid ("so there is exactly one place recipient logic
- * lives"). So this file only computes real, live audience data for preview
- * and review; attendee-message.tsx is honest that sending itself is not
- * open yet, the same "the button never lies" principle already used twice
- * in this app (event-summary.tsx's messages row, web's own held-send
- * banner in AttendeeMessageComposer.tsx).
- */
+/** Existing native audience helpers and self-preview. Atomic review/send uses
+ * attendeeMessageSend.ts and the same PostgreSQL contract as the web composer.
+ * Rollout remains gated until coherent isolated verification and activation. */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { CreatorPageScope } from './creatorPageReview';
+import { scopedTicketRequest } from './creatorTicketRead';
 import { supabase } from './supabase';
 import { isLiveSeat, type DoorAttendee } from './ticketAttendees';
 
@@ -95,12 +78,13 @@ export function countMessageRecipients(seats: DoorAttendee[], filter: SeatFilter
  * count-only head request, never a row fetch: a composer preview never
  * needs to know who they are, only how many.
  */
-export async function getEventRsvpGoingCount(eventId: string): Promise<number> {
-  const { count, error } = await supabase
+export async function getEventRsvpGoingCount(eventId: string, scope?: CreatorPageScope): Promise<number> {
+  const { count, error } = await scopedTicketRequest(scope, () => supabase
     .from('explore_event_rsvps')
     .select('user_id', { count: 'exact', head: true })
     .eq('explore_event_id', eventId)
-    .eq('status', 'going');
+    .eq('status', 'going'));
+  if (scope && (error || !Number.isSafeInteger(count) || count! < 0)) throw new Error('RSVPs could not be loaded.');
   if (error) return 0;
   return count ?? 0;
 }
@@ -110,19 +94,21 @@ export async function getEventRsvpGoingCount(eventId: string): Promise<number> {
  * own account via the same OneSignal pipeline a real send would use
  * (app_notifications -> claim_pending_push_notifications ->
  * send-push-notifications), completely independent of the real send backend
- * described in this file's header (no attendee_message_sends row, no daily
+ * described in this file's header (no attendee_message_sends row, a separate test-only daily
  * cap, no opt-out lookup -- see the RPC's own migration). The RPC takes no
  * audience parameter at all -- auth.uid() is the only possible recipient,
  * re-verified server-side on every call -- so there is no way for this to
  * reach anyone but the caller.
  */
-export async function sendAttendeeMessageTestToSelf(eventId: string, subject: string, body: string): Promise<void> {
-  const { error } = await supabase.rpc('send_attendee_message_test_to_self', {
+export async function sendAttendeeMessageTestToSelf(eventId: string, subject: string, body: string, scope?: CreatorPageScope): Promise<void> {
+  if (!subject.trim() || [...subject.trim()].length > MESSAGE_SUBJECT_MAX || !body.trim() || [...body.trim()].length > 2000) throw new Error('A test needs a subject and a message of up to 2,000 characters.');
+  const { data, error } = await scopedTicketRequest(scope, () => supabase.rpc('send_attendee_message_test_to_self', {
     p_event_id: eventId,
     p_subject: subject,
     p_body: body,
-  });
+  }));
   if (error) throw error;
+  if (typeof data !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data)) throw new Error('Test queuing could not be confirmed. Check your inbox before trying again.');
 }
 
 // ─── local drafts ──────────────────────────────────────────────────────

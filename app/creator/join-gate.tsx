@@ -1,3 +1,6 @@
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { ScaledText as Text } from '../../components/ScaledText';
+import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
 /**
  * Creator mode: the join gate settings (doc 09). The three original things a
  * leader writes once and every joiner sees: the welcome message at the top
@@ -14,10 +17,9 @@
  * updateJoinQuestionsConfig) so an unmigrated column can never break them.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Text,
   ScrollView,
   TextInput,
   TouchableOpacity,
@@ -29,9 +31,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack, Redirect } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
+import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
@@ -50,11 +51,64 @@ import {
   getCommunityRestrictedGender,
   type JoinPolicy,
 } from '../../lib/creatorMode';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { JOIN_GATE_ENABLED, CONFIGURABLE_JOIN_QUESTIONS_ENABLED } from '../../constants/FeatureFlags';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
 
 export default function JoinGateScreen() {
+  const { scope, account, focused } = useCreatorPageScope('legacy-joining-settings');
+  const reader = useId();
+  const ready = !!scope && !account.isLoading && !account.error;
+  const accessRead = useQuery({
+    queryKey: ['creator-access', account.viewerId, account.epoch, reader],
+    enabled: ready,
+    retry: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    queryFn: async () => {
+      if (!account.viewerId || !account.isCurrent()) throw new Error('This account changed.');
+      const access = await requestWithDeadline(getCreatorAccess(account.viewerId), 12_000);
+      if (!account.isCurrent()) throw new Error('This account changed.');
+      return access;
+    },
+  });
+  const access = ready && account.isCurrent() && !accessRead.isError && accessRead.isFetchedAfterMount ? accessRead.data : undefined;
+  const community = useLedCommunity(access);
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
+  const router = useRouter();
+  if (access && !canManageMembers(access)) return <Redirect href={creatorLandingRoute(access)} />;
+  if (scope && access && community) {
+    return <JoinGateEditor key={`${account.viewerId}:${account.epoch}:${community.id}`} community={community}
+      scope={scope} />;
+  }
+  const failed = !!account.error || accessRead.isError;
+  return <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <Stack.Screen options={{ headerShown: false }} />
+    <CreatorScreenHeader title="Joining settings" onBack={() => router.back()} />
+    <View style={styles.centered}>
+      {failed ? <>
+        <Text style={styles.hint}>Could not check your creator access. Try again.</Text>
+        <TouchableOpacity style={styles.previewBtn} accessibilityRole="button" onPress={() => {
+          if (!focused || !account.isCurrent() || (scope && !scope.isCurrent())) return;
+          if (account.error) void account.retry();
+          else if (account.isCurrent()) void accessRead.refetch();
+        }}><Text style={styles.previewBtnText}>Retry</Text></TouchableOpacity>
+      </> : account.viewerId === null ? <Text style={styles.hint}>Sign in to manage joining settings.</Text>
+        : account.isLoading || !access ? <ActivityIndicator size="large" color={Colors.terracotta} />
+        : <Text style={styles.hint}>no community on this account yet.</Text>}
+    </View>
+  </SafeAreaView>;
+}
+
+function JoinGateEditor({ community, scope }: {
+  community: NonNullable<ReturnType<typeof useLedCommunity>>; scope: CreatorPageScope;
+}) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [welcome, setWelcome] = useState('');
@@ -70,24 +124,28 @@ export default function JoinGateScreen() {
   const [saving, setSaving] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  const { data: access, isLoading: accessLoading } = useQuery({
-    queryKey: ['creator-access'],
-    queryFn: getCreatorAccess,
-  });
-  const community = useLedCommunity(access);
-
-  const settingsKey = ['join-gate', community?.id];
-  const { data: settings, isLoading } = useQuery({
+  const latestScope = useRef(scope), mounted = useRef(false), actionLock = useRef(false);
+  useLayoutEffect(() => { latestScope.current = scope; }, [scope]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const current = () => mounted.current && latestScope.current === scope && scope.isCurrent();
+  const settingsKey = ['join-gate', community.id, scope.userId];
+  const { data: settings, isLoading, isError: settingsError, isFetching, isFetchedAfterMount, refetch } = useQuery({
     queryKey: settingsKey,
-    queryFn: () => getJoinGateSettings(community!.id),
-    enabled: !!community,
+    queryFn: async () => {
+      if (!current()) throw new Error('These settings are no longer active.');
+      const result = await requestWithDeadline(getJoinGateSettings(community.id), 12_000);
+      if (!current()) throw new Error('These settings are no longer active.');
+      return result;
+    },
+    retry: false,
+    staleTime: 0,
   });
 
   // proposal 91: self-flipping join-policy toggle. null until the column
   // lands, then the toggle persists each tap immediately (its own write,
   // separate from the text-field save).
   const { data: fetchedPolicy = null } = useQuery({
-    queryKey: ['join-policy', community?.id],
+    queryKey: ['join-policy', community.id, scope.userId],
     queryFn: () => getJoinPolicy(community!.id),
     enabled: !!community,
   });
@@ -98,7 +156,7 @@ export default function JoinGateScreen() {
   // inventory C-08: live counts next to the picker, and the source for the
   // "you have N waiting" confirm copy below.
   const { data: counts } = useQuery({
-    queryKey: ['creator-member-counts', community?.id],
+    queryKey: ['creator-member-counts', community.id, scope.userId],
     queryFn: () => getCommunityMemberCounts(community!.id),
     enabled: !!community,
   });
@@ -106,24 +164,29 @@ export default function JoinGateScreen() {
   // Liz decision #11 (2026-09-03): self-flipping, same double-gate shape as
   // join_policy above -- hidden until both the flag is on AND the column
   // read succeeds.
-  const { data: questionsConfig = null } = useQuery({
-    queryKey: ['join-questions-config', community?.id],
+  const questionsRead = useQuery({
+    queryKey: ['join-questions-config', community.id, scope.userId],
     queryFn: () => getJoinQuestionsConfig(community!.id),
     enabled: !!community && CONFIGURABLE_JOIN_QUESTIONS_ENABLED,
   });
 
+  const questionsConfig = questionsRead.isFetchedAfterMount && !questionsRead.isError && !questionsRead.isFetching
+    ? questionsRead.data ?? null : null;
+
   // Gates the rules-confirmation toggle: only offered when this community
   // actually has a real eligibility restriction (Liz's own condition).
   const { data: restrictedGender = null } = useQuery({
-    queryKey: ['community-restricted-gender', community?.id],
+    queryKey: ['community-restricted-gender', community.id, scope.userId],
     queryFn: () => getCommunityRestrictedGender(community!.id),
     enabled: !!community && CONFIGURABLE_JOIN_QUESTIONS_ENABLED,
   });
 
   const commitJoinPolicy = async (policy: JoinPolicy) => {
+    if (!current() || actionLock.current || !seeded || settingsError) return;
     const prev = joinPolicy;
     setJoinPolicyState(policy); // optimistic
-    const ok = await setJoinPolicy(community!.id, policy);
+    const ok = await setJoinPolicy(community.id, policy);
+    if (!current()) return;
     if (!ok) {
       setJoinPolicyState(prev); // revert on a no-op/denied write
       setAlertInfo({ title: 'That did not save', message: 'give it another try.' });
@@ -136,7 +199,7 @@ export default function JoinGateScreen() {
   // confirm step, not an instant optimistic flip, whenever people are
   // actually waiting right now.
   const setJoinPolicyLocal = (policy: JoinPolicy) => {
-    if (!community || policy === joinPolicy) return;
+    if (!current() || !seeded || settingsError || policy === joinPolicy) return;
     const pendingCount = counts?.pending ?? 0;
     if (joinPolicy === 'approval_required' && pendingCount > 0) {
       setAlertInfo({
@@ -153,31 +216,32 @@ export default function JoinGateScreen() {
   };
 
   useEffect(() => {
-    if (settings && !seeded) {
+    if (current() && settings && !settingsError && isFetchedAfterMount && !isFetching && !seeded) {
       setWelcome(settings.join_welcome_message ?? '');
       setQuestion(settings.join_intro_question ?? '');
       setGuidelines(settings.guidelines_url ?? '');
       setSeeded(true);
     }
-  }, [settings, seeded]);
+  }, [settings, settingsError, isFetchedAfterMount, isFetching, seeded, scope]);
 
   useEffect(() => {
-    if (questionsConfig && !questionsSeeded) {
+    if (current() && questionsConfig && !questionsSeeded) {
       setAskReason(questionsConfig.askReason);
       setAskSource(questionsConfig.askSource);
       setAskRulesConfirm(questionsConfig.askRulesConfirm);
       setOpenQuestion(questionsConfig.openQuestion ?? '');
       setQuestionsSeeded(true);
     }
-  }, [questionsConfig, questionsSeeded]);
+  }, [questionsConfig, questionsSeeded, scope]);
 
   const handleSave = async () => {
-    if (!community || saving) return;
+    if (!current() || actionLock.current || !seeded || !settings || settingsError || isLoading || isFetching) return;
     const url = guidelines.trim();
     if (url && !/^https?:\/\//i.test(url)) {
       setAlertInfo({ title: 'Check the link', message: 'The guidelines link needs to start with https://' });
       return;
     }
+    actionLock.current = true;
     setSaving(true);
     try {
       await updateJoinGateSettings(community.id, {
@@ -190,38 +254,43 @@ export default function JoinGateScreen() {
       // null means either the flag is off or the migration has not landed,
       // and in both cases the section above never rendered so there is
       // nothing here for the leader to have changed.
-      if (CONFIGURABLE_JOIN_QUESTIONS_ENABLED && questionsConfig) {
+      if (!current()) return;
+      if (CONFIGURABLE_JOIN_QUESTIONS_ENABLED && questionsConfig && questionsSeeded) {
         await updateJoinQuestionsConfig(community.id, {
           askReason,
           askSource,
           askRulesConfirm,
           openQuestion: openQuestion.trim() || null,
         });
+        if (!current()) return;
         queryClient.invalidateQueries({ queryKey: ['join-questions-config', community.id] });
       }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: settingsKey });
       setAlertInfo({ title: 'saved', message: 'your join gate is set. every joiner sees it.' });
     } catch (e) {
+      if (!current()) return;
       setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
-      setSaving(false);
+      actionLock.current = false;
+      if (mounted.current) setSaving(false);
     }
   };
-
-  if (access && !canManageMembers(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} hitSlop={12}>
-            <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
+        <CreatorScreenHeader title="Joining settings" onBack={() => { if (current()) router.back(); }} />
 
-        {accessLoading || (community && isLoading) ? (
+        {settingsError ? (
+          <View style={styles.centered}>
+            <Text style={styles.hint}>Could not load your joining settings. Retry to check your saved settings before editing.</Text>
+            <TouchableOpacity style={styles.previewBtn} accessibilityRole="button" disabled={isFetching} onPress={() => { if (current()) void refetch(); }}>
+              <Text style={styles.previewBtnText}>{isFetching ? 'Checking…' : 'Retry'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : isLoading || !settings || !seeded ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
@@ -241,8 +310,9 @@ export default function JoinGateScreen() {
             <Text style={styles.fieldHint}>shows at the top of the join popup, in your voice.</Text>
             <TextInput
               style={[styles.input, styles.inputMultiline]}
+              accessibilityLabel="Welcome message"
               value={welcome}
-              onChangeText={setWelcome}
+              onChangeText={(value) => { if (current() && !actionLock.current) setWelcome(value); }}
               multiline
               maxLength={1000}
               placeholder="hey, glad you found us."
@@ -271,6 +341,7 @@ export default function JoinGateScreen() {
                 <View style={styles.policyRow}>
                   <TouchableOpacity
                     style={[styles.policyPill, joinPolicy === 'open' && styles.policyPillOn]}
+                    accessibilityRole="radio" accessibilityState={{ selected: joinPolicy === 'open' }}
                     onPress={() => { hapticLight(); setJoinPolicyLocal('open'); }}
                     activeOpacity={0.85}
                   >
@@ -281,6 +352,7 @@ export default function JoinGateScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.policyPill, joinPolicy === 'approval_required' && styles.policyPillOn]}
+                    accessibilityRole="radio" accessibilityState={{ selected: joinPolicy === 'approval_required' }}
                     onPress={() => { hapticLight(); setJoinPolicyLocal('approval_required'); }}
                     activeOpacity={0.85}
                   >
@@ -300,7 +372,8 @@ export default function JoinGateScreen() {
                     that larger feature ships. */}
                 <TouchableOpacity
                   style={[styles.policyPill, styles.policyPillWide, joinPolicy === 'invite_only' && styles.policyPillOn]}
-                  onPress={() => { hapticLight(); setJoinPolicyLocal('invite_only'); }}
+                  accessibilityRole="radio" accessibilityState={{ selected: joinPolicy === 'invite_only' }}
+                    onPress={() => { hapticLight(); setJoinPolicyLocal('invite_only'); }}
                   activeOpacity={0.85}
                 >
                   {/* copy to the taste gate */}
@@ -323,8 +396,9 @@ export default function JoinGateScreen() {
             </Text>
             <TextInput
               style={styles.input}
+              accessibilityLabel="Introduction question"
               value={question}
-              onChangeText={setQuestion}
+              onChangeText={(value) => { if (current() && !actionLock.current) setQuestion(value); }}
               maxLength={200}
               placeholder="what's your go-to taco spot?"
               placeholderTextColor={Colors.inkSoft}
@@ -344,7 +418,8 @@ export default function JoinGateScreen() {
 
                 <TouchableOpacity
                   style={[styles.policyPill, styles.policyPillWide, askReason && styles.policyPillOn]}
-                  onPress={() => { hapticLight(); setAskReason((v) => !v); }}
+                  accessibilityRole="checkbox" accessibilityState={{ checked: askReason }}
+                  onPress={() => { if (!current() || actionLock.current) return; hapticLight(); setAskReason((v) => !v); }}
                   activeOpacity={0.85}
                 >
                   <Text style={[styles.policyText, askReason && styles.policyTextOn]}>
@@ -354,7 +429,8 @@ export default function JoinGateScreen() {
 
                 <TouchableOpacity
                   style={[styles.policyPill, styles.policyPillWide, askSource && styles.policyPillOn]}
-                  onPress={() => { hapticLight(); setAskSource((v) => !v); }}
+                  accessibilityRole="checkbox" accessibilityState={{ checked: askSource }}
+                  onPress={() => { if (!current() || actionLock.current) return; hapticLight(); setAskSource((v) => !v); }}
                   activeOpacity={0.85}
                 >
                   <Text style={[styles.policyText, askSource && styles.policyTextOn]}>
@@ -367,7 +443,8 @@ export default function JoinGateScreen() {
                 {restrictedGender !== null && (
                   <TouchableOpacity
                     style={[styles.policyPill, styles.policyPillWide, askRulesConfirm && styles.policyPillOn]}
-                    onPress={() => { hapticLight(); setAskRulesConfirm((v) => !v); }}
+                    accessibilityRole="checkbox" accessibilityState={{ checked: askRulesConfirm }}
+                  onPress={() => { if (!current() || actionLock.current) return; hapticLight(); setAskRulesConfirm((v) => !v); }}
                     activeOpacity={0.85}
                   >
                     <Text style={[styles.policyText, askRulesConfirm && styles.policyTextOn]}>
@@ -380,8 +457,9 @@ export default function JoinGateScreen() {
                 <Text style={styles.fieldHint}>write one more question, or leave this blank to skip it.</Text>
                 <TextInput
                   style={styles.input}
-                  value={openQuestion}
-                  onChangeText={setOpenQuestion}
+                  accessibilityLabel="Additional question"
+              value={openQuestion}
+                  onChangeText={(value) => { if (current() && !actionLock.current) setOpenQuestion(value); }}
                   maxLength={200}
                   placeholder="ask anything else you want to know"
                   placeholderTextColor={Colors.inkSoft}
@@ -397,8 +475,9 @@ export default function JoinGateScreen() {
             </Text>
             <TextInput
               style={styles.input}
+              accessibilityLabel="Guidelines link"
               value={guidelines}
-              onChangeText={setGuidelines}
+              onChangeText={(value) => { if (current() && !actionLock.current) setGuidelines(value); }}
               autoCapitalize="none"
               keyboardType="url"
               placeholder="https://"
@@ -406,7 +485,7 @@ export default function JoinGateScreen() {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
-            <TouchableOpacity style={styles.previewBtn} onPress={() => { hapticLight(); setPreviewVisible(true); }}>
+            <TouchableOpacity style={styles.previewBtn} onPress={() => { if (current() && seeded && !settingsError) { hapticLight(); setPreviewVisible(true); } }}>
               <Text style={styles.previewBtnText}>preview</Text>
             </TouchableOpacity>
 
@@ -423,7 +502,7 @@ export default function JoinGateScreen() {
 
       {community && (
         <JoinCommunityPopup
-          visible={previewVisible}
+          visible={previewVisible && scope.isCurrent()}
           previewMode
           gate={{
             communityId: community.id,
@@ -437,23 +516,23 @@ export default function JoinGateScreen() {
             openQuestion: openQuestion.trim() || null,
           }}
           joinsInstantly={joinPolicy === 'open'}
-          onClose={() => setPreviewVisible(false)}
-          onRequested={() => setPreviewVisible(false)}
+          onClose={() => { if (current()) setPreviewVisible(false); }}
+          onRequested={() => { if (current()) setPreviewVisible(false); }}
         />
       )}
 
       <BrandedAlert
-        visible={!!alertInfo}
+        visible={!!alertInfo && scope.isCurrent()}
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        onClose={() => { if (current()) setAlertInfo(null); }}
       />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -461,29 +540,29 @@ const styles = StyleSheet.create({
   headerBtn: { padding: 4 },
   content: { padding: 20, paddingBottom: 60 },
   title: {
-    fontFamily: Fonts.display,
+    fontFamily: fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
     color: Colors.darkWarm,
     marginBottom: 8,
   },
   hint: {
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodySM,
     color: Colors.secondary,
     lineHeight: LineHeights.bodySM,
     marginBottom: 18,
   },
   fieldLabel: {
-    fontFamily: Fonts.sansBold,
+    fontFamily: fonts.semibold,
     fontSize: FontSizes.caption,
     color: Colors.terracotta,
     letterSpacing: 1.5,
     marginBottom: 2,
   },
-  fieldHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
-  policyPreview: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 8 },
-  policyNote: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: -4, marginBottom: 16 },
+  fieldHint: { fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.tertiary, marginBottom: 6 },
+  policyPreview: { fontFamily: fonts.medium, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 8 },
+  policyNote: { fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: -4, marginBottom: 16 },
   input: {
     backgroundColor: Colors.inputBg,
     borderRadius: 12,
@@ -491,7 +570,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontFamily: Fonts.sans,
+    fontFamily: fonts.regular,
     fontSize: FontSizes.bodyMD,
     color: Colors.darkWarm,
     marginBottom: 16,
@@ -510,8 +589,8 @@ const styles = StyleSheet.create({
   // overrides policyPill's flex:1 (meant for the two-pill row) so this
   // standalone third pill renders as its own full-width block instead
   policyPillWide: { flex: 0, marginTop: 8, marginBottom: 8 },
-  policyText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  policyTextOn: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
+  policyText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
+  policyTextOn: { fontFamily: fonts.semibold, color: Colors.terracotta },
   saveBtn: {
     backgroundColor: Colors.terracotta,
     borderRadius: 999,
@@ -520,7 +599,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   saveBtnBusy: { opacity: 0.6 },
-  saveBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
+  saveBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyLG, color: Colors.white },
   previewBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
@@ -531,5 +610,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
   },
-  previewBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  previewBtnText: { fontFamily: fonts.medium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });
+}

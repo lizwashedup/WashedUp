@@ -1,109 +1,111 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { ChevronLeft, Ticket } from 'lucide-react-native';
 import Colors from '../constants/Colors';
-import { Fonts, FontSizes } from '../constants/Typography';
-import { clearPendingCheckout, peekPendingCheckout, stashPendingCheckout } from '../lib/pendingLink';
+import { Fonts, FontSizes, LineHeights } from '../constants/Typography';
+import { peekPendingCheckout, stashPendingDestination } from '../lib/pendingLink';
 import { getOrder } from '../lib/ticketing';
+import { usePublicPageScope } from '../hooks/usePublicPageScope';
 
 const ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type ReturnState = { kind: 'loading' | 'error' | 'unavailable' | 'closed' | 'pending'; orderId?: string; eventId?: string };
 
-/** Native landing point for the washedup.app Stripe-return bridge. */
+/** The return link describes the browser visit, never proof of a payment outcome. */
 export default function CheckoutReturnScreen() {
-  const { checkout, order } = useLocalSearchParams<{
-    checkout?: string | string[];
-    order?: string | string[];
-  }>();
+  const { checkout, order } = useLocalSearchParams<{ checkout?: string | string[]; order?: string | string[] }>();
   const rawCheckout = Array.isArray(checkout) ? checkout[0] : checkout;
   const rawOrder = Array.isArray(order) ? order[0] : order;
   const directOrderId = rawOrder && ORDER_ID.test(rawOrder) ? rawOrder : null;
   const cancelled = rawCheckout === 'cancelled';
-  const [cancelEventId, setCancelEventId] = useState<string | null>(null);
+  const { scope, account } = usePublicPageScope(`checkout-return:${rawOrder ?? ''}:${cancelled}`);
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ scope: typeof scope; value: ReturnState }>();
+  const value: ReturnState = result?.scope === scope ? result.value : { kind: 'loading' };
 
   useEffect(() => {
-    let live = true;
-    (async () => {
-      if (cancelled) {
-        await clearPendingCheckout();
-        if (directOrderId) {
-          try {
-            const canceledOrder = await getOrder(directOrderId);
-            if (live) setCancelEventId(canceledOrder?.event_id ?? null);
-          } catch {
-            // The buyer can still return to Scene if the pending row is gone.
-          }
-        }
+    if (!scope?.userId || !scope.isCurrent()) return;
+    let active = true;
+    const current = () => active && scope.isCurrent();
+    const show = (next: ReturnState) => { if (current()) setResult({ scope, value: next }); };
+    show({ kind: 'loading' });
+    void (async () => {
+      // An invalid explicit ID must not open a different, previously saved order.
+      if (rawOrder && !directOrderId) { show({ kind: 'unavailable' }); return; }
+      const orderId = directOrderId ?? await peekPendingCheckout(true);
+      if (!current()) return;
+      if (!orderId) { show({ kind: 'closed' }); return; }
+      const saved = await getOrder(orderId, { buyerUserId: scope.userId!, strict: true });
+      if (!current()) return;
+      if (!saved) { show({ kind: 'unavailable' }); return; }
+      if (cancelled && saved.status === 'pending') {
+        show({ kind: 'pending', orderId: saved.id, eventId: saved.event_id });
         return;
       }
-      if (directOrderId) await stashPendingCheckout(directOrderId);
-      const orderId = directOrderId ?? await peekPendingCheckout();
-      if (!live) return;
-      if (orderId) {
-        router.replace(`/tickets/order/${orderId}` as never);
-      } else {
-        router.replace('/tickets' as never);
-      }
-    })();
-    return () => { live = false; };
-  }, [cancelled, directOrderId]);
+      // The existing order screen owns settlement, tickets, refunds and their recovery.
+      // Never clear the durable handoff merely because the URL says cancelled.
+      router.replace(`/tickets/order/${saved.id}` as never);
+    })().catch(() => show({ kind: 'error' }));
+    return () => { active = false; };
+  }, [scope, rawOrder, directOrderId, cancelled, attempt]);
 
-  if (cancelled) {
-    return (
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.content}>
-          <Text style={styles.cancelTitle}>no worries, nothing was charged.</Text>
-          <Text style={styles.cancelBody}>your checkout was cancelled. the tickets are still there if you want them.</Text>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => router.replace(
-              (cancelEventId ? `/event/${cancelEventId}` : '/(tabs)/explore') as never,
-            )}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-          >
-            <Text style={styles.cancelButtonText}>{cancelEventId ? 'back to event' : "what's on"}</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.content}>
-        <ActivityIndicator color={Colors.terracotta} />
-        <Text style={styles.text}>opening your ticket</Text>
-      </View>
-    </SafeAreaView>
-  );
+  const signedOut = !account.isLoading && !account.error && account.viewerId === null;
+  const failed = !!account.error || value.kind === 'error';
+  const loading = !signedOut && !failed && (account.isLoading || value.kind === 'loading');
+  const heading = signedOut ? 'Sign in to continue' : failed ? 'Let’s check your checkout'
+    : value.kind === 'pending' ? 'Checkout is still pending'
+    : value.kind === 'unavailable' ? 'Check your tickets' : 'You’re back';
+  const body = signedOut ? 'Sign in with the account you used for checkout.'
+    : failed ? 'We couldn’t load the latest status. Try again before starting another checkout.'
+    : value.kind === 'pending' ? 'Your order hasn’t been confirmed yet. Open it to check the latest status.'
+    : value.kind === 'unavailable' ? 'This checkout isn’t available for this account. Your other orders are in Your tickets.'
+    : 'Open Your tickets to check your latest orders.';
+  const retry = () => { if (account.error) void account.retry().catch(() => undefined); else setAttempt(old => old + 1); };
+  const signIn = async () => {
+    if (!scope?.isCurrent()) return;
+    const destination = directOrderId ? `/checkout-return?order=${directOrderId}${cancelled ? '&checkout=cancelled' : ''}` : '/checkout-return';
+    await stashPendingDestination(destination);
+    if (scope.isCurrent()) router.replace('/(auth)/phone-entry' as never);
+  };
+  return <SafeAreaView style={styles.screen}>
+    <Stack.Screen options={{ headerShown: false }} />
+    <View style={styles.header}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Back to Scene" style={styles.back}
+        onPress={() => router.replace('/(tabs)/explore' as never)}><ChevronLeft size={22} color={Colors.asphalt} /></Pressable>
+      <Text style={styles.headerLabel}>Checkout</Text>
+    </View>
+    <ScrollView contentContainerStyle={styles.content}>
+      {loading ? <View style={styles.loading}>
+        <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Checking your order" />
+        <Text style={styles.body}>Checking your order…</Text>
+      </View> : <View style={styles.panel}>
+        <View style={styles.mark}><Ticket size={22} color={Colors.terracotta} /></View>
+        <Text accessibilityRole="header" style={styles.title}>{heading}</Text>
+        <Text accessibilityRole={failed ? 'alert' : undefined} style={styles.body}>{body}</Text>
+        <Pressable accessibilityRole="button" style={styles.primary}
+          onPress={signedOut ? () => void signIn() : failed ? retry : () => {
+            if (scope?.isCurrent()) router.replace((value.orderId ? `/tickets/order/${value.orderId}` : '/tickets') as never);
+          }}><Text numberOfLines={1} style={styles.primaryText}>{signedOut ? 'Sign in' : failed ? 'Try again' : value.orderId ? 'View order' : 'Your tickets'}</Text></Pressable>
+        {value.eventId && <Pressable accessibilityRole="button" style={styles.secondary}
+          onPress={() => { if (scope?.isCurrent()) router.replace(`/event/${value.eventId}` as never); }}><Text style={styles.secondaryText}>Back to event</Text></Pressable>}
+      </View>}
+    </ScrollView>
+  </SafeAreaView>;
 }
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.parchment },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  text: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textMedium },
-  cancelTitle: {
-    fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
-    textAlign: 'center',
-  },
-  cancelBody: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.textMedium,
-    textAlign: 'center',
-  },
-  cancelButton: {
-    minHeight: 48,
-    minWidth: 180,
-    borderRadius: 999,
-    backgroundColor: Colors.terracotta,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    marginTop: 12,
-  },
-  cancelButtonText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, minHeight: 56 },
+  back: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
+  content: { padding: 20 },
+  loading: { paddingVertical: 36, alignItems: 'center', gap: 12 },
+  panel: { padding: 20, borderRadius: 20, backgroundColor: Colors.white, gap: 12 },
+  mark: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
+  title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, lineHeight: LineHeights.displayMD, color: Colors.asphalt },
+  body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.textMedium },
+  primary: { minHeight: 44, alignSelf: 'flex-start', borderRadius: 22, backgroundColor: Colors.terracotta, paddingHorizontal: 20, paddingVertical: 12, justifyContent: 'center' },
+  primaryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  secondary: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  secondaryText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
 });

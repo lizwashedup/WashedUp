@@ -1,0 +1,12 @@
+import React from 'react';
+import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+import {Image} from 'expo-image';
+import {TouchableOpacity} from 'react-native';
+jest.mock('../../creator/pages/PublishedPageCover',()=>({PublishedPageCover:()=>null}));
+import {PublishedPageCover} from '../../creator/pages/PublishedPageCover';
+import {CommunityCard} from '../CommunityCard';
+let tree:ReactTestRenderer;
+const community:any={id:'page',name:'Sunday Table',handle:'sunday-table',description:'Neighbors together',member_count:6,cover_image:'legacy-cover'};
+afterEach(()=>act(()=>tree?.unmount()));
+it('preserves the existing legacy cover and card navigation',()=>{const open=jest.fn();act(()=>{tree=create(<CommunityCard community={community} leaderCard={null} width={240} onPress={open}/>);});expect(tree.root.findByType(Image).props.source).toEqual({uri:'legacy-cover'});act(()=>tree.root.findByType(TouchableOpacity).props.onPress());expect(open).toHaveBeenCalledTimes(1);});
+it('routes a new protected cover by exact page/media identity without a legacy fallback image',()=>{act(()=>{tree=create(<CommunityCard community={{...community,cover_media_id:'approved-cover'}} leaderCard={null} width={240} onPress={()=>{}}/>);});expect(tree.root.findByType(PublishedPageCover).props).toMatchObject({pageId:'page',mediaId:'approved-cover',height:120});expect(tree.root.findAllByType(Image)).toHaveLength(0);});

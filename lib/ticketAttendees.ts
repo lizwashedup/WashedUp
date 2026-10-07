@@ -9,6 +9,8 @@
  */
 
 import { supabase } from './supabase';
+import { assertTicketVisit, ticketReadAuthorization } from './creatorTicketRead';
+import type { CreatorPageScope } from './creatorPageReview';
 import { QUESTION_TYPES_WITH_OPTIONS } from './ticketing';
 import type { QuestionType, QuestionScope } from './ticketing';
 
@@ -43,8 +45,9 @@ export interface AttendeeCounts {
  * positions -> their order (name, status, tier) and their check-ins. is_active
  * is not a concept here; a seat exists once the order settled.
  */
-export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]> {
-  const { data, error } = await supabase
+export async function getEventAttendees(eventId: string, scope?: CreatorPageScope): Promise<DoorAttendee[]> {
+  const authorization = await ticketReadAuthorization(scope);
+  let request = supabase
     .from('ticket_order_positions')
     .select(
       'id, position_index, reference_code, voided_at, refunded_cents, ' +
@@ -53,6 +56,10 @@ export async function getEventAttendees(eventId: string): Promise<DoorAttendee[]
     )
     .eq('ticket_orders.event_id', eventId)
     .order('position_index', { ascending: true });
+  if (authorization) request = request.setHeader('Authorization', authorization);
+  const { data, error } = await request;
+  assertTicketVisit(scope);
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Event data could not be loaded.');
   if (error) throw error;
 
   // supabase-js cannot infer the multi-embed row shape, so it widens to its
@@ -148,12 +155,13 @@ export interface EventMoneySummary {
  * and any stripe_* column are never read here, matching organizerData.ts's
  * own column-projection rule.
  */
-export async function getEventMoneySummary(eventId: string): Promise<EventMoneySummary> {
+export async function getEventMoneySummary(eventId: string, scope?: CreatorPageScope): Promise<EventMoneySummary> {
   const empty: EventMoneySummary = {
     grossFaceCents: 0, processingCents: 0, commissionCents: 0,
     payoutStatus: null, payoutReleasedAt: null, payoutPaidAt: null,
   };
-  const [{ data: orderRows, error: orderErr }, { data: payoutRow }] = await Promise.all([
+  const authorization = await ticketReadAuthorization(scope);
+  const requests = [
     supabase
       .from('ticket_orders')
       .select('face_cents, processing_cents, commission_cents, status')
@@ -166,7 +174,10 @@ export async function getEventMoneySummary(eventId: string): Promise<EventMoneyS
       .select('status, released_at, paid_at')
       .eq('event_id', eventId)
       .maybeSingle(),
-  ]);
+  ];
+  const [{ data: orderRows, error: orderErr }, { data: payoutRow, error: payoutErr }] = await Promise.all(requests.map(request => authorization ? request.setHeader('Authorization', authorization) : request));
+  assertTicketVisit(scope);
+  if (scope && (orderErr || payoutErr || !Array.isArray(orderRows))) throw orderErr ?? payoutErr ?? new Error('Sales could not be loaded.');
   if (orderErr) return empty;
   const paid = ((orderRows ?? []) as {
     face_cents: number | null; processing_cents: number | null; commission_cents: number | null; status: string;
@@ -238,13 +249,18 @@ export function choicesFromRawAnswer(value: unknown): string[] {
  * authoring): same table, same is_active filter, same precedent this repo
  * already has for two readers of one table serving two different jobs.
  */
-export async function getEventQuestions(eventId: string): Promise<AttendeeQuestion[]> {
-  const { data, error } = await supabase
+export async function getEventQuestions(eventId: string, scope?: CreatorPageScope): Promise<AttendeeQuestion[]> {
+  const authorization = await ticketReadAuthorization(scope);
+  let request = supabase
     .from('ticket_questions')
     .select('id, prompt, qtype, scope, sort_order, options')
     .eq('event_id', eventId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true });
+  if (authorization) request = request.setHeader('Authorization', authorization);
+  const { data, error } = await request;
+  assertTicketVisit(scope);
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Event data could not be loaded.');
   if (error) return [];
   return (data ?? []).map((q: any) => ({
     id: q.id as string,
@@ -269,12 +285,17 @@ export interface RawTicketAnswer {
  * call) for an event with no active questions, see attendees.tsx's enabled
  * gate.
  */
-export async function getEventAnswers(orderIds: string[]): Promise<RawTicketAnswer[]> {
+export async function getEventAnswers(orderIds: string[], scope?: CreatorPageScope): Promise<RawTicketAnswer[]> {
   if (orderIds.length === 0) return [];
-  const { data, error } = await supabase
+  const authorization = await ticketReadAuthorization(scope);
+  let request = supabase
     .from('ticket_answers')
     .select('order_id, question_id, attendee_index, value')
     .in('order_id', orderIds);
+  if (authorization) request = request.setHeader('Authorization', authorization);
+  const { data, error } = await request;
+  assertTicketVisit(scope);
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Event data could not be loaded.');
   if (error) return [];
   return (data ?? []).map((r: any) => ({
     orderId: r.order_id as string,

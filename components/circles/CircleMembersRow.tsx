@@ -2,12 +2,12 @@
  * CircleMembersRow - the circle's roster as a horizontal row of face chips
  * (photo + first name). Read-only in v1; admin management lands in Step 8.
  */
-import React from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Plus } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import Colors, { AfterglowColors, CreatorSurfaceColors, SceneDetailColors as Scene } from '../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { CIRCLE_HOME } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
 import type { CircleMember } from '../../lib/circles/types';
@@ -22,22 +22,29 @@ function initialOf(m: CircleMember): string {
   return Array.from(displayName(m))[0].toUpperCase();
 }
 
-function MemberChip({ member }: { member: CircleMember }) {
+type Appearance = { fonts: AfterglowFontFamilies };
+function MemberChip({ member, appearance }: { member: CircleMember; appearance?: Appearance }) {
   const name = displayName(member);
+  const { fontScale } = useWindowDimensions();
+  const [failed, setFailed] = useState(false), mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const s = useMemo(() => appearance ? { ...styles, ...memberAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   return (
-    <View style={styles.chip}>
-      {member.profile_photo_url ? (
+    <View style={[s.chip, appearance && { width: Math.max(58, 58 * fontScale) }]} accessible accessibilityLabel={name}>
+      {member.profile_photo_url && !failed ? (
         <Image
           source={{ uri: member.profile_photo_url }}
-          style={styles.avatar}
+          style={s.avatar}
+          contentFit="cover" cachePolicy="memory-disk" recyclingKey={member.profile_photo_url}
+          accessible={false} onError={() => { if (mounted.current) setFailed(true); }}
           accessibilityIgnoresInvertColors
         />
       ) : (
-        <View style={[styles.avatar, styles.avatarFallback]}>
-          <Text style={styles.initial}>{initialOf(member)}</Text>
+        <View style={[s.avatar, s.avatarFallback]}>
+          <Text style={s.initial} accessible={false}>{initialOf(member)}</Text>
         </View>
       )}
-      <Text style={styles.name} numberOfLines={1}>
+      <Text style={s.name} numberOfLines={appearance ? undefined : 1} accessible={false}>
         {name}
       </Text>
     </View>
@@ -47,31 +54,35 @@ function MemberChip({ member }: { member: CircleMember }) {
 export default function CircleMembersRow({
   members,
   onAdd,
+  appearance,
 }: {
   members: CircleMember[];
   onAdd?: () => void;
+  appearance?: Appearance;
 }) {
+  const s = useMemo(() => appearance ? { ...styles, ...memberAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.row}
+      contentContainerStyle={s.row}
+      keyboardShouldPersistTaps="handled"
     >
       {members.map((m) => (
-        <MemberChip key={m.user_id} member={m} />
+        <MemberChip key={JSON.stringify([m.user_id, m.profile_photo_url])} member={m} appearance={appearance}/>
       ))}
       {onAdd && (
         <Pressable
           onPress={onAdd}
-          style={styles.chip}
+          style={s.chip}
           accessibilityRole="button"
           accessibilityLabel={COPY.circleAddTitle}
         >
-          <View style={[styles.avatar, styles.addAvatar]}>
-            <Plus size={20} color={Colors.terracotta} strokeWidth={2} />
+          <View style={[s.avatar, s.addAvatar]}>
+            <Plus size={20} color={appearance ? AfterglowColors.clay : Colors.terracotta} strokeWidth={2} />
           </View>
-          <Text style={[styles.name, styles.addName]} numberOfLines={1}>
-            {COPY.circleAddCell}
+          <Text style={[s.name, s.addName]} numberOfLines={1}>
+            {appearance ? 'Add' : COPY.circleAddCell}
           </Text>
         </Pressable>
       )}
@@ -124,3 +135,14 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
   },
 });
+
+function memberAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  row: { ...styles.row, gap: 12, paddingHorizontal: 20 },
+  chip: { ...styles.chip, width: 58, minHeight: 66 },
+  avatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: AfterglowColors.white, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, opacity: 1 },
+  avatarFallback: { ...styles.avatarFallback, backgroundColor: CreatorSurfaceColors.sunsetGoldLight },
+  initial: { ...AfterglowType.body, fontFamily: fonts.regular, color: Scene.text },
+  name: { ...AfterglowType.caption, fontFamily: fonts.regular, color: Scene.text, marginTop: 5, textAlign: 'center' },
+  addAvatar: { ...styles.addAvatar, backgroundColor: AfterglowColors.paper, borderColor: AfterglowColors.line, borderStyle: 'solid' },
+  addName: { fontFamily: fonts.semibold, color: AfterglowColors.clay },
+}); }

@@ -1,5 +1,9 @@
+import { SunsetWordmark } from '../../../components/SunsetWordmark';
+import { CreatorActionFill } from '../../../components/creator/CreatorActionFill';
+import { MEMBER_REDESIGN_APPEARANCE_ENABLED } from '../../../constants/MemberAppearance';
+import { readFeedMemberIds } from '../../../lib/feedMembership';
 import { Ionicons } from '@expo/vector-icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../../lib/haptics';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,7 +16,6 @@ import {
     Dimensions,
     Easing,
     FlatList,
-    Linking,
     Modal,
     Pressable,
     RefreshControl,
@@ -22,6 +25,7 @@ import {
     Text,
     TouchableOpacity,
     View,
+    useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -37,13 +41,15 @@ import { SaveSnackbar } from '../../../components/SaveSnackbar';
 import { ShareSheet } from '../../../components/ShareSheet';
 import ProfileButton from '../../../components/ProfileButton';
 import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Categories';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
+import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
+import { useFeedWishlist } from '../../../hooks/useFeedWishlist';
+import { usePlansNearMe } from '../../../hooks/usePlansNearMe';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
-import { PLAN_CARD_ACTIVITY_FIRST_ENABLED } from '../../../constants/FeatureFlags';
 import { fetchPlans, fetchRealMemberCounts, Plan } from '../../../lib/fetchPlans';
 import { toPlanCardPlan, type PlanCardPlan } from '../../../lib/creatorMarks';
-import { requestNearMeLocation, type NearMeCoords } from '../../../lib/location/nearMe';
 import { getLADayParts, dayKey, MONTHS } from '../../../lib/laDate';
 import { WhenCalendarSheet } from '../../../components/plans/WhenCalendarSheet';
 import { type CalendarDay } from '../../../components/calendar/WashedUpCalendar';
@@ -209,7 +215,7 @@ function WelcomeLoading({
 
   return (
     <Animated.View
-      style={[styles.welcomeLoading, { opacity: screenOpacity }]}
+      style={[baseStyles.welcomeLoading, { opacity: screenOpacity }]}
       pointerEvents={exitingRef.current ? 'none' : 'auto'}
     >
       <Animated.View
@@ -220,20 +226,20 @@ function WelcomeLoading({
       >
         <Image
           source={wLogo}
-          style={styles.welcomeLoadingLogo}
+          style={baseStyles.welcomeLoadingLogo}
           contentFit="contain"
           tintColor={Colors.brand}
         />
       </Animated.View>
       <Animated.Text
-        style={[styles.welcomeLoadingText, { opacity: textOpacity }]}
+        style={[baseStyles.welcomeLoadingText, { opacity: textOpacity }]}
       >
         finding plans for you
       </Animated.Text>
-      <View style={styles.welcomeLoadingDots}>
-        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot1 }]} />
-        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot2 }]} />
-        <Animated.View style={[styles.welcomeLoadingDot, { opacity: dot3 }]} />
+      <View style={baseStyles.welcomeLoadingDots}>
+        <Animated.View style={[baseStyles.welcomeLoadingDot, { opacity: dot1 }]} />
+        <Animated.View style={[baseStyles.welcomeLoadingDot, { opacity: dot2 }]} />
+        <Animated.View style={[baseStyles.welcomeLoadingDot, { opacity: dot3 }]} />
       </View>
     </Animated.View>
   );
@@ -418,6 +424,12 @@ function filterIntoSections(
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PlansScreen() {
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const appearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? { fonts } : undefined, [fonts]);
+  const { width } = useWindowDimensions();
+  const styles = useMemo(() => appearance ? { ...baseStyles, ...afterglowStyles(fonts, width) } : baseStyles, [appearance, fonts, width]);
+  const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
+  const muted = appearance ? AfterglowColors.muted : Colors.secondary;
   const [now, setNow] = useState(() => new Date());
   // Only update `now` when the calendar date actually changes (not every
   // focus). Section headers ("Tonight", "This Weekend") only care about
@@ -436,25 +448,16 @@ export default function PlansScreen() {
   // Near-me (WS-6): OFF by default. Location is requested just-in-time only on
   // the tap, never at startup. When off, the feed query omits geo params so the
   // default feed is byte-identical to before (off-state parity).
-  const [nearMe, setNearMe] = useState(false);
-  const [nearMeCoords, setNearMeCoords] = useState<NearMeCoords | null>(null);
+  const {
+    active: nearMeActive, coords: nearMeCoords, notice: nearMeNotice,
+    pending: nearMePending, pendingLabel: nearMePendingLabel,
+    toggle: handleNearMeToggle, recover: handleNearMeRecovery, clear: clearNearMe,
+  } = usePlansNearMe();
   // Default 25mi (not 10): p_radius_km is a hard server-side filter and the feed
   // is thin, so a tighter default too often returns an empty Near-me. Wider
   // default = the first tap usually shows something; presets let users narrow.
   const [radiusMi, setRadiusMi] = useState(25);
-  const [nearMeNotice, setNearMeNotice] = useState<string | null>(null);
-  const nearMeActive = nearMe && !!nearMeCoords;
   const radiusKm = radiusMi * 1.60934;
-
-  const handleNearMeToggle = useCallback(async () => {
-    hapticLight();
-    if (nearMe) { setNearMe(false); setNearMeNotice(null); return; }
-    if (nearMeCoords) { setNearMe(true); setNearMeNotice(null); return; } // reuse cached fix
-    const res = await requestNearMeLocation();
-    if (res.ok) { setNearMeCoords(res.coords); setNearMe(true); setNearMeNotice(null); }
-    else if (res.reason === 'denied') setNearMeNotice("Turn on location in Settings to see what's near you.");
-    else setNearMeNotice("Couldn't get your location. Try again.");
-  }, [nearMe, nearMeCoords]);
   const navigation = useNavigation();
 
   React.useEffect(() => {
@@ -477,6 +480,12 @@ export default function PlansScreen() {
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
   const [userId, setUserId] = React.useState<string | null>(null);
+  const saveOverlayOwner = useMemo(() => ({ userId }), [userId]);
+  const saveOverlayOwnerRef = useRef(saveOverlayOwner); saveOverlayOwnerRef.current = saveOverlayOwner;
+  useFocusEffect(useCallback(() => {
+    setSnackbar(null); setShareSheet(null);
+    return () => { setSnackbar(null); setShareSheet(null); };
+  }, [saveOverlayOwner]));
   const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const welcomeBannerOpacity = useRef(new Animated.Value(1)).current;
@@ -689,55 +698,8 @@ export default function PlansScreen() {
     }
   }, [isLoading, isRefetching, isError, userId, allPlans.length, refetch]);
 
-  const queryClient = useQueryClient();
-  const { data: wishlistIds = [], isLoading: wishlistsLoading } = useQuery<string[]>({
-    queryKey: ['wishlists', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      const { data } = await withTimeout(
-        supabase.from('wishlists').select('event_id').eq('user_id', userId),
-        WISHLISTS_TIMEOUT_MS,
-        { data: [] } as any,
-      );
-      return (data ?? []).map((r: any) => r.event_id as string);
-    },
-    enabled: !!userId,
-    staleTime: 30_000,
-  });
-
-  const wishlistMutation = useMutation({
-    mutationFn: async ({ eventId, current }: { eventId: string; current: boolean }) => {
-      if (!userId) return;
-      if (current) {
-        await supabase.from('wishlists').delete().eq('user_id', userId).eq('event_id', eventId);
-      } else {
-        await supabase.from('wishlists').insert({ user_id: userId, event_id: eventId });
-      }
-    },
-    // Optimistic: flip the saved state in the ['wishlists',userId] cache now so the
-    // bookmark fills/empties and persists instantly (the card's isWishlisted derives
-    // from this cache). Rolled back exactly on error; reconciled on settle.
-    onMutate: async ({ eventId, current }: { eventId: string; current: boolean }) => {
-      if (!userId) return { prev: undefined as string[] | undefined };
-      const key = ['wishlists', userId];
-      await queryClient.cancelQueries({ queryKey: key });
-      const prev = queryClient.getQueryData<string[]>(key);
-      queryClient.setQueryData<string[]>(key, (old = []) =>
-        current ? old.filter((id) => id !== eventId) : [...old, eventId],
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      hapticError();
-      if (ctx?.prev !== undefined) {
-        queryClient.setQueryData(['wishlists', userId], ctx.prev);
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
-      queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
-    },
-  });
+  const savedPlans = useFeedWishlist(userId, (eventId, title) => setSnackbar({ planId: eventId, planTitle: title }));
+  const { data: wishlistIds = [], isLoading: wishlistsLoading } = savedPlans;
 
   // ── Featured events query ────────────────────────────────────────────────────
   const { data: featuredPlans = [] } = useQuery<FeaturedPlan[]>({
@@ -759,7 +721,7 @@ export default function PlansScreen() {
 
       const { data: events, error } = await supabase
         .from('events')
-        .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
+        .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, target_age_min, target_age_max, max_invites, min_invites, member_count, status, creator_user_id, host_message, slug, is_featured, featured_type')
         .in('id', eligibleIds)
         .order('start_time', { ascending: true });
 
@@ -803,8 +765,11 @@ export default function PlansScreen() {
           id: e.id,
           title: e.title,
           host_message: e.host_message ?? null,
+          target_age_min: e.target_age_min,
+          target_age_max: e.target_age_max,
           start_time: e.start_time,
           end_time: e.end_time ?? null,
+          status: e.status,
           location_text: e.location_text ?? null,
           neighborhood: null,
           category: e.primary_vibe ?? null,
@@ -829,8 +794,8 @@ export default function PlansScreen() {
   });
 
   // Lightweight, bounded, NON-BLOCKING membership lookup. The feed RPC does not
-  // return a per-card membership flag, and isMember only flips a FULL plan's CTA
-  // ("Waitlist" -> "Let's Go") for plans you're already in. Fetch just the
+  // return a per-card membership flag. Confirmed membership gives cards the
+  // Going state and removes admission prompts. Fetch just the
   // joined + created event ids (ids only) so the feed renders immediately and
   // isMember fills in once this resolves; withTimeout-bounded so it can never
   // pin the feed load. The full My Plans data now lives in the Yours tab.
@@ -838,14 +803,7 @@ export default function PlansScreen() {
     queryKey: ['feed-member-ids', userId],
     queryFn: () => withTimeout((async () => {
       if (!userId) return [];
-      const [joinedRes, createdRes] = await Promise.all([
-        supabase.from('event_members').select('event_id').eq('user_id', userId).eq('status', 'joined'),
-        supabase.from('events').select('id').eq('creator_user_id', userId),
-      ]);
-      const ids = new Set<string>();
-      (joinedRes.data ?? []).forEach((r: any) => ids.add(r.event_id as string));
-      (createdRes.data ?? []).forEach((r: any) => ids.add(r.id as string));
-      return [...ids];
+      return readFeedMemberIds(userId);
     })(), MEMBER_IDS_TIMEOUT_MS, []),
     enabled: !!userId,
     staleTime: 30_000,
@@ -930,7 +888,7 @@ export default function PlansScreen() {
     ({ section }: { section: { title: string } }) => {
       return <Text style={styles.sectionHeader}>{section.title}</Text>;
     },
-    [],
+    [styles],
   );
 
   const { blockUser } = useBlock();
@@ -957,19 +915,15 @@ export default function PlansScreen() {
   // do not defeat PlanCard's memoization and redraw every visible card.
   const allPlansRef = useRef(allPlans);
   allPlansRef.current = allPlans;
-  const wishlistMutateRef = useRef(wishlistMutation.mutate);
-  wishlistMutateRef.current = wishlistMutation.mutate;
-  const handleWishlist = useCallback((id: string, current: boolean) => {
-    wishlistMutateRef.current({ eventId: id, current });
-    if (!current) {
-      const plan = allPlansRef.current.find((candidate) => candidate.id === id);
-      setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
-    } else {
-      setSnackbar(null);
-    }
+  const wishlistToggleRef = useRef(savedPlans.toggle);
+  wishlistToggleRef.current = savedPlans.toggle;
+  const handleWishlist = useCallback((id: string, _current: boolean) => {
+    setSnackbar(null);
+    const plan = allPlansRef.current.find(candidate => candidate.id === id);
+    wishlistToggleRef.current(id, plan?.title ?? '');
   }, []);
-  const handleFeaturedWishlist = useCallback((id: string, current: boolean) => {
-    wishlistMutateRef.current({ eventId: id, current });
+  const handleFeaturedWishlist = useCallback((id: string, _current: boolean) => {
+    wishlistToggleRef.current(id, '', false);
   }, []);
   const handleCreatorPress = useCallback((creatorId: string) => {
     setMiniProfileUserId(creatorId);
@@ -979,8 +933,11 @@ export default function PlansScreen() {
     ({ item }: { item: Plan }) => (
       <View style={styles.cardWrap}>
         <PlanCard
+          layout="creator-first"
           plan={toPlanCardPlan(item)}
-          layout={PLAN_CARD_ACTIVITY_FIRST_ENABLED ? 'activity-first' : 'creator-first'}
+          appearance={appearance}
+          wishlistPending={savedPlans.pending(item.id)}
+          wishlistDisabled={!savedPlans.canWrite}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
           onWishlist={handleWishlist}
@@ -991,7 +948,7 @@ export default function PlansScreen() {
         />
       </View>
     ),
-    [memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress],
+    [memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress, appearance, styles, savedPlans.revision, savedPlans.feedback, savedPlans.canWrite],
   );
 
   // Renders a cluster of duplicate plans as a horizontal scroll. Each member
@@ -1004,7 +961,7 @@ export default function PlansScreen() {
       }
       return (
         <View style={styles.clusterSection}>
-          <Text style={styles.clusterHeaderText}>popular plans</Text>
+          <Text style={styles.clusterHeaderText}>{appearance ? 'More people, same plan' : 'popular plans'}</Text>
           <FlatList
             decelerationRate="normal"
             horizontal
@@ -1015,7 +972,11 @@ export default function PlansScreen() {
             renderItem={({ item: p }) => (
               <View style={styles.clusterCardWrap}>
                 <PlanCard
+          layout="creator-first"
                   plan={toPlanCardPlan(p)}
+                  appearance={appearance}
+                  wishlistPending={savedPlans.pending(p.id)}
+                  wishlistDisabled={!savedPlans.canWrite}
                   isMember={!!memberIdSet[p.id]}
                   isWishlisted={!!wishlistedSet[p.id]}
                   onWishlist={handleWishlist}
@@ -1030,7 +991,7 @@ export default function PlansScreen() {
         </View>
       );
     },
-    [renderItem, memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress],
+    [renderItem, memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress, appearance, styles, savedPlans.revision, savedPlans.feedback, savedPlans.canWrite],
   );
 
   const persistWelcomeSeen = useCallback(async () => {
@@ -1062,12 +1023,15 @@ export default function PlansScreen() {
       <View style={styles.featuredSection}>
         <View style={styles.featuredHeaderRow}>
           <Ionicons name="star" size={14} color={Colors.goldenAmber} />
-          <Text style={styles.featuredHeaderText}>featured</Text>
+          <Text style={styles.featuredHeaderText}>{appearance ? 'Featured' : 'featured'}</Text>
         </View>
         {solo ? (
           <View style={styles.featuredSoloWrap}>
             <FeaturedEventCard
               plan={featuredPlans[0]}
+              appearance={appearance}
+              wishlistPending={savedPlans.pending(featuredPlans[0].id)}
+              wishlistDisabled={!savedPlans.canWrite}
               isMember={!!memberIdSet[featuredPlans[0].id]}
               isWishlisted={!!wishlistedSet[featuredPlans[0].id]}
               onWishlist={handleFeaturedWishlist}
@@ -1088,6 +1052,9 @@ export default function PlansScreen() {
             renderItem={({ item }) => (
               <FeaturedEventCard
                 plan={item}
+                appearance={appearance}
+                wishlistPending={savedPlans.pending(item.id)}
+                wishlistDisabled={!savedPlans.canWrite}
                 isMember={!!memberIdSet[item.id]}
                 isWishlisted={!!wishlistedSet[item.id]}
                 onWishlist={handleFeaturedWishlist}
@@ -1099,7 +1066,7 @@ export default function PlansScreen() {
         )}
       </View>
     );
-  }, [featuredPlans, memberIdSet, wishlistedSet, handleFeaturedWishlist, handleReport, handleBlock]);
+  }, [featuredPlans, memberIdSet, wishlistedSet, handleFeaturedWishlist, handleReport, handleBlock, appearance, styles, savedPlans.revision, savedPlans.feedback, savedPlans.canWrite]);
 
   // First-visit welcome banner. Renders inline at the top of the feed.
   // Uses the same persistence (welcome_seen_at + AsyncStorage) as before;
@@ -1124,6 +1091,7 @@ export default function PlansScreen() {
           people are making plans this week. jump in on one.
         </Text>
         <TouchableOpacity
+            accessibilityRole="button"
           onPress={handleWelcomeDismiss}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           style={styles.welcomeBannerCloseHit}
@@ -1164,14 +1132,18 @@ export default function PlansScreen() {
   // The overlay treats "watchdog fired" the same as "data ready": stop
   // capturing touches and begin its exit. Data keeps loading underneath.
   const overlayReady = dataReady || welcomeWatchdogFired;
-  const emptyMessage = nearMeActive
+  const emptyMessage = appearance
+    ? nearMeActive ? 'Make a plan nearby.' : allPlans.length > 0 ? 'Try another day or activity.' : 'What would you like to do?'
+    : nearMeActive
     ? 'Nothing quite that close yet.'
     : allPlans.length > 0
       ? 'No plans match your filters.'
       : 'No plans yet.';
   // Near-me empty is a proximity gap on a young feed, not a dead end. Reframe it
   // warmly: name the growth, hand back agency (post + share), no plea.
-  const emptySubText = nearMeActive
+  const emptySubText = appearance
+    ? nearMeActive ? 'Try a wider distance, or post something close to you.' : allPlans.length > 0 ? 'Clear your filters to see more plans, or post one of your own.' : 'Post a plan and give someone a reason to join you.'
+    : nearMeActive
     ? "We're still growing in LA. Post your own and share it around. That's how the map fills in."
     : null;
 
@@ -1182,7 +1154,7 @@ export default function PlansScreen() {
       {/* Header — logo + ProfileButton (Plans branding) */}
       <View style={styles.header}>
         <View style={styles.logoRow}>
-          <Image source={require('../../../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
+          {appearance ? <Text style={styles.screenTitle}>Plans</Text> : <SunsetWordmark style={styles.logo} />}
         </View>
         <ProfileButton />
       </View>
@@ -1195,23 +1167,30 @@ export default function PlansScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0, flexShrink: 0 }}
           contentContainerStyle={styles.filterRow}
           keyboardShouldPersistTaps="handled"
         >
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Filter by date"
+            accessibilityState={{ expanded: whenSheetOpen, selected: whenActive }}
             style={[styles.filterPill, whenActive && styles.filterPillActive]}
             onPress={() => {
               hapticLight();
               setWhenSheetOpen(true);
             }}
           >
-            <Calendar size={14} color={whenActive ? Colors.white : Colors.secondary} strokeWidth={2} />
+            <Calendar size={14} color={whenActive ? Colors.white : muted} strokeWidth={2} />
             <Text style={[styles.filterPillText, whenActive && styles.filterPillTextActive]} numberOfLines={1}>
               {whenLabel}
             </Text>
-            <ChevronDown size={10} color={whenActive ? Colors.white : Colors.secondary} strokeWidth={2.5} />
+            <ChevronDown size={10} color={whenActive ? Colors.white : muted} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Filter by category"
+            accessibilityState={{ expanded: categorySheetOpen, selected: categoryActive }}
             style={[styles.filterPill, categoryActive && styles.filterPillActive]}
             onPress={() => {
               hapticLight();
@@ -1221,17 +1200,21 @@ export default function PlansScreen() {
             <Text style={[styles.filterPillText, categoryActive && styles.filterPillTextActive]} numberOfLines={1}>
               {categoryLabel}
             </Text>
-            <ChevronDown size={10} color={categoryActive ? Colors.white : Colors.secondary} strokeWidth={2.5} />
+            <ChevronDown size={10} color={categoryActive ? Colors.white : muted} strokeWidth={2.5} />
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
             style={[styles.filterPill, nearMeActive && styles.filterPillActive]}
             onPress={handleNearMeToggle}
+            disabled={nearMePending}
+            accessibilityState={{ disabled: nearMePending, busy: nearMePending, selected: nearMeActive }}
             accessibilityLabel={nearMeActive ? 'Turn off near me' : 'Show plans near me'}
           >
-            <Ionicons name="location-outline" size={14} color={nearMeActive ? Colors.white : Colors.secondary} />
+            {nearMePending ? <ActivityIndicator size="small" color={accent} /> : <Ionicons name="location-outline" size={14} color={nearMeActive ? Colors.white : muted} />}
             <Text style={[styles.filterPillText, nearMeActive && styles.filterPillTextActive]}>Near me</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            accessibilityRole="button"
             style={[styles.filterPill, mapView && styles.filterPillActive]}
             onPress={() => {
               hapticSelection();
@@ -1242,7 +1225,7 @@ export default function PlansScreen() {
             {mapView ? (
               <LayoutList size={14} color={Colors.white} strokeWidth={2} />
             ) : (
-              <Map size={14} color={Colors.secondary} strokeWidth={2} />
+              <Map size={14} color={muted} strokeWidth={2} />
             )}
             <Text style={[styles.filterPillText, mapView && styles.filterPillTextActive]}>
               {mapView ? 'List' : 'Map'}
@@ -1256,6 +1239,7 @@ export default function PlansScreen() {
         <View style={styles.radiusRow}>
           {[5, 10, 25].map((mi) => (
             <TouchableOpacity
+            accessibilityRole="button"
               key={mi}
               style={[styles.radiusPill, radiusMi === mi && styles.radiusPillActive]}
               onPress={() => { hapticLight(); setRadiusMi(mi); }}
@@ -1265,27 +1249,60 @@ export default function PlansScreen() {
           ))}
         </View>
       )}
-      {nearMeNotice && (
+      {nearMePending ? (
+        <View style={styles.nearMeNotice} accessibilityLiveRegion="polite">
+          <Text style={styles.nearMeNoticeText}>{nearMePendingLabel}</Text>
+        </View>
+      ) : nearMeNotice ? (
         <TouchableOpacity
+            accessibilityRole="button"
           style={styles.nearMeNotice}
-          onPress={() => Linking.openSettings()}
-          accessibilityLabel="Open location settings"
+          onPress={handleNearMeRecovery}
+          accessibilityLabel={nearMeNotice.reason === 'denied' ? 'Open location settings' : 'Try again to find your location'}
         >
-          <Text style={styles.nearMeNoticeText}>{nearMeNotice}</Text>
+          <Text style={styles.nearMeNoticeText}>{nearMeNotice.message}</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
+
+      {savedPlans.identityError ? (
+        <View style={styles.feedback} accessibilityLiveRegion="polite">
+          <Text style={styles.feedbackText}>Couldn't check your account. Try again to save plans.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry account check" style={styles.feedbackAction} onPress={() => { void savedPlans.retryIdentity(); }}>
+            <Text numberOfLines={1} style={styles.feedbackActionText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : savedPlans.identityLoading && userId ? (
+        <View style={styles.feedback} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><Text style={styles.feedbackText}>Checking your account…</Text></View>
+      ) : savedPlans.isError ? (
+        <View style={styles.feedback} accessibilityLiveRegion="polite">
+          <Text style={styles.feedbackText}>Couldn't load your saved plans.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry saved plans" style={styles.feedbackAction} onPress={() => { void savedPlans.refetch(); }}>
+            <Text numberOfLines={1} style={styles.feedbackActionText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : savedPlans.feedback?.kind === 'error' ? (
+        <View style={styles.feedback} accessibilityLiveRegion="polite">
+          <Text style={styles.feedbackText}>{!savedPlans.feedback.call.wantSaved ? "Couldn't remove this plan from saved." : "Couldn't save this plan."}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry saving plan" style={styles.feedbackAction} onPress={savedPlans.retry}>
+            <Text numberOfLines={1} style={styles.feedbackActionText}>Try again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Dismiss save error" style={styles.feedbackAction} onPress={savedPlans.dismissFeedback}>
+            <Ionicons name="close" size={18} color={muted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Map view — lazy-loaded to avoid crash when react-native-maps fails (e.g. Expo Go) */}
       {mapView ? (
         mapLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+            <ActivityIndicator size="large" color={accent} />
           </View>
         ) : (
           <MapErrorBoundary onClose={() => setMapView(false)}>
             <Suspense fallback={
               <View style={styles.centered}>
-                <ActivityIndicator size="large" color={Colors.terracotta} />
+                <ActivityIndicator size="large" color={accent} />
               </View>
             }>
               <LazyPlansMapView
@@ -1304,7 +1321,7 @@ export default function PlansScreen() {
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Having trouble loading</Text>
               <Text style={styles.errorMessage}>Sign in may have timed out. Try again or restart the app.</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={() => {
+              <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => {
               setUserIdTimedOut(false);
               // Bounded retry: don't re-hit an unwrapped getSession() that can
               // hang the same way the initial load did.
@@ -1314,17 +1331,17 @@ export default function PlansScreen() {
                 { data: { session: null } } as any,
               ).then(({ data }) => setUserId(data.session?.user?.id ?? null));
             }}>
-                <Text style={styles.retryButtonText}>Try Again</Text>
+                <Text numberOfLines={1} style={styles.retryButtonText}>{appearance ? 'Try again' : 'Try Again'}</Text>
               </TouchableOpacity>
             </View>
           ) : !userId || isLoading || wishlistsLoading ? (
-            <SkeletonFeed />
+            appearance ? <View style={styles.centered} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><Text style={styles.errorMessage}>Finding plans…</Text></View> : <SkeletonFeed />
           ) : isError ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Couldn't load plans</Text>
-              <Text style={styles.errorMessage}>{friendlyError(error, 'Could not load plans. Pull to refresh or try again.')}</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-                <Text style={styles.retryButtonText}>Try Again</Text>
+              <Text style={styles.errorMessage}>{friendlyError(error, 'Please try again to see plans.')}</Text>
+              <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => refetch()}>
+                <Text numberOfLines={1} style={styles.retryButtonText}>{appearance ? 'Try again' : 'Try Again'}</Text>
               </TouchableOpacity>
             </View>
           ) : listEmpty ? (
@@ -1333,15 +1350,20 @@ export default function PlansScreen() {
               contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20 }}
               showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={accent} />
               }
             >
               {listHeader}
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>{emptyMessage}</Text>
                 {emptySubText && <Text style={styles.emptySubText}>{emptySubText}</Text>}
-                <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
-                  <Text style={styles.emptyButtonText}>Post a Plan</Text>
+                {appearance && (whenActive || categoryActive || nearMeActive) && (
+                  <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => { setWhenFilter([]); setDayFilter(null); setCategoryFilter([]); clearNearMe(); }}>
+                    <Text numberOfLines={1} style={styles.retryButtonText}>Clear filters</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity accessibilityRole="button" style={styles.emptyButton} onPress={() => router.push('/(tabs)/post')}>
+                  <CreatorActionFill /><Text numberOfLines={1} style={styles.emptyButtonText}>{appearance ? 'Post a plan' : 'Post a Plan'}</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -1362,7 +1384,7 @@ export default function PlansScreen() {
               maxToRenderPerBatch={20}
               windowSize={11}
               refreshControl={
-                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />
+                <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={accent} />
               }
             />
           )}
@@ -1370,6 +1392,7 @@ export default function PlansScreen() {
       )}
 
       <WhenCalendarSheet
+        appearance={appearance}
         visible={whenSheetOpen}
         whenSelected={whenFilter}
         onToggleWhen={(key) => {
@@ -1384,6 +1407,7 @@ export default function PlansScreen() {
       />
 
       <FilterBottomSheet
+        appearance={appearance}
         visible={categorySheetOpen}
         title="Category"
         options={CATEGORY_OPTIONS.map((c) => ({ key: c, label: c }))}
@@ -1399,17 +1423,18 @@ export default function PlansScreen() {
 
       {showProfileCompletePrompt && (
       <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt} statusBarTranslucent>
-        <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt}>
-          <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt} accessible={false}>
+          <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()} accessible={false}
+            accessibilityViewIsModal onAccessibilityEscape={dismissProfileCompletePrompt}>
             <Image source={wLogo} style={styles.profilePromptLogo} contentFit="contain" />
             <Text style={styles.profilePromptTitle}>make your profile yours</Text>
             <Text style={styles.profilePromptBody}>
               add a handle, a fun fact, and your neighborhood so people can find you and know where you're coming from.
             </Text>
-            <TouchableOpacity style={styles.profilePromptPrimaryBtn} onPress={confirmProfileCompletePrompt} activeOpacity={0.9}>
+            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptPrimaryBtn} onPress={confirmProfileCompletePrompt} activeOpacity={0.9}>
               <Text style={styles.profilePromptPrimaryBtnText}>finish my profile</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.profilePromptLaterBtn} onPress={dismissProfileCompletePrompt} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptLaterBtn} onPress={dismissProfileCompletePrompt} activeOpacity={0.7}>
               <Text style={styles.profilePromptLaterText}>later</Text>
             </TouchableOpacity>
           </Pressable>
@@ -1442,10 +1467,12 @@ export default function PlansScreen() {
       />
 
       <SaveSnackbar
+        appearance={appearance}
         visible={!!snackbar}
         planId={snackbar?.planId ?? ''}
         planTitle={snackbar?.planTitle ?? ''}
         onShare={(id) => {
+          if (saveOverlayOwnerRef.current !== saveOverlayOwner) return;
           setSnackbar(null);
           const plan = allPlans.find(p => p.id === id);
           setShareSheet({ planId: id, planTitle: plan?.title ?? '', slug: plan?.slug ?? null });
@@ -1485,7 +1512,12 @@ export default function PlansScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
+  screenTitle: { ...AfterglowType.screenTitle, fontFamily: Fonts.sansBold, color: Colors.asphalt },
+  feedback: { marginHorizontal: 20, marginBottom: 10, padding: 12, backgroundColor: Colors.inputBg, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  feedbackText: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  feedbackAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  feedbackActionText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   container: { flex: 1, backgroundColor: '#FAF5EC' },
   header: {
     flexDirection: 'row',
@@ -1798,3 +1830,51 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
   },
 });
+
+function afterglowStyles(fonts: AfterglowFontFamilies, width: number) {
+  const label = { ...AfterglowType.section, fontFamily: fonts.medium, color: AfterglowColors.muted };
+  const body = { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted };
+  const section = { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, textTransform: 'none' as const, letterSpacing: -0.2 };
+  const action = { minHeight: 48, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 6, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: AfterglowColors.clay };
+  const actionText = { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white };
+  return StyleSheet.create({
+    container: { ...baseStyles.container, backgroundColor: AfterglowColors.paper },
+    header: { ...baseStyles.header, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18 },
+    screenTitle: { ...AfterglowType.screenTitle, fontFamily: fonts.display, color: AfterglowColors.ink },
+    filterRow: { ...baseStyles.filterRow, justifyContent: 'flex-start', paddingHorizontal: 16, paddingVertical: 0, marginTop: 0, marginBottom: 14 },
+    filterPill: { ...baseStyles.filterPill, height: undefined, minHeight: 44, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 22, borderWidth: 0, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.paper },
+    filterPillActive: { backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.clay },
+    filterPillText: { ...label, includeFontPadding: false },
+    filterPillTextActive: { color: AfterglowColors.white },
+    radiusRow: { ...baseStyles.radiusRow, marginTop: 0 },
+    radiusPill: { ...baseStyles.radiusPill, height: undefined, minHeight: 44, paddingVertical: 10, borderRadius: 22, borderWidth: 0, borderColor: AfterglowColors.line, backgroundColor: AfterglowColors.paper },
+    radiusPillActive: { backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.clay },
+    radiusPillText: { ...label },
+    radiusPillTextActive: { color: AfterglowColors.white },
+    nearMeNotice: { ...baseStyles.nearMeNotice, minHeight: 44, borderRadius: 6, backgroundColor: AfterglowColors.white },
+    nearMeNoticeText: body,
+    listContent: { ...baseStyles.listContent, paddingHorizontal: 16, paddingBottom: 32 },
+    sectionHeader: { ...baseStyles.sectionHeader, ...section, marginTop: 20, marginBottom: 12 },
+    featuredHeaderText: section,
+    clusterHeaderText: { ...baseStyles.clusterHeaderText, ...label, textTransform: 'none', letterSpacing: 0, marginLeft: 16 },
+    clusterSection: { ...baseStyles.clusterSection, marginHorizontal: -16 },
+    clusterScrollContent: { ...baseStyles.clusterScrollContent, paddingHorizontal: 16 },
+    clusterCardWrap: { width: Math.min(340, width - 48) },
+    featuredScroll: { marginHorizontal: -16 },
+    featuredScrollContent: { ...baseStyles.featuredScrollContent, paddingHorizontal: 16 },
+    cardWrap: { marginBottom: 12 },
+    centered: { ...baseStyles.centered, paddingHorizontal: 20, gap: 8 },
+    emptyState: { ...baseStyles.emptyState, paddingHorizontal: 12, paddingVertical: 32, gap: 12 },
+    emptyText: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, textAlign: 'center', marginBottom: 0 },
+    emptySubText: { ...body, textAlign: 'center', marginBottom: 8, maxWidth: 300 },
+    emptyButton: action,
+    emptyButtonText: actionText,
+    errorTitle: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, textAlign: 'center', marginBottom: 8 },
+    errorMessage: { ...body, textAlign: 'center', marginBottom: 16 },
+    retryButton: action,
+    retryButtonText: actionText,
+    feedback: { ...baseStyles.feedback, backgroundColor: AfterglowColors.white, marginHorizontal: 16, borderWidth: 1, borderColor: AfterglowColors.subtleLine },
+    feedbackText: { ...baseStyles.feedbackText, ...body },
+    feedbackActionText: { ...actionText, color: AfterglowColors.clay },
+  });
+}

@@ -1,0 +1,17 @@
+import { buildPlanEditRulePatch, savedAgeLabel } from '../planEditRules';
+const original={start_time:'2026-11-01T09:30:17.123Z',end_time:'2026-11-01T11:30:17.123Z'};
+const draft={timeChanged:false,proposedStart:new Date('2026-11-02T18:30:00Z'),ageChanged:false,ages:{min:null,max:null},circlePlan:false,groupChanged:false,maxInvites:7,officialCreator:true,featuredChanged:false,featured:false,featuredType:'washedup_event' as const,featuredCapacity:100};
+it('leaves exact existing rule values untouched on a title-only save, including the second DST-fold instant',()=>{expect(buildPlanEditRulePatch(original,draft)).toEqual({});});
+it('preserves a published duration when moving the start beyond the old end',()=>{expect(buildPlanEditRulePatch(original,{...draft,timeChanged:true,proposedStart:new Date('2026-11-04T18:00Z')})).toEqual({start_time:'2026-11-04T18:00:00.000Z',end_time:'2026-11-04T20:00:00.000Z'});});
+it('does not invent a duration where the existing plan has no end',()=>{expect(buildPlanEditRulePatch({...original,end_time:null},{...draft,timeChanged:true})).toEqual({start_time:'2026-11-02T18:30:00.000Z'});});
+it.each(['bad','2026-11-01T09:30:17.123Z','2026-11-01T09:00Z'])('refuses to move a plan with an invalid existing duration: %s',end_time=>{expect(()=>buildPlanEditRulePatch({...original,end_time},{...draft,timeChanged:true})).toThrow('end time needs');});
+it('permits an explicit All ages change while omitting untouched custom bounds',()=>{expect(buildPlanEditRulePatch(original,{...draft,ageChanged:true})).toEqual({target_age_min:null,target_age_max:null});});
+it('writes chosen age bounds only after that field changes',()=>{expect(buildPlanEditRulePatch(original,{...draft,ageChanged:true,ages:{min:20,max:39}})).toEqual({target_age_min:20,target_age_max:39});});
+it.each([false,true])('never maps a Circle onto ordinary or Featured capacity (%s)',featured=>{expect(buildPlanEditRulePatch(original,{...draft,circlePlan:true,featured,featuredChanged:true,groupChanged:true,maxInvites:15})).toEqual({});});
+it('preserves an existing Featured capacity during unrelated edits',()=>{expect(buildPlanEditRulePatch(original,{...draft,featured:true,groupChanged:true,maxInvites:99})).toEqual({});});
+it('writes the explicit Featured capacity with the original creator-inclusive convention',()=>{expect(buildPlanEditRulePatch(original,{...draft,featured:true,featuredChanged:true,featuredType:'special_event',featuredCapacity:250})).toEqual({is_featured:true,featured_type:'special_event',max_invites:249});});
+it('returns to the ordinary maximum only for an explicit Featured-off action',()=>{expect(buildPlanEditRulePatch(original,{...draft,featuredChanged:true,maxInvites:99})).toEqual({is_featured:false,featured_type:null,max_invites:7});});
+it('does not let nonofficial edit inputs rewrite Featured state',()=>{expect(buildPlanEditRulePatch(original,{...draft,officialCreator:false,featuredChanged:true,featured:true})).toEqual({});});
+it.each([[null,null,'All ages'],[21,null,'Ages 21+'],[null,35,'Ages up to 35'],[25,35,'Ages 25–35']] as const)('labels saved %s / %s bounds without claiming All ages', (min,max,label)=>expect(savedAgeLabel(min,max)).toBe(label));
+
+it('preserves the original fold instant and seconds when the same displayed time is confirmed',()=>{expect(buildPlanEditRulePatch(original,{...draft,timeChanged:true,proposedStart:new Date('2026-11-01T08:30:00Z')})).toEqual({});});

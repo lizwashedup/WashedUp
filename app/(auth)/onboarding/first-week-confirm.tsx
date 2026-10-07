@@ -1,7 +1,7 @@
 /**
  * Wishlist confirmation route: "you're on the list" (step 2b). Reached only
  * after saveAreaWishlist succeeds on the first-week step. Shows what we are
- * watching for (profile neighborhood + vibe tags) and exits to Scene.
+ * watching for (profile neighborhood + vibe tags) and exits to Plans.
  */
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
@@ -9,7 +9,7 @@ import { router, Stack } from 'expo-router';
 import Colors from '../../../constants/Colors';
 import { WishlistConfirmation } from '../../../components/firstJoin/WishlistConfirmation';
 import { getUserBounded } from '../../../lib/authGate';
-import { PLANS_ROUTE, SCENE_ROUTE } from '../../../lib/firstJoin/onboardingGate';
+import { PLANS_ROUTE } from '../../../lib/firstJoin/onboardingGate';
 import { updateVibeTags } from '../../../lib/firstJoin/wishlist';
 import { supabase } from '../../../lib/supabase';
 
@@ -43,7 +43,7 @@ export default function FirstWeekConfirm() {
       const { user } = await getUserBounded();
       if (cancelled) return;
       if (!user) {
-        router.replace(SCENE_ROUTE);
+        router.replace(PLANS_ROUTE);
         return;
       }
       const { data } = await supabase

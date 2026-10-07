@@ -1,0 +1,20 @@
+{
+  "derivation": "Static optical-size instances of official Google Fonts sources; renamed internal family names for predictable native loading. See original source hashes and axes in typography-review-20260918.",
+  "files": [
+    {
+      "file": "InterCreator400.ttf",
+      "source_review_asset": "InterReview400.ttf",
+      "sha256": "a12397533a177862f528cf5677d9b8e3183e1860d86d26eaadd85dc9be74ce0d"
+    },
+    {
+      "file": "InterCreator500.ttf",
+      "source_review_asset": "InterReview500.ttf",
+      "sha256": "eaea8736db90a7e6791535a401cf9382e167ea6851a8d5b2e90d440bdc6f3350"
+    },
+    {
+      "file": "NewsreaderCreator500.ttf",
+      "source_review_asset": "NewsreaderReview500.ttf",
+      "sha256": "0be2a683bd86209b54f3d628e6ec27f5217910d789846bce912aa53f27c9c2e5"
+    }
+  ]
+}

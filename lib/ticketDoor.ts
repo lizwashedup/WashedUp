@@ -10,6 +10,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
+import type { CreatorPageScope } from './creatorPageReview';
+import { assertTicketVisit, ticketReadAuthorization, canReadCreatorTickets } from './creatorTicketRead';
 
 export type CheckinResult = 'admitted' | 'duplicate' | 'voided';
 
@@ -66,13 +68,15 @@ interface QueuedCheckin { code: string; queuedAt: string; signature: string; }
  * corrupted/tampered local queue before it gets replayed, one random key
  * per device, generated once and reused.
  */
+let deviceKeyRead: Promise<string> | null = null;
 async function getDeviceKey(): Promise<string> {
-  let key = await AsyncStorage.getItem(DEVICE_KEY_STORAGE);
-  if (!key) {
-    key = Crypto.randomUUID();
-    await AsyncStorage.setItem(DEVICE_KEY_STORAGE, key);
-  }
-  return key;
+  if (!deviceKeyRead) deviceKeyRead = (async () => {
+    let key = await AsyncStorage.getItem(DEVICE_KEY_STORAGE);
+    if (!key) { key = Crypto.randomUUID(); await AsyncStorage.setItem(DEVICE_KEY_STORAGE, key); }
+    return key;
+  })();
+  const pending=deviceKeyRead;
+  try { return await pending; } finally { if(deviceKeyRead===pending)deviceKeyRead=null; }
 }
 
 async function signRecord(code: string, queuedAt: string): Promise<string> {
@@ -93,14 +97,16 @@ async function writeQueue(q: QueuedCheckin[]): Promise<void> {
   try { await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch { /* best effort */ }
 }
 
-export async function queuedCount(): Promise<number> {
+export async function queuedCount(context?: CheckinContext): Promise<number> {
+  if (context) return (await listQueued(context)).length;
   return (await readQueue()).length;
 }
 
 export interface QueuedCheckinView { code: string; queuedAt: string; }
 
 /** The offline door list: every code still waiting on a sync, oldest first. Never exposes the signature. */
-export async function listQueued(): Promise<QueuedCheckinView[]> {
+export async function listQueued(context?: CheckinContext): Promise<QueuedCheckinView[]> {
+  if (context) return withCheckinQueue(context, async () => (await readScopedQueue(context)).map(({code,queuedAt})=>({code,queuedAt})));
   return (await readQueue())
     .map(({ code, queuedAt }) => ({ code, queuedAt }))
     .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt));
@@ -139,7 +145,8 @@ async function attempt(code: string): Promise<CheckinOutcome> {
  * The door path. On bad signal the code is queued and confirmed on the next
  * sync; a real verdict or bad code is returned immediately.
  */
-export async function recordCheckin(rawCode: string): Promise<CheckinOutcome> {
+export async function recordCheckin(rawCode: string, context?: CheckinContext): Promise<CheckinOutcome> {
+  if (context) return recordScopedCheckin(rawCode, context);
   const code = normalizeCode(rawCode);
   if (!code) return { kind: 'error', message: 'enter a code.', code };
   const outcome = await attempt(code);
@@ -167,7 +174,8 @@ export interface SyncSummary {
  * signature no longer matches (corrupted/tampered local storage) is treated
  * as resolved-with-a-refusal rather than replayed blind or retried forever.
  */
-export async function syncQueuedCheckins(): Promise<SyncSummary> {
+export async function syncQueuedCheckins(context?: CheckinContext): Promise<SyncSummary> {
+  if (context) return syncScopedCheckins(context);
   const q = await readQueue();
   const stillQueued: QueuedCheckin[] = [];
   const processed: { code: string; outcome: CheckinOutcome }[] = [];
@@ -186,4 +194,189 @@ export async function syncQueuedCheckins(): Promise<SyncSummary> {
   }
   await writeQueue(stillQueued);
   return { processed, remaining: stillQueued.length };
+}
+
+
+/** Current native visits never claim ownership of the legacy device-wide v1 queue. */
+export interface CheckinContext { eventId: string; pageId: string | null; scope: CreatorPageScope; }
+const checkinQueues = new Map<string, Promise<unknown>>();
+const uuid = (value: string) => /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+function scopedQueueKey(context: CheckinContext): string {
+  assertTicketVisit(context.scope);
+  if (!uuid(context.eventId) || !uuid(context.scope.userId) || (context.pageId !== null && !uuid(context.pageId))) throw new Error('Check-in context could not be verified.');
+  return `ticket_checkin_queue_v2:${context.scope.userId}:${context.eventId}`;
+}
+function withCheckinQueue<T>(context: CheckinContext, work: () => Promise<T>): Promise<T> {
+  const key = scopedQueueKey(context);
+  const previous = checkinQueues.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => { assertTicketVisit(context.scope); return work(); });
+  checkinQueues.set(key, next);
+  void next.finally(() => { if(checkinQueues.get(key) === next) checkinQueues.delete(key); }).catch(() => undefined);
+  return next;
+}
+async function scopedSignature(context: CheckinContext, code: string, queuedAt: string): Promise<string> {
+  // The complete account/event/page identity is covered by the existing device signature.
+  return signRecord(`${context.scope.userId}:${context.eventId}:${context.pageId ?? ''}:${code}`, queuedAt);
+}
+async function readScopedQueue(context: CheckinContext): Promise<QueuedCheckin[]> {
+  const raw = await AsyncStorage.getItem(scopedQueueKey(context));
+  assertTicketVisit(context.scope);
+  const parsed: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(parsed)) throw new Error('Saved check-ins could not be read.');
+  for (const row of parsed) {
+    if (!row || typeof row.code !== 'string' || !row.code || normalizeCode(row.code) !== row.code || typeof row.queuedAt !== 'string' || !Number.isFinite(Date.parse(row.queuedAt)) || typeof row.signature !== 'string' || row.signature !== await scopedSignature(context, row.code, row.queuedAt)) throw new Error('Saved check-ins could not be verified. They have been kept.');
+    assertTicketVisit(context.scope);
+  }
+  return parsed.sort((a,b)=>a.queuedAt.localeCompare(b.queuedAt));
+}
+async function writeScopedQueue(context: CheckinContext, queue: QueuedCheckin[]): Promise<void> {
+  await AsyncStorage.setItem(scopedQueueKey(context), JSON.stringify(queue));
+  assertTicketVisit(context.scope);
+}
+async function scopedAttempt(code: string, context: CheckinContext): Promise<CheckinOutcome> {
+  const {scope,eventId,pageId}=context;
+  const authorization = await ticketReadAuthorization(scope);
+  try {
+    // Page events use the already-installed page/event admission transaction.
+    // Legacy event codes are checked against their order before the existing admission RPC.
+    if (!pageId) {
+      const position = await supabase.from('ticket_order_positions')
+        .select('id, ticket_orders!inner(event_id)').eq('reference_code',code).maybeSingle()
+        .setHeader('Authorization',authorization!);
+      assertTicketVisit(scope);
+      if (position.error) {
+        if (position.error.code) return {kind:'error',code,message:'Ticket details could not be checked. Try again.'};
+        return {kind:'queued',code};
+      }
+      if (!position.data) return {kind:'unknown',code};
+      const order = position.data.ticket_orders as unknown as {event_id:string};
+      if (order?.event_id !== eventId) return {kind:'error',code,message:'This ticket is for another event. Check the event and code.'};
+    }
+    const result = pageId
+      ? await supabase.rpc('record_creator_page_ticket_checkin',{p_page_id:pageId,p_event_id:eventId,p_reference_code:code}).setHeader('Authorization',authorization!)
+      : await supabase.rpc('record_ticket_checkin',{p_reference_code:code}).setHeader('Authorization',authorization!);
+    assertTicketVisit(scope);
+    if (result.error) {
+      const message=(result.error.message??'').toLowerCase();
+      if (message.includes('unknown reference')) return {kind:'unknown',code};
+      if (result.error.code === '22023') return {kind:'error',code,message:'This ticket is not for this event. Check the event and code.'};
+      if (result.error.code === '42501' || message.includes('authenticated') || message.includes('organizer')) return {kind:'error',code,message:'Your access to check in guests could not be confirmed.'};
+      if (result.error.code) return {kind:'error',code,message:'Check-in could not be confirmed. Try again.'};
+      return {kind:'queued',code};
+    }
+    const value=parseCheckinPayload(result.data);
+    if (!['admitted','duplicate','voided'].includes(value.result) || !(value.admittedAt === null || (typeof value.admittedAt === 'string' && Number.isFinite(Date.parse(value.admittedAt))))) return {kind:'queued',code};
+    return {kind:'result',code,...value};
+  } catch {
+    assertTicketVisit(scope);
+    return {kind:'queued',code};
+  }
+}
+async function recordScopedCheckin(raw: string, context: CheckinContext): Promise<CheckinOutcome> {
+  const code=normalizeCode(raw);
+  if(!code)return{kind:'error',code,message:'Enter a ticket code.'};
+  return withCheckinQueue(context,async()=>{
+    const queue=await readScopedQueue(context);
+    const outcome=await scopedAttempt(code,context);
+    if(outcome.kind==='queued'){
+      if(!queue.some(row=>row.code===code)){
+        const queuedAt=new Date().toISOString();
+        queue.push({code,queuedAt,signature:await scopedSignature(context,code,queuedAt)});
+      }
+      // Never claim a scan was saved if durable storage failed.
+      await writeScopedQueue(context,queue);
+    } else if((outcome.kind==='result'||outcome.kind==='unknown') && queue.some(row=>row.code===code)) {
+      await writeScopedQueue(context,queue.filter(row=>row.code!==code));
+    }
+    return outcome;
+  });
+}
+async function syncScopedCheckins(context: CheckinContext): Promise<SyncSummary> {
+  return withCheckinQueue(context,async()=>{
+    const queue=await readScopedQueue(context),processed:SyncSummary['processed']=[];
+    const remaining=[...queue];
+    for(const item of queue){
+      const outcome=await scopedAttempt(item.code,context);
+      assertTicketVisit(context.scope);
+      if(outcome.kind==='result'||outcome.kind==='unknown'){
+        remaining.splice(remaining.findIndex(row=>row.code===item.code),1);
+        await writeScopedQueue(context,remaining);
+        processed.push({code:item.code,outcome});
+      } else if(outcome.kind==='error'){
+        // Access/refusal can change; retain the original scan instead of silently discarding it.
+        processed.push({code:item.code,outcome});
+        break;
+      }
+    }
+    return {processed,remaining:remaining.length};
+  });
+}
+
+
+async function legacySignature(code: string, queuedAt: string): Promise<string> {
+  const key=await AsyncStorage.getItem(DEVICE_KEY_STORAGE);
+  if(!key)throw new Error('Earlier saved scans could not be verified. They have been kept.');
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,`${key}:${code}:${queuedAt}`);
+}
+
+/** Read-only recovery preview: only signed old scans the backend matches to this event. */
+export async function readLegacyCheckins(context: CheckinContext): Promise<QueuedCheckinView[]> {
+  scopedQueueKey(context);
+  const raw=await AsyncStorage.getItem(QUEUE_KEY);
+  assertTicketVisit(context.scope);
+  if(!raw)return [];
+  const rows:unknown=JSON.parse(raw);
+  if(!Array.isArray(rows))throw new Error('Earlier saved scans could not be read. They have been kept.');
+  if(!await canReadCreatorTickets(context.eventId,context.scope))throw new Error('Check-in access could not be confirmed.');
+  const candidates:QueuedCheckin[]=[];
+  for(const row of rows){
+    if(!row || typeof row.code!=='string' || !row.code || normalizeCode(row.code)!==row.code || typeof row.queuedAt!=='string' || !Number.isFinite(Date.parse(row.queuedAt)) || typeof row.signature!=='string')continue;
+    if(row.signature===await legacySignature(row.code,row.queuedAt))candidates.push(row);
+    assertTicketVisit(context.scope);
+  }
+  const codes=[...new Set(candidates.map(row=>row.code))],matched=new Set<string>();
+  const authorization=await ticketReadAuthorization(context.scope);
+  for(let offset=0;offset<codes.length;offset+=40){
+    const batch=codes.slice(offset,offset+40);
+    const result=await supabase.from('ticket_order_positions')
+      .select('reference_code, ticket_orders!inner(event_id)').in('reference_code',batch)
+      .eq('ticket_orders.event_id',context.eventId).setHeader('Authorization',authorization!);
+    assertTicketVisit(context.scope);
+    if(result.error||!Array.isArray(result.data))throw new Error('Earlier scans could not be matched to this event. Try again.');
+    for(const position of result.data){
+      if(!batch.includes(position.reference_code) || (position.ticket_orders as unknown as {event_id:string})?.event_id!==context.eventId)throw new Error('Earlier scans could not be verified.');
+      matched.add(position.reference_code);
+    }
+  }
+  return candidates.filter(row=>matched.has(row.code)).map(({code,queuedAt})=>({code,queuedAt}));
+}
+let legacyRecovery:Promise<unknown>=Promise.resolve();
+/** Explicit creator confirmation only. A preview, mount or empty result never replays old scans. */
+export function confirmLegacyCheckins(context: CheckinContext, expected: QueuedCheckinView[]): Promise<SyncSummary> {
+  const next=legacyRecovery.catch(()=>undefined).then(async()=>{
+    const matched=await readLegacyCheckins(context);
+    const selected=matched.filter(row=>expected.some(item=>item.code===row.code && item.queuedAt===row.queuedAt));
+    if(selected.length!==expected.length)throw new Error('Saved scans changed. Review them again.');
+    const processed:SyncSummary['processed']=[];let remaining=selected.length;
+    for(const row of selected){
+      assertTicketVisit(context.scope);
+      const outcome=await recordCheckin(row.code,context);
+      processed.push({code:row.code,outcome});
+      if(outcome.kind!=='result')break;
+      // Delete only the exact signed record after an authoritative admission/duplicate/void result.
+      // Re-read so records added since the preview are preserved.
+      const raw=await AsyncStorage.getItem(QUEUE_KEY);
+      const currentRows:unknown=raw?JSON.parse(raw):[];
+      if(!Array.isArray(currentRows))throw new Error('Earlier saved scans could not be updated. They have been kept.');
+      const signature=await legacySignature(row.code,row.queuedAt);
+      const kept=currentRows.filter(item=>!(item?.code===row.code && item?.queuedAt===row.queuedAt && item?.signature===signature));
+      assertTicketVisit(context.scope);
+      await AsyncStorage.setItem(QUEUE_KEY,JSON.stringify(kept));
+      assertTicketVisit(context.scope);
+      remaining--;
+    }
+    return {processed,remaining};
+  });
+  legacyRecovery=next;
+  return next;
 }

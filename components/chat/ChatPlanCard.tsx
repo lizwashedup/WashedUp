@@ -6,7 +6,8 @@
  * line ("This plan has wrapped.") - never a broken or error card.
  */
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { ChatSizedText } from './ChatSizedText';
+import { View, Pressable, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -26,7 +27,7 @@ export default function ChatPlanCard({ eventId }: { eventId: string }) {
   if (!data || data.wrapped) {
     return (
       <View style={[styles.card, styles.cardInert]} accessibilityLabel={COPY.chatPlanWrapped}>
-        <Text style={styles.wrapped}>{COPY.chatPlanWrapped}</Text>
+        <ChatSizedText style={styles.wrapped}>{COPY.chatPlanWrapped}</ChatSizedText>
       </View>
     );
   }
@@ -38,9 +39,9 @@ export default function ChatPlanCard({ eventId }: { eventId: string }) {
       accessibilityRole="button"
       accessibilityLabel={data.title}
     >
-      <Text style={styles.when}>{formatPlanWhenLA(data.start_time)}</Text>
-      <Text style={styles.title} numberOfLines={2}>{data.title}</Text>
-      <Text style={styles.joinLine}>{COPY.circlePlanJoinLine}</Text>
+      <ChatSizedText style={styles.when}>{formatPlanWhenLA(data.start_time)}</ChatSizedText>
+      <ChatSizedText style={styles.title} numberOfLines={2}>{data.title}</ChatSizedText>
+      <ChatSizedText style={styles.joinLine}>{COPY.circlePlanJoinLine}</ChatSizedText>
     </Pressable>
   );
 }

@@ -1,3 +1,7 @@
+import { assertTicketVisit, scopedTicketRequest, ticketReadAuthorization } from './creatorTicketRead';
+import type { CreatorPageScope } from './creatorPageReview';
+import { requestWithDeadline } from './requestWithDeadline';
+import { beginTicketRefundAttempt, isTicketRefundAttemptCurrent, readTicketRefundAttempt, settleTicketRefundAttempt, type TicketRefundAttemptTarget } from './ticketRefundAttempt';
 /**
  * Organizer-side ticketing client (doc 61; proposals 64 + 65 applied,
  * 70 pending its re-cut). Tiers are direct table ops under 65's RLS
@@ -149,13 +153,14 @@ export interface TicketTier {
 const TIER_COLUMNS =
   'id, event_id, name, description, price_cents, quantity_cap, per_order_min, per_order_max, sales_open_at, sales_close_at, opens_after_tier_id, visibility, status, sort_order';
 
-export async function getTiers(eventId: string): Promise<TicketTier[]> {
-  const { data, error } = await supabase
+export async function getTiers(eventId: string, strict = false, scope?: CreatorPageScope): Promise<TicketTier[]> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_tiers')
     .select(TIER_COLUMNS)
     .eq('event_id', eventId)
-    .order('sort_order', { ascending: true });
-  if (error) return [];
+    .order('sort_order', { ascending: true }));
+  if (error) { if ((strict || scope)) throw error; return []; }
+  if ((strict || scope) && !Array.isArray(data)) throw new Error('Could not read tickets.');
   return (data ?? []) as TicketTier[];
 }
 
@@ -190,12 +195,12 @@ export interface PaidTicketEventReadiness {
  * Read it immediately before the tier write so a delayed event-form autosave
  * can never turn the ticket editor into an unexplained retry loop.
  */
-export async function getPaidTicketEventReadiness(eventId: string): Promise<PaidTicketEventReadiness> {
-  const { data, error } = await supabase
+export async function getPaidTicketEventReadiness(eventId: string, scope?: CreatorPageScope): Promise<PaidTicketEventReadiness> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('explore_events')
     .select('end_time')
     .eq('id', eventId)
-    .maybeSingle();
+    .maybeSingle());
 
   if (error) {
     return { ok: false, endTime: null, message: error.message, reason: 'unavailable' };
@@ -304,12 +309,13 @@ export function describeStripeRequirement(key: string): string {
   return last.replace(/_/g, ' ');
 }
 
-export async function getMyPayoutState(userId: string): Promise<PayoutState> {
-  const { data, error } = await supabase
+export async function getMyPayoutState(userId: string, scope?: CreatorPageScope): Promise<PayoutState> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('organizer_stripe_accounts')
     .select('charges_enabled, payouts_enabled, details_submitted, commission_bps, requirements_due')
     .eq('user_id', userId)
-    .maybeSingle();
+    .maybeSingle());
+  if (scope && error) throw error;
   if (error || !data) {
     return {
       exists: false,
@@ -363,26 +369,29 @@ const EMPTY_PAYOUT_SUMMARY: PayoutSummary = {
  * total, not a per-event slice. Same money math as the web equivalent and
  * the per-event attendee-money query: face minus our 4% minus refunds.
  */
-export async function getPayoutSummary(communityIds: string[], userId: string): Promise<PayoutSummary> {
+export async function getPayoutSummary(communityIds: string[], userId: string, scope?: CreatorPageScope): Promise<PayoutSummary> {
   const ors: string[] = [`host_user_id.eq.${userId}`];
   if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
-  const { data: eventRows } = await supabase.from('explore_events').select('id').or(ors.join(','));
+  const { data: eventRows, error: eventError } = await scopedTicketRequest(scope, () => supabase.from('explore_events').select('id').or(ors.join(',')));
+  if (scope && (eventError || !Array.isArray(eventRows))) throw eventError ?? new Error('Events could not be loaded.');
   const eventIds = ((eventRows ?? []) as { id: string }[]).map((e) => e.id);
   if (eventIds.length === 0) return EMPTY_PAYOUT_SUMMARY;
 
-  const { data: orderRows } = await supabase
+  const { data: orderRows, error: orderError } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_orders')
     .select('id, face_cents, processing_cents, commission_cents')
     .in('event_id', eventIds)
-    .eq('status', 'paid');
+    .eq('status', 'paid'));
+  if (scope && (orderError || !Array.isArray(orderRows))) throw orderError ?? new Error('Financial records could not be loaded.');
   const orders = (orderRows ?? []) as { id: string; face_cents: number; processing_cents: number; commission_cents: number }[];
   if (orders.length === 0) return { ...EMPTY_PAYOUT_SUMMARY, eventsCount: eventIds.length };
 
   const orderIds = orders.map((o) => o.id);
-  const { data: positionRows } = await supabase
+  const { data: positionRows, error: positionError } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_order_positions')
     .select('order_id, refunded_cents, voided_at')
-    .in('order_id', orderIds);
+    .in('order_id', orderIds));
+  if (scope && (positionError || !Array.isArray(positionRows))) throw positionError ?? new Error('Financial records could not be loaded.');
   const positions = (positionRows ?? []) as { order_id: string; refunded_cents: number; voided_at: string | null }[];
 
   const grossFaceCents = orders.reduce((s, o) => s + (o.face_cents ?? 0), 0);
@@ -416,18 +425,20 @@ export interface FailedPayout {
  * the live check constraint is pending/released/paid/failed -- 'failed' is
  * the actual exception state.
  */
-export async function getFailedPayouts(communityIds: string[], userId: string): Promise<FailedPayout[]> {
+export async function getFailedPayouts(communityIds: string[], userId: string, scope?: CreatorPageScope): Promise<FailedPayout[]> {
   const ors: string[] = [`host_user_id.eq.${userId}`];
   if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
-  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const { data: eventRows, error: eventError } = await scopedTicketRequest(scope, () => supabase.from('explore_events').select('id, title').or(ors.join(',')));
+  if (scope && (eventError || !Array.isArray(eventRows))) throw eventError ?? new Error('Events could not be loaded.');
   const events = (eventRows ?? []) as { id: string; title: string }[];
   if (events.length === 0) return [];
 
-  const { data: payoutRows } = await supabase
+  const { data: payoutRows, error: payoutError } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_payouts')
     .select('event_id, failure_message')
     .in('event_id', events.map((e) => e.id))
-    .eq('status', 'failed');
+    .eq('status', 'failed'));
+  if (scope && (payoutError || !Array.isArray(payoutRows))) throw payoutError ?? new Error('Financial records could not be loaded.');
   const payouts = (payoutRows ?? []) as { event_id: string; failure_message: string | null }[];
   if (payouts.length === 0) return [];
 
@@ -461,6 +472,17 @@ export interface OrganizationPurchase {
   createdAt: string;
 }
 
+/** Refunds live on positions, not a ticket_orders column. Existing recording
+ * allocates the complete refund (including final-seat extras) to those rows. */
+function purchaseRecordedRefundTotal(value: unknown, strict=false): number {
+  if(!Array.isArray(value)){if(strict)throw new Error('Purchase refund details could not be loaded.');return 0;}
+  return value.reduce((total,row)=>{
+    const cents=row?.refunded_cents;
+    if(!Number.isSafeInteger(cents)||cents<0)throw new Error('Purchase refund details could not be verified.');
+    return total+cents;
+  },0);
+}
+
 /**
  * Every purchase across this organizer's events, NOT filtered to 'paid'
  * (unlike getPayoutSummary/getEventMoneySummary): this screen's job is
@@ -470,19 +492,22 @@ export interface OrganizationPurchase {
 export async function getOrganizationPurchases(
   communityIds: string[],
   userId: string,
+  scope?: CreatorPageScope,
 ): Promise<OrganizationPurchase[]> {
   const ors: string[] = [`host_user_id.eq.${userId}`];
   if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
-  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const { data: eventRows, error: eventError } = await scopedTicketRequest(scope, () => supabase.from('explore_events').select('id, title').or(ors.join(',')));
+  if (scope && (eventError || !Array.isArray(eventRows))) throw eventError ?? new Error('Events could not be loaded.');
   const events = (eventRows ?? []) as { id: string; title: string }[];
   if (events.length === 0) return [];
   const titleById = new Map(events.map((e) => [e.id, e.title]));
 
-  const { data, error } = await supabase
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_orders')
-    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name )')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, status, created_at, ticket_order_positions ( refunded_cents ), ticket_tiers ( name )')
     .in('event_id', events.map((e) => e.id))
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }));
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('Purchases could not be loaded.');
   if (error) return [];
 
   return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => ({
@@ -493,7 +518,7 @@ export async function getOrganizationPurchases(
     tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
     qty: (o.qty as number) ?? 0,
     totalCents: (o.total_cents as number) ?? 0,
-    refundedCents: (o.refunded_cents as number) ?? 0,
+    refundedCents: purchaseRecordedRefundTotal(o.ticket_order_positions),
     status: (o.status as string) ?? 'pending',
     createdAt: o.created_at as string,
   }));
@@ -529,13 +554,15 @@ export function purchaseStatusLabel(p: Pick<OrganizationPurchase, 'status' | 're
  * getEventAttendees/getEventMoneySummary: this does not re-derive event
  * ownership client-side, it trusts the caller's own screen-level gate.
  */
-export async function getEventPurchases(eventId: string, eventTitle: string): Promise<OrganizationPurchase[]> {
-  const { data, error } = await supabase
+export async function getEventPurchases(eventId: string, eventTitle: string, scope?: CreatorPageScope): Promise<OrganizationPurchase[]> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_orders')
-    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name )')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, status, created_at, ticket_order_positions ( refunded_cents ), ticket_tiers ( name )')
     .eq('event_id', eventId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }));
+  if (scope && (error || !Array.isArray(data))) throw new Error('Purchases could not be loaded.');
   if (error) return [];
+  if (scope && data.some((row: any) => row.event_id !== eventId || typeof row.id !== 'string' || !row.id)) throw new Error('Purchases could not be verified.');
 
   return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => ({
     orderId: o.id as string,
@@ -545,7 +572,7 @@ export async function getEventPurchases(eventId: string, eventTitle: string): Pr
     tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
     qty: (o.qty as number) ?? 0,
     totalCents: (o.total_cents as number) ?? 0,
-    refundedCents: (o.refunded_cents as number) ?? 0,
+    refundedCents: purchaseRecordedRefundTotal(o.ticket_order_positions, !!scope),
     status: (o.status as string) ?? 'pending',
     createdAt: o.created_at as string,
   }));
@@ -559,13 +586,15 @@ export async function getEventPurchases(eventId: string, eventTitle: string): Pr
  * reason: one row type, three lenses (organization-wide, one event, one
  * order), never a fourth purchase shape to keep in sync.
  */
-export async function getPurchaseDetail(orderId: string): Promise<OrganizationPurchase | null> {
-  const { data, error } = await supabase
+export async function getPurchaseDetail(orderId: string, scope?: CreatorPageScope): Promise<OrganizationPurchase | null> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_orders')
-    .select('id, event_id, buyer_name_snapshot, qty, total_cents, refunded_cents, status, created_at, ticket_tiers ( name ), explore_events ( title )')
+    .select('id, event_id, buyer_name_snapshot, qty, total_cents, status, created_at, ticket_order_positions ( refunded_cents ), ticket_tiers ( name ), explore_events ( title )')
     .eq('id', orderId)
-    .maybeSingle();
+    .maybeSingle());
+  if (scope && error) throw new Error('Purchase details could not be loaded.');
   if (error || !data) return null;
+  if (scope && (data.id !== orderId || typeof data.event_id !== 'string' || !data.event_id)) throw new Error('Purchase details could not be verified.');
   const o = data as unknown as Record<string, unknown>;
   return {
     orderId: o.id as string,
@@ -575,7 +604,7 @@ export async function getPurchaseDetail(orderId: string): Promise<OrganizationPu
     tierName: (o.ticket_tiers as { name?: string } | null)?.name ?? null,
     qty: (o.qty as number) ?? 0,
     totalCents: (o.total_cents as number) ?? 0,
-    refundedCents: (o.refunded_cents as number) ?? 0,
+    refundedCents: purchaseRecordedRefundTotal(o.ticket_order_positions,!!scope),
     status: (o.status as string) ?? 'pending',
     createdAt: o.created_at as string,
   };
@@ -704,16 +733,18 @@ export function sumReconciliationRows(rows: EventReconciliationRow[]): PayoutSum
 export async function getOrganizationReconciliation(
   communityIds: string[],
   userId: string,
+  scope?: CreatorPageScope,
 ): Promise<{ rows: EventReconciliationRow[]; totals: PayoutSummary }> {
   const ors: string[] = [`host_user_id.eq.${userId}`];
   if (communityIds.length > 0) ors.push(`community_id.in.(${communityIds.join(',')})`);
-  const { data: eventRows } = await supabase.from('explore_events').select('id, title').or(ors.join(','));
+  const { data: eventRows, error: eventError } = await scopedTicketRequest(scope, () => supabase.from('explore_events').select('id, title').or(ors.join(',')));
+  if (scope && (eventError || !Array.isArray(eventRows))) throw eventError ?? new Error('Events could not be loaded.');
   const events = (eventRows ?? []) as { id: string; title: string }[];
   if (events.length === 0) return { rows: [], totals: EMPTY_PAYOUT_SUMMARY };
 
   const rows = await Promise.all(
     events.map(async (e): Promise<EventReconciliationRow> => {
-      const [money, attendees] = await Promise.all([getEventMoneySummary(e.id), getEventAttendees(e.id)]);
+      const [money, attendees] = await Promise.all([getEventMoneySummary(e.id, scope), getEventAttendees(e.id, scope)]);
       const refundedCents = sumRefundedCentsOnPaidOrders(attendees);
       return {
         eventId: e.id,
@@ -827,13 +858,15 @@ export interface EventFaq {
 
 export async function getEventFaqs(
   eventId: string,
+  scope?: CreatorPageScope,
 ): Promise<{ available: boolean; faqs: EventFaq[] }> {
-  const { data, error } = await supabase
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('event_faqs')
     .select('id, event_id, question, answer, sort_order, is_active')
     .eq('event_id', eventId)
     .eq('is_active', true)
-    .order('sort_order', { ascending: true });
+    .order('sort_order', { ascending: true }));
+  if (scope && (error || !Array.isArray(data))) throw error ?? new Error('FAQs could not be loaded.');
   if (error) {
     return { available: !isMissingSchema(error.code), faqs: [] };
   }
@@ -912,13 +945,14 @@ export interface TicketQuestion {
   updated_at: string | null;
 }
 
-export async function getQuestions(eventId: string): Promise<TicketQuestion[]> {
-  const { data, error } = await supabase
+export async function getQuestions(eventId: string, strict = false, scope?: CreatorPageScope): Promise<TicketQuestion[]> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_questions')
     .select('id, event_id, prompt, qtype, options, required, scope, sort_order, created_at, updated_at')
     .eq('event_id', eventId)
     .eq('is_active', true)
-    .order('sort_order', { ascending: true });
+    .order('sort_order', { ascending: true }));
+  if ((strict || scope) && (error || !Array.isArray(data))) throw error ?? new Error('Ticket questions could not be loaded.');
   if (error) return [];
   return (data ?? []) as TicketQuestion[];
 }
@@ -929,11 +963,12 @@ export async function getQuestions(eventId: string): Promise<TicketQuestion[]> {
    (null = the one per_order answer). Mirror of web's getAnsweredKeys, same
    table/columns, grouped per-question since the caller only needs to know
    whether a whole question still has an unanswered seat. */
-export async function getAnsweredQuestionIds(orderId: string): Promise<Map<string, Set<number | null>>> {
+export async function getAnsweredQuestionIds(orderId: string, strict = false): Promise<Map<string, Set<number | null>>> {
   const { data, error } = await supabase
     .from('ticket_answers')
     .select('question_id, attendee_index')
     .eq('order_id', orderId);
+  if (strict && (error || !Array.isArray(data))) throw error ?? new Error('Saved answers could not be checked.');
   if (error || !data) return new Map();
   const map = new Map<string, Set<number | null>>();
   for (const row of data as { question_id: string; attendee_index: number | null }[]) {
@@ -1060,6 +1095,10 @@ export const REFUND_POLICY_WRITE_BLOCKED = true;
 // ─── P3: the public price-from + honest scarcity (laws 9, 10) ────────────
 
 export interface PublicTicketSummary {
+  /** A ticketed offer or visible scheduled tiers exist, but sales are closed. */
+  notOnSale?: boolean;
+  /** Inventory exists but no tier can meet its minimum order. */
+  unavailable?: boolean;
   /** any on-sale, visible, still-available tier exists */
   onSale: boolean;
   /** the LOWEST all-in price among AVAILABLE tiers, in cents. Law 9: a
@@ -1074,31 +1113,57 @@ export interface PublicTicketSummary {
   scarcity: { left: number; cap: number } | null;
 }
 
-export async function getPublicTicketSummary(eventId: string): Promise<PublicTicketSummary> {
+/** Shared public admission read. Null is valid only for an uncapped tier. */
+export async function readPublicTierRemaining(tier: Pick<TicketTier, 'id' | 'quantity_cap'>): Promise<number | null> {
+  const { data, error } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tier.id });
+  if (error) throw error;
+  if (data === null && tier.quantity_cap === null) return null;
+  if (typeof data !== 'number' || !Number.isSafeInteger(data) || data < 0) throw new Error('Could not check ticket availability.');
+  return data;
+}
+
+/** Same inclusive opening/closing boundaries as begin_ticket_checkout. */
+export function isTicketSaleOpen(tier: Pick<TicketTier, 'sales_open_at' | 'sales_close_at'>, now = Date.now()): boolean {
+  const boundary = (value: string | null | undefined, fallback: number) => {
+    if (value == null) return fallback;
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) throw new Error('Could not check ticket sale dates.');
+    return parsed;
+  };
+  return now >= boundary(tier.sales_open_at, -Infinity) && now <= boundary(tier.sales_close_at, Infinity);
+}
+
+export async function getPublicTicketSummary(eventId: string, requiresTickets = false): Promise<PublicTicketSummary> {
   const empty: PublicTicketSummary = { onSale: false, fromCents: null, allSoldOut: false, scarcity: null };
   const { data, error } = await supabase
     .from('ticket_tiers')
-    .select('id, price_cents, quantity_cap, status, visibility')
+    .select('id, price_cents, quantity_cap, per_order_min, sales_open_at, sales_close_at, status, visibility')
     .eq('event_id', eventId)
     .eq('status', 'on_sale')
     .neq('visibility', 'hidden')
     .order('price_cents', { ascending: true });
-  if (error || !data || data.length === 0) return empty;
+  if (error) throw error;
+  if (!Array.isArray(data)) throw new Error('Could not read tickets.');
+  if (data.length === 0) return requiresTickets ? { ...empty, notOnSale: true } : empty;
+  const now = Date.now();
+  const selling = data.filter(tier => isTicketSaleOpen(tier, now));
+  if (selling.length === 0) return { ...empty, notOnSale: true };
 
-  // real availability per tier (definer RPC; fail-closed to "unknown", not
-  // to a made-up number)
+  // Keep failed availability reads distinct from a confirmed uncapped tier.
   const withAvail = await Promise.all(
-    data.map(async (tier) => {
-      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tier.id });
-      const remaining = typeof left === 'number' ? left : null;
-      const soldOut = tier.quantity_cap !== null && remaining !== null && remaining <= 0;
-      return { tier, remaining, soldOut };
+    selling.map(async (tier) => {
+      if (!Number.isSafeInteger(tier.price_cents) || tier.price_cents < 0) throw new Error('Could not check ticket prices.');
+      const remaining = await readPublicTierRemaining(tier);
+      // The RPC also counts the event-wide cap, even when this tier is uncapped.
+      const soldOut = remaining !== null && remaining <= 0;
+      const underMinimum = remaining !== null && remaining < Math.max(1, tier.per_order_min ?? 1);
+      return { tier, remaining, soldOut, underMinimum };
     }),
   );
 
-  const available = withAvail.filter((r) => !r.soldOut);
+  const available = withAvail.filter((r) => !r.soldOut && !r.underMinimum);
   if (available.length === 0) {
-    return { onSale: false, fromCents: null, allSoldOut: true, scarcity: null };
+    return withAvail.every(r => r.soldOut) ? { ...empty, allSoldOut: true } : { ...empty, unavailable: true };
   }
 
   // cheapest AVAILABLE tier sets the headline (law 9), by all-in buyer
@@ -1147,12 +1212,13 @@ export function isLowInventory(left: number, cap: number): boolean {
  * this file's own established pattern, not a new one. Uncapped tiers are
  * never "low", so callers should only pass capped tier ids in.
  */
-export async function getTierAvailability(tierIds: string[]): Promise<Map<string, number>> {
+export async function getTierAvailability(tierIds: string[], scope?: CreatorPageScope): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (tierIds.length === 0) return map;
   const entries = await Promise.all(
     tierIds.map(async (tierId) => {
-      const { data: left } = await supabase.rpc('get_ticket_tier_availability', { p_tier_id: tierId });
+      const { data: left, error } = await scopedTicketRequest(scope, () => supabase.rpc('get_ticket_tier_availability', { p_tier_id: tierId }));
+      if (scope && (error || typeof left !== 'number')) throw error ?? new Error('Availability could not be loaded.');
       return [tierId, typeof left === 'number' ? left : null] as const;
     }),
   );
@@ -1201,20 +1267,20 @@ export async function startTicketCheckout(
   // canon body keys. Both travel only when provided, so a checkout without
   // them is byte-identical to today's.
   extras?: {
+    /** Stable, persisted by the initiating checkout. Omitted by legacy callers. */
+    checkoutKey?: string;
+    buyerUserId?: string;
     promoCode?: string | null;
     addons?: { add_on_id: string; qty: number }[];
     // doc 118: the organizer's buyer questions, collected BEFORE payment.
     answers?: CheckoutAnswer[];
   },
 ): Promise<CheckoutResult> {
-  // 87 F1 idempotency (Cowork 7-27): ONE stable checkout_key per user
-  // checkout action, minted here because one call IS one action today (the
-  // sheet's tap runs a single invoke, no auto-retry). A new tap = a new
-  // key by construction. If retry logic is ever added, it belongs INSIDE
-  // this function, reusing this same key. v7 of the edge fn ignores the
-  // field; v8 passes it to begin_ticket_checkout so a retried action lands
-  // on one hold and one order.
-  const checkoutKey = Crypto.randomUUID();
+  // A recovery repeats the initiating key; old callers still create one action.
+  if (extras?.checkoutKey && !/^[A-Za-z0-9_-]{8,64}$/.test(extras.checkoutKey)) {
+    return { kind: 'error', message: 'This checkout could not be restored. Check your tickets.' };
+  }
+  const checkoutKey = extras?.checkoutKey ?? Crypto.randomUUID();
   const body: Record<string, unknown> = {
     // origin drives the Stripe success/cancel return; the fn allow-lists it
     tier_id: tierId, qty, origin: 'https://washedup.app', checkout_key: checkoutKey,
@@ -1226,19 +1292,32 @@ export async function startTicketCheckout(
   if (extras?.promoCode) body.promo_code = extras.promoCode;
   if (extras?.addons && extras.addons.length > 0) body.add_ons = extras.addons;
   if (extras?.answers && extras.answers.length > 0) body.answers = extras.answers;
-  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body });
+  let headers: Record<string,string> | undefined;
+  if (extras?.buyerUserId) {
+    const {data:sessionData,error:sessionError}=await supabase.auth.getSession();
+    const session=sessionData?.session;
+    if (sessionError || !session?.access_token || session.user.id !== extras.buyerUserId) {
+      return {kind:'error',message:'Sign in with the account that started this checkout.'};
+    }
+    // Pin this dispatch to its initiating account even if the global session changes.
+    headers={Authorization:`Bearer ${session.access_token}`};
+  }
+  const { data, error } = await supabase.functions.invoke('create-ticket-checkout', { body, ...(headers ? {headers} : {}) });
   if (error) {
     // functions.invoke surfaces non-2xx as an error with the JSON body. That
     // body can be a curated reason OR raw Postgres; sanitize either way so no
     // schema-cache / uuid text ever reaches the buyer.
-    const ctx = (error as { context?: { body?: unknown } }).context;
+    const ctx = (error as { context?: { json?: () => Promise<unknown>; body?: unknown } }).context;
     let raw: string | null = null;
     try {
-      const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
-      if (parsed && typeof (parsed as { error?: string }).error === 'string') {
+      // The current SDK carries a Response, whose body is a stream. Retain
+      // the older serialized-body form for existing adapters and callers.
+      const parsed = typeof ctx?.json === 'function' ? await ctx.json()
+        : typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+      if (parsed && typeof (parsed as { error?: unknown }).error === 'string') {
         raw = (parsed as { error: string }).error;
       }
-    } catch { /* raw stays null */ }
+    } catch { /* unreadable responses keep the safe generic recovery copy */ }
     return { kind: 'error', message: humanCheckoutError(raw ?? error.message) };
   }
   if (data?.free && data?.order_id) return { kind: 'free', orderId: data.order_id };
@@ -1329,10 +1408,13 @@ function mapSeats(o: Record<string, unknown>): MySeat[] {
     .sort((a, b) => a.position_index - b.position_index);
 }
 
-export async function getMyOrders(): Promise<MyOrder[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function getMyOrders(scope?: CreatorPageScope): Promise<MyOrder[]> {
+  assertTicketVisit(scope);
+  const account = scope ? null : await supabase.auth.getUser();
+  if (account?.error) throw account.error;
+  const user = scope ? { id: scope.userId } : account?.data.user;
   if (!user) return [];
-  const { data, error } = await supabase
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('ticket_orders')
     .select(ORDER_SELECT)
     .eq('buyer_user_id', user.id)
@@ -1342,8 +1424,8 @@ export async function getMyOrders(): Promise<MyOrder[]> {
     // getMyTickets does the same) so a buyer can still see a refunded order in
     // their wallet; SeatTicket already renders the refunded/voided state.
     .in('status', ['paid', 'refunded'])
-    .order('created_at', { ascending: false });
-  if (error) return [];
+    .order('created_at', { ascending: false }), 12000);
+  if (error || !Array.isArray(data)) throw new Error('Your tickets could not be loaded.');
   // supabase-js cannot infer the multi-embed row shape, so it widens to its
   // error type; the query is valid, so read the rows as untyped records
   return ((data ?? []) as unknown as Record<string, unknown>[]).map((o) => {
@@ -1368,12 +1450,11 @@ export async function getMyOrders(): Promise<MyOrder[]> {
   });
 }
 
-export async function getOrder(orderId: string): Promise<MyOrder | null> {
-  const { data, error } = await supabase
-    .from('ticket_orders')
-    .select(ORDER_SELECT)
-    .eq('id', orderId)
-    .maybeSingle();
+export async function getOrder(orderId: string, options?: { buyerUserId?: string; strict?: boolean }): Promise<MyOrder | null> {
+  let request = supabase.from('ticket_orders').select(ORDER_SELECT).eq('id', orderId);
+  if (options?.buyerUserId) request = request.eq('buyer_user_id', options.buyerUserId);
+  const { data, error } = await request.maybeSingle();
+  if (options?.strict && error) throw error;
   if (error || !data) return null;
   // same multi-embed widening as getMyOrders: read the row as an untyped record
   const row = data as unknown as Record<string, unknown>;
@@ -1461,12 +1542,13 @@ export function isQuestionAskableAfterOrder(
  * identifiers are SQL-96 canon (Cowork ruling 8-1), the writer-side twin
  * lives in lib/creatorEvents (CONFIRMATION_MESSAGE_COLUMN).
  */
-export async function getConfirmationMessage(eventId: string): Promise<string | null> {
-  const { data, error } = await supabase
+export async function getConfirmationMessage(eventId: string, strict = false, scope?: CreatorPageScope): Promise<string | null> {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase
     .from('explore_events')
     .select('confirmation_message')
     .eq('id', eventId)
-    .maybeSingle();
+    .maybeSingle());
+  if ((strict || scope) && (error || !data)) throw error ?? new Error('The creator note could not be checked.');
   if (error || !data) return null;
   const raw = (data as Record<string, unknown>).confirmation_message;
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
@@ -1486,6 +1568,8 @@ export interface RefundPreview {
   canSelfRefund: boolean;
   refundAmountCents: number;
   positionCount: number;
+  /** Local continuity only; Paid/eligible does not settle a lost execution. */
+  pendingAttempt?: 'unknown' | 'confirmed';
 }
 
 export type RefundOutcome =
@@ -1493,20 +1577,43 @@ export type RefundOutcome =
       contract's stripe-succeeded-recording-failed shape: money moved, the
       drain + backstop reconcile, so the user sees success, not an error) */
   | { ok: true; refundAmountCents: number; positionsVoided: number; pending: boolean }
-  | { ok: false; message: string };
+  | { ok: false; message: string; /** A verified refusal or local preparation failure before dispatch. */ notStarted?: true };
+
+// These exact responses exit ticket-refund before any provider mutation.
+// A transport error, busy claim or provider failure is not a negative receipt.
+const REFUND_NOT_STARTED = new Set([
+  'refund details changed; review the amount again',
+  'could not check the refund window',
+  'could not load the payment',
+  'could not compute the refund.',
+  'could not start the refund.',
+  'could not confirm refund authority.',
+  'ticketing payments are not configured yet.',
+  'unauthenticated',
+  'not your order',
+  'order not found',
+  'this order is outside its refund window',
+  'refund authority was revoked before this refund could complete',
+]);
 
 /** Raw server text never reaches a user (the humanCheckoutError rule). */
 function humanRefundError(raw: string | null | undefined): string {
   const s = (raw ?? '').toLowerCase();
+  if (/refund details changed/.test(s)) return 'The refund details changed. Review the amount before confirming again.';
+  if (s === 'could not check the refund window' || s === 'could not confirm refund authority.') return 'Refund eligibility could not be checked. No refund was started.';
+  if (s === 'refund authority was revoked before this refund could complete' || s === 'not your order') return "This order can't be refunded from this account.";
   /* copy to the taste gate: web's shipped strings, mirrored verbatim */
   if (/(sign|auth|jwt|not signed)/.test(s)) return 'sign in to manage this order.';
   if (/(window|closed|too late|past|started|cutoff)/.test(s)) return 'this order can no longer be refunded here. reply to your receipt and a person will help.';
   if (/(already|refunded|voided|nothing left|no remaining)/.test(s)) return 'this order is already refunded.';
   if (/(not allowed|forbidden|not permitted|only the)/.test(s)) return "this order can't be refunded from this account.";
-  return 'the refund could not go through. give it a moment and try again.';
+  return 'The refund did not start. Check the details before confirming again.';
 }
 
 export type RefundTarget = {
+  /** Creator confirmation snapshot, checked under the server's refund claim. */
+  reviewedAmountCents?: number;
+  reviewedPositionCount?: number;
   /** organizer callers only; buyers omit (the server forces buyer_request).
    *  'organizer_cancel' is the §4 whole-event-cancellation slice (TK-08):
    *  live server-side in ticket-refund since 7-27, wired client-side from
@@ -1525,46 +1632,65 @@ async function invokeRefund(
   orderId: string,
   action: 'preview' | 'refund',
   target: RefundTarget,
-): Promise<{ data: Record<string, unknown> | null; raw: string | null }> {
+  scope?: CreatorPageScope,
+  execution?: { requestId: string; onDispatch(): void; onReceipt(result: RefundResponse): Promise<void> },
+): Promise<RefundResponse> {
   const body: Record<string, unknown> = { order_id: orderId, action };
+  if (execution) body.client_request_id = execution.requestId;
   if (target.kind) body.kind = target.kind;
   if (target.positionIndexes !== undefined) body.position_indexes = target.positionIndexes;
   if (target.reason) body.reason = target.reason.trim();
-  const { data, error } = await supabase.functions.invoke('ticket-refund', { body });
+  if (target.reviewedAmountCents !== undefined) body.reviewed_amount_cents = target.reviewedAmountCents;
+  if (target.reviewedPositionCount !== undefined) body.reviewed_position_count = target.reviewedPositionCount;
+  const authorization = await ticketReadAuthorization(scope);
+  execution?.onDispatch();
+  const { data, error } = await supabase.functions.invoke('ticket-refund', { body, ...(authorization ? {headers:{Authorization:authorization}} : {}) });
   if (error) {
-    // native functions.invoke carries the JSON body on error.context.body
-    // (string), not a Response like web; same {error} shape underneath
+    // The installed SDK returns a Response on both platforms. Preserve the
+    // older serialized native error shape without trusting a transport message.
     let raw: string | null = null;
+    let requestReceipt: Record<string, unknown> | undefined;
     try {
-      const ctx = (error as { context?: { body?: unknown } }).context;
-      const parsed = typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
+      const ctx = (error as { context?: { body?: unknown; json?: () => Promise<unknown>; clone?: () => { json(): Promise<unknown> } } }).context;
+      const parsed = typeof ctx?.json === 'function'
+        ? await requestWithDeadline(ctx.clone ? ctx.clone().json() : ctx.json(), 12_000)
+        : typeof ctx?.body === 'string' ? JSON.parse(ctx.body) : ctx?.body;
       if (parsed && typeof (parsed as { error?: string }).error === 'string') {
         raw = (parsed as { error: string }).error;
+        requestReceipt = parsed as Record<string, unknown>;
       }
     } catch { /* raw stays null */ }
-    return { data: null, raw: raw ?? error.message ?? null };
+    const result = { data: null, raw: raw ?? error.message ?? null, serverError: raw !== null, requestReceipt };
+    await execution?.onReceipt(result);
+    assertTicketVisit(scope);
+    return result;
   }
-  return { data: (data ?? null) as Record<string, unknown> | null, raw: null };
+  const result = { data: (data ?? null) as Record<string, unknown> | null, raw: null };
+  await execution?.onReceipt(result);
+  assertTicketVisit(scope);
+  return result;
 }
 
 /** Mirrors the ticket-refund edge function's own organizer resolution exactly
     (host_user_id, falling back to the owning community's created_by) --
     narrower than "can view this attendee list" (RLS's organizer-tier read),
     which co_leaders and other event-manager roles also pass. */
-export async function getRefundOrganizerId(eventId: string): Promise<string | null> {
-  const { data: ev, error } = await supabase
+export async function getRefundOrganizerId(eventId: string, scope?: CreatorPageScope): Promise<string | null> {
+  const { data: ev, error } = await scopedTicketRequest(scope, () => supabase
     .from('explore_events')
     .select('host_user_id, community_id')
     .eq('id', eventId)
-    .maybeSingle();
+    .maybeSingle());
+  if (scope && error) throw new Error('Refund access could not be checked.');
   if (error || !ev) return null;
   if (ev.host_user_id) return ev.host_user_id;
   if (!ev.community_id) return null;
-  const { data: comm } = await supabase
+  const { data: comm, error: communityError } = await scopedTicketRequest(scope, () => supabase
     .from('communities')
     .select('created_by')
     .eq('id', ev.community_id)
-    .maybeSingle();
+    .maybeSingle());
+  if (scope && communityError) throw new Error('Refund access could not be checked.');
   return comm?.created_by ?? null;
 }
 
@@ -1599,18 +1725,62 @@ export interface RefundAccess {
  * neither. Mirrors the edge function's own isOrganizer-then-has_refund_authority
  * resolution so the two never disagree about who can act.
  */
-export async function getRefundAccess(eventId: string): Promise<RefundAccess> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function getRefundAccess(eventId: string, scope?: CreatorPageScope): Promise<RefundAccess> {
+  if (scope) await ticketReadAuthorization(scope);
+  const user = scope ? {id:scope.userId} : (await supabase.auth.getUser()).data.user;
   if (!user) return { isOwner: false, isDelegate: false, canRefund: false };
-  const organizerId = await getRefundOrganizerId(eventId);
+  const organizerId = await getRefundOrganizerId(eventId, scope);
   const isOwner = !!organizerId && organizerId === user.id;
   if (isOwner) return { isOwner: true, isDelegate: false, canRefund: true };
-  const { data, error } = await supabase.rpc('has_refund_authority', {
+  const { data, error } = await scopedTicketRequest(scope, () => supabase.rpc('has_refund_authority', {
     p_user_id: user.id,
     p_event_id: eventId,
-  });
+  }));
+  if (scope && error) throw new Error('Refund access could not be checked.');
   const isDelegate = !error && data === true;
   return { isOwner: false, isDelegate, canRefund: isDelegate };
+}
+
+export type RefundAttemptStatus = ({ state: 'none' | 'unknown' | 'confirmed' | 'not-started' }
+  | { state: 'complete'; refundAmountCents: number; positionsVoided: number }) & { requestId?: string; target?: TicketRefundAttemptTarget; isCurrent?: () => boolean };
+
+/** Exact saved-request lookup. This separate endpoint never dispatches a refund. */
+export async function checkRefundAttempt(orderId: string, scope: CreatorPageScope): Promise<RefundAttemptStatus> {
+  const authorization = await ticketReadAuthorization(scope);
+  const attempt = await readTicketRefundAttempt(orderId, scope);
+  if (!attempt) return { state: 'none' };
+  const isCurrent = () => isTicketRefundAttemptCurrent(attempt);
+  const identity = { requestId: attempt.id, ...(attempt.target ? { target: attempt.target } : {}) };
+  if (!isCurrent()) throw new Error('The refund attempt changed. Check its current status.');
+  if (attempt.state === 'complete') return { state: 'complete', refundAmountCents: attempt.refundAmountCents!, positionsVoided: attempt.positionsVoided!, ...identity, isCurrent };
+  if (attempt.state === 'not-started') return { state: 'not-started', ...identity, isCurrent };
+  let result: RefundAttemptStatus = { state: attempt.state };
+  try {
+    const { data, error } = await requestWithDeadline(supabase.functions.invoke('ticket-refund-status', {
+      body: { order_id: orderId, client_request_id: attempt.id },
+      headers: { Authorization: authorization! },
+    }), 12_000);
+    assertTicketVisit(scope);
+    if (!error && data?.ok === true && data.order_id === orderId && data.client_request_id === attempt.id
+      && data.requester_user_id === scope.userId) {
+      if (data.state === 'complete' && Number.isSafeInteger(data.refund_amount_cents) && data.refund_amount_cents >= 0
+        && Number.isSafeInteger(data.positions_voided) && data.positions_voided >= 0) {
+        result = { state: 'complete', refundAmountCents: data.refund_amount_cents, positionsVoided: data.positions_voided };
+      } else if (data.state === 'confirmed') result = { state: 'confirmed' };
+      else if (data.state === 'not-started' && attempt.state !== 'confirmed') result = { state: 'not-started' };
+    }
+    if (result.state === 'complete' || result.state === 'confirmed' || result.state === 'not-started') {
+      await settleTicketRefundAttempt(attempt, result.state === 'complete' ? result : { state: result.state });
+    }
+  } catch {
+    // A missing deployment, failed read or timeout cannot authorize a retry.
+    assertTicketVisit(scope);
+  }
+  const latest = await readTicketRefundAttempt(orderId, scope);
+  // Check(A) cannot release a newer same-order attempt B after A completes.
+  if (!latest || latest.id !== attempt.id || !isCurrent()) throw new Error('The refund attempt changed. Check its current status.');
+  if (latest.state === 'complete') return { state: 'complete', refundAmountCents: latest.refundAmountCents!, positionsVoided: latest.positionsVoided!, ...identity, isCurrent };
+  return { state: latest.state, ...identity, isCurrent };
 }
 
 /** action:"preview": no Stripe call, nothing recorded; the wallet and the
@@ -1618,14 +1788,24 @@ export async function getRefundAccess(eventId: string): Promise<RefundAccess> {
 export async function previewRefund(
   orderId: string,
   target: RefundTarget = {},
+  scope?: CreatorPageScope,
 ): Promise<RefundPreview | null> {
-  const { data } = await invokeRefund(orderId, 'preview', target);
+  const { data } = await invokeRefund(orderId, 'preview', target, scope);
+  if (scope && (!data || data.ok !== true || typeof data.allowed !== 'boolean'
+    || !Number.isSafeInteger(data.refund_amount_cents) || (data.refund_amount_cents as number) < 0
+    || !Number.isSafeInteger(data.position_count) || (data.position_count as number) < 0)) {
+    throw new Error('The refund preview could not be verified.');
+  }
   if (!data || data.ok !== true) return null;
+  const attempt = scope ? await checkRefundAttempt(orderId, scope) : null;
+  assertTicketVisit(scope);
+  if (attempt?.isCurrent && !attempt.isCurrent()) throw new Error('The refund attempt changed. Check its current status.');
   return {
     allowed: data.allowed === true,
     canSelfRefund: data.can_self_refund === true,
     refundAmountCents: typeof data.refund_amount_cents === 'number' ? data.refund_amount_cents : 0,
     positionCount: typeof data.position_count === 'number' ? data.position_count : 0,
+    ...(attempt?.state === 'unknown' || attempt?.state === 'confirmed' ? { pendingAttempt: attempt.state } : {}),
   };
 }
 
@@ -1635,9 +1815,59 @@ export async function previewRefund(
 export async function executeRefund(
   orderId: string,
   target: RefundTarget = {},
+  scope?: CreatorPageScope,
 ): Promise<RefundOutcome> {
-  const { data, raw } = await invokeRefund(orderId, 'refund', target);
+  if (!scope) return refundOutcome(orderId, await invokeRefund(orderId, 'refund', target), false);
+  // Freeze the explicit review before storage/authentication yield to other UI work.
+  const reviewedTarget: RefundTarget = { ...target,
+    ...(target.positionIndexes !== undefined ? { positionIndexes: target.positionIndexes === null ? null : [...target.positionIndexes] } : {}) };
+  let preparation: Awaited<ReturnType<typeof beginTicketRefundAttempt>>;
+  try { preparation = await beginTicketRefundAttempt(orderId, scope,
+    reviewedTarget.reviewedPositionCount !== undefined ? {
+      positionIndexes: reviewedTarget.positionIndexes ?? null,
+      reviewedPositionCount: reviewedTarget.reviewedPositionCount,
+    } : undefined); }
+  catch {
+    assertTicketVisit(scope);
+    return { ok: false, notStarted: true, message: 'No refund was started. Refund details could not be saved. Review them before confirming again.' };
+  }
+  const { attempt, created } = preparation;
+  // This call did not dispatch. A prior confirmed seat refund is not success
+  // for a different target, including a whole-purchase cancellation.
+  if (!created) return { ok: false, message: attempt.state === 'confirmed'
+    ? 'An earlier refund is finishing up. Check your tickets before taking another action.'
+    : 'The refund result is not confirmed. Check your tickets before taking another action.' };
+  let dispatched = false;
+  try {
+    const result = await invokeRefund(orderId, 'refund', reviewedTarget, scope, {
+      requestId: attempt.id,
+      onDispatch() { assertTicketVisit(scope); dispatched = true; },
+      async onReceipt(receipt) {
+        // A late exact receipt can settle its original account's record even
+        // after the screen retires. It must never update that retired screen.
+        const outcome = refundOutcome(orderId, receipt, true, { requestId: attempt.id, userId: attempt.userId });
+        const settlement = outcome.ok ? (outcome.pending ? { state: 'confirmed' as const }
+          : { state: 'complete' as const, refundAmountCents: outcome.refundAmountCents, positionsVoided: outcome.positionsVoided })
+          : outcome.notStarted ? { state: 'not-started' as const } : null;
+        if (settlement) await settleTicketRefundAttempt(attempt, settlement).catch(() => undefined);
+      },
+    });
+    return refundOutcome(orderId, result, true, { requestId: attempt.id, userId: attempt.userId });
+  } catch (error) {
+    // Auth/storage retirement before invoke is proof that this attempt never
+    // dispatched. Once dispatched, a timeout is not permission to send again.
+    if (!dispatched) await settleTicketRefundAttempt(attempt, { state: 'not-started' }).catch(() => undefined);
+    throw error;
+  }
+}
+
+type RefundResponse = { data: Record<string, unknown> | null; raw: string | null; serverError?: boolean; requestReceipt?: Record<string, unknown> };
+function refundOutcome(orderId: string, { data, raw, serverError, requestReceipt }: RefundResponse,
+  strict: boolean, identity?: { requestId: string; userId: string }): RefundOutcome {
   if (data && data.ok === true) {
+    if (strict && (data.order_id !== orderId || !Number.isSafeInteger(data.refund_amount_cents)
+      || (data.refund_amount_cents as number) < 0 || !Number.isSafeInteger(data.positions_voided)
+      || (data.positions_voided as number) < 0)) throw new Error('The refund receipt could not be verified.');
     return {
       ok: true,
       refundAmountCents: typeof data.refund_amount_cents === 'number' ? data.refund_amount_cents : 0,
@@ -1647,10 +1877,16 @@ export async function executeRefund(
   }
   // stripe-succeeded-recording-failed: money moved; recording is idempotent
   // and the drain + backstop reconcile. success.
-  if (raw && /succeeded at stripe/i.test(raw)) {
+  if (serverError && raw && /succeeded at stripe/i.test(raw)) {
     return { ok: true, refundAmountCents: 0, positionsVoided: 0, pending: true };
   }
-  return { ok: false, message: humanRefundError(raw) };
+  const exactRefusal = identity && requestReceipt?.client_request_id === identity.requestId
+    && requestReceipt.order_id === orderId && requestReceipt.requester_user_id === identity.userId
+    && requestReceipt.request_state === 'not-started';
+  if (serverError && (exactRefusal || (!strict && REFUND_NOT_STARTED.has(raw ?? '')))) {
+    return { ok: false, message: humanRefundError(raw), notStarted: true };
+  }
+  return { ok: false, message: 'The refund result is not confirmed. Check your tickets before taking another action.' };
 }
 
 export interface CancelRefundSummary { refundedCount: number; failedCount: number; }
@@ -1662,13 +1898,19 @@ export interface CancelRefundSummary { refundedCount: number; failedCount: numbe
  * (ticket-refund's claim key makes a repeat call on an already-refunded
  * order a no-op, not a double refund).
  */
-export async function refundLiveOrdersOnCancel(eventId: string): Promise<CancelRefundSummary> {
-  const attendees = await getEventAttendees(eventId);
+export async function refundLiveOrdersOnCancel(eventId: string, options?: { beforeEach?: () => Promise<void>; scope?: CreatorPageScope }): Promise<CancelRefundSummary> {
+  assertTicketVisit(options?.scope);
+  await options?.beforeEach?.();
+  const attendees = await getEventAttendees(eventId, options?.scope);
+  assertTicketVisit(options?.scope);
   const orderIds = Array.from(new Set(attendees.filter(isLiveSeat).map((a) => a.orderId)));
   let refundedCount = 0;
   let failedCount = 0;
   for (const orderId of orderIds) {
-    const outcome = await executeRefund(orderId, { kind: 'organizer_cancel' });
+    await options?.beforeEach?.();
+    assertTicketVisit(options?.scope);
+    const outcome = await executeRefund(orderId, { kind: 'organizer_cancel' }, options?.scope);
+    assertTicketVisit(options?.scope);
     if (outcome.ok) refundedCount += 1; else failedCount += 1;
   }
   return { refundedCount, failedCount };
@@ -1721,7 +1963,13 @@ export async function recordAnswer(
   questionId: string,
   value: AnswerValue,
   attendeeIndex: number | null,
+  owner?: { userId: string | null; isCurrent(): boolean },
 ): Promise<{ ok: boolean; message: string | null }> {
+  if (owner) {
+    if (!owner.userId || !owner.isCurrent()) return {ok:false,message:'Purchase visit changed.'};
+    const session = await supabase.auth.getSession();
+    if (!owner.isCurrent() || session.error || session.data.session?.user.id !== owner.userId) return {ok:false,message:'Purchase visit changed.'};
+  }
   const { error } = await supabase.from('ticket_answers').insert({
     order_id: orderId,
     question_id: questionId,

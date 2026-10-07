@@ -1,0 +1,18 @@
+import React from 'react';
+import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+import {Image} from 'expo-image';
+const mockLoad=jest.fn();let mockFocused=true;let mockAccount:any;
+jest.mock('../../../../lib/publishedPageCover',()=>({loadPublishedPageCoverSource:(...args:unknown[])=>mockLoad(...args)}));
+jest.mock('../../../../lib/creatorPageMedia',()=>({loadPageCoverSource:jest.fn()}));
+jest.mock('../../../../hooks/useObservedUser',()=>({useObservedUser:()=>mockAccount}));
+jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
+jest.mock('../../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:{regular:'System'}})}));
+jest.mock('../PageFrame',()=>({pageStyles:{small:{}},PageAction:()=>null}));
+import {PublishedPageCover} from '../PublishedPageCover';
+import {PageAction} from '../PageFrame';
+let tree:ReactTestRenderer;
+beforeEach(()=>{jest.clearAllMocks();mockFocused=true;mockAccount={viewerId:'member',epoch:1,isCurrent:()=>true,error:null,isLoading:false,retry:jest.fn()};mockLoad.mockResolvedValue({uri:'private-image',headers:{Authorization:'Bearer test'}});});
+afterEach(()=>act(()=>tree?.unmount()));
+it('reuses whole-image decoding and no-cache rendering within the existing card height',async()=>{await act(async()=>{tree=create(<PublishedPageCover pageId="page" mediaId="cover" height={120}/>);});const image=tree.root.findByType(Image);expect(image.props.style.height).toBe(120);expect(image.props.contentFit).toBe('contain');expect(image.props.cachePolicy).toBe('none');expect(mockLoad.mock.calls[0][2].userId).toBe('member');});
+it('retires the old image on sign-out and does not retain it when anonymous access fails',async()=>{await act(async()=>{tree=create(<PublishedPageCover pageId="page" mediaId="cover" height={120}/>);});mockAccount.isCurrent=()=>false;mockAccount={...mockAccount,viewerId:null,epoch:2,isCurrent:()=>true};mockLoad.mockRejectedValueOnce(new Error('Unavailable'));await act(async()=>tree.update(<PublishedPageCover pageId="page" mediaId="cover" height={120}/>));expect(tree.root.findAllByType(Image)).toHaveLength(0);expect(tree.root.findByType(PageAction).props.title).toBe('Retry photo');expect(mockLoad.mock.calls[1][2].userId).toBeNull();});
+it('discards a late cover response when its page loses focus',async()=>{let resolve:any;mockLoad.mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));await act(async()=>{tree=create(<PublishedPageCover pageId="page" mediaId="cover" height={240}/>);});mockFocused=false;await act(async()=>tree.update(<PublishedPageCover pageId="page" mediaId="cover" height={240}/>));await act(async()=>resolve({uri:'late-image'}));expect(tree.root.findAllByType(Image)).toHaveLength(0);});

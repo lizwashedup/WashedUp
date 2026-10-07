@@ -1,0 +1,11 @@
+const mockMemory=new Map<string,string>();
+jest.mock('@react-native-async-storage/async-storage',()=>({__esModule:true,default:{getItem:async(k:string)=>mockMemory.get(k)??null,setItem:async(k:string,v:string)=>{mockMemory.set(k,v);},removeItem:async(k:string)=>{mockMemory.delete(k);}}}));
+jest.mock('expo-crypto',()=>({randomUUID:()=> '44444444-4444-4444-8444-444444444444'}));
+import {readCreatorExtraRemoval,prepareCreatorExtraRemoval,clearCreatorExtraRemoval} from '../creatorExtraRemovalAttempt';
+const eventId='11111111-1111-4111-8111-111111111111',pageId='22222222-2222-4222-8222-222222222222',userId='33333333-3333-4333-8333-333333333333',recordId='55555555-5555-4555-8555-555555555555';
+let current=true;const scope={userId,isCurrent:()=>current};const input={kind:'remove-extra' as const,eventId,pageId,recordId,label:'Blanket'};
+beforeEach(()=>{current=true;mockMemory.clear();});
+it('a second removal adopts the original immutable action rather than replacing it',async()=>{const first=await prepareCreatorExtraRemoval(input,scope);const second=await prepareCreatorExtraRemoval({...input,recordId:pageId,label:'Different extra'},scope);expect(second.created).toBe(false);expect(second.action).toEqual(first.action);});
+it('another account or event cannot adopt the saved action',async()=>{await prepareCreatorExtraRemoval(input,scope);expect(await readCreatorExtraRemoval(eventId,{...scope,userId:pageId})).toBeNull();expect(await readCreatorExtraRemoval(pageId,scope)).toBeNull();});
+it('cleanup from an older visit cannot erase a newer removal',async()=>{const first=await prepareCreatorExtraRemoval(input,scope);await clearCreatorExtraRemoval(first.action,scope);const next=await prepareCreatorExtraRemoval({...input,recordId:pageId},scope);await expect(clearCreatorExtraRemoval(first.action,scope)).rejects.toThrow('newer');expect(await readCreatorExtraRemoval(eventId,scope)).toEqual(next.action);});
+it('corrupt data and retired visits fail closed',async()=>{await prepareCreatorExtraRemoval(input,scope);mockMemory.set([...mockMemory.keys()][0],'{');await expect(readCreatorExtraRemoval(eventId,scope)).rejects.toThrow();current=false;expect(()=>prepareCreatorExtraRemoval(input,scope)).toThrow('unavailable');});

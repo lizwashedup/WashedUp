@@ -1,119 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
-import { hapticSuccess, hapticSelection } from '../../../lib/haptics';
+import { Image } from 'expo-image';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
+import { hapticSelection } from '../../../lib/haptics';
 import YoursAvatar from '../primitives/YoursAvatar';
+import { initialOf } from '../../../lib/yours/personDisplay';
 import { COPY } from '../state/constants';
 import type { IncomingRequest } from '../../../lib/yours/types';
+import type { RequestAppearance } from './RequestStack';
 
-/**
- * One pending request, rendered as an explicit list row. There is NO
- * swipe-to-accept and NO auto-advance: accept and decline are distinct,
- * clearly-labelled buttons that act on THIS person only. Decline is
- * confirm-gated inline (one extra tap) so a mis-tap can't silently drop a
- * real person. Gold/terracotta only, never red.
- */
-export default function RequestRow({
-  req,
-  onAdd,
-  onDecline,
-  highlighted,
-  disabled,
-}: {
-  req: IncomingRequest;
-  onAdd: () => void;
-  onDecline: () => void;
-  highlighted?: boolean;
-  disabled?: boolean;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const name = req.first_name_display ?? 'Someone';
-
-  const add = () => {
-    if (disabled) return;
-    hapticSuccess();
-    onAdd();
-  };
-  const askDecline = () => {
-    if (disabled) return;
-    hapticSelection();
-    setConfirming(true);
-  };
-  const confirmDecline = () => {
-    if (disabled) return;
-    setConfirming(false);
-    onDecline();
-  };
-
+export type RequestRowProps = {
+  req: IncomingRequest; onAdd: () => void; onDecline: () => void;
+  highlighted?: boolean; disabled?: boolean; appearance?: RequestAppearance;
+  unavailable?: boolean; pendingAction?: 'accept' | 'decline'; error?: string; retryAction?: 'accept' | 'decline';
+};
+function RequestPhoto({ req, fonts }: { req: IncomingRequest; fonts: AfterglowFontFamilies }) {
+  const [failed, setFailed] = useState(false); const live = useRef(true);
+  useLayoutEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  return <View style={rowAppearanceBase.photoFrame}>
+    {req.profile_photo_url && !failed ? <Image style={rowAppearanceBase.photo} source={{ uri: req.profile_photo_url }}
+      contentFit="cover" recyclingKey={`${req.requester_user_id}:${req.profile_photo_url}`} accessible={false}
+      onError={() => { if (live.current) setFailed(true); }} /> :
+      <Text accessible={false} style={[rowAppearanceBase.initial, { fontFamily: fonts.semibold }]}>{initialOf(req.first_name_display)}</Text>}
+  </View>;
+}
+/** Explicit Add; decline retains its per-person inline confirmation. Pending
+ * and errors are supplied by the account/visit-scoped RequestStack. */
+export default function RequestRow({ req, onAdd, onDecline, highlighted, disabled, appearance, pendingAction, error, retryAction, unavailable: withdrawn }: RequestRowProps) {
+  const identity = `${req.connection_id}:${req.requester_user_id}:${req.requested_at}`;
+  const [confirmingFor, setConfirmingFor] = useState<string | null>(null);
+  const confirming = confirmingFor === identity;
+  const name = req.first_name_display?.trim() || 'Someone';
+  const s = useMemo(() => appearance ? { ...styles, ...rowAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  const busy = !!pendingAction, unavailable = !!disabled || busy || !!withdrawn;
+  const add = () => { if (unavailable) return; hapticSelection(); onAdd(); };
+  const askDecline = () => { if (unavailable) return; hapticSelection(); setConfirmingFor(identity); };
+  const confirmDecline = () => { if (unavailable || confirmingFor !== identity) return; setConfirmingFor(null); onDecline(); };
+  const addLabel = appearance ? 'Add' : COPY.requestAdd;
   return (
-    <View style={[styles.row, highlighted && styles.rowHighlighted]}>
-      <View style={styles.head}>
-        <View style={styles.avatarRing}>
-          <YoursAvatar
-            name={req.first_name_display}
-            photoUrl={req.profile_photo_url}
-            size={52}
-            bucket="none"
-          />
+    <View style={[s.row, highlighted && s.rowHighlighted]} testID={`request-${req.connection_id}`}>
+      <View style={s.head}>
+        <View style={s.avatarRing}>
+          {appearance ? <RequestPhoto key={`${identity}:${req.profile_photo_url}`} req={req} fonts={appearance.fonts} /> :
+            <YoursAvatar name={req.first_name_display} photoUrl={req.profile_photo_url} size={52} bucket="none" />}
         </View>
-        <View style={styles.meta}>
-          <Text style={styles.name} numberOfLines={1}>
-            {name}
-          </Text>
-          <View style={styles.contextChip}>
-            <Text style={styles.context} numberOfLines={2}>
-              {req.context_line}
-            </Text>
-          </View>
+        <View style={s.meta}>
+          <Text style={s.name}>{name}</Text>
+          {!!req.context_line && <View style={s.contextChip}><Text style={s.context} numberOfLines={2}>{req.context_line}</Text></View>}
         </View>
       </View>
-
-      {confirming ? (
-        <View style={styles.actions}>
-          <Text style={styles.confirmTitle} numberOfLines={1}>
-            {COPY.requestDeclineConfirmTitle(name)}
-          </Text>
-          <View style={styles.confirmBtns}>
-            <Pressable
-              style={styles.declineConfirm}
-              onPress={confirmDecline}
-              accessibilityRole="button"
-              accessibilityLabel={`${COPY.requestDeclineConfirmYes} ${name}`}
-            >
-              <Text style={styles.declineConfirmText}>
-                {COPY.requestDeclineConfirmYes}
-              </Text>
+      {withdrawn ? <Text style={s.feedback} accessibilityRole="alert" accessibilityLiveRegion="polite">This request is no longer available.</Text> : busy ? <Text style={s.feedback} accessibilityLiveRegion="polite">{pendingAction === 'accept' ? 'Adding…' : 'Declining…'}</Text> :
+        error ? <Text style={s.feedback} accessibilityRole="alert" accessibilityLiveRegion="polite">{error}</Text> : null}
+      {withdrawn ? null : confirming && !busy ? (
+        <View style={s.confirmation}>
+          <Text style={s.confirmTitle}>{COPY.requestDeclineConfirmTitle(name)}</Text>
+          <View style={s.confirmBtns}>
+            <Pressable style={s.declineConfirm} disabled={unavailable} onPress={confirmDecline} accessibilityRole="button" accessibilityLabel={`Confirm decline ${name}`} accessibilityState={{ disabled: unavailable }}>
+              <Text numberOfLines={1} style={s.declineConfirmText}>{COPY.requestDeclineConfirmYes}</Text>
             </Pressable>
-            <Pressable
-              style={styles.keep}
-              onPress={() => setConfirming(false)}
-              accessibilityRole="button"
-              accessibilityLabel={COPY.requestDeclineConfirmNo}
-            >
-              <Text style={styles.keepText}>{COPY.requestDeclineConfirmNo}</Text>
+            <Pressable style={s.keep} disabled={unavailable} onPress={() => setConfirmingFor(null)} accessibilityRole="button" accessibilityLabel={`Keep request from ${name}`} accessibilityState={{ disabled: unavailable }}>
+              <Text numberOfLines={1} style={s.keepText}>{COPY.requestDeclineConfirmNo}</Text>
             </Pressable>
           </View>
         </View>
       ) : (
-        <View style={styles.actions}>
-          <Pressable
-            style={styles.add}
-            onPress={add}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`${COPY.requestAdd} ${name}`}
-          >
-            <Text style={styles.addText}>{COPY.requestAdd}</Text>
+        <View style={s.actions}>
+          <Pressable style={[s.add, unavailable && s.disabled]} onPress={add} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'accept' ? `Try again to add ${name}` : `${addLabel} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
+            <Text numberOfLines={1} style={s.addText}>{error && retryAction === 'accept' ? 'Try again' : addLabel}</Text>
           </Pressable>
-          <Pressable
-            style={styles.decline}
-            onPress={askDecline}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`${COPY.requestDecline} ${name}`}
-          >
-            <Text style={styles.declineText}>{COPY.requestDecline}</Text>
+          <Pressable style={[s.decline, unavailable && s.disabled]} onPress={askDecline} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'decline' ? `Try again to decline ${name}` : `${COPY.requestDecline} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
+            <Text numberOfLines={1} style={s.declineText}>{error && retryAction === 'decline' ? 'Try again' : COPY.requestDecline}</Text>
           </Pressable>
         </View>
       )}
@@ -168,6 +125,9 @@ const styles = StyleSheet.create({
     color: Colors.asphalt,
   },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  confirmation: { gap: 10 },
+  feedback: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
+  disabled: { opacity: 0.55 },
   add: {
     flex: 1,
     backgroundColor: Colors.terracotta,
@@ -221,3 +181,30 @@ const styles = StyleSheet.create({
     color: Colors.terracotta,
   },
 });
+
+const rowAppearanceBase = StyleSheet.create({
+  photoFrame: { width: 54, height: 54, borderRadius: 27, overflow: 'hidden', backgroundColor: AfterglowColors.avatar, alignItems: 'center', justifyContent: 'center' },
+  photo: { width: 54, height: 54, opacity: 1 },
+  initial: { ...AfterglowType.contextTitle, color: AfterglowColors.muted },
+});
+function rowAppearance(fonts: AfterglowFontFamilies) {
+  return StyleSheet.create({
+    row: { paddingVertical: 18, paddingHorizontal: 0, marginHorizontal: 20, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.subtleLine },
+    rowHighlighted: { backgroundColor: AfterglowColors.unread, borderBottomColor: AfterglowColors.clay },
+    avatarRing: { padding: 0 },
+    meta: { flex: 1, minWidth: 0, gap: 3 },
+    name: { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    contextChip: {},
+    context: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+    feedback: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
+    add: { flex: 1, minHeight: 44, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: AfterglowColors.clay },
+    addText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
+    decline: { minHeight: 44, paddingVertical: 12, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
+    declineText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.muted },
+    confirmTitle: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
+    declineConfirm: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: AfterglowColors.line, borderRadius: 4, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+    declineConfirmText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+    keep: { flex: 1, minHeight: 44, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+    keepText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.clay },
+  });
+}

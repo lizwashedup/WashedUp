@@ -1,16 +1,15 @@
 /**
- * CirclesSummaryHeader - the card pinned above the Yours > Circles list.
- *
- * An uppercase count label, a serif-italic tagline, and a real branded
- * "New circle" button (filled terracotta, warm shadow) - the first-class create
- * entry point that replaces the old dashed placeholder row. The "plans this week"
- * half of the count label fills in next chunk, once circle-plans data exists.
+ * CirclesSummaryHeader - actual count and the existing create entry point.
+ * The refined appearance introduces the conversation list with concise copy;
+ * the legacy presentation remains available to existing callers.
  */
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { PageAction } from '../../creator/pages/PageFrame';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { Plus } from 'lucide-react-native';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { CIRCLE_DIR, TYPE, RADII } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
@@ -18,10 +17,22 @@ import { hapticSelection } from '../../../lib/haptics';
 export default function CirclesSummaryHeader({
   count,
   onCreate,
+  appearance,
 }: {
   count: number;
   onCreate: () => void;
+  appearance?: { fonts: AfterglowFontFamilies };
 }) {
+  if (appearance) {
+    const styled = afterglow(appearance.fonts);
+    return <View style={styled.wrap}>
+      <View style={styled.top}>
+        <Text accessibilityRole="header" style={styled.count}>{COPY.circleDirCount(count)}</Text>
+        <PageAction primary compact singleLine title={COPY.circleDirNewCta} leadingIcon={<Plus size={18} color={Colors.white}/>} onPress={() => { hapticSelection(); onCreate(); }} />
+      </View>
+      <Text style={styled.description}>Chats and plans with your people.</Text>
+    </View>;
+  }
   return (
     <View style={styles.card}>
       <View style={styles.copyCol}>
@@ -40,13 +51,22 @@ export default function CirclesSummaryHeader({
         {({ pressed }) => (
           <View style={[styles.cta, pressed && styles.ctaPressed]}>
             <Plus size={CIRCLE_DIR.ctaIcon} color={Colors.white} strokeWidth={2.5} />
-            <Text style={styles.ctaLabel}>{COPY.circleDirNewCta}</Text>
+            <Text numberOfLines={1} style={styles.ctaLabel}>{COPY.circleDirNewCta}</Text>
           </View>
         )}
       </Pressable>
     </View>
   );
 }
+
+function afterglow(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  wrap: { marginHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 },
+  count: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
+  description: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted, marginTop: 10 },
+  button: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: AfterglowColors.clay, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  buttonText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
+}); }
 
 const styles = StyleSheet.create({
   card: {

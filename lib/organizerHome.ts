@@ -15,8 +15,18 @@ import { getLADayParts } from './laDate';
 import type { CommunityEventRow } from './creatorMode';
 import type { TicketTier } from './ticketing';
 
+// event_date is a calendar date, not a UTC-midnight instant. Preserve its
+// day just as formatEventDateLA does; real timestamps still use the LA zone.
+function eventDayParts(when: string): { y: number; m: number; d: number } {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(when)) {
+    const [y, month, d] = when.split('-').map(Number);
+    return { y, m: month - 1, d };
+  }
+  return getLADayParts(when);
+}
+
 function laDayNumber(when: string): number {
-  const { y, m, d } = getLADayParts(when);
+  const { y, m, d } = eventDayParts(when);
   return y * 10000 + (m + 1) * 100 + d;
 }
 
@@ -86,7 +96,7 @@ export function lowInventoryLabel(left: number): string {
 /** Calendar days from now to eventDateISO, LA-day-boundary aware. Negative = past. */
 function dayDiff(eventDateISO: string, nowISO: string): number {
   const now = getLADayParts(nowISO);
-  const then = getLADayParts(eventDateISO);
+  const then = eventDayParts(eventDateISO);
   const nowUTC = Date.UTC(now.y, now.m, now.d);
   const thenUTC = Date.UTC(then.y, then.m, then.d);
   return Math.round((thenUTC - nowUTC) / 86400000);

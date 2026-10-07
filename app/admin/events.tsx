@@ -1,3 +1,4 @@
+import { EventMediaImage } from '../../components/events/EventMediaImage';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -396,7 +397,7 @@ export default function AdminEventsScreen() {
               <Text style={styles.fieldLabel}>Image</Text>
               {form.image_url ? (
                 <View style={styles.imagePreviewWrap}>
-                  <Image source={{ uri: form.image_url }} style={styles.imagePreview} contentFit="cover" />
+                  <EventMediaImage eventId={editingEvent?.id ?? ''} reference={form.image_url} style={styles.imagePreview} contentFit="cover" />
                   <TouchableOpacity style={styles.imageRemoveBtn} onPress={() => setForm(f => ({ ...f, image_url: '' }))}>
                     <X size={16} color={Colors.white} strokeWidth={2.5} />
                   </TouchableOpacity>
@@ -453,7 +454,7 @@ function EventCard({ event, onEdit, onArchive, archived = false }: { event: Scen
   return (
     <View style={[styles.card, archived && styles.cardArchived]}>
       {event.image_url && (
-        <Image source={{ uri: event.image_url }} style={styles.cardImg} contentFit="cover" />
+        <EventMediaImage eventId={event.id} reference={event.image_url} style={styles.cardImg} contentFit="cover" />
       )}
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>

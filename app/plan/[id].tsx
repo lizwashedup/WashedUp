@@ -1,7 +1,14 @@
+import { ScaledText as Text } from '../../components/ScaledText';
+import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt';
+import ProfileButton from '../../components/ProfileButton';
+import { MEMBER_REDESIGN_APPEARANCE_ENABLED } from '../../constants/MemberAppearance';
+import { useYoursGrid } from '../../hooks/useYoursGrid';
+import {usePlanInterest} from '../../hooks/usePlanInterest';
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
+import { planAgeLabel } from '../../lib/planAgeLabel';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
@@ -22,6 +29,7 @@ import {
     ActivityIndicator,
     Dimensions,
     Keyboard,
+    KeyboardAvoidingView,
     Linking,
     Modal,
     Platform,
@@ -30,24 +38,34 @@ import {
     Share,
     StyleSheet,
     Switch,
-    Text,
     TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as ImagePicker from 'expo-image-picker';
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
+import WashedUpCalendar from '../../components/calendar/WashedUpCalendar';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
-import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED } from '../../constants/FeatureFlags';
-import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
+import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
+import { usePlanInvitation } from '../../hooks/usePlanInvitation';
+import { usePlanWaitlist } from '../../hooks/usePlanWaitlist';
+import { usePlanEdit } from '../../hooks/usePlanEdit';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
+import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { useFeedWishlist } from '../../hooks/useFeedWishlist';
+import { getPlanLifecycle } from '../../lib/planLifecycle';
+import { usePlanDeparture, type PlanDepartureAction, type PlanDepartureResult } from '../../hooks/usePlanDeparture';
+import { PlanDepartureSheet } from '../../components/plans/PlanDepartureSheet';
+import { usePlanJoin } from '../../hooks/usePlanJoin';
+import { usePlanExceptionActions } from '../../hooks/usePlanExceptionActions';
+import { PlanJoinSheet } from '../../components/plans/PlanJoinSheet';
+import { PlanDetailOverview } from '../../components/plans/PlanDetailOverview';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
 // It only renders behind GROUPS_ENABLED && isCirclePlan (see below).
@@ -56,28 +74,28 @@ const CirclePlanCoordination = React.lazy(
 );
 import { COPY } from '../../components/yours/state/constants';
 import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
-import Colors from '../../constants/Colors';
+import Colors, { AfterglowColors } from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
-import { Fonts, FontSizes } from '../../constants/Typography';
+import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
-import { getParticipationNoticeStatus, recordParticipationAssent } from '../../lib/participationTerms';
+import { getParticipationNoticeStatus } from '../../lib/participationTerms';
+import { ObsoletePlanParticipation, recordScopedPlanAssent } from '../../lib/planParticipationScope';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
-import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
 import { joinErrorSurface } from '../../lib/planJoinSafety';
-import { resolveManagePlanImageUrl } from './plan-photo-edit';
+import { buildPlanEditRulePatch, savedAgeLabel } from '../../lib/planEditRules';
+import { resolveManagePlanImageUrl } from '../../lib/planPhotoEdit';
 import {
-  acceptWaitlistException,
-  declineWaitlistException,
   fetchWaitlistManager,
   waitlistAlertMessage,
 } from '../../lib/waitlistExceptions';
 import { WAITLIST_MANAGER_KEY } from '../../constants/QueryKeys';
 import { isPlanPast } from '../../lib/planTime';
+import { getLAWallParts, isValidLAWallTime, laWallTimeToUTC } from '../../lib/laDate';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -144,24 +162,18 @@ function minMaxToAgeRanges(min: number | null, max: number | null): AgeRange[] {
       }
     }
   }
-  return ['All Ages'];
+  return []; // Saved bounds do not fit a preset; keep them until explicitly changed.
 }
 
 // ─── Date/time picker constants ───────────────────────────────────────────────
-// Mirror the wheel-picker pattern used in post/index.tsx so the manage modal's
-// date/time editor matches the create flow visually.
+// Keep display values aligned with the shared creation controls.
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
-const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const MINUTE_OPTIONS = ['00', '15', '30', '45'];
 const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
-
-function getDaysInMonth(month: number, year: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
 
 function buildDatetime(
   month: number, day: number, year: number,
@@ -170,7 +182,7 @@ function buildDatetime(
   let h = hour;
   if (period === 'PM' && h !== 12) h += 12;
   if (period === 'AM' && h === 12) h = 0;
-  return new Date(year, month, day, h, parseInt(minute));
+  return laWallTimeToUTC(year, month, day, h, parseInt(minute, 10));
 }
 
 function displayPickerDate(month: number, day: number, year: number): string {
@@ -210,6 +222,7 @@ interface PlanDetail {
   is_featured: boolean;
   featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | null;
   explore_event_id: string | null;
+  circle_id?: string | null;
   creator: {
     id: string;
     first_name_display: string | null;
@@ -225,6 +238,7 @@ interface Member {
   first_name_display: string | null;
   profile_photo_url: string | null;
   joined_at: string;
+  handle?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -234,6 +248,7 @@ function formatFullDate(dateString: string): string {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: 'America/Los_Angeles',
   });
 }
 
@@ -242,6 +257,7 @@ function formatTime(dateString: string): string {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+    timeZone: 'America/Los_Angeles',
   });
 }
 
@@ -311,7 +327,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
       status, member_count, creator_user_id, tickets_url, neighborhood, slug, is_featured, featured_type,
-      explore_event_id
+      explore_event_id, circle_id
     `)
     .eq('id', id)
     .single();
@@ -366,6 +382,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     is_featured: row.is_featured ?? false,
     featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
     explore_event_id: row.explore_event_id ?? null,
+    circle_id: row.circle_id,
     member_count: row.member_count ?? 0,
     creator,
   };
@@ -382,6 +399,7 @@ async function fetchMembers(planId: string): Promise<Member[]> {
       first_name_display: row.first_name ?? row.first_name_display ?? null,
       profile_photo_url: row.avatar_url ?? row.profile_photo_url ?? null,
       joined_at: row.joined_at ?? '',
+      handle: row.handle ?? null,
     }));
   }
 
@@ -401,28 +419,29 @@ async function fetchMembers(planId: string): Promise<Member[]> {
     first_name_display: row.first_name_display ?? null,
     profile_photo_url: row.profile_photo_url ?? null,
     joined_at: row.joined_at ?? '',
+    handle: row.handle ?? null,
   }));
 }
 
 // ─── Member Avatar ────────────────────────────────────────────────────────────
 
 const MemberAvatar = React.memo(({ member, onPress }: { member: Member; onPress?: () => void }) => (
-  <TouchableOpacity style={styles.memberAvatarWrapper} onPress={onPress} activeOpacity={0.7}>
+  <TouchableOpacity style={legacyStyles.memberAvatarWrapper} onPress={onPress} activeOpacity={0.7}>
     {member.profile_photo_url ? (
       <Image
         source={{ uri: member.profile_photo_url }}
-        style={styles.memberAvatar}
+        style={legacyStyles.memberAvatar}
         contentFit="cover"
         transition={200}
       />
     ) : (
-      <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
-        <Text style={styles.memberAvatarInitial}>
+      <View style={[legacyStyles.memberAvatar, legacyStyles.memberAvatarPlaceholder]}>
+        <Text style={legacyStyles.memberAvatarInitial}>
           {member.first_name_display?.[0]?.toUpperCase() ?? '?'}
         </Text>
       </View>
     )}
-    <Text style={styles.memberAvatarName} numberOfLines={1}>
+    <Text style={legacyStyles.memberAvatarName} numberOfLines={1}>
       {member.first_name_display ?? 'Member'}
     </Text>
   </TouchableOpacity>
@@ -432,24 +451,101 @@ MemberAvatar.displayName = 'MemberAvatar';
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PlanDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string }>();
+  const identity = useObservedUser();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const router = useRouter();
+  if (identity.isLoading || identity.error) return <SafeAreaView style={legacyStyles.container}>
+    <Stack.Screen options={{ headerShown: false }} />
+    <View style={legacyStyles.centered}>{identity.isLoading ? <ActivityIndicator color={Colors.terracotta} /> : <>
+      <Text style={legacyStyles.errorText}>Couldn’t check your account.</Text>
+      <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => void identity.retry()}><Text style={legacyStyles.linkText}>Try again</Text></TouchableOpacity>
+      <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/plans')}><Text style={legacyStyles.linkText}>{router.canGoBack() ? 'Go back' : 'Back to Plans'}</Text></TouchableOpacity>
+    </>}</View>
+  </SafeAreaView>;
+  return <PlanDetailSession key={`${id}:${identity.viewerId}:${identity.epoch}`} id={id} identity={identity} />;
+}
+
+function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUser }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
-  const [currentUserId, setCurrentUserId] = React.useState<string | null>(null);
-  const [isWishlisted, setIsWishlisted] = useState(false);
+  const currentUserId = identity.viewerId ?? null;
+  const peopleQuery = useYoursGrid(currentUserId, { userId: currentUserId ?? '', epoch: identity.epoch, isCurrent: identity.isCurrent });
+  const visibleHandles = useMemo(() => {
+    const handles: Record<string, string> = {};
+    if (peopleQuery.isSuccess && !peopleQuery.isError && identity.isCurrent()) {
+      for (const person of peopleQuery.data ?? []) if (person.handle) handles[person.user_id] = person.handle;
+    }
+    return handles;
+  }, [peopleQuery.data, peopleQuery.isSuccess, peopleQuery.isError, identity]);
+
+  const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const appearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? { fonts } : undefined, [fonts]);
+  const styles = useMemo(() => appearance ? detailAppearance(legacyStyles, fonts) : legacyStyles, [appearance, fonts]);
+  const joinStyles = useMemo(() => appearance ? detailAppearance(legacyJoinStyles, fonts) : legacyJoinStyles, [appearance, fonts]);
+  const manageStyles = useMemo(() => appearance ? manageAppearance(legacyManageStyles, fonts) : legacyManageStyles, [appearance, fonts]);
+  const managePlacesStyles = useMemo(() => appearance ? detailAppearance(legacyManagePlacesStyles, fonts) : legacyManagePlacesStyles, [appearance, fonts]);
+  const duplicateSheetStyles = useMemo(() => appearance ? detailAppearance(legacyDuplicateSheetStyles, fonts) : legacyDuplicateSheetStyles,[appearance,fonts]);
+  const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
+  const ink = appearance ? AfterglowColors.ink : Colors.asphalt;
+  const goBack = () => router.canGoBack() ? router.back() : router.replace('/(tabs)/plans');
+  const wishlist = useFeedWishlist(currentUserId, () => {});
+  const isWishlisted = wishlist.data?.includes(id) ?? false;
   const [mapCoords, setMapCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [shareAfterJoinPending, setShareAfterJoinPending] = useState(false);
+  const joinedNotification = useRef<{ userId: string; planId: string; isCurrent: () => boolean } | null>(null);
+  const finishJoinNotifications = () => {
+    const completed = joinedNotification.current;
+    joinedNotification.current = null;
+    if (completed) requestPlanNotificationPrompt({ userId: completed.userId, planId: completed.planId, reason: 'joined' }, completed.isCurrent);
+  };
+  const [pendingGreetingProblem, setPendingGreetingProblem] = useState<string | null>(null);
   const [noticePending, setNoticePending] = useState<
-    { action: 'join'; message?: string } | { action: 'exception' } | null
+    { action: 'join'; message?: string; isCurrent: () => boolean } | { action: 'exception'; isCurrent: () => boolean } | null
   >(null);
+  const noticePendingRef = useRef(noticePending); noticePendingRef.current = noticePending;
+  const noticeAgreeLock = useRef<object | null>(null);
+  if (noticeAgreeLock.current && noticeAgreeLock.current !== noticePending) noticeAgreeLock.current = null;
+  type DismissalTransition = {
+    source: 'join' | 'notice' | 'manage'; isCurrent: () => boolean; run: () => void;
+    resolve: () => void; cancel: () => void;
+  };
+  const [modalTransition, setModalTransition] = useState<DismissalTransition | null>(null);
+  const modalTransitionRef = useRef<DismissalTransition | null>(null);
+  function afterPlanModalDismiss(source: DismissalTransition['source'], isCurrent: () => boolean, run: () => void = () => {}) {
+    if (Platform.OS !== 'ios') { if (isCurrent()) run(); return Promise.resolve(); }
+    return new Promise<void>((resolve, reject) => {
+      if (!isCurrent()) { reject(new ObsoletePlanParticipation()); return; }
+      modalTransitionRef.current?.cancel();
+      const transition = { source, isCurrent, run, resolve, cancel: () => reject(new ObsoletePlanParticipation()) };
+      modalTransitionRef.current = transition; setModalTransition(transition); setJoinPreparing(true);
+    });
+  }
+  function finishPlanModalDismiss(source: DismissalTransition['source'], expected: DismissalTransition | null) {
+    if (!expected || expected.source !== source || modalTransitionRef.current !== expected) return;
+    modalTransitionRef.current = null; setModalTransition(null); setJoinPreparing(false);
+    if (!expected.isCurrent()) { expected.cancel(); return; }
+    try { expected.run(); expected.resolve(); } catch { expected.cancel(); }
+  }
+  useFocusEffect(useCallback(() => () => {
+    modalTransitionRef.current?.cancel(); modalTransitionRef.current = null; setModalTransition(null); setJoinPreparing(false);
+  }, []));
   const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
+  const duplicateVisit = useRef<object | null>(null);
+  const closeDuplicateSheet = () => {duplicateVisit.current=null;setShowDuplicateSheet(false);};
+  useFocusEffect(useCallback(()=>()=>{duplicateVisit.current=null;setShowDuplicateSheet(false);},[]));
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [manageModalVisible, setManageModalVisible] = useState(false);
+  const [departureVisit, setDepartureVisit] = useState<{ action: PlanDepartureAction; isCurrent: () => boolean } | null>(null);
+  const departureVisitRef = useRef(departureVisit); departureVisitRef.current = departureVisit;
+  const [departureError, setDepartureError] = useState<string | null>(null);
+  const [departureResult, setDepartureResult] = useState<PlanDepartureResult | null>(null);
+
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCreatorMessage, setEditCreatorMessage] = useState('');
@@ -459,8 +555,7 @@ export default function PlanDetailScreen() {
   const [editTicketUrl, setEditTicketUrl] = useState('');
   // Plan photo — mirrors PlanComposerV2's imageUrl/imageLoading pair
   const [editImageUrl, setEditImageUrl] = useState<string | null>(null);
-  const [editImageLoading, setEditImageLoading] = useState(false);
-  // Date / time editing — wheel picker state mirrors the post flow
+  // Date / time editing keeps the shared calendar and direct-entry time sheet.
   const [editDateMonth, setEditDateMonth] = useState(0);
   const [editDateDay, setEditDateDay] = useState(1);
   const [editDateYear, setEditDateYear] = useState(new Date().getFullYear());
@@ -475,131 +570,121 @@ export default function PlanDetailScreen() {
   const [tempEditHour, setTempEditHour] = useState(7);
   const [tempEditMinute, setTempEditMinute] = useState<string>('00');
   const [tempEditPeriod, setTempEditPeriod] = useState<'AM' | 'PM'>('PM');
+  const validTempEditTime = tempEditHour >= 1 && tempEditHour <= 12 &&
+    /^\d{1,2}$/.test(tempEditMinute) && Number(tempEditMinute) <= 59;
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [editGenderRule, setEditGenderRule] = useState('mixed');
   const [editAgeRanges, setEditAgeRanges] = useState<AgeRange[]>([]);
   const [editGroupSize, setEditGroupSize] = useState(6);
-  const [editSaving, setEditSaving] = useState(false);
-  const [userGender, setUserGender] = useState<string | null>(null);
-  const [userAge, setUserAge] = useState<number | null>(null);
+  const edit = usePlanEdit({
+    eventId: id, viewerId: currentUserId, isCurrent: identity.isCurrent,
+    canEdit: () => !!plan && isCreator && contextReady && !isClosedPlan,
+    onPhoto: setEditImageUrl,
+    onCommitted: () => {
+      void Promise.resolve(queryClient.invalidateQueries({ queryKey: ['events', 'detail', id, currentUserId, identity.epoch] })).catch(error => logError(error, 'plan.edit.refresh'));
+    },
+    onSaved: () => {
+      hapticSuccess(); setManageModalVisible(false); edit.close();
+      for (const queryKey of [['events', 'detail', id], ['events', 'feed'], ['my-plans'], ['feed-member-ids']]) {
+        void Promise.resolve(queryClient.invalidateQueries({ queryKey })).catch(error => logError(error, 'plan.edit.refresh'));
+      }
+    },
+  });
+  const editSaving = edit.isSaving, editImageLoading = edit.isPhotoPending;
+  const closeManageModal = () => {
+    if (!edit.close()) return false;
+    Keyboard.dismiss(); setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
+    return true;
+  };
+  useFocusEffect(useCallback(() => () => {
+    setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
+  }, []));
+  const [editOriginal, setEditOriginal] = useState<PlanDetail | null>(null);
+  const [editAgeChanged, setEditAgeChanged] = useState(false);
+  const [editTimeChanged, setEditTimeChanged] = useState(false);
+  const [editGroupChanged, setEditGroupChanged] = useState(false);
+  const [editFeaturedChanged, setEditFeaturedChanged] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
   const [pingPlanId, setPingPlanId] = useState<string | null>(null);
   const pendingNavRef = React.useRef<(() => void) | null>(null);
-  const [isOnWaitlist, setIsOnWaitlist] = useState(false);
-  const [waitlistLoading, setWaitlistLoading] = useState(false);
   const [brandedAlert, setBrandedAlert] = useState<{
     visible: boolean;
     title: string;
     message?: string;
+    scrollMessage?: boolean;
     buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
   }>({ visible: false, title: '' });
+  const greetingRecoveryRef = useRef<object | null>(null);
+  const closeBrandedAlert = () => {
+    if (greetingRecoveryRef.current) finishJoinNotifications();
+    greetingRecoveryRef.current = null;
+    setBrandedAlert((alert) => ({ ...alert, visible: false }));
+  };
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
-  const [isOfficialCreator, setIsOfficialCreator] = useState(false);
   const [featuredToggle, setFeaturedToggle] = useState(false);
   const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party' | 'special_event'>('washedup_event');
   const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
   const [featuredSaving, setFeaturedSaving] = useState(false);
-  // Hide the hero image slot when the URL fails to load. Some legacy plans
-  // have image_url set to a webpage URL (e.g. an Unsplash gallery page)
-  // instead of a real image asset. Without this, the 200px hero container
-  // reserves empty space at the top of the page.
-  const [heroLoadFailed, setHeroLoadFailed] = useState(false);
+  // A missing or invalid upload uses the existing branded Plan artwork.
+  const [failedHeroUrl, setFailedHeroUrl] = useState<string | null>(null);
 
   const { blockUser } = useBlock();
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      setCurrentUserId(user.id);
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('gender, birthday, is_official_host')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.gender) setUserGender(profile.gender);
-      if (profile?.is_official_host) setIsOfficialCreator(true);
-      if (profile?.birthday) {
-        const [by, bm, bd] = profile.birthday.split('-').map(Number);
-        const birth = new Date(by, bm - 1, bd); // local time — avoids UTC midnight timezone shift
-        const today = new Date();
-        let age = today.getFullYear() - birth.getFullYear();
-        const md = today.getMonth() - birth.getMonth();
-        if (md < 0 || (md === 0 && today.getDate() < birth.getDate())) age--;
-        setUserAge(age);
-      }
-    })();
-  }, []);
-
-  const { data: plan, isLoading: planLoading, error: planError } = useQuery({
-    queryKey: ['events', 'detail', id],
-    queryFn: () => fetchPlanDetail(id!),
-    enabled: !!id,
-    staleTime: 60_000,
-  });
-
-  const { data: members = [] } = useQuery({
-    queryKey: ['events', 'members', id],
-    queryFn: () => fetchMembers(id!),
-    enabled: !!id,
-    staleTime: 60_000,
-  });
-
-  // Next Time! — has the current user already signaled interest in this plan?
-  const { data: myInterest = null } = useQuery({
-    queryKey: ['events', 'my-interest', id, currentUserId],
+  const viewerQuery = useQuery({
+    queryKey: ['plan-viewer', currentUserId, identity.epoch], enabled: !!currentUserId,
     queryFn: async () => {
-      if (!currentUserId || !id) return null;
-      const { data } = await supabase
-        .from('event_interest_signals')
-        .select('id, status')
-        .eq('event_id', id)
-        .eq('interested_user_id', currentUserId)
-        .eq('status', 'active')
-        .maybeSingle();
-      return data;
+      const result = await supabase.from('profiles').select('gender, birthday, is_official_host').eq('id', currentUserId!).single();
+      if (result.error) throw result.error;
+      if (!result.data) throw new Error('Account details unavailable');
+      return result.data;
     },
-    enabled: !!id && !!currentUserId,
-    staleTime: 60_000,
   });
+  const userGender = viewerQuery.data?.gender ?? null;
+  const isOfficialCreator = viewerQuery.data?.is_official_host === true;
+  const userAge = useMemo(() => {
+    const birthday = viewerQuery.data?.birthday;
+    if (!birthday) return null;
+    const [by, bm, bd] = birthday.split('-').map(Number), today = new Date();
+    let age = today.getFullYear() - by;
+    if (today.getMonth() + 1 < bm || (today.getMonth() + 1 === bm && today.getDate() < bd)) age--;
+    return Number.isFinite(age) ? age : null;
+  }, [viewerQuery.data?.birthday]);
+  const planQuery = useQuery({
+    queryKey: ['events', 'detail', id, currentUserId, identity.epoch],
+    queryFn: () => fetchPlanDetail(id!), enabled: !!id, staleTime: 60_000,
+  });
+  const { data: plan, isLoading: planLoading, error: planError } = planQuery;
+  const lifecycle = plan ? getPlanLifecycle({ status: plan.status, startTime: plan.start_time, endTime: plan.end_time }) : null;
+  const isClosedPlan = lifecycle?.isClosed ?? true;
+  const terminalStatus = lifecycle?.terminalStatus ?? null;
+  const membersQuery = useQuery({
+    queryKey: ['events', 'members', id, currentUserId, identity.epoch],
+    queryFn: () => fetchMembers(id!), enabled: !!id, staleTime: 60_000,
+  });
+  const members = membersQuery.data ?? [];
 
   // Next Time! — creator-only: who's signaled they'd go next time on this plan?
-  const { data: creatorInterestList = [] } = useQuery({
-    queryKey: ['events', 'creator-interest', id, currentUserId],
+  const creatorInterestQuery = useQuery({
+    queryKey: ['events', 'creator-interest', id, currentUserId, identity.epoch],
     queryFn: async () => {
       if (!id) return [];
       const { data, error } = await supabase.rpc('get_event_interest_signals', { p_event_id: id });
-      if (error) return [];
-      return data ?? [];
+      if (error) throw error;
+      if (!Array.isArray(data) || data.some(row => !row || typeof row.signal_id !== 'string' || (row.interested_name !== null && typeof row.interested_name !== 'string') || (row.interested_photo_url !== null && typeof row.interested_photo_url !== 'string'))) throw new Error('Interest list unavailable');
+      return data;
     },
     enabled: !!id && !!currentUserId && plan?.creator_user_id === currentUserId,
     staleTime: 60_000,
   });
 
-  // Sync featured state with plan data
-  useEffect(() => {
-    if (!plan) return;
-    setFeaturedToggle(plan.is_featured);
-    setFeaturedType(
-      plan.featured_type === 'birthday_party'
-        ? 'birthday_party'
-        : plan.featured_type === 'special_event'
-        ? 'special_event'
-        : 'washedup_event',
-    );
-    if (plan.is_featured) {
-      setFeaturedCapacity((plan.max_invites ?? 99) + 1);
-    }
-  }, [plan?.id, plan?.is_featured, plan?.featured_type, plan?.max_invites]);
-
   // Resolve map coordinates — use stored coords, or geocode from location_text
   useEffect(() => {
     if (!plan) return;
+    let active = true;
+    setMapCoords(null);
 
     if (plan.location_lat != null && plan.location_lng != null) {
       setMapCoords({ latitude: plan.location_lat, longitude: plan.location_lng });
@@ -617,13 +702,14 @@ export default function PlanDetailScreen() {
         const hit = results.find(
           (r) => r.latitude > 33.2 && r.latitude < 34.9 && r.longitude > -119.1 && r.longitude < -117.2,
         );
-        if (hit) {
+        if (hit && active) {
           setMapCoords({ latitude: hit.latitude, longitude: hit.longitude });
         }
       })
       .catch(() => {
         // geocoding unavailable, map won't show
       });
+    return () => { active = false; };
   }, [plan]);
 
   // Prefetch avatar images so they load faster when displayed
@@ -636,64 +722,19 @@ export default function PlanDetailScreen() {
     }
   }, [plan?.creator?.profile_photo_url, members]);
 
-  // Wishlist check
-  useEffect(() => {
-    if (!currentUserId || !id) return;
-    let cancelled = false;
-    supabase
-      .from('wishlists')
-      .select('id')
-      .eq('user_id', currentUserId)
-      .eq('event_id', id)
-      .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setIsWishlisted(!!data); });
-    return () => { cancelled = true; };
-  }, [currentUserId, id]);
+  const waitlist = usePlanWaitlist({
+    eventId:id,viewerId:currentUserId,epoch:identity.epoch,isCurrent:identity.isCurrent,
+    canChange:()=>!isClosedPlan && !planError && contextReady && membersQuery.isSuccess && viewerQuery.isSuccess && !isMember && !isCreator && !isCirclePlan && effectiveIsEligible && effectiveIsFull,
+  });
+  const isOnWaitlist=!!waitlist.entry, waitlistLoading=waitlist.loading || waitlist.busy;
+  const waitlistNotified=waitlist.ready && !waitlist.loading && waitlist.entry?.notified===true;
+  const exceptionStatus=waitlist.ready && !waitlist.loading ? waitlist.entry?.exception_status ?? null : null;
+  const exceptionExpiresAt=waitlist.entry?.exception_expires_at ?? null;
+  const setExceptionStatus=waitlist.setExceptionStatus;
 
-  // Waitlist check. Re-runs on every screen focus (not just mount) so the
-  // exception-invite banner appears live if the creator grants while the
-  // waitlister is on this screen, and clears on return after an external
-  // accept/decline (e.g. acted on from the InboxModal). The !isMember guard
-  // on the banner stays as defense in depth for the in-focus race window.
-  const [waitlistNotified, setWaitlistNotified] = useState(false);
-  const [exceptionStatus, setExceptionStatus] = useState<string | null>(null);
-  const [exceptionExpiresAt, setExceptionExpiresAt] = useState<string | null>(null);
-  const refreshWaitlistState = useCallback(() => {
-    if (!currentUserId || !id) return;
-    let cancelled = false;
-    supabase
-      .from('event_waitlist')
-      .select('id, notified, exception_status, exception_expires_at')
-      .eq('event_id', id)
-      .eq('user_id', currentUserId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled) {
-          setIsOnWaitlist(!!data);
-          setWaitlistNotified(data?.notified === true);
-          setExceptionStatus((data?.exception_status as string | null) ?? null);
-          setExceptionExpiresAt((data?.exception_expires_at as string | null) ?? null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [currentUserId, id]);
-  useFocusEffect(refreshWaitlistState);
-
-  // Pending invite check
-  const [pendingInviteId, setPendingInviteId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!currentUserId || !id) return;
-    let cancelled = false;
-    supabase
-      .from('plan_invites')
-      .select('id')
-      .eq('event_id', id)
-      .eq('recipient_id', currentUserId)
-      .eq('status', 'pending')
-      .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setPendingInviteId(data?.id ?? null); });
-    return () => { cancelled = true; };
-  }, [currentUserId, id]);
+  const invitation=usePlanInvitation({eventId:id,viewerId:currentUserId,epoch:identity.epoch,isCurrent:identity.isCurrent,
+    canRespond:()=>!isClosedPlan&&!planError&&contextReady&&membersQuery.isSuccess&&viewerQuery.isSuccess});
+  const invitationCompletion=useRef<(()=>void)|null>(null);
 
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
@@ -705,7 +746,7 @@ export default function PlanDetailScreen() {
   // (the server creates it post-end), so this is inherently end-time-aware.
   // RLS double-checks membership.
   const { data: hasLiveAlbum = false } = useQuery({
-    queryKey: ['planAlbumExists', id],
+    queryKey: ['planAlbumExists', id, currentUserId, identity.epoch],
     queryFn: async () => {
       const { data } = await supabase
         .from('plan_albums')
@@ -719,13 +760,26 @@ export default function PlanDetailScreen() {
     staleTime: 60_000,
   });
 
-  // Circle-aware plans: one read (gated; degrades to is_circle_plan=false when
-  // the held RPC is absent / GROUPS_ENABLED off) drives the join path, the
-  // member intro-bypass, and the Start-a-chat / Open-it-up affordances.
-  const { data: circleCtx } = useCirclePlanContext(GROUPS_ENABLED ? id : null);
-  const isCirclePlan = !!circleCtx?.is_circle_plan;
-  const circleViewerIsMember = !!circleCtx?.viewer_is_member;
-  const circleName = circleCtx?.circle_name?.trim() || 'your circle';
+  const circleQuery = useCirclePlanContext(GROUPS_ENABLED ? id : null, {
+    viewerId: identity.viewerId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    event: plan ? { id: plan.id, circle_id: plan.circle_id } : undefined,
+  });
+  const circleCtx = GROUPS_ENABLED ? circleQuery.data : plan?.circle_id === null ? { is_circle_plan: false as const } : undefined;
+  const contextReady = GROUPS_ENABLED ? circleQuery.isContextReady : plan?.circle_id === null;
+  const isCirclePlan = !!plan?.circle_id || circleCtx?.is_circle_plan === true;
+  const circleExplanation = plan?.circle_id && contextReady && !circleQuery.isError && !planError
+    && circleCtx?.is_circle_plan === true && circleCtx.circle_id === plan.circle_id
+    ? circleCtx.circle_visibility === 'open'
+      ? 'A group of friends is opening their plan to new people. Joining this plan doesn’t add you to their circle.'
+      : circleCtx.circle_visibility === 'circle_only' ? 'A plan for this circle’s members.' : undefined
+    : undefined;
+  const circleViewerIsMember = contextReady && circleCtx?.viewer_is_member === true;
+  const circleName = circleCtx?.circle_name?.trim() || 'this circle';
+  const confirmedCircleContext = useRef(circleCtx);
+  if (contextReady && circleCtx) confirmedCircleContext.current = circleCtx;
+  const conversation = confirmedCircleContext.current;
+  const planChatPath = isCirclePlan && conversation?.has_own_chat === false && conversation.circle_id
+    ? `/(tabs)/chats/circle/${conversation.circle_id}` : `/(tabs)/chats/${id}`;
 
   // Creator-only "Waitlist (N)" count. Shares WAITLIST_MANAGER_KEY with the
   // manager route so opening it is instant and the count refreshes when the
@@ -733,7 +787,7 @@ export default function PlanDetailScreen() {
   const { data: waitlistManager } = useQuery({
     queryKey: WAITLIST_MANAGER_KEY(id ?? ''),
     queryFn: () => fetchWaitlistManager(id as string),
-    enabled: !!id && !!plan && isCreator,
+    enabled: !!id && !!plan && isCreator && contextReady && !isCirclePlan,
     staleTime: 30_000,
   });
   const waitingCount =
@@ -760,27 +814,19 @@ export default function PlanDetailScreen() {
       )
     : null;
 
-  const acceptExceptionMutation = useMutation({
-    mutationFn: async () => {
-      if (!id) throw new Error('Not found');
-      await acceptWaitlistException(id);
-      // Clear the matching inbox notification so it doesn't linger as a
-      // tappable "Join the plan" entry that would error (not_on_waitlist)
-      // after the join. Best-effort: a failure here must not fail the accept.
-      if (currentUserId) {
-        try {
-          await supabase
-            .from('app_notifications')
-            .update({ status: 'acted' })
-            .eq('type', 'exception_invite')
-            .eq('event_id', id)
-            .eq('user_id', currentUserId);
-        } catch {}
-      }
+  const exceptionActions = usePlanExceptionActions({
+    eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    available: hasActiveException && !isClosedPlan && !planError, organizerUserId: plan?.creator_user_id ?? null,
+    organizerName: plan?.creator?.first_name_display ?? 'Someone',
+    onNotice: isCurrent => setNoticePending({ action: 'exception', isCurrent }),
+    onNoticeComplete: isCurrent => {
+      const dismissal = afterPlanModalDismiss('notice', isCurrent);
+      setNoticePending(value => value?.action === 'exception' && value.isCurrent === isCurrent ? null : value);
+      return dismissal;
     },
-    onSuccess: () => {
+    onAccepted: () => {
       hapticSuccess();
-      setIsOnWaitlist(false);
+      waitlist.clearAfterJoining();
       setExceptionStatus(null);
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
@@ -792,51 +838,27 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
       router.replace(`/(tabs)/chats/${id}` as any);
     },
-    onError: (error: any) => {
-      setBrandedAlert({
-        visible: true,
-        title: 'Hmm',
-        message: waitlistAlertMessage(error, "We couldn't add you to the plan. Try again."),
-      });
-    },
-  });
-
-  const declineExceptionMutation = useMutation({
-    mutationFn: async () => {
-      if (!id) throw new Error('Not found');
-      await declineWaitlistException(id);
-      // Mirror the accept path: clear the lingering inbox notification.
-      if (currentUserId) {
-        try {
-          await supabase
-            .from('app_notifications')
-            .update({ status: 'read' })
-            .eq('type', 'exception_invite')
-            .eq('event_id', id)
-            .eq('user_id', currentUserId);
-        } catch {}
-      }
-    },
-    onSuccess: () => {
+    onDeclined: () => {
       hapticLight();
       setExceptionStatus('declined');
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
       queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
     },
-    onError: (error: any) => {
+    onError: (error, kind) => {
       setBrandedAlert({
         visible: true,
         title: 'Hmm',
-        message: waitlistAlertMessage(error),
+        message: waitlistAlertMessage(error, kind === 'accept' ? "We couldn't add you to the plan. Try again." : undefined),
       });
     },
   });
+  const { acceptExceptionMutation, declineExceptionMutation } = exceptionActions;
 
   const isFeatured = plan?.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan?.featured_type === 'birthday_party';
   const isSpecialEvent = isFeatured && plan?.featured_type === 'special_event';
   // Use actual member count when available — member_count can be out of sync
-  const displayMemberCount = members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
+  const displayMemberCount = isCirclePlan ? (members.length > 0 ? members.length : plan?.member_count ?? 0) : members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
   const totalCapacity = isFeatured
     ? (plan?.max_invites ?? 99) + 1
     : Math.min((plan?.max_invites ?? 7) + 1, MAX_GROUP);
@@ -844,37 +866,38 @@ export default function PlanDetailScreen() {
   const spotsLeft = plan ? Math.max(0, totalCapacity - displayMemberCount) : 0;
   const isPastPlan = plan ? isPlanPast(plan.start_time, plan.end_time) : false;
 
-  // Communities: if this plan spawned from a Scene event and that event was
-  // cancelled, say so plainly. Two read shapes cover everyone: a normal
-  // user's Live-only RLS read comes back EMPTY, while the event's owner or
-  // community leader can still read the row and must check its status (the
-  // tour walked as the leader, so the empty-read-only version could never
-  // show her the banner). The plan itself is untouched: formed groups keep
-  // their plans and decide for themselves (batch 15 call b).
+  // A confirmed cancelled source event can show a banner. A missing or
+  // inaccessible row does not establish cancellation. The formed plan keeps
+  // its own state and the group can still decide what to do.
   const { data: sourceEventCancelled = false } = useQuery({
-    queryKey: ['plan-source-event-gone', id],
+    queryKey: ['plan-source-event-gone', id, currentUserId, identity.epoch],
     enabled: COMMUNITIES_ENABLED && !!id && !!plan && !isPastPlan,
     queryFn: async () => {
-      const { data: row } = await supabase
+      const { data: row, error: sourceError } = await supabase
         .from('events')
         .select('explore_event_id')
         .eq('id', id!)
         .maybeSingle();
+      if (sourceError) throw sourceError;
       if (!row?.explore_event_id) return false;
-      const { data: ev } = await supabase
+      const { data: ev, error: eventError } = await supabase
         .from('explore_events')
         .select('id, status')
         .eq('id', row.explore_event_id)
         .maybeSingle();
-      return !ev || ev.status === 'Cancelled';
+      if (eventError) throw eventError;
+      return ev?.status === 'Cancelled';
     },
   });
-  // Next Time! uses the end_time-aware "past" check so users can still
-  // signal interest on a plan that's already started but not yet ended.
-  const interestPlanEnded = plan ? isPlanPast(plan.start_time, plan.end_time) : true;
-  const canShowInterestButton =
-    !!plan && !!currentUserId && !isCreator && !isMember && !interestPlanEnded && myInterest === null;
-  const interestAlreadySent = !!myInterest;
+  // Future interest does not use current attendance age/gender/capacity gates.
+  const interestAvailable = !!plan && !!currentUserId && !isCreator && !isMember && !isClosedPlan &&
+    !planError && planQuery.isSuccess && !planQuery.isFetching && membersQuery.isSuccess && !membersQuery.isFetching &&
+    contextReady && (!isCirclePlan || circleCtx?.circle_visibility === 'open' || circleViewerIsMember);
+  const interest = usePlanInterest({eventId:id,viewerId:currentUserId,epoch:identity.epoch,isCurrent:identity.isCurrent,
+    canSend:()=>interestAvailable});
+  const canShowInterestButton = interestAvailable && interest.ready && !interest.entry && !interest.error && !interest.phase;
+  const interestAlreadySent = !!interest.entry;
+  const creatorInterestList = creatorInterestQuery.data ?? [];
   const isHappeningNow =
     !!plan &&
     new Date(plan.start_time) <= new Date() &&
@@ -917,123 +940,41 @@ export default function PlanDetailScreen() {
   const effectiveIsFull = circleMemberJoining
     ? false
     : isCirclePlan
-      ? (circleCtx?.viewer_stranger_spots_left ?? 1) <= 0
+      ? (circleCtx?.viewer_stranger_spots_left ?? 0) <= 0
       : isFull;
 
-  // ─── Join ────────────────────────────────────────────────────────────────────
-
-  // Synchronous re-entrancy lock. join_circle_plan_atomic / join_event_atomic
-  // are UPSERTs that return a plain success value even on a redundant call
-  // from an already-joined member (no "already_member" signal for the client
-  // to catch), and the direct circle-join button below has no disabled-while-
-  // pending state to stop a fast double-tap. Without this, two concurrent
-  // mutationFn runs each insert their own "joined the plan" system message,
-  // i.e. a real duplicate chat message from one tap. Same pattern as
-  // PlanComposerV2's submittingRef / ChatThread's sendingRef.
   const joiningRef = useRef(false);
-
-  const joinMutation = useMutation({
-    mutationFn: async (greeting?: string) => {
-      if (!currentUserId || !id) throw new Error('Not authenticated');
-      if (!plan) throw new Error('Plan not loaded');
-      if (isPlanPast(plan.start_time, plan.end_time)) {
-        throw new Error('This plan has ended.');
+  const [joinPreparing, setJoinPreparing] = useState(false);
+  const joinReady = !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
+  const showGreetingProblem = (greeting: string) => {
+    const recovery = {};
+    const isCurrent = joinMutation.isCurrent;
+    greetingRecoveryRef.current = recovery;
+    setBrandedAlert({
+      visible: true, title: 'You’re in', scrollMessage: true,
+      message: `We couldn’t confirm your introduction in the chat. Check the conversation before sending it again.\n\nYour introduction:\n${greeting}`,
+      buttons: [{ text: 'Open chat', onPress: () => {
+        if (greetingRecoveryRef.current !== recovery || !isCurrent()) return;
+        greetingRecoveryRef.current = null;
+        setBrandedAlert((alert) => ({ ...alert, visible: false }));
+        finishJoinNotifications();
+        router.push(planChatPath as any);
+      } }],
+    });
+  };
+  const joinMutation = usePlanJoin({
+    eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    ready: joinReady, startTime: plan?.start_time, endTime: plan?.end_time, status: plan?.status,
+    circle: circleCtx, age: userAge, gender: userGender,
+    onJoined: (result = {}) => {
+      if (currentUserId && id && joinMutation.isCurrent()) {
+        joinedNotification.current = { userId: currentUserId, planId: id, isCurrent: joinMutation.isCurrent };
       }
-
-      if (greeting?.trim()) {
-        const filter = checkContent(greeting.trim());
-        if (!filter.ok) throw new Error(filter.reason ?? 'Your message contains language that goes against our community guidelines.');
-      }
-
-      // Circle plans route through join_circle_plan_atomic (members uncapped,
-      // strangers capped at stranger_cap, circle_only blocks non-members). The
-      // normal-plan gender eligibility check does not apply: circle members
-      // bypass it, and stranger eligibility is enforced by the RPC itself.
-      if (isCirclePlan) {
-        const { data: cData, error: cErr } = await supabase.rpc('join_circle_plan_atomic', {
-          p_event_id: id,
-          p_user_id: currentUserId,
-          p_age_at_join: userAge ?? null,
-          p_gender_at_join: userGender ?? null,
-        });
-        if (cErr) throw cErr;
-        if (cData === 'full') throw new Error('This plan is full for now.');
-        if (cData === 'not_eligible') throw new Error('This plan is just for the circle.');
-        if (cData === 'not_found') throw new Error('This plan no longer exists.');
-
-        // Only a plan with its own (event-parented) chat has a surface for the
-        // join system line / intro greeting. A whole-circle just-us plan lives
-        // in the circle chat, so skip these inserts there.
-        if (circleCtx?.has_own_chat) {
-          const { error: sysErr } = await supabase.from('messages').insert({
-            event_id: id,
-            user_id: currentUserId,
-            content: 'joined the plan',
-            message_type: 'system',
-          });
-          if (sysErr) console.warn('[WashedUp] System message insert failed:', sysErr);
-          if (greeting && greeting.trim().length > 0) {
-            const { error: gErr } = await supabase.from('messages').insert({
-              event_id: id,
-              user_id: currentUserId,
-              content: greeting.trim(),
-              message_type: 'user',
-            });
-            if (gErr) console.warn('[WashedUp] Greeting insert failed:', gErr);
-          }
-        }
-        return;
-      }
-
-      try {
-        const { data: canJoinGender, error: eligibilityError } = await supabase.rpc('can_join_event_gender', {
-          p_user_id: currentUserId,
-          p_event_id: id,
-        });
-        if (eligibilityError) throw eligibilityError;
-        if (canJoinGender === false) {
-          throw new Error('This plan is restricted and you are not eligible to join.');
-        }
-      } catch (eligibilityError) {
-        throw eligibilityError;
-      }
-
-      const { data, error } = await supabase.rpc('join_event_atomic', {
-        p_event_id: id,
-        p_user_id: currentUserId,
-        p_age_at_join: userAge ?? null,
-        p_gender_at_join: userGender ?? null,
-      });
-
-      if (error) throw error;
-      if (data === 'full') throw new Error('This plan is full. Try joining the waitlist.');
-      if (data === 'not_found') throw new Error('This plan no longer exists.');
-      if (data === 'waitlist_priority') {
-        throw new Error("This spot's saved for the waitlist right now. Check back in a bit!");
-      }
-
-      const { error: sysError } = await supabase.from('messages').insert({
-        event_id: id,
-        user_id: currentUserId,
-        content: 'joined the plan',
-        message_type: 'system',
-      });
-      if (sysError) console.warn('[WashedUp] System message insert failed:', sysError);
-
-      if (greeting && greeting.trim().length > 0) {
-        const { error: greetError } = await supabase.from('messages').insert({
-          event_id: id,
-          user_id: currentUserId,
-          content: greeting.trim(),
-          message_type: 'user',
-        });
-        if (greetError) console.warn('[WashedUp] Greeting insert failed:', greetError);
-      }
-    },
-    onSuccess: () => {
       hapticSuccess();
+      const finishInvitation=invitationCompletion.current;invitationCompletion.current=null;
+      finishInvitation?.();
       setJoinError(null);
-      setJoinMessage('');
+      setJoinMessage(result.greetingUnconfirmed ?? '');
       setJoinConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
@@ -1045,9 +986,17 @@ export default function PlanDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
 
       // Clear local waitlist state since the trigger deleted the row
-      setIsOnWaitlist(false);
-      setWaitlistNotified(false);
+      waitlist.clearAfterJoining();
 
+
+      if (result.greetingUnconfirmed) {
+        setShareAfterJoinPending(false);
+        setShareAfterJoinVisible(false);
+        if (Platform.OS === 'ios' && joinModalVisible) setPendingGreetingProblem(result.greetingUnconfirmed);
+        else showGreetingProblem(result.greetingUnconfirmed);
+        setJoinModalVisible(false);
+        return;
+      }
       if (Platform.OS === 'ios' && joinModalVisible) {
         // Native iOS cannot reliably replace one sibling Modal with another in
         // the same render. Open the share sheet only from the join sheet's
@@ -1058,20 +1007,26 @@ export default function PlanDetailScreen() {
         setJoinModalVisible(false);
         setShareAfterJoinVisible(true);
       }
+
     },
-    onError: (error: any) => {
-      logError(error, 'plan.join');
-      const message = friendlyError(error, 'Something went wrong.');
-      if (joinErrorSurface(joinModalVisible) === 'inline') {
-        setJoinError(message);
-      } else {
-        setBrandedAlert({ visible: true, title: 'Oops', message });
-      }
-    },
-    onSettled: () => {
-      joiningRef.current = false;
+    onError: (message) => {
+      if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError(message);
+      else setBrandedAlert({ visible: true, title: 'Joining this plan', message });
     },
   });
+
+  useFocusEffect(useCallback(() => () => {
+    invitationCompletion.current=null;
+    joinedNotification.current = null;
+    setJoinModalVisible(false); setNoticePending(null); setShareAfterJoinVisible(false);
+    setShareAfterJoinPending(false); setTicketModalVisible(false); setPingPlanId(null);
+    setPendingGreetingProblem(null);
+    if (greetingRecoveryRef.current) {
+      greetingRecoveryRef.current = null;
+      setBrandedAlert((alert) => ({ ...alert, visible: false }));
+    }
+    pendingNavRef.current = null;
+  }, []));
 
   // the creator name exactly as the byline renders it, for the notice and
   // its evidence snapshot (doc 13: show the organizer's display name)
@@ -1085,131 +1040,111 @@ export default function PlanDetailScreen() {
   // closes first because two sibling Modals cannot be visible at once on
   // iOS, and joinMessage survives in state.
   const requestJoin = useCallback(async (message?: string) => {
-    if (!plan || isPlanPast(plan.start_time, plan.end_time)) {
+    if (joiningRef.current || modalTransitionRef.current || !joinReady || !joinMutation.isCurrent() || joinMutation.isPending || joinMutation.unconfirmed) return;
+    if (!plan || isClosedPlan) {
+      const showEnded = () => setBrandedAlert({ visible: true, title: 'This plan ended', message: 'You can still look back, but nobody new can join.' });
+      if (Platform.OS === 'ios' && joinModalVisible) void afterPlanModalDismiss('join', joinMutation.isCurrent, showEnded).catch(() => {});
+      else showEnded();
       setJoinModalVisible(false);
-      setBrandedAlert({ visible: true, title: 'This plan ended', message: 'You can still look back, but nobody new can join.' });
       return;
     }
-    const { needsAssent } = await getParticipationNoticeStatus();
-    if (needsAssent) {
-      setJoinModalVisible(false);
-      setNoticePending({ action: 'join', message });
-      return;
+    joiningRef.current = true; setJoinPreparing(true);
+    try {
+      const { needsAssent } = await getParticipationNoticeStatus();
+      if (!joinMutation.isCurrent()) return;
+      if (needsAssent) {
+        const pending = { action: 'join' as const, message, isCurrent: joinMutation.isCurrent };
+        if (Platform.OS === 'ios' && joinModalVisible) {
+          void afterPlanModalDismiss('join', pending.isCurrent, () => setNoticePending(pending)).catch(() => {});
+          setJoinModalVisible(false);
+        } else { setJoinModalVisible(false); setNoticePending(pending); }
+      }
+      else joinMutation.join(message);
+    } catch {
+      if (joinMutation.isCurrent()) {
+        const message = 'Couldn’t check the joining details. Try again.';
+        if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError(message);
+        else setBrandedAlert({ visible: true, title: 'Joining this plan', message });
+      }
+    } finally {
+      joiningRef.current = false;
+      if (identity.isCurrent() && !modalTransitionRef.current) setJoinPreparing(false);
     }
-    if (joiningRef.current) return;
-    joiningRef.current = true;
-    joinMutation.mutate(message);
-  }, [joinMutation, plan]);
+  }, [joinMutation, plan, joinReady, identity, joinModalVisible, isClosedPlan]);
 
-  const requestAcceptException = useCallback(async () => {
-    const { needsAssent } = await getParticipationNoticeStatus();
-    if (needsAssent) {
-      setNoticePending({ action: 'exception' });
-      return;
-    }
-    acceptExceptionMutation.mutate();
-  }, [acceptExceptionMutation]);
+  const requestAcceptException = exceptionActions.requestAccept;
 
   const handleNoticeAgree = useCallback(async () => {
-    if (!id || !noticePending) return false;
-    const ok = await recordParticipationAssent({
-      listingType: 'plan',
-      listingId: id,
-      organizerUserId: plan?.creator_user_id ?? null,
-      organizerName: noticeOrganizerName,
-      action: 'join',
-    });
-    if (!ok) return false;
+    const pending = noticePending;
+    if (!id || !currentUserId || !pending || noticePendingRef.current !== pending || !pending.isCurrent() || !joinMutation.isCurrent() || noticeAgreeLock.current) return false;
+    noticeAgreeLock.current = pending;
+    try {
+      if (pending.action === 'exception') return await exceptionActions.agree(pending.isCurrent);
+      const scope = { viewerId: currentUserId, isCurrent: () => noticePendingRef.current === pending && pending.isCurrent() && joinMutation.isCurrent() };
+      const ok = await recordScopedPlanAssent({
+        listingType: 'plan', listingId: id,
+        organizerUserId: plan?.creator_user_id ?? null,
+        organizerName: noticeOrganizerName, action: 'join',
+      }, scope);
+      if (!ok || !scope.isCurrent()) return false;
+      const dismissal = afterPlanModalDismiss('notice', () => pending.isCurrent() && joinMutation.isCurrent(), () => joinMutation.join(pending.message));
+      setNoticePending(null);
+      await dismissal;
+      return true;
+    } catch { return false; }
+    finally { if (noticeAgreeLock.current === pending) noticeAgreeLock.current = null; }
+  }, [id, currentUserId, plan?.creator_user_id, noticeOrganizerName, noticePending, joinMutation, exceptionActions]);
+
+  const closeParticipationNotice = useCallback(() => {
+    const pending = noticePending;
+    if (!pending || noticePendingRef.current !== pending || noticeAgreeLock.current || !pending.isCurrent()) return;
+    if (pending.action === 'exception' && !exceptionActions.cancelNotice(pending.isCurrent)) return;
+    void afterPlanModalDismiss('notice', joinMutation.isCurrent).catch(() => {});
+    noticePendingRef.current = null;
     setNoticePending(null);
-    if (noticePending.action === 'join') {
-      if (joiningRef.current) return true;
-      joiningRef.current = true;
-      joinMutation.mutate(noticePending.message);
-    } else {
-      acceptExceptionMutation.mutate();
-    }
-    return true;
-  }, [id, plan?.creator_user_id, noticeOrganizerName, noticePending, joinMutation, acceptExceptionMutation]);
+  }, [noticePending, exceptionActions, joinMutation]);
 
   // ─── Leave ───────────────────────────────────────────────────────────────────
 
-  const leaveMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentUserId || !id) throw new Error('Not authenticated');
-
-      await supabase
-        .from('event_members')
-        .update({ status: 'left' })
-        .eq('event_id', id)
-        .eq('user_id', currentUserId);
-
-      await supabase.from('messages').insert({
-        event_id: id,
-        user_id: currentUserId,
-        content: 'had to leave the plan',
-        message_type: 'system',
-      });
-    },
-    onSuccess: () => {
-      hapticWarning();
-      queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
-      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
-      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
-      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
-      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
-    },
-    onError: (error: any) => {
-      setBrandedAlert({ visible: true, title: 'Oops', message: friendlyError(error, 'Something went wrong.') });
-    },
+  const departure = usePlanDeparture({
+    eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    ready: !!plan && !planError && contextReady && membersQuery.isSuccess && !isClosedPlan && !editSaving && !editImageLoading,
+    canLeave: isMember && !isCreator, canCancel: isCreator,
+    hasOwnChat: !isCirclePlan || circleCtx?.has_own_chat === true,
+    onSuccess: result => { hapticWarning(); setDepartureError(null); setDepartureResult(result); },
+    onError: message => setDepartureError(message),
+    onUnconfirmed: () => setDepartureError(null),
   });
-
-  // ─── Next Time! interest signal ──────────────────────────────────────────
-
-  const interestMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentUserId || !id) throw new Error('Not authenticated');
-      const { error } = await supabase.rpc('send_interest_signal', { p_event_id: id });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      hapticSuccess();
-      queryClient.invalidateQueries({ queryKey: ['events', 'my-interest', id, currentUserId] });
-    },
-    onError: (error: any) => {
-      setBrandedAlert({
-        visible: true,
-        title: 'Oops',
-        message: friendlyError(error, "Couldn't send your interest. Try again."),
-      });
-    },
-  });
-
-  const handleSendInterest = () => {
-    if (interestMutation.isPending) return;
-    hapticLight();
-    interestMutation.mutate();
+  const openDeparture = (action: PlanDepartureAction) => {
+    if (!departure.isCurrent() || departure.isPending || departure.isChecking || departureVisitRef.current || editSaving || editImageLoading || edit.unknown || modalTransitionRef.current) return;
+    if (isClosedPlan && !departure.unknownAction) return;
+    if (action === 'cancel' ? !isCreator : !isMember || isCreator) return;
+    const current = departure.isCurrent;
+    const show = () => { if (!current()) return; setDepartureError(null); setDepartureResult(null); const visit = { action, isCurrent: current }; departureVisitRef.current = visit; setDepartureVisit(visit); };
+    if (manageModalVisible && !edit.close()) return;
+    if (manageModalVisible && Platform.OS === 'ios') {
+      void afterPlanModalDismiss('manage', current, show).catch(() => {});
+      setManageModalVisible(false);
+    } else { setManageModalVisible(false); show(); }
   };
+  useFocusEffect(useCallback(() => () => {
+    departureVisitRef.current = null; setDepartureVisit(null); setDepartureError(null); setDepartureResult(null);
+  }, []));
 
-  const handleLeave = () => {
-    setBrandedAlert({
-      visible: true,
-      title: "Can't make it?",
-      message: 'Your spot will open for someone else. Everyone will be notified.',
-      buttons: [
-        { text: 'Stay', style: 'cancel' },
-        {
-          text: 'Leave Plan',
-          style: 'destructive',
-          onPress: () => leaveMutation.mutate(),
-        },
-      ],
-    });
-  };
+  const handleLeave = () => openDeparture('leave');
 
   // ─── Manage Plan ─────────────────────────────────────────────────────────────
 
   const openManageModal = () => {
-    if (!plan) return;
+    if (!plan || !contextReady || isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
+    if (!edit.begin()) return;
+    if (edit.unknown) { setManageModalVisible(true); return; }
+    const isCurrentEdit = edit.capture();
+    setEditOriginal({ ...plan });
+    setEditAgeChanged(false); setEditTimeChanged(false); setEditGroupChanged(false); setEditFeaturedChanged(false);
+    setFeaturedToggle(plan.is_featured);
+    setFeaturedType(plan.featured_type ?? 'washedup_event');
+    setFeaturedCapacity(plan.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
     setEditTitle(plan.title);
     setEditDescription(plan.description ?? '');
     setEditCreatorMessage(plan.host_message ?? '');
@@ -1219,64 +1154,59 @@ export default function PlanDetailScreen() {
     setEditTicketUrl(plan.tickets_url ?? '');
     setEditImageUrl(plan.image_url ?? null);
     setTimeout(() => {
-      managePlacesRef.current?.setAddressText(plan.location_text ?? '');
+      if (isCurrentEdit()) managePlacesRef.current?.setAddressText(plan.location_text ?? '');
     }, 100);
     setEditCategory(plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null);
     setEditGenderRule(plan.gender_rule ?? 'mixed');
     setEditAgeRanges(minMaxToAgeRanges(plan.target_age_min, plan.target_age_max));
     setEditGroupSize(plan.max_invites ?? 6);
     // Seed the date / time pickers from the existing plan.start_time
-    const start = new Date(plan.start_time);
-    setEditDateMonth(start.getMonth());
-    setEditDateDay(start.getDate());
-    setEditDateYear(start.getFullYear());
-    const h24 = start.getHours();
+    const start = getLAWallParts(plan.start_time);
+    if (!start) return;
+    setEditDateMonth(start.m);
+    setEditDateDay(start.d);
+    setEditDateYear(start.y);
+    const h24 = start.hour24;
     const period: 'AM' | 'PM' = h24 >= 12 ? 'PM' : 'AM';
     const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
     setEditTimeHour(h12);
-    // Snap minute to nearest allowed option (00, 15, 30, 45)
-    const m = start.getMinutes();
-    const nearest = MINUTE_OPTIONS.reduce((prev, curr) =>
-      Math.abs(parseInt(curr) - m) < Math.abs(parseInt(prev) - m) ? curr : prev,
-    );
-    setEditTimeMinute(nearest);
+    // Preserve the exact published minute when opening Manage. A no-op edit
+    // must never silently move a Plan to a quarter-hour boundary.
+    setEditTimeMinute(String(start.minute).padStart(2, '0'));
     setEditTimePeriod(period);
     setManageModalVisible(true);
   };
 
   // Date picker open / confirm
   const openEditDatePicker = () => {
+    if (!edit.canChange()) return;
     setTempEditMonth(editDateMonth);
     setTempEditDay(editDateDay);
     setTempEditYear(editDateYear);
     setShowEditDatePicker(true);
   };
-  const confirmEditDate = () => {
-    const days = getDaysInMonth(tempEditMonth, tempEditYear);
-    setEditDateMonth(tempEditMonth);
-    setEditDateDay(Math.min(tempEditDay, days));
-    setEditDateYear(tempEditYear);
-    setShowEditDatePicker(false);
-    hapticLight();
-  };
-
   // Time picker open / confirm
   const openEditTimePicker = () => {
+    if (!edit.canChange()) return;
     setTempEditHour(editTimeHour);
     setTempEditMinute(editTimeMinute);
     setTempEditPeriod(editTimePeriod);
     setShowEditTimePicker(true);
   };
   const confirmEditTime = () => {
+    if (!edit.canChange() || !validTempEditTime) return;
+    Keyboard.dismiss();
+    setEditTimeChanged(true);
     setEditTimeHour(tempEditHour);
-    setEditTimeMinute(tempEditMinute);
+    setEditTimeMinute(tempEditMinute.padStart(2, '0'));
     setEditTimePeriod(tempEditPeriod);
     setShowEditTimePicker(false);
     hapticLight();
   };
 
   const toggleEditAgeRange = (range: AgeRange) => {
-    hapticLight();
+    if (!edit.canChange()) return;
+    hapticLight(); setEditAgeChanged(true);
     if (range === 'All Ages') {
       setEditAgeRanges(['All Ages']);
       return;
@@ -1291,57 +1221,17 @@ export default function PlanDetailScreen() {
     });
   };
 
-  // ── Manage Plan photo ── mirrors components/post/PlanComposerV2.tsx's
-  // pickImage/uploadPhoto pattern exactly (same expo-image-picker +
-  // expo-image-manipulator + uploadBase64ToStorage('event-images', ...)
-  // pipeline), so a posted plan's photo can be changed the same way it
-  // was picked at creation time.
-  const pickEditImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      setBrandedAlert({ visible: true, title: 'Permission needed', message: 'Go to Settings and allow photo access.' });
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1,
-    });
-    if (!result.canceled && result.assets[0]) {
-      try {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 1200 } }],
-          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-        );
-        setEditImageUrl(manipulated.uri);
-        if (manipulated.base64) uploadEditPhoto(manipulated.base64);
-        else { setEditImageUrl(null); setBrandedAlert({ visible: true, title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE }); }
-      } catch {
-        setEditImageUrl(null);
-        setBrandedAlert({ visible: true, title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
-      }
-    }
-  };
-
-  const uploadEditPhoto = async (base64: string) => {
-    setEditImageLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { error: refreshErr } = await supabase.auth.refreshSession();
-      if (refreshErr) throw refreshErr;
-      const fileName = `${user.id}/${Date.now()}.jpg`;
-      const publicUrl = await uploadBase64ToStorage('event-images', fileName, base64);
-      setEditImageUrl(publicUrl);
-    } catch {
-      setEditImageUrl(null);
-      setBrandedAlert({ visible: true, title: 'Upload failed', message: 'Could not upload photo. Try again.' });
-    } finally {
-      setEditImageLoading(false);
-    }
-  };
+  const pickEditImage = edit.pickPhoto;
 
   const handleSaveEdit = async () => {
-    if (!plan || !currentUserId || editSaving || editImageLoading) return;
+    if (isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
+    if (!plan || !editOriginal || !currentUserId || !edit.canChange() || !editTitle.trim()) return;
+
+    const editHour24 = editTimeHour % 12 + (editTimePeriod === 'PM' ? 12 : 0);
+    if (!isValidLAWallTime(editDateYear, editDateMonth, editDateDay, editHour24, Number(editTimeMinute))) {
+      setBrandedAlert({ visible: true, title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
+      return;
+    }
 
     const fieldsToCheck = [editTitle, editDescription, editCreatorMessage, editLocation].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -1350,7 +1240,6 @@ export default function PlanDetailScreen() {
       return;
     }
 
-    setEditSaving(true);
     try {
       const newStartTime = buildDatetime(
         editDateMonth, editDateDay, editDateYear,
@@ -1370,140 +1259,38 @@ export default function PlanDetailScreen() {
         image_url: resolveManagePlanImageUrl(editImageUrl),
         primary_vibe: editCategory?.toLowerCase() ?? null,
         gender_rule: editGenderRule,
-        target_age_min: editAgeBounds.min,
-        target_age_max: editAgeBounds.max,
-        max_invites: editGroupSize,
-        start_time: newStartTime.toISOString(),
+        ...buildPlanEditRulePatch(editOriginal, {
+          timeChanged: editTimeChanged, proposedStart: newStartTime,
+          ageChanged: editAgeChanged, ages: editAgeBounds,
+          circlePlan: isCirclePlan, groupChanged: editGroupChanged, maxInvites: editGroupSize,
+          officialCreator: isOfficialCreator, featuredChanged: editFeaturedChanged, featured: featuredToggle,
+          featuredType, featuredCapacity,
+        }),
       };
 
-      // Official creators can toggle featured status
-      if (isOfficialCreator) {
-        updatePayload.is_featured = featuredToggle;
-        if (featuredToggle) {
-          updatePayload.max_invites = featuredCapacity - 1; // max_invites = capacity - 1 (creator counts as 1)
-          updatePayload.featured_type = featuredType;
-        } else if (plan.is_featured && !featuredToggle) {
-          // Toggled off — reset to normal max and clear the featured type
-          updatePayload.max_invites = Math.min(editGroupSize, MAX_GROUP - 1);
-          updatePayload.is_featured = false;
-          updatePayload.featured_type = null;
-        }
-      }
-
-      const { error } = await supabase
-        .from('events')
-        .update(updatePayload)
-        .eq('id', plan.id)
-        .eq('creator_user_id', currentUserId);
-
-      if (error) throw error;
-
-      hapticSuccess();
-      setManageModalVisible(false);
-      queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
-      queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
-      queryClient.invalidateQueries({ queryKey: ['my-plans'] });
-      queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
+      await edit.save(updatePayload);
     } catch (e: any) {
       const rawMsg = e?.message ?? '';
       const msg = rawMsg.includes('events_host_message_length')
-        ? 'Message must be at least 10 characters.'
+        ? 'Keep your message to 150 characters or fewer.'
         : friendlyError(e, 'Could not save changes.');
       setBrandedAlert({ visible: true, title: 'Error', message: msg });
-    } finally {
-      setEditSaving(false);
     }
   };
 
-  const handleCancelPlan = () => {
-    setBrandedAlert({
-      visible: true,
-      title: 'Cancel this plan?',
-      message: 'This will cancel the plan for everyone. Members will be notified in the chat.',
-      buttons: [
-        { text: 'Keep Plan', style: 'cancel' },
-        {
-          // muted confirm, never red (C13)
-          text: 'Cancel Plan',
-          onPress: async () => {
-            if (!plan || !currentUserId) return;
-            try {
-              await supabase
-                .from('events')
-                .update({ status: 'cancelled' })
-                .eq('id', plan.id)
-                .eq('creator_user_id', currentUserId);
-
-              await supabase.from('messages').insert({
-                event_id: plan.id,
-                user_id: currentUserId,
-                content: 'cancelled this plan',
-                message_type: 'system',
-              });
-
-              hapticWarning();
-              setManageModalVisible(false);
-              queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
-              queryClient.invalidateQueries({ queryKey: ['my-plans'] });
-              queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
-              router.back();
-            } catch (e: any) {
-              setBrandedAlert({ visible: true, title: 'Error', message: friendlyError(e, 'Could not cancel plan.') });
-            }
-          },
-        },
-      ],
-    });
-  };
+  const handleCancelPlan = () => openDeparture('cancel');
 
   // ─── Wishlist ────────────────────────────────────────────────────────────────
 
-  const toggleWishlist = useCallback(async () => {
-    if (!currentUserId || !id) return;
-    hapticLight();
-    const next = !isWishlisted;
-    setIsWishlisted(next);
-    if (!next) {
-      await supabase.from('wishlists').delete().eq('user_id', currentUserId).eq('event_id', id);
-    } else {
-      await supabase.from('wishlists').insert({ user_id: currentUserId, event_id: id });
-    }
-    queryClient.invalidateQueries({ queryKey: ['wishlists', currentUserId] });
-    queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
-  }, [currentUserId, id, isWishlisted, queryClient]);
+  const toggleWishlist = () => wishlist.toggle(id, plan?.title ?? '', false);
 
   // ─── Waitlist ─────────────────────────────────────────────────────────────────
 
-  const handleJoinWaitlist = useCallback(async () => {
-    if (waitlistLoading || !currentUserId || !id) return;
-    setWaitlistLoading(true);
-    hapticMedium();
-
-    try {
-      if (isOnWaitlist) {
-        await supabase
-          .from('event_waitlist')
-          .delete()
-          .eq('event_id', id)
-          .eq('user_id', currentUserId);
-        setIsOnWaitlist(false);
-      } else {
-        await supabase
-          .from('event_waitlist')
-          .insert({ event_id: id, user_id: currentUserId });
-        setIsOnWaitlist(true);
-        setBrandedAlert({
-          visible: true,
-          title: "You're on the waitlist",
-          message: "We'll notify you if a spot opens up.",
-        });
-      }
-    } catch {
-      setBrandedAlert({ visible: true, title: 'Error', message: 'Please try again.' });
-    } finally {
-      setWaitlistLoading(false);
-    }
-  }, [currentUserId, id, isOnWaitlist, waitlistLoading]);
+  const handleJoinWaitlist = () => {
+    if (!waitlist.ready || waitlist.intent?.phase==='unknown') return waitlist.refresh();
+    if (waitlist.intent?.phase==='failed') return waitlist.retry();
+    return waitlist.change(!isOnWaitlist);
+  };
 
   // ─── Share ───────────────────────────────────────────────────────────────────
 
@@ -1550,22 +1337,25 @@ export default function PlanDetailScreen() {
 
   if (planLoading) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.container} edges={appearance ? ['top'] : ['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
+        <View style={[styles.header, { paddingTop: 8 }]}><TouchableOpacity onPress={goBack} accessibilityRole="button" accessibilityLabel={isCirclePlan || router.canGoBack() ? "Go back" : "Go back to plans"} style={styles.headerIconButton}><ArrowLeft size={20} color={ink}/></TouchableOpacity><ProfileButton compact/></View>
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.terracotta} />
+          <ActivityIndicator size="large" color={accent} />
         </View>
       </SafeAreaView>
     );
   }
 
-  if (planError || !plan) {
+  if (!plan) {
     return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.container} edges={appearance ? ['top'] : ['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
+        <View style={[styles.header, { paddingTop: 8 }]}><TouchableOpacity onPress={goBack} accessibilityRole="button" accessibilityLabel={router.canGoBack() ? "Go back" : "Go back to plans"} style={styles.headerIconButton}><ArrowLeft size={20} color={ink}/></TouchableOpacity><ProfileButton compact/></View>
         <View style={styles.centered}>
-          <Text style={styles.errorText}>Couldn't load this plan.</Text>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
+          <Text style={styles.errorText}>Couldn’t load this plan.</Text>
+          <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => void planQuery.refetch()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity>
+          <TouchableOpacity onPress={goBack} style={{ marginTop: 12 }}>
             <Text style={styles.linkText}>Go back</Text>
           </TouchableOpacity>
         </View>
@@ -1574,14 +1364,9 @@ export default function PlanDetailScreen() {
   }
 
   const genderLabel = formatGenderLabel(plan.gender_rule);
+  const ageLabel = isCirclePlan ? null : planAgeLabel(plan);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
-
-  // Show short location under creator name — venue name only (before first comma), or neighborhood
-  const shortLocation = plan.location_text?.split(',')[0] ?? null;
-  const creatorMeta = plan.neighborhood
-    ? `${shortLocation ?? plan.neighborhood}`
-    : shortLocation ?? '';
 
   const categoryTags = [
       plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null,
@@ -1591,37 +1376,42 @@ export default function PlanDetailScreen() {
   const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
 
       {/* Custom Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { paddingTop: 8 }]}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={goBack}
           style={styles.backButton}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          accessibilityLabel="Go back to plans"
+          accessibilityRole="button"
+          accessibilityLabel={isCirclePlan || router.canGoBack() ? "Go back" : "Go back to plans"}
         >
-          <ArrowLeft size={20} color={Colors.asphalt} strokeWidth={2.5} />
-          <Text style={styles.backButtonText}>Plans</Text>
+          <ArrowLeft size={20} color={ink} strokeWidth={2.5} />
+          <Text style={styles.backButtonText}>{isCirclePlan || router.canGoBack() ? 'Back' : 'Plans'}</Text>
         </TouchableOpacity>
         <View style={styles.headerIcons}>
           <TouchableOpacity
             onPress={(e) => { e.stopPropagation(); handleShare(); }}
             style={styles.headerIconButton}
+            accessibilityRole="button"
             accessibilityLabel="Share plan"
           >
-            <Ionicons name="share-outline" size={22} color={Colors.asphalt} />
+            <Ionicons name="share-outline" size={22} color={ink} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={toggleWishlist}
+            disabled={!wishlist.canWrite || wishlist.pending(id)}
+            accessibilityState={{ disabled: !wishlist.canWrite || wishlist.pending(id), busy: wishlist.pending(id) }}
             style={styles.headerIconButton}
-            accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+            accessibilityRole="button"
+            accessibilityLabel={isWishlisted ? 'Remove from saved' : 'Save plan'}
           >
             <Ionicons
               name={isWishlisted ? 'bookmark' : 'bookmark-outline'}
               size={20}
-              color={isWishlisted ? '#B5522E' : '#78695C'}
+              color={isWishlisted ? accent : (appearance ? AfterglowColors.muted : Colors.quoteText)}
             />
           </TouchableOpacity>
           {!isCreator && plan?.creator && (
@@ -1630,61 +1420,55 @@ export default function PlanDetailScreen() {
               style={styles.headerIconButton}
               accessibilityLabel="Report or block"
             >
-              <MoreHorizontal size={20} color={Colors.asphalt} strokeWidth={2} />
+              <MoreHorizontal size={20} color={ink} strokeWidth={2} />
             </TouchableOpacity>
           )}
+          <ProfileButton compact/>
         </View>
       </View>
 
+      {terminalStatus ? <View style={styles.cancelledEventBanner}><Text style={styles.exceptionBannerTitle}>{terminalStatus === 'cancelled' ? 'Plan cancelled' : 'Plan complete'}</Text></View> : null}
+      {planError ? <View style={styles.cancelledEventBanner}>
+        <Text style={styles.errorText}>Couldn’t refresh this plan. These are the last details we loaded.</Text>
+        <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => void planQuery.refetch()}>
+          <Text style={styles.linkText}>Try again</Text>
+        </TouchableOpacity>
+      </View> : null}
+      {wishlist.isError || wishlist.feedback?.kind === 'error' ? <View style={styles.cancelledEventBanner}><Text style={styles.errorText}>{wishlist.isError ? 'Couldn’t load saved plans.' : 'Couldn’t update saved plans.'}</Text><TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => wishlist.isError ? void wishlist.refetch() : wishlist.retry()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity></View> : null}
       <ScrollView
+        style={{ flex: 1 }}
         decelerationRate="normal"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {/* Hero image — hide entirely if no URL or if the URL fails to load
-            (some legacy plans store a webpage URL instead of an image asset). */}
-        {plan.image_url && !heroLoadFailed ? (
-          <Image
-            source={{ uri: plan.image_url }}
-            style={styles.heroImage}
-            contentFit="cover"
-            transition={200}
-            onError={() => setHeroLoadFailed(true)}
-          />
-        ) : null}
-
-        {/* A. Creator Info */}
-        <View style={styles.creatorBlock}>
-          <TouchableOpacity
-            onPress={() => plan.creator?.id && setMiniProfileUserId(plan.creator.id)}
-            disabled={!plan.creator?.id}
-            activeOpacity={0.7}
-          >
-            {plan.creator?.profile_photo_url ? (
-              <Image
-                source={{ uri: plan.creator?.profile_photo_url ?? '' }}
-                style={styles.creatorAvatarLarge}
-                contentFit="cover"
-                transition={200}
-                priority="high"
-              />
-            ) : (
-              <View style={[styles.creatorAvatarLarge, styles.creatorAvatarPlaceholder]}>
-                <Ionicons name="person-outline" size={32} color={Colors.textLight} />
-              </View>
-            )}
-          </TouchableOpacity>
-          <View style={styles.creatorDetails}>
-            <Text style={styles.postedBy}>POSTED</Text>
-            <Text style={styles.creatorNameLarge}>{plan.creator?.first_name_display ?? 'Someone'}</Text>
-            <Text style={styles.creatorMeta} numberOfLines={1}>{creatorMeta}</Text>
-          </View>
-        </View>
+        {appearance ? <PlanDetailOverview fonts={fonts} plan={plan} visibleHandles={visibleHandles} mapCoords={mapCoords}
+          date={formatFullDate(plan.start_time)} time={formatTime(plan.start_time)} audience={formatGenderLabel(plan.gender_rule)} ageLabel={ageLabel}
+          featuredLabel={isFeatured ? (isBirthdayParty ? 'Birthday party' : isSpecialEvent ? 'Special event' : 'WashedUp event') : null}
+          capacity={isClosedPlan ? terminalStatus === 'cancelled' ? 'Plan cancelled' : 'Plan ended' : !contextReady || !!planError || !membersQuery.isSuccess ? 'Checking availability…' : isMember ? 'You’re going' : isCirclePlan ? `${displayMemberCount} going` : isFeatured ? `${displayMemberCount} going` : spotsLeft === 0 ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+          capacityDetail={isClosedPlan ? undefined : !contextReady || !!planError || !membersQuery.isSuccess ? undefined : isMember ? `${displayMemberCount} going, including you` : isCirclePlan ? !contextReady ? 'Checking availability…' : circleViewerIsMember ? 'Circle members can join this plan.' : circleCtx?.circle_visibility === 'circle_only' ? 'For circle members' : `${circleCtx?.viewer_stranger_spots_left ?? 0} public ${circleCtx?.viewer_stranger_spots_left === 1 ? 'spot' : 'spots'} open` : isFeatured ? undefined : `Up to ${totalCapacity} people, including the creator`}
+          circleLabel={isCirclePlan ? 'Made from a circle' : undefined}
+          circleExplanation={circleExplanation}
+          members={members} memberCount={plan.member_count} membersLoading={membersQuery.isLoading} membersError={membersQuery.isError}
+          onRetryMembers={() => void membersQuery.refetch()} onProfile={setMiniProfileUserId}
+          onCalendar={() => showAddToCalendar(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined)}
+          onMap={() => plan.location_text && openDirections(plan.location_text, mapCoords)} onTickets={() => plan.tickets_url && openUrl(plan.tickets_url)}
+          sourceCancelled={sourceEventCancelled} happeningNow={isHappeningNow && !isClosedPlan} /> : <>
+        <Image
+          source={plan.image_url && failedHeroUrl !== plan.image_url
+            ? { uri: plan.image_url }
+            : require('../../assets/images/plan-placeholder.png')}
+          accessibilityLabel={plan.image_url && failedHeroUrl !== plan.image_url ? 'Plan photo' : 'Plan placeholder'}
+          style={styles.heroImage}
+          contentFit="cover"
+          transition={200}
+          onError={() => setFailedHeroUrl(plan.image_url)}
+        />
 
         {/* B. Plan Title */}
         <Text style={styles.planTitle}>{plan.title}</Text>
+        {circleExplanation ? <Text style={styles.description}>{circleExplanation}</Text> : null}
 
         {COMMUNITIES_ENABLED && sourceEventCancelled && (
           /* LIZ COPY (taste call 7) */
@@ -1715,14 +1499,16 @@ export default function PlanDetailScreen() {
                 {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
               </Text>
             </View>
+            {ageLabel ? <View style={styles.categoryTag}><Text accessibilityLabel={`Age range: ${ageLabel}`} style={styles.categoryTagText}>{ageLabel}</Text></View> : null}
           </View>
-        ) : (categoryTags.length > 0 || isWomenOnly) ? (
+        ) : (categoryTags.length > 0 || isWomenOnly || ageLabel) ? (
           <View style={styles.categoryTagsRow}>
             {categoryTags.map((tag) => (
               <View key={tag} style={styles.categoryTag}>
                 <Text style={styles.categoryTagText}>{tag}</Text>
               </View>
             ))}
+            {ageLabel ? <View style={styles.categoryTag}><Text accessibilityLabel={`Age range: ${ageLabel}`} style={styles.categoryTagText}>{ageLabel}</Text></View> : null}
             {isWomenOnly && (
               <View style={styles.womenOnlyTag}>
                 <Text style={styles.womenOnlyTagText}>Women Only</Text>
@@ -1744,7 +1530,7 @@ export default function PlanDetailScreen() {
         {/* F. Creator's Note */}
         {plan.host_message && (
           <View style={styles.noteBox}>
-            <Text style={styles.noteLabel}>{`${plan.creator?.first_name_display ?? 'CREATOR'}'S NOTE`}</Text>
+            <Text style={styles.noteLabel}>{`${plan.creator?.first_name_display ?? 'Creator'}’s note`}</Text>
             <LinkifiedText text={plan.host_message} style={styles.noteText} />
           </View>
         )}
@@ -1765,7 +1551,7 @@ export default function PlanDetailScreen() {
             </View>
           )}
           <View style={styles.logisticsRow}>
-            <Calendar size={18} color={Colors.terracotta} strokeWidth={2} />
+            <Calendar size={18} color={accent} strokeWidth={2} />
             <View style={styles.logisticsContent}>
               <Text style={styles.logisticsMain}>
                 {formatWhenShort(plan.start_time)} • {formatTime(plan.start_time)}
@@ -1783,7 +1569,7 @@ export default function PlanDetailScreen() {
           {plan.location_text && (
             <>
               <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-                <MapPin size={18} color={Colors.terracotta} strokeWidth={2} />
+                <MapPin size={18} color={accent} strokeWidth={2} />
                 <View style={styles.logisticsContent}>
                   <Text style={styles.logisticsMain}>{plan.neighborhood ? `${plan.location_text} · ${plan.neighborhood}` : plan.location_text}</Text>
                 </View>
@@ -1824,7 +1610,7 @@ export default function PlanDetailScreen() {
 
           {plan.tickets_url && (
             <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-              <Ionicons name="ticket-outline" size={18} color={Colors.terracotta} />
+              <Ionicons name="ticket-outline" size={18} color={accent} />
               <View style={styles.logisticsContent}>
                 <Text style={styles.logisticsMain}>Tickets required</Text>
               </View>
@@ -1839,16 +1625,23 @@ export default function PlanDetailScreen() {
 
           {!isBirthdayParty && (
             <View style={[styles.logisticsRow, styles.logisticsRowBorder]}>
-              <Users size={18} color={Colors.terracotta} strokeWidth={2} />
+              <Users size={18} color={accent} strokeWidth={2} />
               <View style={styles.logisticsContent}>
                 <Text style={styles.logisticsMain}>
-                  {isFeatured && !(isCreator && isOfficialCreator)
+                  {isCirclePlan
+                    ? !contextReady || !!planError || !membersQuery.isSuccess ? 'Checking availability…' : `${displayMemberCount} going`
+                    : isFeatured && !(isCreator && isOfficialCreator)
                     ? `${displayMemberCount} going`
                     : spotsLeft === 0
                       ? 'Full'
                       : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
                 </Text>
-                <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>
+                {isCirclePlan ? contextReady && !planError && membersQuery.isSuccess && (
+                  <Text style={styles.logisticsSub}>{circleViewerIsMember ? 'Circle members can join this plan.'
+                    : circleCtx?.circle_visibility === 'circle_only' ? 'For circle members'
+                    : circleCtx?.viewer_stranger_spots_left == null ? 'Checking public availability…'
+                    : `${circleCtx.viewer_stranger_spots_left} public ${circleCtx.viewer_stranger_spots_left === 1 ? 'spot' : 'spots'} open`}</Text>
+                ) : <Text style={styles.logisticsSub}>{groupSizeLabel}</Text>}
               </View>
             </View>
           )}
@@ -1868,37 +1661,53 @@ export default function PlanDetailScreen() {
           </View>
         )}
 
+        </>}
         {/* F-2. Next Time! — interest signal button (non-creator, non-member, plan still upcoming) */}
         {canShowInterestButton && (
+          <View>
+          <Text style={[styles.ctaSub,{marginBottom:10}]}>Can’t make this one? Let {plan?.creator?.first_name_display ?? 'the creator'} know you’d join another time.</Text>
           <TouchableOpacity
             style={styles.interestButton}
-            onPress={handleSendInterest}
+            accessibilityRole="button"
+            accessibilityLabel={`Tell ${plan?.creator?.first_name_display ?? 'them'} I would go next time`}
+            onPress={() => {void interest.send();}}
             activeOpacity={0.8}
-            disabled={interestMutation.isPending}
+            disabled={interest.busy}
           >
-            {interestMutation.isPending ? (
+            {interest.busy ? (
               <ActivityIndicator size="small" color={Colors.quoteText} />
             ) : (
               <>
                 <Ionicons name="heart-outline" size={18} color={Colors.quoteText} />
-                <Text style={styles.interestButtonText}>
-                  {`Tell ${plan?.creator?.first_name_display ?? 'them'} I'd go next time`}
-                </Text>
+                <Text numberOfLines={1} style={styles.interestButtonText}>Next time</Text>
               </>
             )}
           </TouchableOpacity>
+          </View>
+        )}
+        {(interestAvailable || interest.phase === 'unknown' || interest.busy) && (interest.error || interest.phase) && (
+          <View style={{marginBottom:16}}>
+            <Text accessibilityLiveRegion="polite" style={[styles.ctaSub,{marginBottom:8}]}>{interest.busy ? 'Saving your interest…' : interest.error ?? 'Check your interest before trying again.'}</Text>
+            {!interest.busy && <TouchableOpacity accessibilityRole="button" disabled={interest.loading} onPress={()=>{void interest.retry();}} style={styles.interestButton}>
+              <Text numberOfLines={1} style={styles.interestButtonText}>{interest.loading ? 'Checking…' : interest.phase === 'unknown' ? 'Check interest' : 'Try again'}</Text>
+            </TouchableOpacity>}
+          </View>
         )}
         {interestAlreadySent && !isCreator && !isMember && (
           <View style={styles.interestSent}>
             <Ionicons name="checkmark-circle" size={18} color={Colors.quoteText} />
             <Text style={styles.interestSentText}>
-              {plan?.creator?.first_name_display
-                ? `${plan.creator.first_name_display} knows you're interested`
-                : "They know you're interested"}
+              Interest saved
             </Text>
           </View>
         )}
 
+        {isCreator && creatorInterestQuery.isError && <View style={styles.creatorInterestBlock}>
+          <Text style={styles.ctaSub}>Couldn’t load who would go next time.</Text>
+          <TouchableOpacity accessibilityRole="button" disabled={creatorInterestQuery.isFetching} onPress={()=>{void creatorInterestQuery.refetch();}}>
+            <Text style={styles.interestButtonText}>Try again</Text>
+          </TouchableOpacity>
+        </View>}
         {/* F-3. Next Time! — creator-only "Would go next time" section */}
         {isCreator && creatorInterestList.length > 0 && (
           <View style={styles.creatorInterestBlock}>
@@ -1930,11 +1739,11 @@ export default function PlanDetailScreen() {
         )}
 
         {/* H. CTA hints (button is in sticky bar) */}
-        {!isCreator && !isMember && isEligible && !isFull && !isCirclePlan && (
+        {!isCreator && !isMember && contextReady && isEligible && !isFull && !isCirclePlan && (
           <View style={styles.ctaBlock}>
             {!isFeatured && spotsLeft > 0 && spotsLeft <= 2 && (
               <Text style={styles.ctaInfo}>
-                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left, closing soon
+                {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
               </Text>
             )}
             <Text style={styles.ctaSub}>A chat opens the moment you join</Text>
@@ -1943,7 +1752,7 @@ export default function PlanDetailScreen() {
 
         {/* Circle-plan coordination: Start a chat / Open it up. The component
             renders only for a circle member viewing a circle_only plan. */}
-        {GROUPS_ENABLED && isCirclePlan && id && (
+        {GROUPS_ENABLED && contextReady && isCirclePlan && id && (
           <React.Suspense fallback={null}>
             <CirclePlanCoordination
               eventId={id}
@@ -1960,9 +1769,30 @@ export default function PlanDetailScreen() {
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
-        {isPastPlan && (isMember || isCreator) && currentUserId ? (
+        {(invitation.error||invitation.attempt||invitation.loading&&!invitation.ready) && <View style={{gap:8,marginBottom:12}}>
+          <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">
+            {isMember&&invitation.attempt?.reply==='accepted'?'You’re in this plan. ':''}{invitation.busy?'Saving your invitation reply…':invitation.loading?'Checking your invitation…':invitation.error}
+          </Text>
+          {!invitation.busy&&!invitation.loading&&<TouchableOpacity accessibilityRole="button" style={styles.waitlistButton}
+            onPress={()=>{if(!invitation.ready||!invitation.attempt||invitation.attempt.phase==='unknown')void invitation.refresh();else void invitation.retry();}}>
+            <Text numberOfLines={1} style={styles.waitlistButtonText}>{invitation.attempt?.phase==='unknown'?'Check reply':'Try again'}</Text>
+          </TouchableOpacity>}
+          {!invitation.busy&&!invitation.loading&&invitation.attempt?.phase==='failed'&&invitation.attempt.reply==='declined'&&
+            <TouchableOpacity accessibilityRole="button" onPress={invitation.keepInvitation} style={{minHeight:44,justifyContent:'center',alignItems:'center'}}>
+              <Text numberOfLines={1} style={styles.waitlistButtonText}>Keep invitation</Text>
+            </TouchableOpacity>}
+        </View>}
+
+        {!currentUserId ? <TouchableOpacity style={styles.joinButton} onPress={() => router.push('/(auth)/login')}><Text style={styles.joinButtonText}>Sign in</Text></TouchableOpacity> : departure.unknownAction ? <View><Text style={styles.exceptionBannerTitle}>Check the result</Text><Text style={styles.exceptionBannerBody}>We haven’t confirmed the change yet.</Text><TouchableOpacity accessibilityRole="button" style={styles.joinButton} onPress={() => setDepartureVisit({ action: departure.unknownAction!, isCurrent: departure.isCurrent })}><Text style={styles.joinButtonText}>Check status</Text></TouchableOpacity></View> : joinMutation.unconfirmed && !isMember ? <View>
+          <Text style={styles.exceptionBannerTitle}>Check your place</Text>
+          <Text style={styles.exceptionBannerBody}>We haven’t received confirmation yet. Check who’s going before trying again.</Text>
+          <TouchableOpacity style={styles.joinButton} onPress={() => { setJoinModalVisible(false); void membersQuery.refetch(); void planQuery.refetch(); }}><Text style={styles.joinButtonText}>Check plan</Text></TouchableOpacity>
+        </View> : (!contextReady || (currentUserId && !viewerQuery.isSuccess) || !membersQuery.isSuccess) ? <View>
+          <Text style={styles.exceptionBannerBody}>{circleQuery.isError || viewerQuery.isError || membersQuery.isError ? 'Couldn’t check the joining details.' : 'Checking the joining details…'}</Text>
+          {circleQuery.isError || viewerQuery.isError || membersQuery.isError ? <TouchableOpacity style={styles.joinButton} onPress={() => { void circleQuery.refetch().catch(() => {}); void viewerQuery.refetch(); void membersQuery.refetch(); }}><Text style={styles.joinButtonText}>Try again</Text></TouchableOpacity> : <ActivityIndicator color={accent}/>}
+        </View> : isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember ? <Text style={styles.ineligibleText}>This plan is for circle members.</Text> : isClosedPlan && (isMember || isCreator) && currentUserId ? (
           <View style={styles.memberActions}>
-            {hasLiveAlbum && (
+            {hasLiveAlbum && terminalStatus !== 'cancelled' && (
               <TouchableOpacity
                 style={styles.openChatButton}
                 onPress={() => router.push(`/album/upload/${plan!.id}` as any)}
@@ -1973,15 +1803,15 @@ export default function PlanDetailScreen() {
             )}
             <TouchableOpacity
               style={styles.openChatButton}
-              onPress={() => router.push(`/(tabs)/chats/${plan!.id}` as any)}
+              onPress={() => router.push(planChatPath as any)}
             >
               <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-              <Text style={styles.openChatText}>Open Chat</Text>
+              <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
             </TouchableOpacity>
           </View>
-        ) : isPastPlan ? (
+        ) : isClosedPlan ? (
           <View style={styles.endedBar}>
-            <Text style={styles.endedBarText}>plan ended</Text>
+            <Text style={styles.endedBarText}>{terminalStatus === 'cancelled' ? 'Plan cancelled' : 'Plan ended'}</Text>
           </View>
         ) : isCreator ? (
           <View>
@@ -1994,13 +1824,13 @@ export default function PlanDetailScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.openChatButton}
-                onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
+                onPress={() => router.push(planChatPath as any)}
               >
                 <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-                <Text style={styles.openChatText}>Open Chat</Text>
+                <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity
+            {!isCirclePlan && <TouchableOpacity
               style={styles.waitlistManageButton}
               onPress={() => router.push(`/waitlist/${plan.id}` as any)}
               activeOpacity={0.85}
@@ -2008,7 +1838,7 @@ export default function PlanDetailScreen() {
               <Text style={styles.waitlistManageButtonText}>
                 {waitingCount > 0 ? `Waitlist (${waitingCount})` : 'Waitlist'}
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
             <TouchableOpacity
               style={styles.creatorCancelLink}
               onPress={handleCancelPlan}
@@ -2021,17 +1851,29 @@ export default function PlanDetailScreen() {
         ) : isMember ? (
           <View>
             <View style={styles.memberActions}>
-              <TouchableOpacity style={styles.youreGoingBadge} onPress={handleLeave}>
-                <Text style={styles.youreGoingText}>Can't make it?</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Leave plan" style={styles.youreGoingBadge} onPress={handleLeave}>
+                <Text numberOfLines={1} style={styles.youreGoingText}>Can't make it?</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.openChatButton}
-                onPress={() => router.push(`/(tabs)/chats/${plan.id}` as any)}
+                onPress={() => router.push(planChatPath as any)}
               >
                 <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-                <Text style={styles.openChatText}>Open Chat</Text>
+                <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        ) : invitation.attempt?.reply === 'declined' ? null : waitlist.busy || waitlist.intent?.phase === 'unknown' ? (
+          <View style={{gap:10}}>
+            <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">
+              {waitlist.busy ? 'Updating your waitlist…' : waitlist.error ?? 'Your waitlist change may have saved. Check before trying again.'}
+            </Text>
+            <TouchableOpacity accessibilityRole="button"
+              accessibilityState={{disabled:waitlistLoading,busy:waitlistLoading}}
+              style={styles.waitlistButton} disabled={waitlistLoading}
+              onPress={()=>{void waitlist.refresh();}}>
+              <Text numberOfLines={1} style={styles.waitlistButtonText}>{waitlistLoading ? 'Checking…' : 'Check waitlist'}</Text>
+            </TouchableOpacity>
           </View>
         ) : hasActiveException ? (
           <View>
@@ -2093,91 +1935,55 @@ export default function PlanDetailScreen() {
           >
             <Text style={styles.claimSpotText}>Claim Your Spot</Text>
           </TouchableOpacity>
+        ) : isCirclePlan && effectiveIsFull ? (
+          <View><Text style={styles.exceptionBannerTitle}>The public spots are full</Text><Text style={styles.exceptionBannerBody}>You can check back here for an opening.</Text></View>
         ) : effectiveIsFull ? (
-          <TouchableOpacity
-            style={[
-              styles.waitlistButton,
-              isOnWaitlist && styles.waitlistButtonActive,
-            ]}
-            onPress={() => {
-              if (isOnWaitlist) {
-                handleJoinWaitlist();
-              } else if (plan?.allow_duplicate === false) {
-                // Creator opted out of letting others duplicate this plan;
-                // skip the "post your own version" sheet and just queue the
-                // user on the waitlist.
-                handleJoinWaitlist();
-              } else {
-                hapticLight();
-                setShowDuplicateSheet(true);
-              }
-            }}
-            disabled={waitlistLoading}
-            activeOpacity={0.9}
-          >
-            {waitlistLoading ? (
-              <ActivityIndicator size="small" color={isOnWaitlist ? Colors.white : Colors.terracotta} />
-            ) : (
-              <Text style={[
-                styles.waitlistButtonText,
-                isOnWaitlist && styles.waitlistButtonTextActive,
-              ]}>
-                {isOnWaitlist ? 'On Waitlist \u2713' : 'Join Waitlist'}
+          <View style={{gap:10}}>
+            <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">
+              {waitlist.error ?? (!waitlist.ready ? 'Checking your waitlist…' : isOnWaitlist ? 'You’re on the waitlist. A place isn’t reserved yet.' : 'Join the waitlist for an opening.')}
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{disabled:waitlistLoading,busy:waitlistLoading}}
+              style={[styles.waitlistButton,isOnWaitlist && styles.waitlistButtonActive]}
+              disabled={waitlistLoading}
+              onPress={()=>{
+                if(waitlistLoading)return;
+                if(waitlist.intent || isOnWaitlist) {void handleJoinWaitlist();return;}
+                if(!waitlist.ready){void waitlist.refresh();return;}
+                if(plan?.allow_duplicate===false){void waitlist.change(true);return;}
+                hapticLight();duplicateVisit.current={};setShowDuplicateSheet(true);
+              }}>
+              <Text numberOfLines={1} style={[styles.waitlistButtonText,isOnWaitlist&&styles.waitlistButtonTextActive]}>
+                {waitlistLoading ? 'Checking…' : waitlist.intent?.phase==='failed' ? 'Try again' : !waitlist.ready ? 'Try again' : isOnWaitlist ? 'Leave waitlist' : 'Join waitlist'}
               </Text>
-            )}
-          </TouchableOpacity>
-        ) : pendingInviteId ? (
-          <View style={styles.inviteActions}>
-            <TouchableOpacity
-              style={styles.declineInviteButton}
-              onPress={async () => {
-                hapticLight();
-                try {
-                  await supabase
-                    .from('plan_invites')
-                    .update({ status: 'declined', updated_at: new Date().toISOString() })
-                    .eq('id', pendingInviteId);
-                  setPendingInviteId(null);
-                  queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-                  queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
-                  setBrandedAlert({
-                    visible: true,
-                    title: 'No worries',
-                    message: "Maybe next time! We won't tell them.",
-                  });
-                } catch {
-                  setBrandedAlert({ visible: true, title: 'Something went wrong', message: 'Please try again.' });
-                }
-              }}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.declineInviteText}>Can't make it</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.acceptInviteButton}
-              onPress={async () => {
-                hapticMedium();
-                try {
-                  await supabase
-                    .from('plan_invites')
-                    .update({ status: 'accepted', updated_at: new Date().toISOString() })
-                    .eq('id', pendingInviteId);
-                  setPendingInviteId(null);
-                  queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-                  queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
-                  setJoinModalVisible(true);
-                } catch {
-                  setBrandedAlert({ visible: true, title: 'Something went wrong', message: 'Could not accept invite. Please try again.' });
-                }
-              }}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.acceptInviteText}>Accept Invite</Text>
+          </View>
+        ) : invitation.invitation && !invitation.attempt ? (
+          <View style={styles.inviteActions}>
+            <TouchableOpacity accessibilityRole="button" style={styles.declineInviteButton}
+              disabled={invitation.loading||invitation.busy||!invitation.ready}
+              onPress={()=>{hapticLight();void invitation.decline();}} activeOpacity={0.85}>
+              <Text numberOfLines={1} style={styles.declineInviteText}>Not this time</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={styles.acceptInviteButton}
+              disabled={invitation.loading||invitation.busy||!invitation.ready||!joinReady}
+              onPress={()=>{
+                if(!joinReady||invitationCompletion.current)return;
+                const complete=invitation.prepareAcceptance();if(!complete)return;
+                invitationCompletion.current=complete;hapticMedium();
+                if(isCirclePlan&&circleViewerIsMember)requestJoin(undefined);
+                else setJoinModalVisible(true);
+              }} activeOpacity={0.9}>
+              <Text numberOfLines={1} style={styles.acceptInviteText}>Join the plan</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity
             style={styles.joinButton}
+            accessibilityRole="button"
+            disabled={joinPreparing || joinMutation.isPending || !joinReady}
+            accessibilityState={{ disabled: joinPreparing || joinMutation.isPending || !joinReady, busy: joinPreparing || joinMutation.isPending }}
             onPress={() => {
               hapticMedium();
               // Circle members bypass the "say hi" intro gate (they already know
@@ -2192,91 +1998,33 @@ export default function PlanDetailScreen() {
             }}
             activeOpacity={0.9}
           >
-            <Text style={styles.joinButtonText}>Let's Go →</Text>
+            {joinPreparing || joinMutation.isPending ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.joinButtonText}>Let's Go →</Text>}
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Join Confirmation Modal */}
-      <Modal
-        visible={joinModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => { if (!joinMutation.isPending) setJoinModalVisible(false); }}
+      {departureVisit ? <PlanDepartureSheet action={departureVisit.action} planTitle={plan.title} appearance={appearance}
+        busy={departure.isPending || departure.isChecking} unknown={!!departure.unknownAction} error={departureError} result={departureResult}
+        onConfirm={() => { if (departureVisitRef.current !== departureVisit || !departureVisit.isCurrent()) return; setDepartureError(null); if (departureVisit.action === 'leave') departure.leave(); else departure.cancel(); }}
+        onCheck={() => { if (departureVisitRef.current === departureVisit && departureVisit.isCurrent()) { setDepartureError(null); void departure.checkResult(); } }}
+        onClose={() => { if (departureVisitRef.current !== departureVisit || departure.isPending || departure.isChecking) return; departureVisitRef.current = null; setDepartureVisit(null); }}
+        onDone={() => { if (departureVisitRef.current !== departureVisit || !departureVisit.isCurrent()) return; departureVisitRef.current = null; setDepartureVisit(null); router.replace('/(tabs)/plans'); }} /> : null}
+
+      <PlanJoinSheet visible={joinModalVisible} planId={id} appearance={appearance}
+        planTitle={plan.title} dateLabel={`${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}`}
+        message={joinMessage} confirmed={joinConfirmed} error={joinError} unconfirmed={joinMutation.unconfirmed}
+        busy={joinPreparing || joinMutation.isPending} canJoin={joinReady}
+        onMessage={(value) => { setJoinMessage(value); setJoinError(null); }} onConfirmed={setJoinConfirmed}
+        onJoin={() => requestJoin(joinMessage)} onClose={() => {invitationCompletion.current=null;setJoinModalVisible(false);}}
+        onCheck={async () => { setJoinModalVisible(false); await Promise.all([membersQuery.refetch(), planQuery.refetch()]); }}
         onDismiss={() => {
-          if (shareAfterJoinPending) {
-            setShareAfterJoinPending(false);
-            setShareAfterJoinVisible(true);
+          if (modalTransition) { finishPlanModalDismiss('join', modalTransition); return; }
+          if (pendingGreetingProblem && joinMutation.isCurrent()) {
+            setPendingGreetingProblem(null); showGreetingProblem(pendingGreetingProblem);
+          } else if (shareAfterJoinPending && joinMutation.isCurrent()) {
+            setShareAfterJoinPending(false); setShareAfterJoinVisible(true);
           }
-        }}
-        statusBarTranslucent
-      >
-        <Pressable style={joinStyles.overlay} onPress={() => {
-          Keyboard.dismiss();
-          if (!joinMutation.isPending) setJoinModalVisible(false);
-        }}>
-          <Pressable style={joinStyles.sheet} onPress={() => Keyboard.dismiss()}>
-            <TouchableOpacity
-              style={joinStyles.closeButton}
-              onPress={() => setJoinModalVisible(false)}
-              disabled={joinMutation.isPending}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Text style={joinStyles.closeX}>✕</Text>
-            </TouchableOpacity>
-
-            <Text style={joinStyles.title}>You're joining {plan?.title}</Text>
-            <Text style={joinStyles.subtitle}>
-              {plan ? `${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}` : ''}
-            </Text>
-
-            <View style={joinStyles.infoBox}>
-              <Text style={joinStyles.infoTitle}>washedup plans are small on purpose.</Text>
-              <Text style={joinStyles.infoText}>You're not just a number.</Text>
-              <Text style={joinStyles.infoText}>You're part of the plan.</Text>
-            </View>
-
-            <Text style={joinStyles.label}>Say something to everyone <Text style={joinStyles.required}>*required</Text></Text>
-            <TextInput
-              style={[joinStyles.input, !joinMessage.trim() && joinConfirmed && joinStyles.inputRequired]}
-              placeholder="Hey everyone! Can't wait"
-              placeholderTextColor={Colors.textLight}
-              value={joinMessage}
-              onChangeText={(value) => { setJoinMessage(value); setJoinError(null); }}
-              multiline
-              maxLength={200}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            <Text style={joinStyles.hint}>This will be posted to the chat when you join</Text>
-
-            {joinError ? <Text style={joinStyles.error}>{joinError}</Text> : null}
-
-            <TouchableOpacity
-              style={joinStyles.checkRow}
-              onPress={() => setJoinConfirmed(!joinConfirmed)}
-              activeOpacity={0.7}
-            >
-              <View style={[joinStyles.checkbox, joinConfirmed && joinStyles.checkboxChecked]}>
-                {joinConfirmed && <Text style={joinStyles.checkmark}>✓</Text>}
-              </View>
-              <Text style={joinStyles.checkLabel}>I'm coming</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[joinStyles.joinBtn, (!joinConfirmed || !joinMessage.trim()) && joinStyles.joinBtnDisabled]}
-              onPress={() => requestJoin(joinMessage)}
-              disabled={!joinConfirmed || !joinMessage.trim() || joinMutation.isPending}
-              activeOpacity={0.85}
-            >
-              {joinMutation.isPending ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <Text style={joinStyles.joinBtnText}>Join</Text>
-              )}
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        }} />
 
       {/* "Don't want to wait?" bottom sheet — shown when user taps Join Waitlist
           on a full plan (only when they're not already on waitlist / not waitlistNotified). */}
@@ -2284,12 +2032,12 @@ export default function PlanDetailScreen() {
         visible={showDuplicateSheet}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowDuplicateSheet(false)}
+        onRequestClose={closeDuplicateSheet}
         statusBarTranslucent
       >
         <Pressable
           style={duplicateSheetStyles.overlay}
-          onPress={() => setShowDuplicateSheet(false)}
+          onPress={closeDuplicateSheet}
           accessibilityRole="button"
           accessibilityLabel="close"
         >
@@ -2297,18 +2045,20 @@ export default function PlanDetailScreen() {
             <View style={duplicateSheetStyles.handle} />
             <Text style={duplicateSheetStyles.title}>Post your own</Text>
             <Text style={duplicateSheetStyles.body}>
-              skip the wait. we'll let everyone on the waitlist know to join you!
+              Make another plan, or join the waitlist for this one.
             </Text>
             <TouchableOpacity
               style={duplicateSheetStyles.primaryBtn}
               onPress={() => {
-                hapticLight();
-                setShowDuplicateSheet(false);
+                if(!duplicateVisit.current)return;
+                hapticLight();closeDuplicateSheet();
                 // Let the modal start its slide-out before pushing the next
                 // screen — otherwise on Android with statusBarTranslucent
                 // there's a brief flash where the modal is mid-animation
                 // while the new screen pushes in.
+                const isCurrent = waitlist.capture();
                 setTimeout(() => {
+                  if (!isCurrent()) return;
                   router.push({
                     pathname: '/(tabs)/post',
                     params: buildDuplicatePostParams(plan, id),
@@ -2324,23 +2074,25 @@ export default function PlanDetailScreen() {
             <TouchableOpacity
               style={duplicateSheetStyles.secondaryBtn}
               onPress={() => {
-                hapticLight();
-                setShowDuplicateSheet(false);
-                handleJoinWaitlist();
+                if(!duplicateVisit.current)return;
+                hapticLight();closeDuplicateSheet();
+                void waitlist.change(true);
               }}
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel="just join the waitlist"
+              accessibilityLabel="Join waitlist"
             >
-              <Text style={duplicateSheetStyles.secondaryBtnText}>just join the waitlist</Text>
+              <Text style={duplicateSheetStyles.secondaryBtnText} numberOfLines={1}>Join waitlist</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
 
       <SharePlanModal
+        appearance={appearance}
         visible={shareAfterJoinVisible}
         onClose={() => {
+          if (!joinMutation.isCurrent()) return;
           setShareAfterJoinVisible(false);
           const runRest = () => {
             if (plan?.tickets_url) {
@@ -2351,7 +2103,7 @@ export default function PlanDetailScreen() {
               // transition on Android.
               setTicketModalVisible(true);
             } else {
-              router.push(`/(tabs)/chats/${id}` as any);
+              finishJoinNotifications(); router.push(planChatPath as any);
             }
           };
           if (YOURS_PAGE_ENABLED) {
@@ -2372,6 +2124,7 @@ export default function PlanDetailScreen() {
         <PingAfterPlanModal
           planId={pingPlanId}
           onDone={() => {
+            if (!joinMutation.isCurrent()) return;
             const nav = pendingNavRef.current;
             pendingNavRef.current = null;
             setPingPlanId(null);
@@ -2381,11 +2134,11 @@ export default function PlanDetailScreen() {
       )}
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
-      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }} statusBarTranslucent>
-        <Pressable style={joinStyles.overlay} onPress={() => { setTicketModalVisible(false); router.push(`/(tabs)/chats/${id}` as any); }}>
+      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); finishJoinNotifications(); router.push(planChatPath as any); }} statusBarTranslucent>
+        <Pressable style={joinStyles.overlay} onPress={() => { setTicketModalVisible(false); finishJoinNotifications(); router.push(planChatPath as any); }}>
           <Pressable style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={ticketStyles.iconCircle}>
-              <Ticket size={28} color={Colors.terracotta} strokeWidth={2} />
+              <Ticket size={28} color={accent} strokeWidth={2} />
             </View>
             <Text style={ticketStyles.title}>This plan is ticketed!</Text>
             <Text style={ticketStyles.subtitle}>
@@ -2397,7 +2150,7 @@ export default function PlanDetailScreen() {
               onPress={() => {
                 setTicketModalVisible(false);
                 if (plan?.tickets_url) openUrl(plan.tickets_url);
-                router.push(`/(tabs)/chats/${id}` as any);
+                finishJoinNotifications(); router.push(planChatPath as any);
               }}
               activeOpacity={0.85}
             >
@@ -2408,7 +2161,7 @@ export default function PlanDetailScreen() {
               style={ticketStyles.secondaryBtn}
               onPress={() => {
                 setTicketModalVisible(false);
-                router.push(`/(tabs)/chats/${id}` as any);
+                finishJoinNotifications(); router.push(planChatPath as any);
               }}
               activeOpacity={0.7}
             >
@@ -2419,12 +2172,12 @@ export default function PlanDetailScreen() {
       </Modal>
 
       {/* Manage Plan Modal */}
-      <Modal visible={manageModalVisible} transparent animationType="slide" onRequestClose={() => setManageModalVisible(false)} statusBarTranslucent>
-        <View style={manageStyles.overlay}>
+      <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
+        <KeyboardAvoidingView style={manageStyles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={manageStyles.sheet}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title}>Manage Plan</Text>
-              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setManageModalVisible(false); }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <TouchableOpacity style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                 <Text style={manageStyles.closeX}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -2443,10 +2196,13 @@ export default function PlanDetailScreen() {
               }}
               scrollIndicatorInsets={{ right: 2 }}
             >
+<View pointerEvents={edit.isBusy || edit.unknown ? "none" : "auto"}>
               {/* Title */}
               <Text style={manageStyles.label}>Title</Text>
               <TextInput
+                editable={!edit.isBusy && !edit.unknown}
                 style={manageStyles.input}
+                accessibilityLabel="Plan title"
                 value={editTitle}
                 onChangeText={setEditTitle}
                 maxLength={80}
@@ -2466,37 +2222,43 @@ export default function PlanDetailScreen() {
                     {editImageLoading ? (
                       <View style={manageStyles.photoThumbOverlay}><ActivityIndicator color={Colors.white} /></View>
                     ) : (
-                      <TouchableOpacity style={manageStyles.photoRemove} onPress={() => { hapticLight(); setEditImageUrl(null); }} hitSlop={8}>
+                      <TouchableOpacity accessibilityRole="button" style={manageStyles.photoRemove} accessibilityLabel="Remove photo" disabled={edit.isBusy || edit.unknown} onPress={() => { if (edit.canChange()) { hapticLight(); setEditImageUrl(null); } }} hitSlop={8}>
                         <X size={13} color={Colors.white} strokeWidth={2.5} />
                       </TouchableOpacity>
                     )}
                   </View>
                 ) : (
-                  <TouchableOpacity style={manageStyles.photoAdd} onPress={pickEditImage} activeOpacity={0.7}>
+                  <TouchableOpacity accessibilityRole="button" style={manageStyles.photoAdd} disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} activeOpacity={0.7}>
                     <ImagePlus size={15} color={Colors.secondary} strokeWidth={2} />
-                    <Text style={manageStyles.photoAddText}>add a photo</Text>
+                    <Text style={manageStyles.photoAddText} numberOfLines={1}>Add photo</Text>
                   </TouchableOpacity>
                 )}
+                {editImageUrl && <TouchableOpacity accessibilityRole="button" disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} style={manageStyles.photoAdd}>
+                  <Text style={manageStyles.photoAddText} numberOfLines={1}>Change photo</Text>
+                </TouchableOpacity>}
+                {editImageLoading && <Text accessibilityLiveRegion="polite" style={manageStyles.hint}>Adding photo…</Text>}
               </View>
 
               {/* Date & time */}
               <Text style={manageStyles.label}>Date & time</Text>
               <View style={manageStyles.dateTimeRow}>
-                <TouchableOpacity
-                  style={[manageStyles.input, manageStyles.dateTimeBtn]}
+                <TouchableOpacity accessibilityRole="button"
+                  disabled={edit.isBusy || edit.unknown}
+                style={[manageStyles.input, manageStyles.dateTimeBtn]}
                   onPress={() => { hapticLight(); openEditDatePicker(); }}
                   activeOpacity={0.85}
                 >
-                  <Text style={manageStyles.dateTimeBtnText}>
-                    {displayPickerDate(editDateMonth, editDateDay, editDateYear)}
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
+                    {new Date(editDateYear, editDateMonth, editDateDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[manageStyles.input, manageStyles.dateTimeBtn, { marginLeft: 8 }]}
+                <TouchableOpacity accessibilityRole="button"
+                  disabled={edit.isBusy || edit.unknown}
+                style={[manageStyles.input, manageStyles.dateTimeBtn, { marginLeft: 8 }]}
                   onPress={() => { hapticLight(); openEditTimePicker(); }}
                   activeOpacity={0.85}
                 >
-                  <Text style={manageStyles.dateTimeBtnText}>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
                     {displayPickerTime(editTimeHour, editTimeMinute, editTimePeriod)}
                   </Text>
                 </TouchableOpacity>
@@ -2515,7 +2277,9 @@ export default function PlanDetailScreen() {
                 </Text>
               </View>
               <TextInput
+                editable={!edit.isBusy && !edit.unknown}
                 style={[manageStyles.input, manageStyles.textArea]}
+                accessibilityLabel="Plan description"
                 value={editDescription}
                 onChangeText={setEditDescription}
                 multiline
@@ -2528,7 +2292,9 @@ export default function PlanDetailScreen() {
               {/* Creator note */}
               <Text style={manageStyles.label}>Your message</Text>
               <TextInput
+                editable={!edit.isBusy && !edit.unknown}
                 style={[manageStyles.input, manageStyles.creatorMessageInput]}
+                accessibilityLabel="Your message"
                 value={editCreatorMessage}
                 onChangeText={setEditCreatorMessage}
                 multiline
@@ -2537,7 +2303,7 @@ export default function PlanDetailScreen() {
                 placeholderTextColor={Colors.textLight}
                 inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
               />
-              <Text style={manageStyles.hint}>Min 10 characters · Max 150</Text>
+              <Text style={manageStyles.hint}>Up to 150 characters</Text>
 
               {/* Location */}
               <Text style={manageStyles.label}>Location</Text>
@@ -2548,6 +2314,7 @@ export default function PlanDetailScreen() {
                   fetchDetails
                   disableScroll={true}
                   onPress={(data, details) => {
+                    if (!edit.canChange()) return;
                     const lat = details?.geometry?.location?.lat ?? null;
                     const lng = details?.geometry?.location?.lng ?? null;
                     const name = data.structured_formatting?.main_text ?? data.description;
@@ -2565,6 +2332,12 @@ export default function PlanDetailScreen() {
                   }}
                   styles={managePlacesStyles}
                   textInputProps={{
+                    accessibilityLabel: "Location",
+                    editable: !edit.isBusy && !edit.unknown,
+                    onChangeText: (text: string) => {
+                      if (!edit.canChange()) return;
+                      setEditLocation(text); setEditLocationLat(null); setEditLocationLng(null);
+                    },
                     placeholderTextColor: Colors.textLight,
                   }}
                   enablePoweredByContainer={false}
@@ -2577,7 +2350,9 @@ export default function PlanDetailScreen() {
               {/* Ticket link */}
               <Text style={manageStyles.label}>Ticket link</Text>
               <TextInput
+                editable={!edit.isBusy && !edit.unknown}
                 style={manageStyles.input}
+                accessibilityLabel="Ticket link"
                 value={editTicketUrl}
                 onChangeText={setEditTicketUrl}
                 placeholder="https://..."
@@ -2595,8 +2370,10 @@ export default function PlanDetailScreen() {
                 {MANAGE_CATEGORIES.map((cat) => {
                   const isSelected = editCategory === cat;
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityRole="button"
                       key={cat}
+                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
+                      disabled={edit.isBusy || edit.unknown}
                       style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
                         hapticLight();
@@ -2616,8 +2393,10 @@ export default function PlanDetailScreen() {
                 {manageGenderOptions.map((opt) => {
                   const isSelected = editGenderRule === opt.value;
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityRole="button"
                       key={opt.value}
+                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
+                      disabled={edit.isBusy || edit.unknown}
                       style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
                         hapticLight();
@@ -2637,8 +2416,10 @@ export default function PlanDetailScreen() {
                 {AGE_RANGES.map((range) => {
                   const isSelected = editAgeRanges.includes(range);
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity accessibilityRole="button"
                       key={range}
+                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
+                      disabled={edit.isBusy || edit.unknown}
                       style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
                       onPress={() => toggleEditAgeRange(range)}
                       activeOpacity={0.8}
@@ -2648,20 +2429,22 @@ export default function PlanDetailScreen() {
                   );
                 })}
               </View>
-              <Text style={manageStyles.hint}>Select up to 2 ranges, or All Ages</Text>
+              <Text style={manageStyles.hint}>{!editAgeChanged && editAgeRanges.length === 0 && editOriginal ? `${savedAgeLabel(editOriginal.target_age_min, editOriginal.target_age_max)}. Kept unless you choose a range.` : 'Select up to 2 ranges, or All Ages'}</Text>
 
-              {/* How many to invite */}
+              {/* Ordinary capacity does not describe a Circle’s outsider allowance. */}
+              {isCirclePlan ? <><Text style={manageStyles.label}>Circle plan</Text><Text style={manageStyles.hint}>Circle members aren’t included in the public spot limit. Your Circle’s existing joining settings stay the same.</Text></> : !featuredToggle ? <>
               <Text style={manageStyles.label}>How many to invite</Text>
               <View style={manageStyles.stepperRow}>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   style={[manageStyles.stepperBtn, editGroupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize > (MIN_GROUP - 1)) {
                       hapticLight();
-                      setEditGroupSize((g) => g - 1);
+                      setEditGroupChanged(true); setEditGroupSize((g) => g - 1);
                     }
                   }}
-                  disabled={editGroupSize <= (MIN_GROUP - 1)}
+                  accessibilityLabel="Fewer people"
+                  disabled={edit.isBusy || edit.unknown || editGroupSize <= (MIN_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>−</Text>
                 </TouchableOpacity>
@@ -2669,23 +2452,24 @@ export default function PlanDetailScreen() {
                   <Text style={manageStyles.stepperValueText}>{editGroupSize + 1}</Text>
                   <Text style={manageStyles.stepperValueSub}>people total</Text>
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
                   style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
                     if (editGroupSize < (MAX_GROUP - 1)) {
                       hapticLight();
-                      setEditGroupSize((g) => g + 1);
+                      setEditGroupChanged(true); setEditGroupSize((g) => g + 1);
                     }
                   }}
-                  disabled={editGroupSize >= (MAX_GROUP - 1)}
+                  accessibilityLabel="More people"
+                  disabled={edit.isBusy || edit.unknown || editGroupSize >= (MAX_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={manageStyles.stepperValueSub}>including you</Text>
+              <Text style={manageStyles.stepperValueSub}>including you</Text></> : null}
 
               {/* Featured Event toggle — official creators only */}
-              {isCreator && isOfficialCreator && (
+              {isCreator && isOfficialCreator && !isCirclePlan && (
                 <View style={manageStyles.featuredSection}>
                   <View style={manageStyles.featuredRow}>
                     <View style={{ flex: 1 }}>
@@ -2693,66 +2477,74 @@ export default function PlanDetailScreen() {
                       <Text style={manageStyles.hint}>Allows custom capacity (50 to 500)</Text>
                     </View>
                     <Switch
-                      value={featuredToggle}
+                      accessibilityLabel="Feature this plan"
+                      disabled={edit.isBusy || edit.unknown}                      value={featuredToggle}
                       onValueChange={(val) => {
+                        if (!edit.canChange()) return;
                         hapticLight();
-                        setFeaturedToggle(val);
+                        setEditFeaturedChanged(true); setFeaturedToggle(val);
                         if (val) {
-                          setFeaturedCapacity(plan?.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
+                          setFeaturedCapacity(editOriginal?.is_featured ? (editOriginal.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
                         }
                       }}
-                      trackColor={{ false: Colors.border, true: featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
+                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: appearance ? AfterglowColors.clay : featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
                       thumbColor={Colors.white}
                     />
                   </View>
                   {featuredToggle && (
                     <View style={manageStyles.featuredTypeRow}>
-                      <TouchableOpacity
+                      <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg },
+                          { backgroundColor: appearance ? (featuredType === 'washedup_event' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg) },
                         ]}
-                        onPress={() => { hapticLight(); setFeaturedType('washedup_event'); }}
+                        disabled={edit.isBusy || edit.unknown}
+                        accessibilityState={{selected: featuredType === "washedup_event"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('washedup_event'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary },
+                            { color: appearance ? (featuredType === 'washedup_event' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary) },
                           ]}
                         >
                           washedup event
                         </Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
+                      <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg },
+                          { backgroundColor: appearance ? (featuredType === 'birthday_party' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg) },
                         ]}
-                        onPress={() => { hapticLight(); setFeaturedType('birthday_party'); }}
+                        disabled={edit.isBusy || edit.unknown}
+                        accessibilityState={{selected: featuredType === "birthday_party"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('birthday_party'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary },
+                            { color: appearance ? (featuredType === 'birthday_party' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary) },
                           ]}
                         >
                           birthday party
                         </Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
+                      <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg },
+                          { backgroundColor: appearance ? (featuredType === 'special_event' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg) },
                         ]}
-                        onPress={() => { hapticLight(); setFeaturedType('special_event'); }}
+                        disabled={edit.isBusy || edit.unknown}
+                        accessibilityState={{selected: featuredType === "special_event"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('special_event'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary },
+                            { color: appearance ? (featuredType === 'special_event' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary) },
                           ]}
                         >
                           special event
@@ -2764,15 +2556,15 @@ export default function PlanDetailScreen() {
                     <View style={manageStyles.capacitySection}>
                       <Text style={manageStyles.capacityValue}>{featuredCapacity} people</Text>
                       <View style={manageStyles.stepperRow}>
-                        <TouchableOpacity
+                        <TouchableOpacity accessibilityRole="button"
                           style={[manageStyles.stepperBtn, featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
                             if (featuredCapacity > FEATURED_MIN_CAPACITY) {
                               hapticLight();
-                              setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
+                              setEditFeaturedChanged(true); setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
                             }
                           }}
-                          disabled={featuredCapacity <= FEATURED_MIN_CAPACITY}
+                          accessibilityLabel="Lower capacity" disabled={edit.isBusy || edit.unknown || featuredCapacity <= FEATURED_MIN_CAPACITY}
                         >
                           <Text style={manageStyles.stepperBtnText}>−</Text>
                         </TouchableOpacity>
@@ -2780,15 +2572,15 @@ export default function PlanDetailScreen() {
                           <Text style={manageStyles.stepperValueText}>{featuredCapacity}</Text>
                           <Text style={manageStyles.stepperValueSub}>capacity</Text>
                         </View>
-                        <TouchableOpacity
+                        <TouchableOpacity accessibilityRole="button"
                           style={[manageStyles.stepperBtn, featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
                             if (featuredCapacity < FEATURED_MAX_CAPACITY) {
                               hapticLight();
-                              setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
+                              setEditFeaturedChanged(true); setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
                             }
                           }}
-                          disabled={featuredCapacity >= FEATURED_MAX_CAPACITY}
+                          accessibilityLabel="Higher capacity" disabled={edit.isBusy || edit.unknown || featuredCapacity >= FEATURED_MAX_CAPACITY}
                         >
                           <Text style={manageStyles.stepperBtnText}>+</Text>
                         </TouchableOpacity>
@@ -2798,27 +2590,15 @@ export default function PlanDetailScreen() {
                 </View>
               )}
 
-              {/* Save button */}
-              <TouchableOpacity
-                style={[manageStyles.saveBtn, (editSaving || editImageLoading || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
-                onPress={handleSaveEdit}
-                disabled={editSaving || editImageLoading || editTitle.trim().length === 0}
-                activeOpacity={0.85}
-              >
-                {editSaving ? (
-                  <ActivityIndicator size="small" color={Colors.white} />
-                ) : (
-                  <Text style={manageStyles.saveBtnText}>Save Changes</Text>
-                )}
-              </TouchableOpacity>
-
+</View>
               {/* Duplicate: reuse the exact prefill pipeline the waitlist
                   "Post your own" path uses, from the creator's own plan */}
               {COMMUNITIES_ENABLED && (
-                <TouchableOpacity
+                <TouchableOpacity accessibilityRole="button"
+                  disabled={edit.isBusy || edit.unknown}
                   style={manageStyles.duplicateBtn}
                   onPress={() => {
-                    setManageModalVisible(false);
+                    if (edit.unknown || !closeManageModal()) return;
                     router.push({
                       pathname: '/(tabs)/post',
                       params: buildDuplicatePostParams(plan, id),
@@ -2826,19 +2606,41 @@ export default function PlanDetailScreen() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={manageStyles.duplicateBtnText}>Post This Again</Text>
+                  <Text numberOfLines={1} style={manageStyles.duplicateBtnText}>Post again</Text>
                 </TouchableOpacity>
               )}
 
               {/* Cancel plan */}
-              <TouchableOpacity
+              <TouchableOpacity accessibilityRole="button"
                 style={manageStyles.cancelBtn}
+                disabled={edit.isBusy || edit.unknown}
                 onPress={handleCancelPlan}
                 activeOpacity={0.7}
               >
-                <Text style={manageStyles.cancelBtnText}>Cancel This Plan</Text>
+                <Text numberOfLines={1} style={manageStyles.cancelBtnText}>Cancel plan</Text>
               </TouchableOpacity>
             </ScrollView>
+            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>              {edit.unknown && <View style={manageStyles.recovery}>
+                <Text style={manageStyles.label}>Check your changes</Text>
+                <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
+              </View>}
+              {edit.error && <Text accessibilityRole="alert" style={manageStyles.editError}>{edit.error}</Text>}
+              {/* Save button */}
+              <TouchableOpacity accessibilityRole="button"
+                style={[manageStyles.saveBtn, (editSaving || editImageLoading || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
+                onPress={edit.unknown ? edit.check : handleSaveEdit}
+                disabled={editSaving || editImageLoading || editTitle.trim().length === 0}
+                activeOpacity={0.85}
+              >
+                {editSaving ? (
+                  <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><ActivityIndicator size="small" color={Colors.white} /><Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Checking…" : "Saving…"}</Text></View>
+                ) : (
+                  <Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Check changes" : "Save changes"}</Text>
+                )}
+              </TouchableOpacity>
+
+
+            </View>
           </View>
           {/* Date picker overlay — child of the manage modal overlay so we
               avoid the Modal-inside-Modal stacking issue on iOS. */}
@@ -2849,50 +2651,18 @@ export default function PlanDetailScreen() {
             >
               <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
                 <Text style={manageStyles.pickerTitle}>Select date</Text>
-                <View style={manageStyles.pickerRow}>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
-                    {MONTHS.map((m, i) => (
-                      <Pressable
-                        key={m}
-                        style={[manageStyles.pickerItem, tempEditMonth === i && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditMonth(i)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditMonth === i && manageStyles.pickerItemTextSel]}>
-                          {m.slice(0, 3)}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerColSm} showsVerticalScrollIndicator={false}>
-                    {Array.from({ length: getDaysInMonth(tempEditMonth, tempEditYear) }, (_, i) => i + 1).map((d) => (
-                      <Pressable
-                        key={d}
-                        style={[manageStyles.pickerItem, tempEditDay === d && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditDay(d)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditDay === d && manageStyles.pickerItemTextSel]}>
-                          {d}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerColSm} showsVerticalScrollIndicator={false}>
-                    {[new Date().getFullYear(), new Date().getFullYear() + 1].map((y) => (
-                      <Pressable
-                        key={y}
-                        style={[manageStyles.pickerItem, tempEditYear === y && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditYear(y)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditYear === y && manageStyles.pickerItemTextSel]}>
-                          {y}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-                <TouchableOpacity style={manageStyles.pickerDoneBtn} onPress={confirmEditDate}>
-                  <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
-                </TouchableOpacity>
+                <WashedUpCalendar
+                  mode="pick"
+                  selected={{ year: tempEditYear, month: tempEditMonth, day: tempEditDay }}
+                  onSelect={(day) => {
+                    if (!edit.canChange()) return;
+                    setEditTimeChanged(true);
+                    setEditDateYear(day.year);
+                    setEditDateMonth(day.month);
+                    setEditDateDay(day.day);
+                    setShowEditDatePicker(false);
+                  }}
+                />
               </Pressable>
             </Pressable>
           )}
@@ -2906,47 +2676,24 @@ export default function PlanDetailScreen() {
               <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
                 <Text style={manageStyles.pickerTitle}>Select time</Text>
                 <View style={manageStyles.pickerRow}>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
-                    {HOURS.map((h) => (
-                      <Pressable
-                        key={h}
-                        style={[manageStyles.pickerItem, tempEditHour === h && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditHour(h)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditHour === h && manageStyles.pickerItemTextSel]}>
-                          {h}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
-                    {MINUTE_OPTIONS.map((m) => (
-                      <Pressable
-                        key={m}
-                        style={[manageStyles.pickerItem, tempEditMinute === m && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditMinute(m)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditMinute === m && manageStyles.pickerItemTextSel]}>
-                          :{m}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                  <ScrollView decelerationRate="normal" style={manageStyles.pickerCol} showsVerticalScrollIndicator={false}>
-                    {PERIODS.map((p) => (
-                      <Pressable
-                        key={p}
-                        style={[manageStyles.pickerItem, tempEditPeriod === p && manageStyles.pickerItemSelected]}
-                        onPress={() => setTempEditPeriod(p)}
-                      >
-                        <Text style={[manageStyles.pickerItemText, tempEditPeriod === p && manageStyles.pickerItemTextSel]}>
-                          {p}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                  <TextInput style={manageStyles.directTimeInput} value={tempEditHour ? String(tempEditHour) : ''} onChangeText={(value) => setTempEditHour(Number(value.replace(/\D/g, '').slice(0, 2)))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Hour, 1 through 12" />
+                  <Text style={manageStyles.pickerItemText}>:</Text>
+                  <TextInput style={manageStyles.directTimeInput} value={tempEditMinute} onChangeText={(value) => setTempEditMinute(value.replace(/\D/g, '').slice(0, 2))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Minute, 0 through 59" />
+                  {PERIODS.map((p) => (
+                    <Pressable key={p} style={[manageStyles.directPeriod, tempEditPeriod === p && manageStyles.pickerItemSelected]} onPress={() => setTempEditPeriod(p)} accessibilityRole="button" accessibilityState={{ selected: tempEditPeriod === p }}>
+                      <Text style={[manageStyles.pickerItemText, tempEditPeriod === p && manageStyles.pickerItemTextSel]}>{p}</Text>
+                    </Pressable>
+                  ))}
                 </View>
-                <TouchableOpacity style={manageStyles.pickerDoneBtn} onPress={confirmEditTime}>
+                <View style={manageStyles.directMinutes}>
+                  {MINUTE_OPTIONS.map((m) => (
+                    <Pressable key={m} style={[manageStyles.directPeriod, tempEditMinute === m && manageStyles.pickerItemSelected]} onPress={() => setTempEditMinute(m)} accessibilityRole="button" accessibilityLabel={`${m} minutes`}>
+                      <Text style={[manageStyles.pickerItemText, tempEditMinute === m && manageStyles.pickerItemTextSel]}>:{m}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {!validTempEditTime && <Text style={manageStyles.directTimeError}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
+                <TouchableOpacity style={[manageStyles.pickerDoneBtn, !validTempEditTime && { opacity: 0.45 }]} onPress={confirmEditTime} disabled={!validTempEditTime} accessibilityRole="button" accessibilityState={{ disabled: !validTempEditTime }}>
                   <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
                 </TouchableOpacity>
               </Pressable>
@@ -2955,13 +2702,15 @@ export default function PlanDetailScreen() {
 
           {/* BrandedAlert inside the modal so it renders on top, not behind it */}
           <BrandedAlert
+        appearance={appearance}
             visible={brandedAlert.visible}
             title={brandedAlert.title}
             message={brandedAlert.message}
+            scrollMessage={brandedAlert.scrollMessage}
             buttons={brandedAlert.buttons}
-            onClose={() => setBrandedAlert((a) => ({ ...a, visible: false }))}
+            onClose={closeBrandedAlert}
           />
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {reportTarget && (
@@ -2975,11 +2724,13 @@ export default function PlanDetailScreen() {
       )}
 
       <BrandedAlert
+        appearance={appearance}
         visible={brandedAlert.visible}
         title={brandedAlert.title}
         message={brandedAlert.message}
+            scrollMessage={brandedAlert.scrollMessage}
         buttons={brandedAlert.buttons}
-        onClose={() => setBrandedAlert((a) => ({ ...a, visible: false }))}
+        onClose={closeBrandedAlert}
       />
 
       <MiniProfileCard
@@ -2997,7 +2748,8 @@ export default function PlanDetailScreen() {
         visible={noticePending !== null}
         organizerName={noticeOrganizerName}
         onAgree={handleNoticeAgree}
-        onClose={() => setNoticePending(null)}
+        onClose={closeParticipationNotice}
+        onDismiss={() => finishPlanModalDismiss('notice', modalTransition)}
       />
     </SafeAreaView>
   );
@@ -3005,7 +2757,7 @@ export default function PlanDetailScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const legacyStyles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textMedium },
@@ -3052,46 +2804,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 140,
-  },
-  creatorBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  creatorAvatarLarge: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-  },
-  creatorAvatarPlaceholder: {
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  creatorDetails: {
-    marginLeft: 16,
-    flex: 1,
-  },
-  postedBy: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.textLight,
-    letterSpacing: 0.8,
-    marginBottom: 2,
-  },
-  creatorNameLarge: {
-    fontFamily: Fonts.displayBold,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
-    marginBottom: 2,
-  },
-  creatorMeta: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textMedium,
+    paddingBottom: 28,
   },
   planTitle: {
     fontFamily: Fonts.displayBold,
@@ -3391,16 +3104,13 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
   },
   stickyBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    flexShrink: 0,
     paddingHorizontal: 20,
     paddingBottom: 32,
     paddingTop: 12,
     backgroundColor: Colors.parchment,
     borderTopWidth: 0.5,
-    borderTopColor: '#E8DDD0',
+    borderTopColor: Colors.border,
   },
   ticketButton: {
     backgroundColor: Colors.cardBg,
@@ -3606,7 +3316,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const joinStyles = StyleSheet.create({
+const legacyJoinStyles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: Colors.overlayDark,
@@ -3811,7 +3521,7 @@ const ticketStyles = StyleSheet.create({
   },
 });
 
-const managePlacesStyles = {
+const legacyManagePlacesStyles = {
   container: { flex: 0 },
   textInputContainer: { backgroundColor: 'transparent' },
   textInput: {
@@ -3840,7 +3550,10 @@ const managePlacesStyles = {
   poweredContainer: { display: 'none' as const },
 };
 
-const manageStyles = StyleSheet.create({
+const legacyManageStyles = StyleSheet.create({
+  footer: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12, gap: 12 },
+  recovery: { marginTop: 0 },
+  editError: { color: Colors.errorRed, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, marginTop: 12 },
   overlay: {
     flex: 1,
     backgroundColor: Colors.overlayDark,
@@ -4083,9 +3796,31 @@ const manageStyles = StyleSheet.create({
   },
   pickerRow: {
     flexDirection: 'row',
-    height: 220,
+    alignItems: 'center',
     gap: 8,
   },
+  directTimeInput: {
+    width: 55,
+    minHeight: 50,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+    fontFamily: Fonts.sansBold,
+    fontSize: FontSizes.bodyLG,
+    color: Colors.asphalt,
+  },
+  directPeriod: {
+    flex: 1,
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+  },
+  directMinutes: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  directTimeError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 10 },
   pickerCol: {
     flex: 1,
   },
@@ -4134,7 +3869,7 @@ const manageStyles = StyleSheet.create({
   },
 });
 
-const duplicateSheetStyles = StyleSheet.create({
+const legacyDuplicateSheetStyles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: Colors.overlayDark,
@@ -4197,3 +3932,44 @@ const duplicateSheetStyles = StyleSheet.create({
     color: Colors.terracotta,
   },
 });
+
+function detailAppearance<T extends Record<string, any>>(base: T, fonts: AfterglowFontFamilies): T {
+  const colorMap: Record<string, string> = {
+    [Colors.parchment]: AfterglowColors.paper, [Colors.asphalt]: AfterglowColors.ink,
+    [Colors.textLight]: AfterglowColors.muted,
+    [Colors.terracotta]: AfterglowColors.clay, [Colors.cardBg]: AfterglowColors.white,
+    [Colors.border]: AfterglowColors.subtleLine, [Colors.inputBg]: AfterglowColors.white,
+  };
+  const familyMap: Record<string, string> = { [Fonts.displayBold]: fonts.display, [Fonts.display]: fonts.regular,
+    [Fonts.sans]: fonts.regular, [Fonts.sansMedium]: fonts.medium, [Fonts.sansSemibold]: fonts.semibold, [Fonts.sansBold]: fonts.semibold };
+  return Object.fromEntries(Object.entries(base).map(([key, value]) => {
+    const style = { ...StyleSheet.flatten(value) } as any;
+    for (const prop of ['color', 'backgroundColor', 'borderColor', 'borderTopColor', 'borderBottomColor']) if (colorMap[style[prop]]) style[prop] = colorMap[style[prop]];
+    if (familyMap[style.fontFamily]) style.fontFamily = familyMap[style.fontFamily];
+    if (/Button$|Btn$/.test(key)) { style.minHeight = 48; style.borderRadius = 6; }
+    if (['joinButton', 'openChatButton', 'managePlanButton', 'waitlistButton'].includes(key)) style.borderRadius = 14;
+    if (key === 'headerIconButton') { style.width = 44; style.height = 44; style.backgroundColor = AfterglowColors.paper; style.borderWidth = 0; }
+    if (key === 'youreGoingBadge') { style.backgroundColor = AfterglowColors.paper; style.minHeight = 48; style.borderRadius = 0; style.justifyContent = 'center'; }
+    if (key === 'youreGoingText') style.color = AfterglowColors.muted;
+    if (key === 'scrollContent') style.paddingBottom = 28;
+    if (key === 'stickyBar') { style.position = 'relative'; style.bottom = undefined; style.left = undefined; style.right = undefined; style.borderTopColor = AfterglowColors.subtleLine; }
+    if (key === 'title') { Object.assign(style, AfterglowType.identity); }
+    if (key === 'sheet') { style.borderTopLeftRadius = 12; style.borderTopRightRadius = 12; }
+    return [key, style];
+  })) as T;
+}
+
+function manageAppearance<T extends Record<string, any>>(base: T, fonts: AfterglowFontFamilies): T {
+  const result = detailAppearance(base, fonts) as any;
+  Object.assign(result.sheet, { backgroundColor: AfterglowColors.paper, paddingHorizontal: 20, paddingTop: 12, maxHeight: '92%' });
+  Object.assign(result.title, { ...AfterglowType.identity, fontFamily: fonts.semibold });
+  Object.assign(result.label, { textTransform: 'none', letterSpacing: 0, fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: AfterglowColors.ink });
+  for (const key of ['input', 'photoAdd']) Object.assign(result[key], { backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderRadius: 6, minHeight: 48 });
+  Object.assign(result.saveBtn, { marginTop: 0, minHeight: 52 });
+  Object.assign(result.photoRow, { gap: 10 });
+  for (const key of ['pill', 'genderPill', 'featuredTypePill']) Object.assign(result[key], { borderRadius: 6, minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: AfterglowColors.line });
+  Object.assign(result.featuredTypePillText, { fontSize: FontSizes.bodySM });
+  Object.assign(result.hint, { color: AfterglowColors.muted });
+  Object.assign(result.photoRemove, { width: 44, height: 44, top: 0, right: 0, borderRadius: 6 });
+  return result;
+}

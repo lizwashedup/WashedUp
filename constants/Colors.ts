@@ -3,6 +3,45 @@
  * Brand colors v2.0
  */
 
+// Reviewed September redesign tokens. Opt in per staged screen; legacy tokens
+// and the bottom navigation keep their existing values during implementation.
+export const AfterglowColors = {
+  paper: '#F6EFE3',
+  ink: '#15120E',
+  muted: '#655A50',
+  line: '#CFC4B5',
+  subtleLine: '#E6DCCE',
+  clay: '#A63F2D',
+  white: '#FFFDF8',
+  avatar: '#E5D8C8',
+  unread: 'rgba(166,63,45,0.035)',
+} as const;
+
+// September 26 correction: approved sunset gold light over warm paper.
+// Scene content no longer shares the dark ink used by branded action fills.
+export const SceneDetailColors = {
+  upper: '#F3CD82', middle: '#F4DCAA', lower: '#F6EFE3',
+  gradientLocations: [0, 0.68, 1] as const,
+  text: '#15120E', supporting: '#60564C', line: '#CFC4B5', actionText: '#FFFFFF',
+  action: '#B5522E', surface: '#FFFDF8', border: '#D7C7AB',
+} as const;
+
+// Existing branded action depth stays independent of the Scene page surface.
+export const SunsetActionColors = { lower: '#7A3528' } as const;
+
+// Restrained gold lighting for creator actions, requested September 18.
+// Decorative only: labels and state are never communicated by gold alone.
+export const CreatorSurfaceColors = {
+  goldEdge: 'rgba(212,191,130,0.48)',
+  goldLight: 'rgba(212,191,130,0.30)',
+  goldClear: 'rgba(212,191,130,0)',
+  selectionTop: '#EBD49B',
+  selectionBottom: '#C7A663',
+  sunsetGoldLight: '#F5E3B7',
+  sunsetGoldMiddle: '#EBC987',
+  sunsetGoldWarm: '#DFAA78',
+} as const;
+
 const brand = {
   // ── Primary palette ──────────────────────────────────────────────────────
   terracotta: '#B5522E', // Primary accent — buttons, active states, CTA
