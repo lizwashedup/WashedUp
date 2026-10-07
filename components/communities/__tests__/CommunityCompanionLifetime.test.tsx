@@ -280,9 +280,11 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
       expect(mockReply).toHaveBeenCalledTimes(1);
       await act(async () => { await jest.advanceTimersByTimeAsync(35001); });
       expect(recovery('Check original reply')).toBeDefined();
-      expect(input().props.value).toBe('Keep this reply');
+      expect(input().props.value).toBe('');
+      expect(visibleText()).toContain('Keep this reply');
       await act(async () => pending.resolve());
-      expect(input().props.value).toBe('Keep this reply');
+      expect(input().props.value).toBe('');
+      expect(visibleText()).toContain('Keep this reply');
       expect(mockSuccess).not.toHaveBeenCalled();
     } finally {jest.useRealTimers();}
   });
@@ -300,11 +302,12 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
     await mount(); await showReplies(); type('Old reply'); act(() => { void sendButton().props.onPress(); }); await flush();
     scope = nextScope('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'); await update(); expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
     await showReplies(); type('New reply'); act(() => { void sendButton().props.onPress(); }); await flush();
+    type('Next draft');
     await act(async () => old.resolve()); await flush();
-    expect(input().props.value).toBe('New reply'); expect(sendButton().props.disabled).toBe(true);
+    expect(input().props.value).toBe('Next draft'); expect(sendButton().props.disabled).toBe(true);
     expect(mockSuccess).not.toHaveBeenCalled(); expect(invalidate).not.toHaveBeenCalled();
     await act(async () => fresh.resolve()); await flush();
-    expect(input().props.value).toBe(''); expect(mockSuccess).toHaveBeenCalledTimes(1);
+    expect(input().props.value).toBe('Next draft'); expect(mockSuccess).toHaveBeenCalledTimes(1);
   });
 
   it('retires queued input, send, reaction and picker callbacks before an account change rerenders', async () => {
@@ -368,10 +371,34 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
     expect(visibleText()).toContain('Current visit reply');
   });
 
+  it('keeps identically retyped next reply after the original is confirmed', async () => {
+    const pending=deferred(); mockReply.mockReturnValueOnce(pending.promise);
+    await mount(); await showReplies(); type('Hello');
+    act(() => { void sendButton().props.onPress(); }); await flush();
+    const detached=input().props.value;
+    type('Hello');
+    await act(async () => pending.resolve()); await flush();
+    expect(input().props.value).toBe('Hello');
+    expect(detached).toBe('');
+    expect(sendButton().props.disabled).toBe(false);
+    expect(mockReply).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps mention suggestions for the next reply when the original is confirmed', async () => {
+    const pending=deferred(); mockReply.mockReturnValueOnce(pending.promise);
+    await mount(); await showReplies(); type('First reply');
+    act(() => { void sendButton().props.onPress(); }); await flush();
+    type('@Am'); await flush();
+    expect(tree.root.findAllByType(ChatMentionPicker)).toHaveLength(1);
+    await act(async () => pending.resolve()); await flush();
+    expect(input().props.value).toBe('@Am');
+    expect(tree.root.findAllByType(ChatMentionPicker)).toHaveLength(1);
+  });
+
   it('preserves an unsuccessful reply and allows retry with its original text', async () => {
     mockReply.mockRejectedValueOnce(new Error('Offline'));
     await mount(); await showReplies(); type('Keep this text'); act(() => { void sendButton().props.onPress(); }); await flush();
-    expect(input().props.value).toBe('Keep this text'); expect(mockError).not.toHaveBeenCalled(); expect(visibleText()).toContain('Your reply is kept.');
+    expect(input().props.value).toBe(''); expect(visibleText()).toContain('Keep this text'); expect(mockError).not.toHaveBeenCalled(); expect(visibleText()).toContain('Your reply is kept.');
     act(() => recovery('Retry original reply').props.onPress()); await flush(); expect(mockReply).toHaveBeenCalledTimes(2);
     expect(mockReply.mock.calls[1][3]).toBe(mockReply.mock.calls[0][3]);
     expect(mockReply.mock.calls.map(call => call.slice(0, 2))).toEqual([['11111111-1111-4111-8111-111111111111', 'Keep this text'], ['11111111-1111-4111-8111-111111111111', 'Keep this text']]);
