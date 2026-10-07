@@ -2,6 +2,8 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useBlock } from '../useBlock';
+import { chatListMemoryCache } from '../../lib/chatListCache';
+import { consumeChatListDirty } from '../../lib/chatListSignal';
 
 const mockGetUser = jest.fn(), mockRead = jest.fn(), mockWrite = jest.fn(), mockReport = jest.fn(), mockInvalidate = jest.fn();
 const mockQueryClient = { invalidateQueries: mockInvalidate };
@@ -24,6 +26,7 @@ async function mount() { await act(async () => { tree = create(<Harness />); });
 async function open(context?: ReturnType<typeof scope>) { await act(async () => controller.blockUser('target', 'Jamie', after, context)); }
 function confirm() { return (jest.mocked(Alert.alert).mock.calls[0][2]![1].onPress as () => Promise<void>); }
 beforeEach(() => {
+  chatListMemoryCache.clear(); consumeChatListDirty();
   jest.useFakeTimers(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); current = 'alice';
   mockGetUser.mockResolvedValue(user('alice')); mockRead.mockResolvedValue({ data: { blocked_users: ['existing'] }, error: null });
   mockWrite.mockResolvedValue({ error: null }); mockReport.mockResolvedValue({ error: null }); mockInvalidate.mockResolvedValue(undefined);
@@ -76,6 +79,28 @@ it.each(['read', 'write'] as const)('does not report success when a scoped %s re
   await mount(); await open(scope()); await act(async () => confirm()());
   expect(mockWrite).toHaveBeenCalledTimes(stage === 'read' ? 0 : 1); expect(mockReport).not.toHaveBeenCalled(); expect(after).not.toHaveBeenCalled();
   expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+});
+
+it.each(['auth', 'read', 'write', 'missing-profile'] as const)('does not report unscoped success or remove previews after %s fails', async stage => {
+  const row = { is_dm: true, dm_user_id: 'target', conversationId: 'dm-target' } as any;
+  chatListMemoryCache.set('alice', [row]);
+  if (stage === 'auth') mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'alice' } }, error: new Error('auth failed') });
+  else (stage === 'write' ? mockWrite : mockRead).mockResolvedValueOnce({ data: null, error: stage === 'missing-profile' ? null : new Error('failed') });
+  await mount(); await open(); await act(async () => confirm()()); act(() => jest.runOnlyPendingTimers());
+  expect(after).not.toHaveBeenCalled(); expect(mockReport).not.toHaveBeenCalled();
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+  expect(chatListMemoryCache.get('alice')).toEqual([row]); expect(consumeChatListDirty()).toBe(false);
+});
+
+it.each([false, true])('removes only the matching account/private preview after confirmation (already blocked: %s)', async alreadyBlocked => {
+  const row = (conversationId: string, dm_user_id: string, is_dm = true) => ({ conversationId, dm_user_id, is_dm, title: 'Same display name' }) as any;
+  chatListMemoryCache.set('alice', [row('target-dm', 'target'), row('other-dm', 'other'), row('shared-circle', 'target', false)]);
+  chatListMemoryCache.set('bob', [row('bob-dm', 'target')]);
+  if (alreadyBlocked) mockRead.mockResolvedValueOnce({ data: { blocked_users: ['target'] }, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(chatListMemoryCache.get('alice')?.map(chat => chat.conversationId)).toEqual(['other-dm', 'shared-circle']);
+  expect(chatListMemoryCache.get('bob')?.map(chat => chat.conversationId)).toEqual(['bob-dm']);
+  expect(consumeChatListDirty()).toBe(true); expect(after).toHaveBeenCalledTimes(1);
 });
 
 

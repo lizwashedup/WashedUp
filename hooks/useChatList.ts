@@ -5,6 +5,8 @@ import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../constants/FeatureFlags';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
 import { seedSender } from '../lib/chatEngine/senderCache';
 import { getPlanChatTiming } from '../lib/planChatExpiry';
+import { getBlockedWith } from '../lib/blocking';
+import { chatListMemoryCache, subscribeChatListPrivacy } from '../lib/chatListCache';
 
 export interface ChatPreview {
   // A conversation row is either a plan (event) chat or a circle chat.
@@ -28,12 +30,14 @@ export interface ChatPreview {
   // A DM (unnamed 2-person circle): the row shows the counterpart's face, not a
   // circle monogram. Undefined for plans and real circles.
   is_dm?: boolean;
+  /** Identity used only to remove a blocked private conversation from previews. */
+  dm_user_id?: string | null;
 }
 
-// Keep the last completed list for each signed-in person for the lifetime of
-// the app process. Keying by user prevents one account's previews from ever
-// appearing if a different account signs in without restarting the app.
-const chatListMemoryCache = new Map<string, ChatPreview[]>();
+async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Promise<ChatPreview[]> {
+  const blocked = await getBlockedWith(userId, previews.filter(chat => chat.is_dm).map(chat => chat.dm_user_id));
+  return previews.filter(chat => !chat.is_dm || (!!chat.dm_user_id && !blocked.has(chat.dm_user_id)));
+}
 
 function sortChatPreviews(previews: ChatPreview[]): ChatPreview[] {
   const active = previews
@@ -132,7 +136,7 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
     }
   });
 
-  return (memberships ?? [])
+  const previews = (memberships ?? [])
     .map((m: any) => m.circles)
     .filter(Boolean)
     .map((circle: any): ChatPreview => {
@@ -146,6 +150,7 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
         // DM rows render the counterpart's face; real circles use the monogram.
         image_url: disp.isDm ? disp.otherAvatar : null,
         is_dm: disp.isDm,
+        dm_user_id: disp.otherUserId,
         start_time: circle.created_at,
         member_count: realCounts[circle.id] ?? 0,
         ticket_url: null,
@@ -165,6 +170,7 @@ async function fetchCircleChats(userId: string, senderCache?: Map<string, string
         member_avatars: avatarMap[circle.id] ?? [],
       };
     });
+  return visiblePrivateChats(userId, previews);
 }
 
 /**
@@ -178,7 +184,7 @@ async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string
   const { data, error } = await supabase.rpc('get_my_circle_chat_cards');
   if (error) throw error;
 
-  return ((data ?? []) as any[]).map((card: any): ChatPreview => {
+  const previews = ((data ?? []) as any[]).map((card: any): ChatPreview => {
     const members: DisplayMember[] = (card.members ?? []).map((m: any) => ({
       user_id: m.user_id,
       name: m.first_name ?? null,
@@ -213,6 +219,7 @@ async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string
       // DM rows render the counterpart's face; real circles use the monogram.
       image_url: disp.isDm ? disp.otherAvatar : null,
       is_dm: disp.isDm,
+      dm_user_id: disp.otherUserId,
       start_time: card.created_at,
       member_count: card.member_count ?? 0,
       ticket_url: null,
@@ -226,6 +233,7 @@ async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string
         .slice(0, 4),
     };
   });
+  return visiblePrivateChats(userId, previews);
 }
 
 export function useChatList(knownUserId: string | null | undefined) {
@@ -502,6 +510,15 @@ export function useChatList(knownUserId: string | null | undefined) {
     void fetchChats(!!cached);
   }, [fetchChats]);
 
+  useEffect(() => subscribeChatListPrivacy(viewerId => {
+    if (!mounted.current || currentViewer.current !== viewerId || knownUserId !== viewerId) return;
+    // Retire reads and realtime hydration started before the confirmed block.
+    // A network failure must never restore the removed cached private row.
+    requestVersion.current++;
+    setChats(chatListMemoryCache.get(viewerId) ?? []);
+    void fetchChats(true);
+  }), [knownUserId, fetchChats]);
+
   // Optimistic removal for delete-chat / leave-circle (doc 120). Dropping the
   // row also drops its id from convIdsRef (the effect below), so the realtime
   // handler stops patching a conversation the user just left.
@@ -528,11 +545,13 @@ export function useChatList(knownUserId: string | null | undefined) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
+          const version = requestVersion.current;
+          const isCurrentPreview = () => isCurrent() && requestVersion.current === version;
           const msg = payload.new as any;
           // Match either parent. circle_id is only considered behind the flag
           // (and is null on event messages), so plan chats are unaffected.
           const convId = msg?.event_id ?? (GROUPS_ENABLED ? msg?.circle_id : null);
-          if (!isCurrent() || !convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
+          if (!isCurrentPreview() || !convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
 
           // Incremental update: patch the affected chat instead of full refetch
           try {
@@ -548,7 +567,7 @@ export function useChatList(knownUserId: string | null | undefined) {
                   .select('first_name_display')
                   .eq('id', msg.user_id)
                   .maybeSingle(), 12_000);
-                if (!isCurrent()) return;
+                if (!isCurrentPreview()) return;
                 senderName = profile?.first_name_display ?? null;
                 if (senderName) senderNameCacheRef.current.set(msg.user_id, senderName);
               }
@@ -559,6 +578,7 @@ export function useChatList(knownUserId: string | null | undefined) {
             const preview = senderName ? `${senderName}: ${text}` : text;
 
             setChats(prev => {
+              if (!isCurrentPreview()) return prev;
               const updated = prev.map(c => {
                 if (c.conversationId !== convId) return c;
                 return {
@@ -576,7 +596,7 @@ export function useChatList(knownUserId: string | null | undefined) {
             });
           } catch {
             // Fallback: full refetch only for this active account.
-            if (isCurrent()) void fetchChats(true);
+            if (isCurrentPreview()) void fetchChats(true);
           }
         },
       )

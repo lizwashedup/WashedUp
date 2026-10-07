@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
+import { removeBlockedPrivateChatPreviews } from '../lib/chatListCache';
 
 export interface BlockOperationScope {
   userId: string;
@@ -44,8 +45,8 @@ export function useBlock() {
             try {
               const { data: { user }, error: authError } = await supabase.auth.getUser();
               if (!isCurrent() || (scope && user?.id !== scope.userId)) return;
-              if (scope && authError) throw authError;
-              if (!user) return;
+              if (authError) throw authError;
+              if (!user) throw new Error('Could not confirm this account.');
 
               const { data: profile, error: readError } = await supabase
                 .from('profiles')
@@ -53,7 +54,8 @@ export function useBlock() {
                 .eq('id', user.id)
                 .single();
               if (!isCurrent()) return;
-              if (scope && readError) throw readError;
+              if (readError) throw readError;
+              if (!profile) throw new Error('Could not read blocked people.');
 
               const current: string[] = profile?.blocked_users ?? [];
               if (!current.includes(blockedId)) {
@@ -62,7 +64,9 @@ export function useBlock() {
                   .update({ blocked_users: [...current, blockedId] })
                   .eq('id', user.id);
                 if (!isCurrent()) return;
-                if (scope && writeError) throw writeError;
+                if (writeError) throw writeError;
+
+                removeBlockedPrivateChatPreviews(user.id, blockedId);
 
                 // Apple 1.2: Notify developer of inappropriate content when user blocks
                 try {
@@ -78,6 +82,7 @@ export function useBlock() {
                 }
               }
               if (!isCurrent()) return;
+              if (current.includes(blockedId)) removeBlockedPrivateChatPreviews(user.id, blockedId);
 
               // Apple 1.2: Instant removal from feed — invalidate all relevant queries
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });

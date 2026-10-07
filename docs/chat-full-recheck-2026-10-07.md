@@ -1,8 +1,8 @@
 # WashedUp chat: full scoped recheck — October 7, 2026
 
-Latest continuation: **2,481 passing tests, 11 unchanged baseline failures,
-172 suites**. The scroll/speed section at the end records three targeted CPU/
-allocation improvements, before/after evidence and the updated simulator check.
+Latest continuation: **2,510 passing tests, 11 unchanged baseline failures,
+174 suites**. The blocking/inbox section at the end records the reported private
+preview problem, scoped client fixes, research and remaining server questions.
 Earlier correctness, simulator and transport results remain separately identified.
 
 ## Initial full-recheck result
@@ -543,3 +543,144 @@ The next useful acceptance step remains sustained scrolling and keyboard testing
 on the intended phone candidate after safe integration. This pass establishes
 specific reduced work and passing scoped regressions, not a guarantee that all
 possible freezes or errors have been eliminated.
+
+## Blocking, private inbox and chat consistency — October 7, 2026
+
+Liz reported that a blocked person's message and picture remained visible and
+clarified that this was a **private chat or inbox**, not a community message.
+This pass started from clean isolated feature commit
+`85a15e52eaa4f6c9d45340056aab3b3206d2ee67`. Canonical origin, feature branch,
+worktree isolation and protected release ancestry were verified; remote fetch
+completed without changing checkout files. Protected release remains
+`9c2994b10e9f263e98a262e87a9bf7a94ee941c5`. The separate push checkout is doing
+other work and was not edited. No personal production records were queried.
+
+### Research and recommended behavior
+
+Blocking conventions differ; they are product decisions, not a single mandatory
+protocol. [WhatsApp's official explanation](https://faq.whatsapp.com/414631957536067)
+retains the existing chat and allows shared-group messages to remain visible.
+[Snapchat's official explanation](https://help.snapchat.com/hc/en-us/articles/7012401093396-How-do-I-block-a-friend-on-Snapchat)
+says active one-to-one conversations disappear from the blocking person's view,
+while shared-group messages can still be seen.
+[Signal's official explanation](https://support.signal.org/hc/en-us/articles/360007060072-Block-numbers-usernames-or-groups)
+hides the blocked contact's group messages from the blocker but warns that the
+blocked contact may still see the blocker's group messages/profile updates.
+These sources were read October 7, 2026. None establishes WashedUp's live behavior.
+
+Recommended WashedUp contract, with implementation status kept separate:
+
+- After a confirmed block, hide the private conversation's row, picture, preview
+  and row unread count from the blocker's normal inbox. Preserve message records
+  for reporting; do not delete another person's history or group history.
+- Stop new private contact and notifications in both directions at the server;
+  verify existing conversations and direct links as well as new-DM creation.
+  A frontend visibility filter alone cannot establish this protection.
+- For ordinary shared-chat messages, hide the blocked author's content and avatar
+  from the blocker. A quoted/replied-to hidden message can say “Message unavailable”
+  without repeating its text or photo. Avoid “Message deleted” unless it really
+  was deleted. Group membership and group records must not be silently removed.
+- Keep blocking distinct from a global ban. Retain a clear place to manage blocked
+  people, and retain an intentional reporting path. Do not announce the block to
+  the other person or promise that previously seen information can be recalled.
+
+For uniform ordinary-chat interactions, use the same hold-to-react/action menu,
+attached reaction chips, and reply behavior in shared, main-community and topic
+messages. [WhatsApp documents holding a message to react](https://faq.whatsapp.com/424198503229937/),
+and [Signal documents swipe-to-reply and cancellation in the composer](https://support.signal.org/hc/en-us/articles/6851465208986-Reply-to-a-specific-message).
+Announcements/system cards can remain distinct but should have consistent
+applicable actions and clear unavailable/read-only states. Main-community nested
+replies currently differ from quoted replies elsewhere; moving that history
+requires an explicit data-preserving design. This pass does not claim to have
+completed that unification.
+
+### Confirmed source gaps and bounded repair
+
+1. Both private-inbox fetch paths built a counterpart's name, image and last
+   message without consulting the mutual-block resolver. They now collect DM
+   counterpart IDs and call the existing `yours_is_blocked_between` helper through
+   `getBlockedWith` before publishing fresh DM rows. Either-direction blocks and
+   per-person privacy errors exclude the private row. Named circles/plan previews
+   retain their existing semantics; no group is deleted.
+2. The block hook invalidated React Query caches, but the Chats list uses its own
+   component state and per-account process cache. Those previews now live in a
+   small shared cache module. A successful block removes matching private rows
+   by account and counterpart ID, including when Chats is unmounted. Mounted
+   lists retire earlier reads, repaint the filtered cache and refresh. A dirty
+   flag also bypasses the normal next-focus throttle. Stale refreshes and delayed
+   realtime sender hydration cannot restore a pre-block preview.
+3. Legacy callers without an explicit operation scope ignored returned auth,
+   profile-read and profile-update errors. The block hook now checks these errors
+   for all callers and rejects missing profiles/accounts. Error paths leave
+   previews intact and show failure rather than false success. Existing scoped
+   account/visit guards and report payloads remain. Inbox removal happens before
+   the existing best-effort report wait.
+
+This is a client repair, not proof that the reported real block failed or that a
+new message arrived after it. No block/unblock/report was sent to production,
+and no real conversation or image was deleted. Tests use fictional identities.
+
+### Profile discovery and remaining security verification
+
+Source review found limited profile cards reachable from shared chat/member
+surfaces, an exact-handle People lookup, and gated individual-profile/DM paths.
+The checked-in `get_or_create_dm` migration requires an accepted relationship
+and rejects mutual blocks. That is repository intent, not confirmation that the
+same function is deployed. It also does not by itself prove that writes into an
+already-existing conversation are denied after blocking.
+
+The checked-in original circle message SELECT/INSERT policies rely on joined
+membership. Live effective policies, triggers, public-profile visibility and
+notification dispatch must be verified together before asserting complete
+server-enforced blocking. This pass does not deploy or replace them. A block
+record, relationship history, DM creation time and any retained navigation audit
+events would be needed to investigate the particular contact; a first name and
+an old inbox preview cannot establish how he found the profile. No such personal
+record was retrieved or attributed in this pass.
+
+Other limits: warm caches after a block performed on another device are not a
+cross-device privacy-sync guarantee; existing private deep-link/header reads,
+group avatars, quotes, typing, search and aggregate notification badges were not
+converted into a new universal block layer here. The additional privacy lookup
+is one parallel RPC per distinct private counterpart; production inbox latency
+with a large number of DMs remains unmeasured. Native testing did not exercise
+this block flow against real accounts.
+
+### Verification and changed files
+
+- New tests reproduced the unscoped false-success and retained private-preview
+  problems against the previous source. Original and candidate results are kept
+  separately. One new account-switch fixture initially returned the old person's
+  membership for every account; its mock was corrected to return no membership
+  for the new viewer, then the final full inventory passed to the stated baseline.
+- 17 cases added: six block-hook cases and eleven private-inbox cases. The
+  existing twelve block-scope cases were newly included in the wider inventory.
+  Direct blocking suites: **29 passing tests**. Existing loading/history/expiry
+  suites: **18 passing tests**.
+- Final selected inventory: **174 suites, 170 passing suites, 2,510 passing tests,
+  11 unchanged baseline failures, zero pending, zero timeouts**. Independent Jest
+  processes, at most two concurrently, 60 seconds per suite. The same four
+  baseline failing suites are listed earlier in this record.
+- TypeScript, auth invariants, diff whitespace and offline iOS JavaScript/Hermes
+  export passed. Available Node 24.19 used; pinned Node20.20.1 unavailable. No
+  separate lint command is configured. No new simulator performance or real
+  multi-client transport measurement is claimed for this continuation.
+
+Every file changed in this continuation:
+
+- `hooks/useBlock.ts`
+- `hooks/useChatList.ts`
+- `lib/chatListCache.ts`
+- `hooks/__tests__/useBlock.scope.test.tsx`
+- `hooks/__tests__/useChatList.blocking.test.tsx`
+- `docs/chat-full-recheck-2026-10-07.md`
+
+Evidence:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/block-inbox-20261007/`.
+The final summary and per-suite results supersede the intermediate affected-test
+directory containing the corrected fixture failure. Comparisons against this
+pass's start and the protected release, source snapshots, check logs and test
+inventories are retained. The temporary dependency symlink is removed before
+commit. These are JavaScript-only, OTA-compatible source changes with no native
+dependency/configuration requirement. Existing release gates still apply.
+Nothing was merged, pushed, published, deployed or released.
