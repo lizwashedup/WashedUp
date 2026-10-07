@@ -89,6 +89,27 @@ beforeEach(() => {
 });
 afterEach(() => cleanup.splice(0).forEach(close => close()));
 
+it.each(['event', 'circle'] as const)('retires every %s subscription across 40 visits and ignores callbacks from departed rooms', async kind => {
+  readMessages.mockResolvedValue(result(message(1)));
+  const fixture = mount({ kind, id: 'visit-0' }); await flush();
+  const retired: Array<(payload: any) => void | Promise<void>> = [];
+  for (let visit = 1; visit <= 40; visit++) {
+    retired.push(callbacks.INSERT);
+    fixture.navigate({ kind, id: `visit-${visit}` }); await flush();
+    expect(supabase.removeChannel).toHaveBeenCalledTimes(visit);
+    expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id]);
+    await act(async () => { await retired[visit - 1]({ new: message(visit + 10) }); });
+    await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id]);
+  }
+  cleanup.splice(0).forEach(close => close());
+  expect(supabase.channel).toHaveBeenCalledTimes(41);
+  expect(supabase.removeChannel).toHaveBeenCalledTimes(41);
+  const readsBefore = readMessages.mock.calls.length;
+  await act(async () => { for (const callback of retired) await callback({ new: message(99) }); });
+  expect(readMessages).toHaveBeenCalledTimes(readsBefore);
+});
+
 it.each(['event', 'circle'] as const)('recovers a persisted %s message when PostgreSQL streaming becomes ready', async kind => {
   readMessages.mockResolvedValueOnce(result(message(1)));
   const fixture = mount({ kind, id: 'plan-a' });
@@ -522,4 +543,48 @@ it.each(['event', 'circle'] as const)('starts the %s privacy gate while history 
   await flush();
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(2).id]);
   expect(fixture.chat.loading).toBe(false);
+});
+
+it.each(['event', 'circle'] as const)('renders %s history after its required reads without waiting for five-second profile enrichment', async kind => {
+  jest.useFakeTimers();
+  try {
+    readMessages.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(result(message(1))), 200)));
+    readBlocked.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: { blocked_users: [] }, error: null }), 100)));
+    readProfiles.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: [{ id: 'other', first_name_display: 'Alex' }], error: null }), 5000)));
+    const fixture = mount({ kind, id: 'plan-a' }); await flush();
+    await act(async () => { await jest.advanceTimersByTimeAsync(199); }); await flush();
+    expect(fixture.chat.loading).toBe(true);
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); }); await flush();
+    expect(fixture.chat.loading).toBe(false);
+    expect(fixture.chat.messages.map(row => row.content)).toEqual(['Message 1']);
+    expect(fixture.chat.messages[0].sender).toBeFalsy();
+    await act(async () => { await jest.advanceTimersByTimeAsync(5000); }); await flush();
+    expect(fixture.chat.messages[0].sender?.first_name).toBe('Alex');
+  } finally {
+    cleanup.splice(0).forEach(close => close());
+    jest.clearAllTimers(); jest.useRealTimers();
+  }
+});
+
+it('shows a pending text bubble through a three-second acknowledgement and keeps one confirmed copy', async () => {
+  jest.useFakeTimers();
+  try {
+    readMessages.mockResolvedValue(result(message(1)));
+    const fixture = mount(); await flush();
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const receipt = { ...message(2), id, user_id: 'viewer', content: 'Slow delivery' };
+    writeMessage.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: receipt, error: null }), 3000)));
+    let sent!: Promise<boolean>;
+    act(() => { sent = fixture.chat.sendMessage('Slow delivery', undefined, undefined, id); }); await flush();
+    expect(fixture.chat.messages.filter(row => row.content === 'Slow delivery').map(row => row.id)).toEqual([`optimistic-${id}`]);
+    await act(async () => { await jest.advanceTimersByTimeAsync(2999); }); await flush();
+    expect(fixture.chat.messages.at(-1)?.id).toBe(`optimistic-${id}`);
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); await sent; }); await flush();
+    expect(fixture.chat.messages.filter(row => row.content === 'Slow delivery').map(row => row.id)).toEqual([id]);
+    await emit('INSERT', receipt); await flush();
+    expect(fixture.chat.messages.filter(row => row.id === id)).toHaveLength(1);
+  } finally {
+    cleanup.splice(0).forEach(close => close());
+    jest.clearAllTimers(); jest.useRealTimers();
+  }
 });
