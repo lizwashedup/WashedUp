@@ -1,20 +1,19 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getAdminAlertEmail } from '../_shared/alertRecipient.ts';
-import { diagnosePushFailures } from '../_shared/pushFailureDiagnosis.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!;
+const ALERT_EMAIL = 'liz@washedup.app';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // Watchdog: scheduled every 5 min via pg_cron. Three independent checks, each
-// emailing the admin alert recipient (admin_alert_recipients, key 'default')
-// via Resend (email is the sink: a push-outage alarm must not ride push).
-// NONE of this touches app_notifications.
+// emailing Liz via Resend (email is the sink: a push-outage alarm must not ride
+// push). NONE of this touches app_notifications.
 //   1. recent_edge_function_failures: 4xx/5xx from pg_net edge calls (15m). The
 //      original check (a verify_jwt flip took push down silently for 4 days).
-//   2. push_registration_health: device_tokens minted/refreshed in 24h, catches
-//      the 2026-06 empty-App-ID outage, which returned 200 everywhere while
-//      registration cratered (the gap that hid it for 9 days).
+//   2. push_registration_health_v2: OneSignal coverage among accounts that
+//      completed onboarding in 24h, plus active known subscriptions. This
+//      catches registration loss without treating a quiet signup day as an
+//      outage.
 //   3. push_delivery_health: OneSignal delivered ratio over 90m above a volume
 //      floor, catches a true transport collapse.
 // Debounce lives in record_push_health (email on healthy->unhealthy transition,
@@ -28,19 +27,11 @@ function esc(s: unknown): string {
   return String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string));
 }
 
-// Recipient comes from public.admin_alert_recipients (alert_key 'default'),
-// the 698769d centralization -- no hardcoded address. A missing row skips the
-// send and returns false so callers record alerted:false; the skip is logged
-// loudly since a silent watchdog is the exact failure this function watches for.
-async function sendAlert(alertEmail: string | null, subject: string, html: string): Promise<boolean> {
-  if (!alertEmail) {
-    console.error('[monitor-push-health] no admin_alert_recipients row for alert_key "default" -- alert email skipped:', subject);
-    return false;
-  }
+async function sendAlert(subject: string, html: string): Promise<boolean> {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'WashedUp Alerts <plans@washedup.app>', to: [alertEmail], subject, html }),
+    body: JSON.stringify({ from: 'WashedUp Alerts <plans@washedup.app>', to: [ALERT_EMAIL], subject, html }),
   });
   return res.ok;
 }
@@ -52,7 +43,6 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const result: Record<string, unknown> = {};
-  const alertEmail = await getAdminAlertEmail(supabase);
 
   // Check 1: 4xx/5xx from pg_net edge calls (last 15 min). No early return.
   const { data: failures, error: failErr } = await supabase.rpc('recent_edge_function_failures', { window_minutes: 15 });
@@ -61,8 +51,13 @@ Deno.serve(async (req) => {
   } else {
     const failureRows = failures ?? [];
     result.failures = failureRows.length;
-    if (failureRows.length > 0) {
-      const diagnosis = diagnosePushFailures(failureRows);
+    const failureDetails = `failures_15m=${failureRows.length}`;
+    const { data: shouldAlert } = await supabase.rpc('record_push_health', {
+      p_kind: 'edge', p_unhealthy: failureRows.length > 0,
+      p_value: failureRows.length, p_details: failureDetails,
+    });
+    result.failuresAlerted = false;
+    if (failureRows.length > 0 && shouldAlert) {
       const sampleHtml = failureRows.slice(0, 5)
         .map((f: any) => `<li><strong>${esc(f.created)}</strong>: HTTP ${esc(f.status_code)} <code>${esc(String(f.content ?? '').slice(0, 200))}</code></li>`)
         .join('');
@@ -70,21 +65,25 @@ Deno.serve(async (req) => {
         <div style="font-family:-apple-system,sans-serif;max-width:600px">
           <h2 style="color:#C43D2E;margin:0 0 4px 0">Push pipeline alert</h2>
           <p>Detected <strong>${failureRows.length}</strong> failed edge function call(s) from Postgres triggers in the last 15 minutes.</p>
-          <p><strong>Diagnosis:</strong> ${esc(diagnosis.summary)}</p>
+          <p>Usually a DB-trigger edge fn (<code>send-push-notifications</code> / <code>notify-plan-posted</code>) rejecting with 4xx/5xx, most often <code>verify_jwt</code> flipped to <code>true</code> on a redeploy.</p>
           <h3>Sample failures</h3><ul>${sampleHtml}</ul>
-          <p><strong>Next action:</strong> ${esc(diagnosis.action)}</p>
+          <p>If <code>verify_jwt</code> is true, redeploy with <code>--no-verify-jwt</code>.</p>
         </div>`.trim();
-      result.failuresAlerted = await sendAlert(alertEmail, `[ALERT] Push pipeline failing: ${failureRows.length} errors in last 15min`, html);
+      result.failuresAlerted = await sendAlert(`[ALERT] Push pipeline failing: ${failureRows.length} errors in last 15min`, html);
     }
   }
 
-  // Check 2: registration health (24h tokens minted/refreshed).
-  const { data: reg, error: regErr } = await supabase.rpc('push_registration_health');
+  // Check 2: registration health (completed-account OneSignal coverage).
+  const { data: reg, error: regErr } = await supabase.rpc('push_registration_health_v2');
   if (regErr) {
     result.registrationError = regErr.message;
   } else if (reg?.[0]) {
-    const r = reg[0] as { new_24h: number; refresh_24h: number; active_24h: number; healthy: boolean };
-    const details = `new_24h=${r.new_24h} refresh_24h=${r.refresh_24h} active_24h=${r.active_24h}`;
+    const r = reg[0] as {
+      completed_24h: number; covered_24h: number; coverage: number | null;
+      refreshed_24h: number; active_24h: number; evaluated: boolean; healthy: boolean;
+    };
+    const coverageLabel = r.coverage == null ? 'n/a' : `${Math.round(r.coverage * 100)}%`;
+    const details = `completed_24h=${r.completed_24h} covered_24h=${r.covered_24h} coverage=${coverageLabel} refreshed_24h=${r.refreshed_24h} active_24h=${r.active_24h} evaluated=${r.evaluated}`;
     const { data: shouldAlert } = await supabase.rpc('record_push_health', {
       p_kind: 'registration', p_unhealthy: !r.healthy, p_value: r.active_24h, p_details: details,
     });
@@ -92,11 +91,12 @@ Deno.serve(async (req) => {
     if (shouldAlert) {
       const html = `
         <div style="font-family:-apple-system,sans-serif;max-width:600px">
-          <h2 style="color:#C43D2E;margin:0 0 4px 0">Push REGISTRATION stalled</h2>
-          <p>Only <strong>${r.active_24h}</strong> device tokens active in 24h (${details}). Healthy runs ~50 to 175 per day.</p>
-          <p>Signature of OneSignal not initializing on-device (empty App ID / SDK not starting) or new-user registration breaking. Check EXPO_PUBLIC_ONESIGNAL_APP_ID + the hardcoded fallback in usePushNotifications.ts and that the latest OTA carries it.</p>
+          <h2 style="color:#C43D2E;margin:0 0 4px 0">WashedUp push signup registration is failing</h2>
+          <p><strong>${r.covered_24h} of ${r.completed_24h}</strong> accounts that completed onboarding in the last 24 hours have a OneSignal subscription (${coverageLabel}).</p>
+          <p>There are ${r.active_24h} known subscriptions active in the same period and ${r.refreshed_24h} existing users refreshed. ${details}.</p>
+          <p>This email comes from the WashedUp push watchdog, not Expo. Check the app’s native permission prompt, OneSignal subscription observer and authenticated device-token claim path.</p>
         </div>`.trim();
-      (result.registration as any).alerted = await sendAlert(alertEmail, `[ALERT] Push registration stalled: ${r.active_24h} tokens/24h`, html);
+      (result.registration as any).alerted = await sendAlert(`[ALERT] WashedUp push signup coverage: ${r.covered_24h}/${r.completed_24h}`, html);
     }
   }
 
@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
           <p>OneSignal delivered <strong>${d.delivered}/${d.recipients}</strong> (ratio ${d.ratio}) in the last 90 min, below the 3% floor.</p>
           <p>Steady-state is ~13% (coverage gap). Near-zero with real volume means a transport failure: empty App ID, dead APNs key, or verify_jwt flipped on send-push-notifications.</p>
         </div>`.trim();
-      (result.delivery as any).alerted = await sendAlert(alertEmail, `[ALERT] Push delivery collapsed: ${d.delivered}/${d.recipients} in 90min`, html);
+      (result.delivery as any).alerted = await sendAlert(`[ALERT] Push delivery collapsed: ${d.delivered}/${d.recipients} in 90min`, html);
     }
   }
 

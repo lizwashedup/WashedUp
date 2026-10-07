@@ -8,6 +8,8 @@ export const OneSignal = {
   login: () => {},
   logout: () => {},
   User: {
+    addEventListener: () => {},
+    removeEventListener: () => {},
     pushSubscription: {
       getIdAsync: async () => null,
       getOptedInAsync: async () => false,
@@ -20,6 +22,7 @@ export const OneSignal = {
     hasPermission: () => false,
     getPermissionAsync: async () => false,
     requestPermission: async () => false,
+    canRequestPermission: async () => false,
     addEventListener: () => {},
     removeEventListener: () => {},
   },

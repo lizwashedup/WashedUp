@@ -9,3 +9,6 @@ verify_jwt = false
 
 [functions.transactional-email-drain]
 verify_jwt = false
+
+[functions.claim-push-subscription]
+verify_jwt = true

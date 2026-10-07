@@ -23,6 +23,7 @@ type Call = { eventId: string; viewerId: string; greeting?: string; rpc: PlanJoi
   startTime: string; endTime?: string | null; status?: unknown; age: number | null; gender: string | null;
   ownChat: boolean; state: JoinState; isCurrent: () => boolean; dispatched: boolean };
 class UnknownJoin extends Error {}
+class ConfirmedJoinRefusal extends Error {}
 const unknownCopy = 'We haven’t received confirmation yet. Check this plan before trying to join again.';
 const denialCopy = {
   full: 'This plan just filled up.', not_found: 'This plan is no longer available.',
@@ -101,7 +102,7 @@ export function usePlanJoin(options: Options) {
       }
       const receipt = classifyPlanJoinReceipt(result?.data, call.rpc);
       if (receipt.kind === 'unknown') throw new UnknownJoin();
-      if (receipt.kind === 'denied') throw new Error(denialCopy[receipt.reason]);
+      if (receipt.kind === 'denied') throw new ConfirmedJoinRefusal(denialCopy[receipt.reason]);
       call.state.result = 'joined'; // remains locked even if this visit retired
       if (!call.isCurrent()) return false;
       const joined: PlanJoinResult = {};
@@ -129,7 +130,10 @@ export function usePlanJoin(options: Options) {
     },
     onSuccess: (joined, call) => { if (joined && call.isCurrent()) latest.current.onJoined(joined); },
     onError: (error, call) => {
-      logError(error, 'plan.join');
+      // Capacity, availability and waitlist refusals are authoritative business
+      // outcomes, not application failures. Keep genuine transport, auth and
+      // malformed-receipt failures in Sentry.
+      if (!(error instanceof ConfirmedJoinRefusal)) logError(error, 'plan.join');
       if (error instanceof UnknownJoin) call.state.result = 'unknown';
       if (call.isCurrent()) latest.current.onError(error instanceof UnknownJoin ? unknownCopy : friendlyError(error, 'Couldn’t join this plan. Try again.'));
     },

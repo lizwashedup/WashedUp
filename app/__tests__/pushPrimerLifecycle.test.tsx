@@ -8,6 +8,7 @@ type User = { id: string; phone: string };
 const PERSON_A: User = { id: 'person-a', phone: '+12025550100' };
 const PERSON_B: User = { id: 'person-b', phone: '+12025550101' };
 const SNOOZE_KEY = 'push_primer_snoozed_at';
+const PLAN_SNOOZE_KEY = 'plan_push_primer_snoozed_at';
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 let mockPath = '/(tabs)/plans';
 let mockRedraw: (() => void) | undefined;
@@ -15,6 +16,7 @@ let mockUser: User | null = PERSON_A;
 const mockAuthListeners = new Set<(event: string, session: any) => any>();
 const mockClickListeners = new Set<(event: any) => void>();
 const mockEligibility = jest.fn();
+const mockPromptPermission = jest.fn();
 const mockRegister = jest.fn();
 const mockLegacyRegister = jest.fn();
 const mockNativePermission = jest.fn();
@@ -58,6 +60,7 @@ jest.mock('../../hooks/usePushNotifications', () => ({
   usePushNotifications: () => {}, initOneSignal: async () => true, ensureOneSignalReady: async () => true,
   getPushPermissionStatus: async () => 'undetermined',
   getPushPrimerEligibility: (...args: any[]) => mockEligibility(...args),
+  getPushPromptPermission: (...args: any[]) => mockPromptPermission(...args),
   registerPushNotificationsWithResult: (...args: any[]) => mockRegister(...args),
   registerForPushNotifications: (...args: any[]) => mockLegacyRegister(...args),
 }));
@@ -91,6 +94,7 @@ jest.mock('../../lib/giphyInit', () => ({ initGiphySDK: () => {} }));
 jest.mock('../../lib/ticketing', () => ({ getOrder: async () => null }));
 jest.mock('../../components/albums/AlbumUploadPromptModal', () => ({ AlbumUploadPromptModal: mockNothing }));
 jest.mock('../../components/keyboard/KeyboardDoneBar', () => ({ KeyboardDoneBar: mockNothing }));
+jest.mock('../../components/keyboard/ChatKeyboard', () => ({ ChatKeyboardProvider: ({ children }: any) => children }));
 jest.mock('../../components/PostPlanSurvey', () => ({
   __esModule: true, default: (props: any) => require('react').createElement('SurveyFixture', props),
   isPostPlanSurveyHandled: async () => false,
@@ -105,6 +109,7 @@ jest.mock('../../components/BrandedAlert', () => ({ BrandedAlert: mockNothing })
 const RootLayout = require('../_layout').default;
 import { authedUserIdRef, deliberateSignOutAt, lastUnauthRedirectAt, verifyCodeSelfRoutingRef, cancelVerificationDestination } from '../../lib/navState';
 import { queryClient } from '../../lib/queryClient';
+import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt';
 
 let tree: ReactTestRenderer | undefined;
 const originalPlatform = Platform.OS;
@@ -134,6 +139,7 @@ beforeEach(async () => {
   mockPath = '/(tabs)/plans'; mockUser = PERSON_A; mockAuthListeners.clear(); mockClickListeners.clear();
   cancelVerificationDestination(); authedUserIdRef.current = null; deliberateSignOutAt.ts = 0; lastUnauthRedirectAt.ts = 0; verifyCodeSelfRoutingRef.current = false;
   mockEligibility.mockReset().mockResolvedValue('requestable');
+  mockPromptPermission.mockReset().mockResolvedValue('requestable');
   mockRegister.mockReset().mockResolvedValue({ status: 'registered', subscriptionId: 'subscription-a' });
   mockLegacyRegister.mockReset().mockResolvedValue(null);
   mockNativePermission.mockReset().mockResolvedValue(true);
@@ -178,6 +184,28 @@ it.each([[WEEK - 1, false], [WEEK, true]] as const)('respects the seven-day snoo
   // Root's authentication handoff advances 80 ms before checking eligibility.
   await AsyncStorage.setItem(SNOOZE_KEY, String(Date.now() + 80 - age));
   await mount(); expect(primers()).toHaveLength(expectedVisible ? 1 : 0); expect(mockRegister).not.toHaveBeenCalled();
+});
+
+it('lets a post/join invitation appear after the generic reminder was dismissed and keeps its snooze separate', async () => {
+  await mount();
+  const coldDismissedAt = Date.now();
+  await dismiss();
+  expect(await AsyncStorage.getItem(SNOOZE_KEY)).toBe(String(coldDismissedAt));
+  expect(await AsyncStorage.getItem(PLAN_SNOOZE_KEY)).toBeNull();
+
+  act(() => requestPlanNotificationPrompt({
+    userId: PERSON_A.id,
+    planId: 'plan-after-dismissal',
+    reason: 'posted',
+  }, () => true));
+  await flush();
+  await tick(400);
+  expect(primer().title).toBe('Know when people join');
+
+  const contextualDismissedAt = Date.now();
+  await dismiss();
+  expect(await AsyncStorage.getItem(PLAN_SNOOZE_KEY)).toBe(String(contextualDismissedAt));
+  expect(await AsyncStorage.getItem(SNOOZE_KEY)).toBe(String(coldDismissedAt));
 });
 
 it('preflights Enable once despite same-beat taps, then prompts once only for permission-required', async () => {

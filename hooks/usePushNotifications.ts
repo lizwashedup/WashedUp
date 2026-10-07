@@ -1,7 +1,7 @@
 import { LOCAL_DEVELOPMENT_ONLY } from '../constants/LocalDevelopment';
 import { useEffect, useRef, useState } from 'react';
 import { OneSignal, OSNotificationPermission } from '../lib/oneSignalShim';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
@@ -46,6 +46,8 @@ type PushIdentity = {
   registrations: Map<string | (() => boolean), Promise<PushRegistrationResult>>;
   writes: Map<string, Promise<boolean>>;
   subscription: { id: string | null; optedIn: boolean } | null;
+  subscriptionWaiters: Set<(subscription: { id: string | null; optedIn: boolean }) => void>;
+  reconciliation: Promise<void> | null;
 };
 
 // The root is the single identity owner. Object identity also distinguishes
@@ -157,13 +159,37 @@ function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<bo
           platform,
           onesignal_player_id: playerId,
           last_seen_at: new Date().toISOString(),
+          // This write only runs after the native SDK reports both OS
+          // permission and an opted-in subscription for this exact ID. Clear a
+          // stale provider-disabled snapshot immediately after a user repairs
+          // permission in Settings instead of waiting for the next sync job.
+          push_enabled: true,
+          enabled_synced_at: new Date().toISOString(),
         },
         { onConflict: 'onesignal_player_id' },
       ), 12_000);
       if (!canWrite()) return false;
       if (error) {
-        console.error('[PushNotifications] Failed to upsert device_tokens:', error.message, error.code ?? '');
-        return false;
+        // The same physical installation can move from account A to B after a
+        // OneSignal login. RLS correctly prevents B from overwriting A's row,
+        // so let the authenticated edge function verify OneSignal's current
+        // external_id before atomically transferring ownership. Never loosen
+        // the owner-only device_tokens policies in the client.
+        const { data, error: claimError } = await requestWithDeadline(
+          supabase.functions.invoke('claim-push-subscription', {
+            body: { subscriptionId: playerId, platform },
+          }),
+          12_000,
+        );
+        if (!canWrite()) return false;
+        if (claimError || data?.status !== 'claimed') {
+          console.error(
+            '[PushNotifications] Failed to claim device token:',
+            claimError?.message ?? data?.status ?? error.message,
+            error.code ?? '',
+          );
+          return false;
+        }
       }
       return true;
     } catch (err) {
@@ -174,6 +200,70 @@ function upsertDeviceToken(identity: PushIdentity, playerId: string): Promise<bo
   identity.writes.set(playerId, task);
   void task.then(() => { if (identity.writes.get(playerId) === task) identity.writes.delete(playerId); });
   return task;
+}
+
+function publishSubscription(
+  identity: PushIdentity,
+  subscription: { id: string | null; optedIn: boolean },
+) {
+  if (!identity.isCurrent()) return;
+  identity.subscription = subscription;
+  for (const resolve of [...identity.subscriptionWaiters]) resolve(subscription);
+}
+
+function reconcileSubscription(identity: PushIdentity): Promise<void> {
+  if (!identity.isCurrent() || !identity.userId) return Promise.resolve();
+  if (identity.reconciliation) return identity.reconciliation;
+  const task = Promise.resolve().then(async () => {
+    if (!(await bindIdentity(identity)) || !identity.isCurrent()) return;
+    try {
+      const observed = identity.subscription;
+      const [hasPermission, id, optedIn] = await Promise.all([
+        pushRead(OneSignal.Notifications.getPermissionAsync()),
+        pushRead(OneSignal.User.pushSubscription.getIdAsync()),
+        pushRead(OneSignal.User.pushSubscription.getOptedInAsync()),
+      ]);
+      if (!identity.isCurrent() || identity.subscription !== observed) return;
+      if (typeof hasPermission !== 'boolean' || typeof optedIn !== 'boolean') return;
+      if (id !== null && typeof id !== 'string') return;
+      const next = { id: id || null, optedIn: hasPermission && optedIn };
+      publishSubscription(identity, next);
+      if (next.id && next.optedIn) await upsertDeviceToken(identity, next.id);
+    } catch {
+      // A later SDK observer, foreground transition, or manual action retries.
+    }
+  });
+  identity.reconciliation = task;
+  void task.finally(() => {
+    if (identity.reconciliation === task) identity.reconciliation = null;
+  });
+  return task;
+}
+
+async function waitForSubscription(
+  identity: PushIdentity,
+  observed: PushIdentity['subscription'],
+  timeoutMs = 6_000,
+): Promise<{ id: string | null; optedIn: boolean } | null> {
+  if (!identity.isCurrent()) return null;
+  if (identity.subscription !== observed) return identity.subscription;
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = (value: { id: string | null; optedIn: boolean } | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      identity.subscriptionWaiters.delete(onChange);
+      resolve(value);
+    };
+    const onChange = (value: { id: string | null; optedIn: boolean }) => finish(value);
+    identity.subscriptionWaiters.add(onChange);
+    const timer = setTimeout(
+      () => finish(identity.isCurrent() && identity.subscription !== observed ? identity.subscription : null),
+      timeoutMs,
+    );
+    if (identity.subscription !== observed || !identity.isCurrent()) finish(identity.subscription);
+  });
 }
 
 export function usePushNotifications(
@@ -217,12 +307,17 @@ export function usePushNotifications(
     if (observedAuth.current && observedAuth.current.userId !== (userId ?? null)) return;
     let cancelled = false;
     let attached: ((event: any) => void) | null = null;
+    let permissionAttached: ((granted: boolean) => void) | null = null;
+    let userAttached: ((event: any) => void) | null = null;
+    let appStateSubscription: { remove: () => void } | null = null;
     const identity: PushIdentity = {
       userId: userId ?? null,
       isCurrent: () => !cancelled && owned.current === identity && currentIdentity === identity && latest.current.identityResolved && latest.current.userId === userId,
       registrations: new Map(),
       writes: new Map(),
       subscription: null,
+      subscriptionWaiters: new Set(),
+      reconciliation: null,
     };
     owned.current = identity;
     currentIdentity = identity;
@@ -232,10 +327,20 @@ export function usePushNotifications(
       if (!identity.isCurrent() || typeof event?.current?.optedIn !== 'boolean') return;
       const id = event?.current?.id;
       const optedIn = event?.current?.optedIn;
-      identity.subscription = { id: typeof id === 'string' && id ? id : null, optedIn };
+      publishSubscription(identity, { id: typeof id === 'string' && id ? id : null, optedIn });
       if (typeof id === 'string' && id && optedIn === true) {
         void upsertDeviceToken(identity, id);
       }
+    };
+
+    const onPermissionChange = (_granted: boolean) => {
+      if (identity.isCurrent()) void reconcileSubscription(identity);
+    };
+
+    const onUserChange = (event: any) => {
+      if (!identity.isCurrent()) return;
+      const externalId = event?.current?.externalId;
+      if (!externalId || externalId === identity.userId) void reconcileSubscription(identity);
     };
 
     void bindIdentity(identity).then(async (bound) => {
@@ -247,6 +352,23 @@ export function usePushNotifications(
         if (__DEV__) console.warn('[PushNotifications] addEventListener failed:', err);
       }
       try {
+        OneSignal.Notifications.addEventListener('permissionChange', onPermissionChange);
+        permissionAttached = onPermissionChange;
+      } catch (err) {
+        if (__DEV__) console.warn('[PushNotifications] permission observer failed:', err);
+      }
+      try {
+        OneSignal.User.addEventListener('change', onUserChange);
+        userAttached = onUserChange;
+      } catch (err) {
+        if (__DEV__) console.warn('[PushNotifications] user observer failed:', err);
+      }
+      if (AppState?.addEventListener) {
+        appStateSubscription = AppState.addEventListener('change', (state) => {
+          if (state === 'active' && identity.isCurrent()) void reconcileSubscription(identity);
+        });
+      }
+      try {
         const observed = identity.subscription;
         const [id, optedIn] = await Promise.all([
           pushRead(OneSignal.User.pushSubscription.getIdAsync()),
@@ -255,7 +377,7 @@ export function usePushNotifications(
         // A subscription event is newer than this initial read, including an
         // opt-out or token rotation while the bridge response was pending.
         if (!identity.isCurrent() || identity.subscription !== observed) return;
-        identity.subscription = { id, optedIn };
+        publishSubscription(identity, { id, optedIn });
         if (id && optedIn) await upsertDeviceToken(identity, id);
       } catch { /* Subscription changes and explicit registration can retry. */ }
     });
@@ -272,6 +394,14 @@ export function usePushNotifications(
           OneSignal.User.pushSubscription.removeEventListener('change', attached);
         } catch {}
       }
+      if (permissionAttached) {
+        try { OneSignal.Notifications.removeEventListener('permissionChange', permissionAttached); } catch {}
+      }
+      if (userAttached) {
+        try { OneSignal.User.removeEventListener('change', userAttached); } catch {}
+      }
+      appStateSubscription?.remove();
+      identity.subscriptionWaiters.clear();
     };
   }, [userId, identityResolved, authRevision]);
 
@@ -281,7 +411,7 @@ export function usePushNotifications(
 // Status helper for entry points that branch on 'granted'/'denied'/'undetermined'
 // (e.g. profile settings showing "open Settings" only on hard denial). Maps
 // OneSignal's permissionNative values to the legacy three-state shape.
-export type PushPermissionStatus = 'granted' | 'denied' | 'undetermined';
+export type PushPermissionStatus = 'granted' | 'provisional' | 'denied' | 'undetermined';
 
 export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
   if (!(await ensureOneSignalReady())) return 'undetermined';
@@ -289,11 +419,11 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
     const native = await pushRead(OneSignal.Notifications.permissionNative());
     if (
       native === OSNotificationPermission.Authorized ||
-      native === OSNotificationPermission.Provisional ||
       native === OSNotificationPermission.Ephemeral
     ) {
       return 'granted';
     }
+    if (native === OSNotificationPermission.Provisional) return 'provisional';
     if (native === OSNotificationPermission.Denied) return 'denied';
     return 'undetermined';
   } catch {
@@ -301,7 +431,7 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
   }
 }
 
-export type PushPromptPermission = 'requestable' | 'granted' | 'denied' | 'unavailable';
+export type PushPromptPermission = 'requestable' | 'granted' | 'provisional' | 'denied' | 'unavailable';
 
 // Read permission only. A contextual invitation may offer Settings after a
 // confirmed denial, while the cold-launch primer remains first-request only.
@@ -326,9 +456,9 @@ export async function getPushPromptPermission(): Promise<PushPromptPermission> {
     if (native === OSNotificationPermission.Denied) return 'denied';
     if (
       native === OSNotificationPermission.Authorized ||
-      native === OSNotificationPermission.Provisional ||
       native === OSNotificationPermission.Ephemeral
     ) return 'granted';
+    if (native === OSNotificationPermission.Provisional) return 'provisional';
     return 'unavailable';
   } catch {
     return 'unavailable';
@@ -340,7 +470,7 @@ export type PushPrimerEligibility = 'requestable' | 'answered' | 'unavailable';
 // Preserve the existing cold-launch policy and its public contract.
 export async function getPushPrimerEligibility(): Promise<PushPrimerEligibility> {
   const status = await getPushPromptPermission();
-  return status === 'granted' || status === 'denied' ? 'answered' : status;
+  return status === 'granted' || status === 'provisional' || status === 'denied' ? 'answered' : status;
 }
 
 // Structured feedback distinguishes accepting OS permission from completing
@@ -417,9 +547,10 @@ export function registerPushNotificationsWithResult(
       if (!identity.isCurrent()) return { status: 'obsolete' };
       if (playerId !== null && typeof playerId !== 'string') return { status: 'failed' };
       if (!playerId) {
-        await new Promise((r) => setTimeout(r, 1500));
+        const observedSubscription = await waitForSubscription(identity, identity.subscription);
         if (!identity.isCurrent()) return { status: 'obsolete' };
-        playerId = await pushRead(OneSignal.User.pushSubscription.getIdAsync());
+        if (observedSubscription?.optedIn === false) return { status: 'opted-out' };
+        playerId = observedSubscription?.id ?? await pushRead(OneSignal.User.pushSubscription.getIdAsync());
       }
       if (!identity.isCurrent()) return { status: 'obsolete' };
       if (playerId !== null && typeof playerId !== 'string') return { status: 'failed' };

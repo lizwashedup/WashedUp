@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { usePlanJoin } from '../usePlanJoin';
+import { logError } from '../../lib/logger';
 
 const mockGetUser = jest.fn(), mockRpc = jest.fn(), mockInsert = jest.fn();
 let mockAccount: string | null = 'alice', mockEpoch = 1;
@@ -106,15 +107,17 @@ it.each(['auth', 'eligibility'])('a rejected %s read remains retryable without d
 });
 
 it.each([
-  [{ data: 'full' }, 'filled up'],
-  [{ data: 'not_found' }, 'no longer available'],
-  [{ data: 'waitlist_priority' }, 'saved for the waitlist'],
-  [{ data: null, error: { code: 'P0001', message: 'rejected' } }, 'Couldn’t join'],
-])('keeps a confirmed refusal separate from unknown: %p', async (result, copy) => {
+  [{ data: 'full' }, 'filled up', false],
+  [{ data: 'not_found' }, 'no longer available', false],
+  [{ data: 'waitlist_priority' }, 'saved for the waitlist', false],
+  [{ data: null, error: { code: 'P0001', message: 'rejected' } }, 'Couldn’t join', true],
+])('keeps a confirmed refusal separate from unknown: %p', async (result, copy, shouldLog) => {
   mockRpc.mockImplementation(async (name: string) => name === 'can_join_event_gender' ? { data: true } : result);
   const f = await mount(); f.join('Hi'); await flush();
   expect(f.current.unconfirmed).toBe(false); expect(f.onError).toHaveBeenCalledWith(expect.stringContaining(copy));
   expect(f.onJoined).not.toHaveBeenCalled(); expect(mockInsert).not.toHaveBeenCalled();
+  if (shouldLog) expect(logError).toHaveBeenCalledWith(expect.any(Error), 'plan.join');
+  else expect(logError).not.toHaveBeenCalled();
   f.join('Hi'); await flush(); expect(joins()).toHaveLength(2);
 });
 

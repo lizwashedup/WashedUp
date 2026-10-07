@@ -1,3 +1,7 @@
+## October 6, 2026 — current decision authority
+
+Josh no longer works with or represents WashedUp. Liz Bridges is the sole human decision-maker and production approver. The active working relationship is Liz and Codex. Historical Josh references are context only and do not create an approval gate. Liz's explicit authorization governs production actions, alongside normal safety and verification requirements.
+
 ## September 19, 22:03 — conversation layout rejection
 
 The founder rejected the actual topic-chat preview as clunky: detached reactions, displaced avatars, oversized header and crowded bottom composer. Do not treat earlier component rendering as visual acceptance. Reactions must visibly overlap their own bubble edge; sender alignment must follow the message, not the reaction row. Use the agreed compact WhatsApp interaction reference with WashedUp sunset branding. Keep the member profile top-right and all existing draft/permissions/transport safeguards. Check complete composer/edit/attachment states at ordinary phone widths and narrow widths; no app builds under the existing hold.

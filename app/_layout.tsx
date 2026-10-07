@@ -33,15 +33,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, LogBox, Platform } from 'react-native';
 import 'react-native-reanimated';
 
-// Silence dev-only redboxes that aren't real bugs:
-// 1. expo-notifications trying to read APNs registration from the keychain
-//    on simulators (no push entitlement). Harmless on real devices.
-// 2. device_tokens upsert failing because the table only exists in the
-//    OneSignal migration file, not yet applied to prod. Will be removed
-//    once the migration ships in §8 Step 8 of the OneSignal plan.
+// Silence the dev-only expo-notifications redbox caused by simulators having
+// no APNs entitlement. Real device registration failures must stay visible.
 LogBox.ignoreLogs([
   'getRegistrationInfoAsync',
-  'Failed to upsert device_tokens',
 ]);
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PostHogProvider, usePostHog } from 'posthog-react-native';
@@ -223,10 +218,13 @@ const styles = StyleSheet.create({
 
 export default Sentry.wrap(RootLayout);
 
-// Pre-permission primer snooze. "Not now" snoozes for 7 days, then the primer
-// can re-ask; a granted permission permanently short-circuits it. Distinct
-// from the chat banner's `push_banner_dismissed_at`.
+// Keep the generic launch reminder and the higher-intent post/join invitation
+// on separate cooldowns. Dismissing an out-of-context reminder must not hide
+// the more relevant invitation after someone actually creates or joins a plan.
+// Preserve the original key for the launch reminder so existing choices carry
+// forward across the OTA.
 const PUSH_PRIMER_SNOOZE_KEY = 'push_primer_snoozed_at';
+const PLAN_PUSH_PRIMER_SNOOZE_KEY = 'plan_push_primer_snoozed_at';
 const PUSH_PRIMER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 function RootLayoutNav({ onReady }: { onReady: () => void }) {
@@ -365,6 +363,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // provider is in disabled mode (no key configured), so the optional chaining
   // keeps this safe in misconfigured environments.
   const posthog = usePostHog();
+  const capturePushEvent = useCallback((event: string, properties: Record<string, string | null>) => {
+    // Analytics is observability only. A disabled or unhealthy analytics SDK
+    // must never block a permission choice, registration repair, or dismissal.
+    try { posthog?.capture(event, properties); } catch {}
+  }, [posthog]);
   useEffect(() => {
     if (!posthog) return;
     if (authedUserId) {
@@ -396,6 +399,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const planPrimerShownRef = useRef(false);
   const [planPrimerRequest, setPlanPrimerRequest] = useState<(PlanNotificationPromptRequest & { identity: typeof authIdentityRef.current }) | null>(null);
   const pushPrimerAttemptRef = useRef<object | null>(null);
+  const pushPrimerAnalyticsVisitRef = useRef<typeof pushPrimerVisitRef.current>(null);
   const primerIdentity = authIdentityRef.current;
   const { fonts: primerFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
 
@@ -619,7 +623,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const snoozedAt = await AsyncStorage.getItem(PUSH_PRIMER_SNOOZE_KEY);
+          const snoozedAt = await AsyncStorage.getItem(PLAN_PUSH_PRIMER_SNOOZE_KEY);
           if (!isCurrent()) return;
           if (snoozedAt && Date.now() - Number(snoozedAt) < PUSH_PRIMER_COOLDOWN_MS) return;
           const permission = await getPushPromptPermission();
@@ -641,16 +645,29 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const pushPrimerVisible = showPushPrimer && !!authedUserId && authResolved
     && pushPrimerVisitRef.current?.identity === primerIdentity && !isRecoveryRef.current
     && !surveyPlan && !reviewSheetPending && !modalLocked && !layoutAlert;
+  const renderedPushPrimerVisit = pushPrimerVisitRef.current;
   const pushPrimerVisibleRef = useRef(pushPrimerVisible);
   pushPrimerVisibleRef.current = pushPrimerVisible;
-  useEffect(() => { if (pushPrimerVisible) planPrimerShownRef.current = true; }, [pushPrimerVisible]);
+  useEffect(() => {
+    if (!pushPrimerVisible || !renderedPushPrimerVisit) return;
+    // Only a contextual visit consumes the contextual once-per-launch guard.
+    // A generic reminder can therefore be followed by one meaningful post/join
+    // invitation later in the same session.
+    if (renderedPushPrimerVisit.reason) planPrimerShownRef.current = true;
+    if (pushPrimerAnalyticsVisitRef.current === renderedPushPrimerVisit) return;
+    pushPrimerAnalyticsVisitRef.current = renderedPushPrimerVisit;
+    capturePushEvent('push_primer_viewed', {
+      source: renderedPushPrimerVisit.reason ? 'plan_action' : 'cold_launch',
+      reason: renderedPushPrimerVisit.reason ?? null,
+      destination: renderedPushPrimerVisit.settings ? 'settings' : 'native_prompt',
+    });
+  }, [pushPrimerVisible, renderedPushPrimerVisit, capturePushEvent]);
   useEffect(() => {
     // A higher-priority modal taking over retires an in-flight enable. Never
     // open the OS sheet later underneath a survey or an account alert.
     if (!pushPrimerVisible && pushPrimerAttemptRef.current) retirePushPrimer();
   }, [pushPrimerVisible]);
 
-  const renderedPushPrimerVisit = pushPrimerVisitRef.current;
   const enablePushPrimer = async () => {
     const visit = renderedPushPrimerVisit;
     if (!mountedRef.current || !visit || visit.identity !== authIdentityRef.current || isRecoveryRef.current
@@ -662,6 +679,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       && pushPrimerVisibleRef.current && !isRecoveryRef.current;
     setPushPrimerPending(true);
     setPushPrimerFeedback(null);
+    capturePushEvent('push_primer_cta_tapped', {
+      source: visit.reason ? 'plan_action' : 'cold_launch',
+      reason: visit.reason ?? null,
+      destination: visit.settings ? 'settings' : 'native_prompt',
+    });
     try {
       if (visit.settings) {
         await Linking.openSettings();
@@ -684,6 +706,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       } else {
         setPushPrimerFeedback(pushRegistrationFeedback(result).message);
       }
+      capturePushEvent('push_registration_result', {
+        source: visit.reason ? 'plan_action' : 'cold_launch',
+        reason: visit.reason ?? null,
+        status: result.status,
+      });
     } catch (error) {
       if (!isCurrent()) return;
       logError(error, 'layout.pushPrimerEnable');
@@ -699,10 +726,18 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const dismissPushPrimer = () => {
     if (!mountedRef.current || !pushPrimerVisibleRef.current || !renderedPushPrimerVisit
       || pushPrimerVisitRef.current !== renderedPushPrimerVisit || renderedPushPrimerVisit.identity !== authIdentityRef.current) return;
+    const visit = renderedPushPrimerVisit;
+    capturePushEvent('push_primer_dismissed', {
+      source: visit.reason ? 'plan_action' : 'cold_launch',
+      reason: visit.reason ?? null,
+    });
     retirePushPrimer();
     // Preserve the existing device-level seven-day Not now choice. A
     // registration failure alone never writes this suppression timestamp.
-    void AsyncStorage.setItem(PUSH_PRIMER_SNOOZE_KEY, String(Date.now())).catch(() => {});
+    void AsyncStorage.setItem(
+      visit.reason ? PLAN_PUSH_PRIMER_SNOOZE_KEY : PUSH_PRIMER_SNOOZE_KEY,
+      String(Date.now()),
+    ).catch(() => {});
   };
 
   useEffect(() => {

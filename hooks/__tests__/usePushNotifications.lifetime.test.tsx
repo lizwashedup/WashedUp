@@ -10,19 +10,27 @@ const mockNativePermission = jest.fn(), mockCanRequest = jest.fn();
 const mockNativeStatuses = { NotDetermined: 0, Denied: 1, Authorized: 2, Provisional: 3, Ephemeral: 4 } as const;
 let mockCachedPermission = false;
 const mockUpsert = jest.fn(), mockAdd = jest.fn(), mockRemove = jest.fn(), mockAuthUnsubscribe = jest.fn();
+const mockClaim = jest.fn(), mockPermissionAdd = jest.fn(), mockPermissionRemove = jest.fn();
+const mockUserAdd = jest.fn(), mockUserRemove = jest.fn(), mockAppStateAdd = jest.fn();
 const mockAuthListeners = new Set<(...args: any[]) => void>();
 const mockOnAuth = jest.fn((callback: (...args: any[]) => void) => {
   mockAuthListeners.add(callback);
   return { data: { subscription: { unsubscribe: () => { mockAuthListeners.delete(callback); mockAuthUnsubscribe(); } } } };
 });
-jest.mock('react-native', () => ({ Platform: { get OS() { return mockPlatform; } } }));
+jest.mock('react-native', () => ({
+  Platform: { get OS() { return mockPlatform; } },
+  AppState: { addEventListener: (...args: any[]) => mockAppStateAdd(...args) },
+}));
 jest.mock('react-native-css-interop', () => ({ createInteropElement: (...args: any[]) => require('react').createElement(...args) }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { extra: { oneSignalAppId: 'fixture-only-app-id' } } } }));
 jest.mock('../../constants/LocalDevelopment', () => ({ get LOCAL_DEVELOPMENT_ONLY() { return mockLocal; } }));
 jest.mock('../../lib/oneSignalShim', () => ({
   OneSignal: {
     initialize: (...args: any[]) => mockInitialize(...args), login: (...args: any[]) => mockLogin(...args), logout: () => mockLogout(),
-    User: { pushSubscription: {
+    User: {
+      addEventListener: (...args: any[]) => mockUserAdd(...args),
+      removeEventListener: (...args: any[]) => mockUserRemove(...args),
+      pushSubscription: {
       getIdAsync: () => mockGetId(), getOptedInAsync: () => mockOptedIn(),
       optIn: () => mockOptIn(), optOut: () => mockOptOut(),
       addEventListener: (...args: any[]) => mockAdd(...args), removeEventListener: (...args: any[]) => mockRemove(...args),
@@ -31,6 +39,8 @@ jest.mock('../../lib/oneSignalShim', () => ({
       // Deliberately stale, matching installed SDK's initial cached value.
       hasPermission: () => mockCachedPermission, getPermissionAsync: () => mockPermission(),
       requestPermission: (...args: any[]) => mockPrompt(...args), permissionNative: () => mockNativePermission(), canRequestPermission: () => mockCanRequest(),
+      addEventListener: (...args: any[]) => mockPermissionAdd(...args),
+      removeEventListener: (...args: any[]) => mockPermissionRemove(...args),
     },
   },
   OSNotificationPermission: mockNativeStatuses,
@@ -38,6 +48,7 @@ jest.mock('../../lib/oneSignalShim', () => ({
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { onAuthStateChange: (...args: any[]) => mockOnAuth(...args as [any]) },
   from: (table: string) => { if (table !== 'device_tokens') throw new Error('Unexpected table'); return { upsert: (...args: any[]) => mockUpsert(...args) }; },
+  functions: { invoke: (...args: any[]) => mockClaim(...args) },
 } }));
 
 type PushModule = typeof import('../usePushNotifications');
@@ -62,6 +73,8 @@ beforeEach(() => {
   mockGetId.mockResolvedValue('device-one'); mockOptedIn.mockResolvedValue(true); mockPermission.mockResolvedValue(true);
   mockNativePermission.mockResolvedValue(mockNativeStatuses.Authorized); mockCanRequest.mockResolvedValue(true);
   mockPrompt.mockResolvedValue(true); mockUpsert.mockResolvedValue({ error: null });
+  mockClaim.mockResolvedValue({ data: { status: 'claimed' }, error: null });
+  mockAppStateAdd.mockReturnValue({ remove: jest.fn() });
   api = require('../usePushNotifications');
 });
 afterEach(async () => { await act(async () => tree?.unmount()); jest.clearAllTimers(); jest.useRealTimers(); });
@@ -170,10 +183,19 @@ it.each(['permission', 'subscription'] as const)('drops manual registration afte
   pending.resolve(stage === 'permission' ? true : 'late-device'); expect(await work).toBeNull(); expect(mockUpsert).not.toHaveBeenCalled();
 });
 
-it('returns null when a token write fails instead of claiming registration success', async () => {
+it('returns null when both the owner write and verified ownership claim fail', async () => {
   mockCachedPermission = true; await render('alice'); mockUpsert.mockClear(); mockUpsert.mockResolvedValue({ error: { message: 'rejected' } });
+  mockClaim.mockResolvedValue({ data: { status: 'identity-pending' }, error: null });
   expect(await api.registerForPushNotifications({ prompt: false, userId: 'alice' })).toBeNull();
-  expect(mockUpsert).toHaveBeenCalledTimes(1);
+  expect(mockUpsert).toHaveBeenCalledTimes(1); expect(mockClaim).toHaveBeenCalledTimes(1);
+});
+
+it('repairs an account-switch ownership conflict through the authenticated claim function', async () => {
+  await render('alice'); mockUpsert.mockClear(); mockUpsert.mockResolvedValue({ error: { message: 'conflict', code: '23505' } });
+  expect(await api.registerForPushNotifications({ prompt: false, userId: 'alice' })).toBe('device-one');
+  expect(mockClaim).toHaveBeenCalledWith('claim-push-subscription', {
+    body: { subscriptionId: 'device-one', platform: 'ios' },
+  });
 });
 
 it('does not register when native login throws', async () => {
@@ -203,6 +225,34 @@ it('serializes duplicate subscription callbacks while their write is pending', a
   await render('alice'); const write = deferred<any>(); mockUpsert.mockReturnValue(write.promise); mockUpsert.mockClear();
   const callback = subscription(); act(() => { callback(changed()); callback(changed()); }); await settle();
   expect(mockUpsert).toHaveBeenCalledTimes(1); write.resolve({ error: null }); await settle();
+});
+
+it('reconciles a changed subscription when native permission changes', async () => {
+  await render('alice'); mockUpsert.mockClear(); mockGetId.mockResolvedValue('device-after-permission');
+  const observer = mockPermissionAdd.mock.calls.find(call => call[0] === 'permissionChange')?.[1];
+  expect(observer).toEqual(expect.any(Function));
+  await act(async () => { observer(true); await Promise.resolve(); }); await settle();
+  expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    user_id: 'alice', onesignal_player_id: 'device-after-permission',
+  }), expect.anything());
+});
+
+it('reconciles after returning from device Settings without opening a prompt', async () => {
+  await render('alice'); mockUpsert.mockClear(); mockPrompt.mockClear(); mockGetId.mockResolvedValue('device-after-settings');
+  const observer = mockAppStateAdd.mock.calls.at(-1)?.[1];
+  expect(observer).toEqual(expect.any(Function));
+  await act(async () => { observer('active'); await Promise.resolve(); }); await settle();
+  expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    user_id: 'alice', onesignal_player_id: 'device-after-settings',
+  }), expect.anything());
+  expect(mockPrompt).not.toHaveBeenCalled();
+});
+
+it('does not register during foreground reconciliation when OS permission is off', async () => {
+  await render('alice'); mockUpsert.mockClear(); mockPermission.mockResolvedValue(false);
+  const observer = mockAppStateAdd.mock.calls.at(-1)?.[1];
+  await act(async () => { observer('active'); await Promise.resolve(); }); await settle();
+  expect(mockUpsert).not.toHaveBeenCalled();
 });
 
 it('returns null after an already-dispatched manual write loses its account', async () => {
@@ -239,22 +289,33 @@ it('does not apply queued sign-out after a replacement account has bound', async
 });
 
 describe('structured registration feedback', () => {
-  it('reports accepted permission with a pending ID, then leaves eventual registration to the listener', async () => {
+  it('waits for the subscription observer after accepted permission instead of using a fixed retry', async () => {
     await render('alice'); mockPermission.mockResolvedValue(false); mockGetId.mockResolvedValue(null); mockUpsert.mockClear(); mockGetId.mockClear();
     const work = api.registerPushNotificationsWithResult({ prompt: true, userId: 'alice' }); await settle();
     expect(mockPrompt).toHaveBeenCalledWith(true); expect(mockGetId).toHaveBeenCalledTimes(1);
-    await act(async () => { jest.advanceTimersByTime(1500); });
-    expect(await work).toEqual({ status: 'pending' }); expect(mockGetId).toHaveBeenCalledTimes(2); expect(mockUpsert).not.toHaveBeenCalled();
     await act(async () => subscription()(changed('ready-later'))); await settle();
+    expect(await work).toEqual({ status: 'registered', subscriptionId: 'ready-later' });
     expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ onesignal_player_id: 'ready-later', user_id: 'alice' }), expect.anything());
     expect(mockPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports pending when no subscription event or bridge ID arrives before the deadline', async () => {
+    await render('alice'); mockPermission.mockResolvedValue(false); mockGetId.mockResolvedValue(null); mockUpsert.mockClear();
+    const work = api.registerPushNotificationsWithResult({ prompt: true, userId: 'alice' }); await settle();
+    await act(async () => { await jest.advanceTimersByTimeAsync(6_000); });
+    expect(await work).toEqual({ status: 'pending' });
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 
   it.each(['read', 'prompt', 'write'] as const)('reports %s failure as retryable failure, never denial', async stage => {
     await render('alice'); mockUpsert.mockClear();
     if (stage === 'read') mockPermission.mockRejectedValueOnce(new Error('bridge failed'));
     if (stage === 'prompt') { mockPermission.mockResolvedValue(false); mockPrompt.mockRejectedValueOnce(new Error('bridge failed')); }
-    if (stage === 'write') { mockPermission.mockResolvedValue(false); mockUpsert.mockResolvedValueOnce({ error: { message: 'write rejected' } }); }
+    if (stage === 'write') {
+      mockPermission.mockResolvedValue(false);
+      mockUpsert.mockResolvedValueOnce({ error: { message: 'write rejected' } });
+      mockClaim.mockResolvedValueOnce({ data: { status: 'identity-pending' }, error: null });
+    }
     expect(await api.registerPushNotificationsWithResult({ prompt: true, userId: 'alice' })).toEqual({ status: 'failed' });
     if (stage === 'read') expect(mockPrompt).not.toHaveBeenCalled();
     if (stage !== 'write') expect(mockUpsert).not.toHaveBeenCalled();

@@ -10,6 +10,8 @@ import * as pageTargets from '../_shared/creatorPagePushTargets.ts';
 import * as pageInvitationTargets from '../_shared/pageInvitationPushTargets.ts';
 import * as joinTargets from '../_shared/creatorJoinPushTargets.ts';
 import * as createResult from '../_shared/oneSignalCreateResult.ts';
+import * as notificationText from '../_shared/pushNotificationText.ts';
+import * as peopleRequestEligibility from '../_shared/peopleRequestPushEligibility.ts';
 import { isAuthorizedRunToken } from '../_shared/runTokenAuth.ts';
 
 // Run the actual Edge handler, not a copied send loop. Strip only TypeScript
@@ -60,9 +62,25 @@ function fixture(options = {}) {
         const eligibleRows=rows.filter(n=>args.p_notification_ids.includes(n.id));
         return {data:options.memberTargets===undefined ? eligibleRows.map(n=>({notification_id:n.id,user_id:n.user_id,event_id:n.event_id??null,circle_id:n.circle_id??null,eligible:true,reaction_message_id:null})) : typeof options.memberTargets==='function' ? options.memberTargets(args) : options.memberTargets,error:options.memberTargetError??null};
       }
-      if (name === 'claim_pending_push_notifications') {
+      if (name === 'claim_pending_push_notifications_v2') {
         rows.forEach((row) => claimed.add(row.id));
-        return { data: plain(rows), error: null };
+        return { data: plain(rows.map(row => ({ ...row, push_attempt_id: row.push_attempt_id ?? row.id }))), error: null };
+      }
+      if (name === 'prepare_notification_push_attempts') {
+        return { data: args.p_attempts.map(value => value.id).filter(id => claimed.has(id)), error: null };
+      }
+      if (name === 'settle_notification_push_attempts') {
+        const retries = args.p_results.filter(value => value.outcome === 'retry').map(value => value.id);
+        if (retries.length) calls.updates.push({
+          table: 'app_notifications', update: { push_sent: false }, filters: [{ column: 'id', values: retries }],
+        });
+        if (options.releaseThrow) throw options.releaseThrow;
+        if (options.releaseError) return { data: null, error: options.releaseError };
+        for (const result of args.p_results) {
+          if (result.outcome === 'retry') claimed.delete(result.id);
+          else claimed.add(result.id);
+        }
+        return { data: args.p_results.map(value => value.id), error: null };
       }
       throw new Error(`Unexpected mocked RPC: ${name}`);
     },
@@ -97,7 +115,7 @@ function fixture(options = {}) {
   };
   let handler;
   const context = vm.createContext({
-    ...joinTargets, ...createResult, ...pageTargets, ...pageInvitationTargets, ...chatTargets, ...memberTargets, ...attendeeTargets, isAuthorizedRunToken, Response, Request, AbortController,
+    ...joinTargets, ...createResult, ...notificationText, ...peopleRequestEligibility, ...pageTargets, ...pageInvitationTargets, ...chatTargets, ...memberTargets, ...attendeeTargets, isAuthorizedRunToken, Response, Request, AbortController,
     Deno: { env: { get: (key) => env[key] }, serve: (value) => { handler = value; } },
     createClient: () => { calls.clients++; return database; },
     console: { error() {}, warn() {}, log() {} },
@@ -252,9 +270,38 @@ test('OneSignal keeps priority when the recipient also has a legacy Expo token',
   assert.equal(result.body.expoSent, 0);
   assert.equal(f.calls.provider.length, 1);
   assert.equal(f.calls.provider[0].url, 'https://api.onesignal.com/notifications');
-  assert.deepEqual(f.calls.rpc.find((call) => call.name === 'claim_pending_push_notifications').args, {
+  assert.deepEqual(f.calls.rpc.find((call) => call.name === 'claim_pending_push_notifications_v2').args, {
     p_token_user_ids: ['person-a'], p_batch_size: 100,
   });
+});
+
+test('a provider-confirmed disabled OneSignal row uses the temporary Expo fallback', async () => {
+  const f = fixture({
+    deviceRows: [{ user_id: 'person-a', push_enabled: false, enabled_synced_at: '2026-10-06T00:00:00Z' }],
+    expoRows: [{ id: 'person-a', expo_push_token: 'synthetic-expo-token' }],
+    receipts: [{ data: [{ status: 'ok', id: 'synthetic-ticket' }] }, { data: { 'synthetic-ticket': { status: 'ok' } } }],
+  });
+  const result = await f.run();
+  assert.equal(result.body.oneSignalSent, 0);
+  assert.equal(result.body.expoSent, 1);
+  assert.equal(f.calls.provider[0].url, 'https://exp.host/--/api/v2/push/send');
+});
+
+test('a confirmed empty OneSignal audience falls back to Expo without settling twice', async () => {
+  const f = fixture({
+    expoRows: [{ id: 'person-a', expo_push_token: 'synthetic-expo-token' }],
+    receipts: [
+      { id: '', errors: ['All included players are not subscribed'] },
+      { data: [{ status: 'ok', id: 'synthetic-ticket' }] },
+      { data: { 'synthetic-ticket': { status: 'ok' } } },
+    ],
+  });
+  const result = await f.run();
+  assert.equal(result.body.oneSignalFallbackQueued, 1);
+  assert.equal(result.body.oneSignalNoSubscription, 0);
+  assert.equal(result.body.expoSent, 1);
+  assert.equal(result.body.sent, 1);
+  assert.deepEqual(f.calls.rpc.filter(call => call.name === 'settle_notification_push_attempts').at(-1).args.p_results.map(row => row.outcome), ['completed']);
 });
 
 test('the legacy-only recipient retains its existing mocked Expo send and receipt path', async () => {
