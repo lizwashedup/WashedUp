@@ -389,7 +389,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [surveyMembers, setSurveyMembers] = useState<SurveyMember[]>([]);
   const surveyCheckedRef = useRef(false);
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
-  const prevUserIdRef = useRef<string | null>(null);
+  const [reviewCheckDone, setReviewCheckDone] = useState(false);
+  const [reviewSheetPending, setReviewSheetPending] = useState(false);
+  const reviewCheckIdentityRef = useRef<typeof authIdentityRef.current | null>(null);
   const [showPushPrimer, setShowPushPrimer] = useState(false);
   const pushPrimerCheckedRef = useRef(false);
   const [pushPrimerPending, setPushPrimerPending] = useState(false);
@@ -413,12 +415,19 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   };
   // An account epoch also changes on sign-out/recovery, including A → B → A.
   // Never let a check or an enable result from that old visit own this modal.
-  useEffect(() => {
+  const resetAccountOwnedUi = useCallback(() => {
     pushPrimerCheckedRef.current = false;
     planPrimerShownRef.current = false;
     setPlanPrimerRequest(null);
     retirePushPrimer();
-  }, [primerIdentity]);
+    surveyCheckedRef.current = false;
+    setSurveyCheckDone(false);
+    setReviewCheckDone(false);
+    reviewCheckIdentityRef.current = null;
+    setSurveyPlan(null);
+    setReviewSheetPending(false);
+  }, []);
+  useEffect(() => resetAccountOwnedUi(), [primerIdentity, resetAccountOwnedUi]);
 
   // ── Root-modal sequencer ──────────────────────────────────────────────────
   // RN can only safely present ONE modal at a time. Closing one modal used to
@@ -438,25 +447,16 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setTimeout(() => setModalLocked(false), MODAL_HANDOFF_MS);
   };
 
-  // Reset survey/review state when user changes (sign out + sign in as different user)
   useEffect(() => {
-    if (authedUserId && authedUserId !== prevUserIdRef.current) {
-      if (prevUserIdRef.current !== null) {
-        surveyCheckedRef.current = false;
-        setSurveyCheckDone(false);
-        setReviewCheckDone(false);
-        setSurveyPlan(null);
-        setReviewSheetPending(false);
-        pushPrimerCheckedRef.current = false;
-        setShowPushPrimer(false);
-      }
-      prevUserIdRef.current = authedUserId;
-    }
-  }, [authedUserId]);
-
-  useEffect(() => {
-    if (!authedUserId || !authResolved || surveyCheckedRef.current) return;
+    // authIdentityRef advances synchronously inside the Supabase callback,
+    // before the matching React user state commits. Do not let the new visit
+    // consume its survey/review check while the render still belongs to the
+    // previous account.
+    if (!authedUserId || !authResolved || primerIdentity.userId !== authedUserId
+      || surveyCheckedRef.current) return;
     surveyCheckedRef.current = true;
+    const surveyIdentity = authIdentityRef.current;
+    const isCurrent = () => mountedRef.current && authIdentityRef.current === surveyIdentity;
 
     (async () => {
       try {
@@ -465,6 +465,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // today PT does NOT trigger the modal — only plans on a strictly
         // earlier PT calendar day do. Returns null when nothing is eligible.
         const { data, error } = await supabase.rpc('get_pending_post_plan_survey');
+        if (!isCurrent()) return;
         if (error) {
           console.warn('[WashedUp] Survey RPC failed:', error.message);
           return;
@@ -495,7 +496,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // plan once a plan_feedback row exists; if that insert ever failed
         // or the user skipped offline, this guarantees the survey can never
         // re-block them on a later cold start (incident 2026-05-18).
-        if (await isPostPlanSurveyHandled(payload.plan.id)) return;
+        if (await isPostPlanSurveyHandled(payload.plan.id) || !isCurrent()) return;
 
         setSurveyPlan({
           id: payload.plan.id,
@@ -517,9 +518,15 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           })),
         );
       } catch (e) { logError(e, 'layout.surveyCheck'); }
-      finally { setSurveyCheckDone(true); }
+      finally {
+        if (isCurrent()) {
+          reviewCheckIdentityRef.current = surveyIdentity;
+          setSurveyCheckDone(true);
+          setReviewCheckDone(true);
+        }
+      }
     })();
-  }, [authedUserId, authResolved]);
+  }, [authedUserId, authResolved, primerIdentity]);
 
   // ── App Store review ask ────────────────────────────────────────────────
   // The review ask is no longer a competing root modal. It is the native OS
@@ -529,13 +536,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // review modal did. reviewCheckDone stays as the gate the push primer and the
   // album/mark modals wait on; it now resolves as soon as the survey decision
   // is made (there is no separate review pre-check to await).
-  const [reviewCheckDone, setReviewCheckDone] = useState(false);
-  const [reviewSheetPending, setReviewSheetPending] = useState(false);
-
-  useEffect(() => {
-    if (surveyCheckDone) setReviewCheckDone(true);
-  }, [surveyCheckDone]);
-
   // Called from the survey owner after a TOP-rating completion. Defers the push
   // primer to a later launch (the review sheet owns this beat) and fires the
   // native ask once the survey Modal has unmounted (the handoff window).
@@ -563,7 +563,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     // Wait for the App Store review decision before evaluating, so the primer
     // never flashes on screen a beat ahead of a review ask that takes
     // precedence (the review check is network-bound and resolves later).
-    if (!reviewCheckDone) return;
+    if (!reviewCheckDone || reviewCheckIdentityRef.current !== primerIdentity) return;
     if (pushPrimerCheckedRef.current) return;
     pushPrimerCheckedRef.current = true;
     const check = {};
@@ -1173,6 +1173,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         || authIdentityRef.current.userId !== userId) {
         authIdentityRef.current = { userId, revision: authIdentityRef.current.revision + 1 };
         authedDestRef.current = '';
+        // Retire old-account callbacks immediately, before React commits the
+        // new user state. This covers same-account re-entry and batched auth
+        // events where an effect keyed only to rendered state could miss the
+        // intervening visit entirely.
+        resetAccountOwnedUi();
       }
       const identity = authIdentityRef.current;
       const isCurrent = () => !cancelled && !isRecoveryRef.current && authIdentityRef.current === identity;
@@ -1401,7 +1406,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       deferredAuthTimers.clear();
       subscription.unsubscribe();
     };
-  }, []);
+  }, [resetAccountOwnedUi]);
 
   return (
     <View style={{ flex: 1 }}>

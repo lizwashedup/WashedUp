@@ -269,7 +269,7 @@ it.each(['active','pending'])('guest preview ignores cached %s membership withou
  mockEvent.community_id='community-page';mockMembership=status;
  mockLinks.mockResolvedValue(new Map([['saved-event',{pageId:'community-page',page:{...page,pageId:'community-page',kind:'community'}}]]));
  await mount();
- const label=status==='active'?'member':'pending';
+ const label=status==='active'?'You’re a member':'pending';
  expect(tree.root.findAllByType(Text).some(n=>n.props.children===label)).toBe(true);
  mockParams={id:'saved-event',preview:'guest',pageId:'community-page'};
  await act(async()=>tree.update(<EventDetail/>));
