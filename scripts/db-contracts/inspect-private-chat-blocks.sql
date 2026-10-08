@@ -21,7 +21,9 @@ FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
 WHERE n.nspname='public' AND p.proname IN
   ('yours_is_blocked_between','get_or_create_dm','get_circle','get_circle_chat_messages',
    'get_my_circle_chat_cards','get_person_profile','is_circle_member','private_chat_contact_allowed',
-   'record_push_registration_state','edit_own_chat_message','edit_own_chat_message_with_mentions')
+   'record_push_registration_state','edit_own_chat_message','edit_own_chat_message_with_mentions',
+   'get_my_circles','update_circle','invite_to_circle','join_circle_atomic',
+   'get_member_chat_push_targets','get_member_chat_push_targets_v2')
 UNION ALL
 SELECT 'column', c.table_name || '.' || c.column_name,
   jsonb_build_object('data_type',c.data_type,'udt_name',c.udt_name,'nullable',c.is_nullable)

@@ -1,6 +1,6 @@
 # Chat and push integration candidate — October 7, 2026
 
-Status: locally integrated and checked; authenticated Sentry and Supabase catalog inspection completed. Five confirmed blocking RPC gaps have an additional locally tested review-only fix. Public release remains held. The combined candidate has not been installed on a phone or published. See `docs/sentry-blocking-live-audit-2026-10-07.md` for findings and remaining limits.
+Status: locally integrated and checked; authenticated Sentry and Supabase catalog inspection completed. Nine confirmed blocking RPC gaps have an additional locally tested review-only fix. Public release remains held. The combined candidate has not been installed on a phone or published. See `docs/sentry-blocking-live-audit-2026-10-07.md` for findings and remaining limits.
 
 ## Source provenance
 
@@ -13,7 +13,9 @@ Status: locally integrated and checked; authenticated Sentry and Supabase catalo
 - Push parent: `701c91bcbf80dfa1ab2f8535f217ce4bdd6fb955`.
 - Combined app-source commit: `3cbb1da2bd9dcc24f34c3dd24a4910ffa6093540`.
 
-The candidate began at the existing isolated chat feature tip and normally merged the exact newer push tip, without conflicts or cherry-picking. Both descend from the protected release source. Original chat, push, and release branches were preserved. No application logic was additionally changed during this integration. The integration added this record and the catalog inspection query. The subsequent authenticated audit adds review-only SQL guards, exact catalog function fixtures, expanded local contracts and an evidence record; application/native source is unchanged by that audit.
+The October 8 follow-up additionally fixes cached DM rows reappearing before privacy revalidation. Four inbox suites (31 tests), TypeScript, a fresh offline iOS export, 264 SQL assertions and 14 real local Realtime checks pass; see the dated continuation in the live-audit record.
+
+The candidate began at the existing isolated chat feature tip and normally merged the exact newer push tip, without conflicts or cherry-picking. Both descend from the protected release source. Original chat, push, and release branches were preserved. No application logic was additionally changed during this integration. The integration added this record and the catalog inspection query. The subsequent authenticated audit adds review-only SQL guards, exact catalog function fixtures, expanded local contracts and an evidence record; the first authenticated audit changed no application/native source. The later inbox cache correction changes JavaScript only.
 
 ## Verification
 
@@ -28,8 +30,8 @@ The pinned Node 20.20.1 runtime was downloaded from nodejs.org and verified agai
 | All changed Jest suites | 47/47 pass; 1,263 tests pass | `changed-suite-summary.json` |
 | Entire Jest inventory, each suite in a separate process | 567 suites: 541 pass, 25 fail, 1 times out; 8,501 passed tests, 129 failed, 1 pending | `node20/summary.json` |
 | Failed-suite comparison with unchanged main | All 26 reproduce on `d7bdb9a`, including the timeout; same failed test names and exit outcomes; zero candidate-only failed assertions | `baseline-comparison.json`, `baseline-node20/summary.json` |
-| Review-only block policy/RPC contracts | 210 assertions pass in disposable PostgreSQL 17.11, including exact live RPC bodies and source-drift rollback; no live test connection | `block-sql-contract-live-rpcs.log` |
-| Catalog inspection SELECT | Expanded query executes against disposable fixture; live catalog read completed separately | `block-sql-contract-live-rpcs.log`, audit record |
+| Review-only block policy/RPC contracts | 264 assertions pass in disposable PostgreSQL 17.11, including exact live RPC bodies and source-drift rollback; no live test connection | `../block-realtime-followup-20261007/sql-contracts.log` |
+| Catalog inspection SELECT | Expanded query executes against disposable fixture; live catalog read completed separately | `../block-realtime-followup-20261007/sql-contracts.log`, audit record |
 | Deno notification and delivery policy tests | 28 pass, zero fail; local Deno 2.9.4, while CI specifies 2.9.5 | `deno-notifications.log` |
 | Required `qa:all` | Incomplete: stops at Docker-dependent consent-sync database contracts; `docker` unavailable | `mandatory-qa.log` |
 | Repository `qa/guinea-verify-washedup.sh` | Attempted; stops at the same Docker-dependent step; later cross-repository checks not reached | `guinea-verification.log` |
@@ -37,15 +39,17 @@ The pinned Node 20.20.1 runtime was downloaded from nodejs.org and verified agai
 
 The required gate passed no-cloud-build, paid-ticket-flow, migration policy, auth routing/phone tests, and auth invariants before stopping at Docker. Static contracts passed for all 311 migration files. The scoped native PostgreSQL block contracts are additional evidence, not a replacement for the full Docker gate. The full-suite baseline comparison also does not turn the required gate green. The earlier Node 24 inventory had different results and is superseded for release assessment by the pinned Node 20 run above.
 
+The October 8 follow-up also passes a fresh offline iOS export (`../block-realtime-followup-20261007/ios-export-final.log`). A fresh `qa:all` attempt with Node 20.20.1 and Deno available reaches the same consent-sync Docker blocker (`../block-realtime-followup-20261007/mandatory-qa-final.log`); the required gate remains incomplete.
+
 No lint script is configured in package.json. No failures were hidden, skipped in the required command, or used to justify unrelated application changes.
 
 ## Authenticated Sentry and database audit
 
 See `docs/sentry-blocking-live-audit-2026-10-07.md` for event links, release/runtime provenance, exact findings, local fix boundaries and reproduction steps. Three App Hanging events in the last 14 days have native keyboard/clipboard wait stacks; chat scrolling is not established as their cause. Recent watchdog events include both private preview and production launches. No native root-cause fix is claimed and monitoring remains enabled.
 
-Catalog-only SELECTs in the verified WashedUp production project confirmed that existing private-chat reads and edits bypass the block boundary in five security-definer functions. The policy candidate now requires the review-only RPC companion `20261007140000_private_chat_rpc_block_boundary.sql`; neither has been deployed. The companion refuses changed source fingerprints and preserves existing function grants and other behavior. Its local regression tests use the exact catalog-exported bodies and synthetic data. Direct membership endpoints, active Realtime sessions, profile/storage visibility and deployed notification dispatch are not universally certified by this scoped fixture.
+Catalog-only SELECTs in the verified WashedUp production project confirmed that existing private-chat reads and edits bypass the block boundary in nine security-definer functions. The policy candidate now requires the review-only RPC companion `20261007140000_private_chat_rpc_block_boundary.sql`; neither has been deployed. The companion refuses changed source fingerprints and preserves existing function grants and other behavior. Its local regression tests use the exact catalog-exported bodies and synthetic data. Direct membership endpoints, active Realtime sessions, profile/storage visibility and deployed notification dispatch are not universally certified by this scoped fixture.
 
-Live `get_member_chat_push_targets` includes the actor/recipient block check and is service-only. The two new-message triggers did not contain that block-helper call in their inspected source lines, so dispatch remains an important boundary. This catalog evidence does not verify the deployed Edge Function's use of that boundary or legacy notices without an actor.
+Live `get_member_chat_push_targets` includes the actor/recipient block check and is service-only. The two new-message triggers did not contain that block-helper call in their inspected source lines, so dispatch remains an important boundary. The follow-up downloaded the deployed worker and ten shared modules: all match the candidate, and both delivery paths use the live v2 wrapper around this guard. This verifies source wiring, not a live delivery canary or legacy notices without an actor.
 
 The push diagnostic table/RPC (`push_registration_state`, `record_push_registration_state`) are absent from the live catalog, matching the preview's diagnostic 404. Their migration is already in the push source but remains undeployed by this task. A diagnostic write failure alone does not prove registration failure.
 
@@ -158,6 +162,8 @@ M	lib/topicComposerDraft.ts
 M	lib/uploadAudio.ts
 M	lib/uploadPhoto.ts
 A	scripts/chat-lab/README.md
+A	scripts/chat-lab/private-block-schema.sql
+A	scripts/chat-lab/private-blocks.mjs
 A	scripts/chat-lab/run.mjs
 A	scripts/chat-lab/schema.sql
 A	scripts/db-contracts/inspect-private-chat-blocks.sql

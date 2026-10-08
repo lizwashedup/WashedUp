@@ -1,6 +1,7 @@
 -- REVIEW ONLY. Companion to 20261007120000_private_chat_block_boundary.sql.
 -- NOT an active migration; NOT deployed. Apply both only after full review.
 -- The live October 7 functions are SECURITY DEFINER and bypass message RLS.
+-- Include Circle list/rename/invite/join paths that could reopen a blocked DM.
 -- Preserve their exact bodies, ownership, signatures and grants, inserting only
 -- the block guard. Abort atomically if any live definition changed since review.
 -- Fingerprints are drift checks, not credential/security hashes.
@@ -42,7 +43,41 @@ BEGIN
     ('get_my_circle_chat_cards', '', 'c013dfbcd14e6a6f9658b77430eef363',
      $needle$ where mine.user_id = auth.uid() and mine.status = 'joined'$needle$,
      $replacement$ where mine.user_id = auth.uid() and mine.status = 'joined'
- and public.private_chat_contact_allowed(c.id) IS TRUE$replacement$)
+ and public.private_chat_contact_allowed(c.id) IS TRUE$replacement$),
+    ('get_my_circles', '', '3d026f4ce1026a6a737c9272c119d3b7',
+     $needle$    WHERE mine.user_id = v_uid AND mine.status = 'joined'$needle$,
+     $replacement$    WHERE mine.user_id = v_uid AND mine.status = 'joined'
+      AND public.private_chat_contact_allowed(c.id) IS TRUE$replacement$),
+    ('invite_to_circle', 'p_circle_id uuid, p_user_ids uuid[]', '0c1663e55939914d7ba07b0b97a81cb3',
+     $needle$  IF NOT public.is_circle_admin(p_circle_id, v_uid) THEN$needle$,
+     $replacement$  IF public.private_chat_contact_allowed(p_circle_id) IS NOT TRUE THEN
+    RAISE EXCEPTION 'circle unavailable';
+  END IF;
+  IF NOT public.is_circle_admin(p_circle_id, v_uid) THEN$replacement$),
+    ('join_circle_atomic', 'p_circle_id uuid', '904ed27658f47e1560851bb26d0115d6',
+     $needle$  UPDATE public.circle_members
+  SET status$needle$,
+     $replacement$  -- Small unnamed rooms are private conversations, including a departed pair.
+  -- An arbitrary third account must not turn a known DM ID into a group, and
+  -- leaving/rejoining must not bypass a retained block. Named/larger groups
+  -- retain their existing join behavior.
+  IF btrim(COALESCE(v_circle.name, '')) = '' AND
+     (SELECT count(*) FROM public.circle_members WHERE circle_id=p_circle_id) <= 2 THEN
+    IF NOT EXISTS (SELECT 1 FROM public.circle_members WHERE circle_id=p_circle_id AND user_id=v_uid)
+       OR EXISTS (SELECT 1 FROM public.circle_members cm WHERE cm.circle_id=p_circle_id
+         AND cm.user_id<>v_uid AND public.yours_is_blocked_between(v_uid,cm.user_id) IS DISTINCT FROM false) THEN
+      RETURN 'unavailable';
+    END IF;
+  END IF;
+
+  UPDATE public.circle_members
+  SET status$replacement$),
+    ('update_circle', 'p_circle_id uuid, p_name text, p_description text, p_cover_upload_id uuid, p_room_enabled boolean, p_promote_user_ids uuid[], p_demote_user_ids uuid[], p_set_all_admins boolean, p_clear_cover boolean', '63532b9328bc1866e2eb47be67eef30f',
+     $needle$  IF NOT public.is_circle_admin(p_circle_id, v_uid) THEN$needle$,
+     $replacement$  IF public.private_chat_contact_allowed(p_circle_id) IS NOT TRUE THEN
+    RAISE EXCEPTION 'circle unavailable';
+  END IF;
+  IF NOT public.is_circle_admin(p_circle_id, v_uid) THEN$replacement$)
   ) expected(name, identity_args, fingerprint, needle, replacement)
   LOOP
     SELECT p.oid INTO routine_oid FROM pg_proc p

@@ -99,3 +99,25 @@ The original local run and evidence are under
 This lab replaces the need for two physical phones for these transport checks.
 It does not replace physical-device checks for keyboard input, scrolling,
 background delivery, push, cold starts, or Build 51 native compatibility.
+
+## Private DM blocking follow-up
+
+`private-block-schema.sql` adds a synthetic DM/group fixture only to the marked
+local chat lab above and refuses to replace an existing `messages` table. Using
+that same verified loopback database, apply this add-on, the canonical
+`yours_is_blocked_between` definition from `20260517000100_yours_helpers.sql`,
+and the review-only `20261007120000_private_chat_block_boundary.sql`. Reload the
+local PostgREST schema. Never apply application migrations wholesale to this lab.
+
+Run `node scripts/chat-lab/private-blocks.mjs /private/connection.json /local/report.json`.
+The 14 checks keep both authenticated sessions connected across both directions
+and both storage forms of a block. They verify denied history/send/reactions,
+filtered live message/reaction rows from a privileged synthetic write, continuing
+group delivery, restored delivery after unblock, and outsider denial. A delivered
+group sentinel plus an 800 ms observation window checks for unexpected DM events;
+it is bounded evidence, not a guarantee about every possible network schedule.
+
+The test does not clear messages already held in a UI, test native performance,
+or invoke notification providers. RPC behavior is verified separately by the
+264-assertion disposable PostgreSQL contract runner. Stop `chat-check` afterward
+as above; retain its fictional data for reproducibility.

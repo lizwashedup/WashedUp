@@ -55,3 +55,73 @@ Notification catalog follow-up: live `get_member_chat_push_targets` has fingerpr
 - Application TypeScript/Jest/export results from the earlier combined-source check remain applicable because this pass changes only review SQL, test fixtures/scripts and documentation. Required Docker checks and existing baseline Jest failures remain unresolved as documented in the combined-candidate record.
 
 Evidence: `/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/combined-candidate-20261007/block-sql-contract-live-rpcs.log` and `live-private-chat-routines.json`. The repository fixture contains function definitions only; no private user telemetry or user rows were committed. These database-only guards introduce no native-build requirement and cannot be delivered by an Expo OTA.
+
+
+## October 8 continuation checkpoint
+
+The subsequent server/read-path pass is complete locally. The original five-RPC
+snapshot above records the first pass; the candidate now guards **nine** routines.
+The additional live definitions were read through the authenticated Supabase CLI
+in the same verified project. Only catalog SELECTs were issued; no provider or
+notification function was invoked.
+
+Additional reproduced and corrected paths:
+
+- A warm inbox cache could paint an old private row on a later visit before its
+  mutual-block check completed, including when the fresh read failed. Two new
+  regressions reproduced the failure before the code change. `useChatList` now
+  retires those cached DM rows in both the component and shared cache until the
+  current read authorizes them. Ordinary non-DM warm rows retain their behavior.
+  Offline reopening therefore waits for privacy verification before showing DMs.
+- `get_my_circles` could list a blocked private conversation. The companion filters
+  it with the same boundary used by the inbox.
+- `update_circle` and `invite_to_circle` could rename a blocked DM or add a member,
+  changing its classification and reopening contact. Both now check the existing
+  private-conversation boundary before performing their action.
+- `join_circle_atomic` allowed an authenticated outsider with a DM ID to join and
+  turn it into a group. The review-only guard rejects outsiders and mutually
+  blocked former members for small unnamed rooms. Named/larger group joining and
+  an unblocked former peer's return remain covered by passing tests. This is a
+  scoped guard, not introduction of an immutable conversation type.
+
+Verification completed:
+
+- **264 SQL assertions pass**, using nine exact exported routine definitions.
+  They include the new bypass reproductions, preserved group behavior, source
+  drift rollback, and the existing push diagnostic migration's account ownership,
+  read isolation, permission preservation and account-deletion cascade.
+- **31 inbox tests pass across all four inbox suites**. TypeScript and a fresh
+  offline iOS export pass. The final `qa:all` rerun reaches the existing consent-sync
+  Docker dependency and stops because Docker is unavailable; the full release gate
+  remains incomplete.
+- **14 real local Auth/PostgREST/Realtime checks pass** with two connected members
+  and an outsider. Both block directions and stores deny history, writes and
+  reactions, filter subsequent DM events on already-open sockets, preserve group
+  delivery, and restore subsequent delivery on unblock. These are synthetic local
+  services; no production messages or notifications were sent. The test stack was
+  stopped after the run and its data preserved.
+- The deployed `send-push-notifications` worker and all ten downloaded shared
+  modules match the candidate byte for byte. Its OneSignal and Expo paths use
+  `get_member_chat_push_targets_v2`, whose live definition delegates to the verified
+  original block-checking function. This closes the earlier source-inspection gap;
+  it is not a live delivery canary. Legacy actor-less notices and a block committed
+  after the final eligibility read remain distinct boundaries.
+- The existing Expo `preview` channel is shared and maps to the historical
+  `preview` branch. It is not evidence of a phone-exclusive audience. No channel
+  mapping, update publication, build, installation, or production migration changed.
+
+Evidence directory:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/block-realtime-followup-20261007`.
+Relevant files: `cache-before.log`, `cache-after.log`, `sql-contracts.log`,
+`typecheck.log`, `realtime-block-report.json`, `deployed-push-comparison.json`,
+`catalog.json`, `circle-boundary.json`, `preview-channel.json`,
+`ios-export-final.log`, and `mandatory-qa-final.log`.
+
+The nine-RPC candidate and policy companion remain **review-only and undeployed**.
+Promotion must combine them into one reviewed transaction with a fresh fingerprint
+check; the preparation of that atomic release package and a rollback procedure is
+still outstanding. The push diagnostic migration is locally verified but remains
+undeployed. Exact-candidate physical keyboard/clipboard/scroll testing, native
+hang diagnosis and the full required release gate remain open. No new native
+configuration or dependency is introduced by these changes. The inbox change is
+JavaScript/OTA-compatible in principle; database guards require separate delivery.

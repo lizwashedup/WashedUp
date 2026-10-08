@@ -151,6 +151,23 @@ UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
 {login(a)}
 SELECT pg_temp.check_true({edit_call(name)}->>'status'='saved', 'baseline definer permits blocked edit');
 ROLLBACK;""")
+        sql(assertions + f"""BEGIN;
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(a)}
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circles())=4, 'baseline Circle list retains blocked DM');
+SELECT update_circle('{dm}','Renamed blocked DM');
+SELECT pg_temp.check_true(private_chat_contact_allowed('{dm}'), 'baseline rename bypasses DM boundary');
+ROLLBACK;
+BEGIN;
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(a)}
+SELECT invite_to_circle('{dm}',ARRAY['00000000-0000-0000-0000-000000000003'::uuid]);
+SELECT pg_temp.check_true(private_chat_contact_allowed('{dm}'), 'baseline invite bypasses DM boundary');
+ROLLBACK;
+BEGIN; {login('00000000-0000-0000-0000-000000000004')}
+SELECT pg_temp.check_true(join_circle_atomic('{dm}')='joined', 'baseline outsider can self-join a known DM ID');
+SELECT pg_temp.check_true(get_circle('{dm}')->'members' IS NOT NULL, 'baseline outsider gains private details');
+ROLLBACK;""")
         rpc_candidate = (root / 'docs/database/review-only/20261007140000_private_chat_rpc_block_boundary.sql').read_text()
         # Source drift must roll back even the routines patched earlier in the loop.
         circle_routine = next(r for r in routines if r['name'] == 'get_circle')
@@ -168,7 +185,7 @@ CREATE OR REPLACE FUNCTION pg_temp.rpc_denied(statement text, label text) RETURN
 BEGIN
   BEGIN EXECUTE statement;
   EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM = 'not a member of this circle' THEN RAISE NOTICE 'PASS: %', label; RETURN; END IF;
+    IF SQLERRM IN ('not a member of this circle','circle unavailable') THEN RAISE NOTICE 'PASS: %', label; RETURN; END IF;
     RAISE;
   END;
   RAISE EXCEPTION 'FAIL (RPC allowed): %', label;
@@ -187,6 +204,10 @@ SELECT pg_temp.rpc_denied('SELECT get_circle(''{dm}'')', 'blocked member detail 
 SELECT pg_temp.rpc_denied('SELECT get_circle_chat_messages(''{dm}'')', 'blocked history denied');
 SELECT pg_temp.rpc_denied('SELECT get_circle(''10000000-0000-0000-0000-000000000004'')', 'whitespace-name DM detail denied');
 SELECT pg_temp.check_true(jsonb_array_length(get_my_circle_chat_cards())=2, 'inbox omits both blocked DM variants');
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circles())=2, 'Circle list omits blocked private rooms');
+SELECT pg_temp.rpc_denied('SELECT update_circle(''{dm}'',''Bypass name'')', 'blocked pair cannot rename DM into a group');
+SELECT pg_temp.rpc_denied('SELECT invite_to_circle(''{dm}'',ARRAY[''00000000-0000-0000-0000-000000000003''::uuid])', 'blocked pair cannot add a third member to reopen DM');
+SELECT pg_temp.check_true(join_circle_atomic('{dm}')='unavailable', 'blocked pair cannot rejoin DM');
 SELECT pg_temp.check_true(NOT EXISTS(SELECT 1 FROM jsonb_array_elements(get_my_circle_chat_cards()) card WHERE card->>'circle_id'='{dm}'), 'no retained private preview or avatar');
 SELECT pg_temp.check_true(jsonb_array_length(get_circle_chat_messages('10000000-0000-0000-0000-000000000002'))=1, 'named group history preserved');
 SELECT pg_temp.check_true(get_circle('10000000-0000-0000-0000-000000000003')->'members' IS NOT NULL, 'grown group detail preserved');
@@ -223,8 +244,55 @@ UPDATE events SET status='cancelled';
 {login(a)}
 SELECT pg_temp.check_true({edit_call(edits[1],'30000000-0000-0000-0000-000000000005','20000000-0000-0000-0000-000000000001','event','Event history')}->>'status'='closed', 'cancelled event write window preserved');
 ROLLBACK;""")
+        sql(assertions + f"""BEGIN; {login('00000000-0000-0000-0000-000000000004')}
+SELECT pg_temp.check_true(join_circle_atomic('{dm}')='unavailable', 'outsider cannot turn DM into group');
+SELECT pg_temp.check_true(join_circle_atomic('10000000-0000-0000-0000-000000000002')='joined', 'named group joining preserved');
+SELECT pg_temp.check_true(join_circle_atomic('10000000-0000-0000-0000-000000000003')='joined', 'larger unnamed group joining preserved');
+ROLLBACK;
+BEGIN;
+UPDATE circle_members SET status='left' WHERE circle_id='{dm}' AND user_id='{b}';
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(b)}
+SELECT pg_temp.check_true(join_circle_atomic('{dm}')='unavailable', 'departed blocked peer cannot reopen DM');
+RESET ROLE;
+UPDATE profiles SET blocked_users='{{}}'::uuid[] WHERE id='{a}';
+{login(b)}
+SELECT pg_temp.check_true(join_circle_atomic('{dm}')='joined', 'unblocked former peer can return');
+ROLLBACK;
+BEGIN; {login(a)}
+SELECT update_circle('10000000-0000-0000-0000-000000000002','Updated group');
+SELECT pg_temp.check_true(get_circle('10000000-0000-0000-0000-000000000002')->'circle'->>'name'='Updated group', 'ordinary group rename preserved');
+SELECT pg_temp.check_true(invite_to_circle('{dm}',ARRAY['00000000-0000-0000-0000-000000000003'::uuid])=1, 'unblocked DM can grow into group');
+ROLLBACK;""")
         for name, signature in signatures.items():
             sql(assertions + f"SELECT pg_temp.check_true(NOT has_function_privilege('anon','{signature}','EXECUTE') AND has_function_privilege('authenticated','{signature}','EXECUTE'), 'RPC grants preserved: {name}');")
+        # Verify the already-prepared push diagnostics migration without any
+        # real registration/provider calls or production writes.
+        sql((root / 'supabase/migrations/20261007130000_push_registration_state.sql').read_text())
+        sql(assertions + f"""
+CREATE OR REPLACE FUNCTION pg_temp.identity_denied(statement text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+ BEGIN EXECUTE statement; EXCEPTION WHEN raise_exception THEN
+  IF SQLERRM='identity mismatch' THEN RAISE NOTICE 'PASS: telemetry rejects another account'; RETURN; END IF;
+  RAISE;
+ END;
+ RAISE EXCEPTION 'FAIL: telemetry identity was not denied';
+END $$;
+BEGIN; {login(a)}
+SELECT record_push_registration_state('{a}','ios','prompt_requested','authorized');
+SELECT record_push_registration_state('{a}','ios','registered','unknown');
+SELECT pg_temp.check_true((SELECT stage='registered' AND permission_status='authorized' AND attempt_count=1 AND registered_at IS NOT NULL FROM push_registration_state WHERE user_id='{a}'), 'diagnostic stages and permission preservation');
+SELECT pg_temp.denied('INSERT INTO push_registration_state(user_id,platform,stage) VALUES (''{b}'',''ios'',''failed'')', 'member cannot write telemetry table directly');
+RESET ROLE;
+{login(b)}
+SELECT pg_temp.check_true((SELECT count(*) FROM push_registration_state)=0, 'another account cannot read telemetry');
+SELECT pg_temp.identity_denied('SELECT record_push_registration_state(''{a}'',''ios'',''failed'')');
+RESET ROLE;
+DELETE FROM profiles WHERE id='{a}';
+SELECT pg_temp.check_true((SELECT count(*) FROM push_registration_state)=0, 'account deletion cascades diagnostic data');
+ROLLBACK;
+SELECT pg_temp.check_true(NOT has_function_privilege('anon','public.record_push_registration_state(uuid,text,text,text,text,text,text,text,text)','EXECUTE'), 'anonymous telemetry write denied');
+""")
         sql((root / 'scripts/db-contracts/inspect-private-chat-blocks.sql').read_text())
         print(json.dumps({'passed_assertions': checks, 'database': 'disposable Unix socket only',
                           'candidate_deployed': False, 'live_routine_bodies_verified': True, 'full_live_schema_verified': False}))

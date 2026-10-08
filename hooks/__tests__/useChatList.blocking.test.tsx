@@ -114,3 +114,21 @@ it('revalidates privacy after an account changes during a pending private-chat r
   await act(async () => old.resolve({ data: false, error: null }));
   expect(value.chats).toEqual([]);
 });
+
+it('does not paint a cached private row on a later visit before privacy is revalidated', async () => {
+  await mount(); expect(value.chats).toHaveLength(1);
+  act(() => tree.unmount());
+  const privacy = deferred<any>(); mockPrivacy.mockReturnValueOnce(privacy.promise);
+  await mount();
+  expect(value.chats).toEqual([]);
+  await act(async () => privacy.resolve({ data: true, error: null }));
+  expect(value.chats).toEqual([]);
+});
+
+it('does not restore a cached private row when the next visit cannot reach the server', async () => {
+  await mount(); expect(value.chats).toHaveLength(1);
+  act(() => tree.unmount()); mockOffline = true;
+  await mount();
+  expect(value.chats).toEqual([]);
+  expect(value.loadError).toBe(true);
+});

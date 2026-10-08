@@ -34,3 +34,14 @@ CREATE FUNCTION public.validate_chat_mention_document(text,jsonb) RETURNS jsonb
 LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce($2,'{"references":[]}'::jsonb); $$;
 INSERT INTO events VALUES ('20000000-0000-0000-0000-000000000001',null,'Fixture event',now(),now()+interval '1 hour',null,'active');
 INSERT INTO event_members SELECT '20000000-0000-0000-0000-000000000001',id,'joined' FROM profiles;
+
+ALTER TABLE circles ADD COLUMN description text;
+ALTER TABLE circles ADD COLUMN cover_upload_id uuid;
+ALTER TABLE circles ADD COLUMN room_enabled boolean DEFAULT true;
+ALTER TABLE circles ADD COLUMN updated_at timestamptz DEFAULT now();
+ALTER TABLE circles ADD COLUMN creator_user_id uuid;
+CREATE FUNCTION public.is_circle_admin(p_circle_id uuid,p_user_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT EXISTS(SELECT 1 FROM public.circle_members WHERE circle_id=p_circle_id AND user_id=p_user_id AND role='admin' AND status='joined');
+$$;
+UPDATE circle_members SET role='admin' WHERE user_id='00000000-0000-0000-0000-000000000001';

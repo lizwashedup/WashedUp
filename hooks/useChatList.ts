@@ -495,7 +495,14 @@ export function useChatList(knownUserId: string | null | undefined) {
     userIdRef.current = knownUserId ?? null;
     senderNameCacheRef.current = new Map();
     setLoadError(false);
-    setChats(knownUserId ? chatListMemoryCache.get(knownUserId) ?? [] : []);
+    // A block may have changed on another device while this observer was gone.
+    // Keep ordinary warm rows, but never paint a prior visit's private preview
+    // until the existing mutual-block check authorizes it again. Retire it in
+    // the shared cache too: a faster Plan response must not republish the DM.
+    const previous = knownUserId ? chatListMemoryCache.get(knownUserId) : undefined;
+    const safeWarmRows = previous?.filter(chat => !chat.is_dm);
+    if (knownUserId && safeWarmRows) chatListMemoryCache.set(knownUserId, safeWarmRows);
+    setChats(safeWarmRows ?? []);
     if (knownUserId === undefined) { setLoading(true); return; }
     if (knownUserId === null) {
       setChats([]);
