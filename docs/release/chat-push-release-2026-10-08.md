@@ -48,7 +48,7 @@ deployment or proof of device behavior.
 - Existing app-source evidence: 31 latest inbox tests, 14 local Realtime checks,
   TypeScript and iOS export pass; earlier changed-suite run was 47 suites/1,263 tests.
 - The earlier process-isolated full Jest inventory had 26 non-passing suites;
-  all reproduced on unchanged main. The fresh legacy aggregate gate is being run;
+  all reproduced on unchanged main. The fresh legacy aggregate gate remains failed/incomplete;
   do not call the complete regression lock green based on scoped results.
 
 The full native traceability gate requires the real sibling web/admin repositories.
@@ -82,3 +82,60 @@ recorded below when completed. No WhatsApp-equivalent reliability guarantee is m
 
 Evidence directory:
 `/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/release-20261008`.
+
+## Deployed backend checkpoint — 23:38 UTC / 4:38 PM PDT
+
+Both exact migrations committed successfully to WashedUp App production project
+`upstjumasqblszevlgik`. Versions `20261007130000` and `20261008120000` are recorded
+with their exact SQL source. No historical migrations were applied or rewritten.
+
+Fresh post-deployment comparison verified all nine patched function fingerprints,
+preserved authenticated/anonymous execute grants, all previous policies unchanged,
+and all six new policies restrictive. The production phone-signup canary passed
+and returned `rollback_clean = true`; no synthetic account was retained. This is
+signup database-chain proof, not an SMS/OTP delivery test.
+
+The exact deployment package SHA256 is
+`723887ce5d3279415bbb0a920d9617de365db7f37cecb449df5d0f2d3fba99e6`.
+Evidence: `deployment-result.json`, `post-deploy-catalog.json`, and
+`post-deploy-signup-canary.json` in the evidence directory above.
+
+Chrome's signed-in Sentry page was inspected after deployment: project react-native,
+all environments, no text/status restriction, last one hour, sorted Last Seen.
+It displayed “No issues match your search.” This short observation is not proof
+of error-free active use or resolution of the earlier native keyboard hangs.
+No Sentry settings/issues were changed.
+
+## App publication status
+
+[PR #16](https://github.com/lizwashedup/WashedUp/pull/16) contains the combined
+candidate and release package. No merge, iOS OTA, Android update, or native build
+has been performed in this pass. Production remains on the previous verified
+update group listed above.
+
+The full Docker private-database gate now passes. The aggregate `qa:all` attempt
+also passed consent/signup database contracts, complete native/sibling evidence
+traceability and TypeScript before its Jest runner failed and stalled. Four
+reported suites were rerun in separate processes and all passed (72 tests):
+AndroidReactionJourney (6), useTopicChat.intros (18), ReportModal.lifetime (24),
+and useTopicComposerDraft (24). The stuck aggregate process was stopped after
+about five minutes; its incomplete inventory is not a pass. The earlier complete
+process-isolated inventory and its unchanged-main failure comparison remain the
+broader evidence. No tests or application behavior were altered to hide failures.
+
+A release-choice question is pending: repair the mandatory aggregate gate before
+public OTA, or obtain an explicit limited-rollout exception for the documented
+failures. iPhone Mirroring reported iPhone in Use; a separate lock/nearby request
+is pending. Exact-candidate phone testing has not occurred. Existing baseline
+hangs, physical-device proof and full regression certification remain open.
+
+The remaining non-aggregate gate commands were executed explicitly and passed:
+`qa:confirmations`, `qa:notifications`, `qa:payouts`, `qa:ticketing`,
+`qa:deliverability:local`, `qa:consent-sync:local`, `test:db:static`,
+`qa:migration-inventory`, and `qa:migration-drift`. This records their results
+without presenting the interrupted all-in-one command as successful.
+
+The existing Lima VM was initially stopped. It was started solely for verification;
+test containers were removed by the contract runner. The retained integration
+containers/data were not deleted. The VM is returned to its stopped state after
+verification. The isolated source snapshot is retained for a reproducible follow-up.
