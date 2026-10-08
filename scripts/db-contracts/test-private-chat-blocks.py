@@ -169,17 +169,27 @@ SELECT pg_temp.check_true(join_circle_atomic('{dm}')='joined', 'baseline outside
 SELECT pg_temp.check_true(get_circle('{dm}')->'members' IS NOT NULL, 'baseline outsider gains private details');
 ROLLBACK;""")
         rpc_candidate = (root / 'docs/database/review-only/20261007140000_private_chat_rpc_block_boundary.sql').read_text()
-        # Source drift must roll back even the routines patched earlier in the loop.
+        atomic_candidate = (root / 'supabase/migrations/20261008120000_private_chat_block_boundary.sql').read_text()
+        for reviewed in (policy_source, rpc_candidate):
+            body = reviewed.split('BEGIN;\n', 1)[1].rsplit('COMMIT;', 1)[0].strip()
+            if body not in atomic_candidate:
+                raise RuntimeError('Promoted migration diverged from its tested component')
+        # Start from the original policy state, then test the entire transaction.
+        for policy, table in re.findall(r'CREATE POLICY (\w+) ON public\.(\w+)', policy_source):
+            sql(f'DROP POLICY {policy} ON public.{table};')
+        sql('DROP FUNCTION public.private_chat_contact_allowed(uuid);')
+        # Source drift must roll back policy/helper creation AND earlier RPC edits.
         circle_routine = next(r for r in routines if r['name'] == 'get_circle')
         sql(circle_routine['definition'].replace('BEGIN', 'BEGIN\n -- simulated later source change', 1) + ';')
         rejected = subprocess.run([str(bin_dir / 'psql'), '-X', '-v', 'ON_ERROR_STOP=1'],
-            input=rpc_candidate, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            input=atomic_candidate, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if rejected.returncode == 0 or 'Private-chat routine changed since review: get_circle' not in rejected.stdout:
             raise RuntimeError('RPC source drift was not rejected as expected: ' + rejected.stdout)
         checks += 1
         sql(assertions + "SELECT pg_temp.check_true(md5(pg_get_functiondef('public.edit_own_chat_message(uuid,text,uuid,text,text)'::regprocedure))='24435e62bdc5019d0a393faa67205c13', 'drift abort rolls back earlier changes');")
+        sql(assertions + "SELECT pg_temp.check_true(to_regprocedure('public.private_chat_contact_allowed(uuid)') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname LIKE 'private_chat_%'), 'atomic drift failure leaves no helper or policies');")
         sql(circle_routine['definition'] + ';')
-        sql(rpc_candidate)
+        sql(atomic_candidate)
         rpc_denied = """
 CREATE OR REPLACE FUNCTION pg_temp.rpc_denied(statement text, label text) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
@@ -293,6 +303,22 @@ SELECT pg_temp.check_true((SELECT count(*) FROM push_registration_state)=0, 'acc
 ROLLBACK;
 SELECT pg_temp.check_true(NOT has_function_privilege('anon','public.record_push_registration_state(uuid,text,text,text,text,text,text,text,text)','EXECUTE'), 'anonymous telemetry write denied');
 """)
+        rollback = (root / 'docs/database/review-only/20261008120000_private_chat_block_boundary.rollback.sql').read_text()
+        sql("CREATE TABLE rollback_data_snapshot AS SELECT (SELECT md5(string_agg(row_to_json(m)::text, '' ORDER BY id)) FROM messages m) AS messages, (SELECT md5(string_agg(row_to_json(cm)::text, '' ORDER BY circle_id,user_id)) FROM circle_members cm) AS memberships;")
+        sql(rollback)
+        for routine in routines:
+            sql(assertions + f"SELECT pg_temp.check_true(md5(pg_get_functiondef('{signatures[routine['name']]}'::regprocedure))='{routine['md5']}', 'rollback restores exact original {routine['name']}');")
+        sql(assertions + """
+SELECT pg_temp.check_true(to_regprocedure('public.private_chat_contact_allowed(uuid)') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname LIKE 'private_chat_%'), 'rollback removes only introduced helper/policies');
+SELECT pg_temp.check_true((SELECT messages IS NOT DISTINCT FROM (SELECT md5(string_agg(row_to_json(m)::text, '' ORDER BY id)) FROM messages m) AND memberships IS NOT DISTINCT FROM (SELECT md5(string_agg(row_to_json(cm)::text, '' ORDER BY circle_id,user_id)) FROM circle_members cm) FROM rollback_data_snapshot), 'rollback preserves every message and membership row');
+SELECT pg_temp.check_true(to_regclass('public.push_registration_state') IS NOT NULL, 'rollback retains additive push diagnostics');
+""")
+        sql(atomic_candidate)
+        sql(assertions + f"""BEGIN;
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(a)}
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circle_chat_cards())=2, 'reapply restores blocked inbox boundary');
+ROLLBACK;""")
         sql((root / 'scripts/db-contracts/inspect-private-chat-blocks.sql').read_text())
         print(json.dumps({'passed_assertions': checks, 'database': 'disposable Unix socket only',
                           'candidate_deployed': False, 'live_routine_bodies_verified': True, 'full_live_schema_verified': False}))

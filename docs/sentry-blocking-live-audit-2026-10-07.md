@@ -1,5 +1,6 @@
 # Sentry and live private-chat audit — October 7, 2026
 
+October 8 release continuation: Liz has now authorized deployment. The atomic package, fresh verification and actual deployment status are tracked in `docs/release/chat-push-release-2026-10-08.md`; earlier hold statements below describe the prior checkpoint.
 Status: authenticated read-only inspection completed; five confirmed server RPC gaps have a locally tested, review-only fix. No public release, database change, Sentry issue mutation, notification send, or phone installation was performed. No native hang fix is claimed.
 
 ## Sentry evidence

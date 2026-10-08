@@ -1,5 +1,6 @@
 # Chat and push integration candidate — October 7, 2026
 
+October 8 release continuation: Liz has now authorized deployment. The atomic package, fresh verification and actual deployment status are tracked in `docs/release/chat-push-release-2026-10-08.md`; earlier hold statements below describe the prior checkpoint.
 Status: locally integrated and checked; authenticated Sentry and Supabase catalog inspection completed. Nine confirmed blocking RPC gaps have an additional locally tested review-only fix. Public release remains held. The combined candidate has not been installed on a phone or published. See `docs/sentry-blocking-live-audit-2026-10-07.md` for findings and remaining limits.
 
 ## Source provenance
@@ -99,6 +100,8 @@ A	docs/chat-push-candidate-2026-10-07.md
 A	docs/chat-reliability-2026-10-06.md
 A	docs/database/review-only/20261007120000_private_chat_block_boundary.sql
 A	docs/database/review-only/20261007140000_private_chat_rpc_block_boundary.sql
+A	docs/database/review-only/20261008120000_private_chat_block_boundary.rollback.sql
+A	docs/release/chat-push-release-2026-10-08.md
 A	docs/sentry-blocking-live-audit-2026-10-07.md
 M	hooks/__tests__/useBlock.scope.test.tsx
 M	hooks/__tests__/useChat.anchor.test.tsx
@@ -170,6 +173,7 @@ A	scripts/db-contracts/inspect-private-chat-blocks.sql
 M	scripts/db-contracts/migration-contracts.json
 A	scripts/db-contracts/test-private-chat-blocks.py
 A	supabase/migrations/20261007130000_push_registration_state.sql
+A	supabase/migrations/20261008120000_private_chat_block_boundary.sql
 A	supabase/tests/contracts/20261007_private_chat_block_fixture.sql
 A	supabase/tests/contracts/20261007_private_chat_live_routines.json
 A	supabase/tests/contracts/20261007_private_chat_rpc_fixture.sql
