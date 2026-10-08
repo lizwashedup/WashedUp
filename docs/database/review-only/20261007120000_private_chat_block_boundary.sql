@@ -4,7 +4,8 @@
 -- permissive policy cannot OR its way around this boundary. Keep existing
 -- membership, sender-identity, history and reaction rules in force.
 -- Before promotion: compare live schema/policy/RPC definitions and grants,
--- verify the canonical block helper, review SECURITY DEFINER message writers,
+-- verify the canonical block helper, include the five SECURITY DEFINER guards
+-- in companion 20261007140000_private_chat_rpc_block_boundary.sql,
 -- verify Realtime and push eligibility, then obtain Liz's deployment approval.
 -- Does not delete history, sever memberships, or change group-chat semantics.
 BEGIN;

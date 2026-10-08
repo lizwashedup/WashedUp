@@ -4,6 +4,7 @@ Usage: python3 scripts/db-contracts/test-private-chat-blocks.py /absolute/pg/bin
 Requires existing PostgreSQL binaries; no Docker, network, credentials or installs.
 Creates and removes only its own temporary database. Never accepts a DB URL.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -114,8 +115,119 @@ WITH changed AS (UPDATE profiles SET blocked_users=ARRAY['00000000-0000-0000-000
  SELECT pg_temp.check_true((SELECT count(*) FROM changed)=0, 'stale array update cannot overwrite concurrent block');
 SELECT pg_temp.check_true((SELECT blocked_users FROM profiles WHERE id='{a}')=ARRAY['{b}'::uuid], 'concurrent block remains stored');
 ROLLBACK;""")
+        # Execute exact catalog-exported SECURITY DEFINER routines, not mocks.
+        sql((root / 'supabase/tests/contracts/20261007_private_chat_rpc_fixture.sql').read_text())
+        policy_source = (root / 'docs/database/review-only/20261007120000_private_chat_block_boundary.sql').read_text()
+        sql(policy_source[policy_source.index('CREATE POLICY private_chat_reaction_select'):].replace('COMMIT;', ''))
+        routines = json.loads((root / 'supabase/tests/contracts/20261007_private_chat_live_routines.json').read_text())
+        signatures = {}
+        for routine in routines:
+            if hashlib.md5(routine['definition'].encode()).hexdigest() != routine['md5']:
+                raise RuntimeError('Catalog fixture fingerprint mismatch: ' + routine['name'])
+            sql(routine['definition'] + ';')
+            # CREATE's default public execute is not representative of production.
+            identity = routine['identity']
+            signature = f"public.{routine['name']}({identity})"
+            sql(f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC, anon; GRANT EXECUTE ON FUNCTION {signature} TO authenticated;")
+            arg_types = ','.join(arg.strip().split(' ',1)[1] for arg in identity.split(',') if arg.strip())
+            signatures[routine['name']] = f"public.{routine['name']}({arg_types})"
+        mid = '30000000-0000-0000-0000-000000000001'
+        def edit_call(name, message=mid, conversation=dm, kind='circle', expected='Retained history', content='Edited fixture'):
+            args = f"'{message}','{kind}','{conversation}','{expected}','{content}'"
+            if name.endswith('_with_mentions'):
+                args += ",null,null"
+            return f"public.{name}({args})"
+        edits = ('edit_own_chat_message', 'edit_own_chat_message_with_mentions')
+        sql(assertions + f"""BEGIN;
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(a)}
+SELECT pg_temp.check_true(get_circle('{dm}')->'members' IS NOT NULL, 'baseline definer leaks retained member photos');
+SELECT pg_temp.check_true(jsonb_array_length(get_circle_chat_messages('{dm}'))=1, 'baseline definer bypasses message RLS');
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circle_chat_cards())=4, 'baseline definer leaks blocked inbox preview');
+ROLLBACK;""")
+        for name in edits:
+            sql(assertions + f"""BEGIN;
+UPDATE profiles SET blocked_users=ARRAY['{b}'::uuid] WHERE id='{a}';
+{login(a)}
+SELECT pg_temp.check_true({edit_call(name)}->>'status'='saved', 'baseline definer permits blocked edit');
+ROLLBACK;""")
+        rpc_candidate = (root / 'docs/database/review-only/20261007140000_private_chat_rpc_block_boundary.sql').read_text()
+        # Source drift must roll back even the routines patched earlier in the loop.
+        circle_routine = next(r for r in routines if r['name'] == 'get_circle')
+        sql(circle_routine['definition'].replace('BEGIN', 'BEGIN\n -- simulated later source change', 1) + ';')
+        rejected = subprocess.run([str(bin_dir / 'psql'), '-X', '-v', 'ON_ERROR_STOP=1'],
+            input=rpc_candidate, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if rejected.returncode == 0 or 'Private-chat routine changed since review: get_circle' not in rejected.stdout:
+            raise RuntimeError('RPC source drift was not rejected as expected: ' + rejected.stdout)
+        checks += 1
+        sql(assertions + "SELECT pg_temp.check_true(md5(pg_get_functiondef('public.edit_own_chat_message(uuid,text,uuid,text,text)'::regprocedure))='24435e62bdc5019d0a393faa67205c13', 'drift abort rolls back earlier changes');")
+        sql(circle_routine['definition'] + ';')
+        sql(rpc_candidate)
+        rpc_denied = """
+CREATE OR REPLACE FUNCTION pg_temp.rpc_denied(statement text, label text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  BEGIN EXECUTE statement;
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'not a member of this circle' THEN RAISE NOTICE 'PASS: %', label; RETURN; END IF;
+    RAISE;
+  END;
+  RAISE EXCEPTION 'FAIL (RPC allowed): %', label;
+END $$;
+"""
+        for store in ('array','table'):
+            for blocker, blocked in ((a,b),(b,a)):
+                setup = (f"UPDATE profiles SET blocked_users=ARRAY['{blocked}'::uuid] WHERE id='{blocker}';" if store == 'array'
+                         else f"INSERT INTO user_blocks VALUES ('{blocker}','{blocked}');")
+                for viewer in (a,b):
+                    edit_assertions = '\n'.join(f"SELECT pg_temp.check_true({edit_call(name)}->>'status'='unavailable', 'blocked definer edit denied');" for name in edits)
+                    sql(assertions + rpc_denied + f"""BEGIN; {setup}
+UPDATE messages SET user_id='{viewer}' WHERE id='{mid}';
+{login(viewer)}
+SELECT pg_temp.rpc_denied('SELECT get_circle(''{dm}'')', 'blocked member detail denied');
+SELECT pg_temp.rpc_denied('SELECT get_circle_chat_messages(''{dm}'')', 'blocked history denied');
+SELECT pg_temp.rpc_denied('SELECT get_circle(''10000000-0000-0000-0000-000000000004'')', 'whitespace-name DM detail denied');
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circle_chat_cards())=2, 'inbox omits both blocked DM variants');
+SELECT pg_temp.check_true(NOT EXISTS(SELECT 1 FROM jsonb_array_elements(get_my_circle_chat_cards()) card WHERE card->>'circle_id'='{dm}'), 'no retained private preview or avatar');
+SELECT pg_temp.check_true(jsonb_array_length(get_circle_chat_messages('10000000-0000-0000-0000-000000000002'))=1, 'named group history preserved');
+SELECT pg_temp.check_true(get_circle('10000000-0000-0000-0000-000000000003')->'members' IS NOT NULL, 'grown group detail preserved');
+{edit_assertions}
+RESET ROLE;
+SELECT pg_temp.check_true((SELECT content FROM messages WHERE id='{mid}')='Retained history', 'blocked edit did not mutate retained evidence');
+ROLLBACK;""")
+        for name in edits:
+            for kind, conversation, message in (
+                ('circle',dm,mid),
+                ('circle','10000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000002'),
+                ('event','20000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000005')):
+                expected = 'Event history' if kind=='event' else 'Retained history'
+                sql(assertions + f"""BEGIN; {login(a)}
+SELECT pg_temp.check_true({edit_call(name,message,conversation,kind,expected)}->>'status'='saved', 'allowed DM/group/event edit preserved');
+SELECT pg_temp.check_true({edit_call(name,message,conversation,kind,'stale','Next fixture')}->>'status'='changed', 'edit compare-and-swap preserved');
+ROLLBACK;""")
+        sql(assertions + rpc_denied + f"""BEGIN; {login(a)}
+SELECT pg_temp.check_true(jsonb_array_length(get_my_circle_chat_cards())=4, 'unblocked inbox retained');
+SELECT pg_temp.check_true(get_circle('{dm}')->'members' IS NOT NULL, 'unblocked member detail retained');
+SELECT pg_temp.check_true(jsonb_array_length(get_circle_chat_messages('{dm}'))=1, 'unblocked history retained');
+ROLLBACK;
+BEGIN; {login('00000000-0000-0000-0000-000000000004')}
+SELECT pg_temp.check_true(get_my_circle_chat_cards()='[]'::jsonb, 'outsider inbox empty');
+SELECT pg_temp.rpc_denied('SELECT get_circle(''{dm}'')', 'outsider detail denied');
+ROLLBACK;
+BEGIN;
+UPDATE profiles SET suspended_until=now()+interval '1 day' WHERE id='{a}';
+{login(a)}
+SELECT pg_temp.check_true({edit_call(edits[0])}->>'status'='unavailable', 'account hold preserved');
+ROLLBACK;
+BEGIN;
+UPDATE events SET status='cancelled';
+{login(a)}
+SELECT pg_temp.check_true({edit_call(edits[1],'30000000-0000-0000-0000-000000000005','20000000-0000-0000-0000-000000000001','event','Event history')}->>'status'='closed', 'cancelled event write window preserved');
+ROLLBACK;""")
+        for name, signature in signatures.items():
+            sql(assertions + f"SELECT pg_temp.check_true(NOT has_function_privilege('anon','{signature}','EXECUTE') AND has_function_privilege('authenticated','{signature}','EXECUTE'), 'RPC grants preserved: {name}');")
+        sql((root / 'scripts/db-contracts/inspect-private-chat-blocks.sql').read_text())
         print(json.dumps({'passed_assertions': checks, 'database': 'disposable Unix socket only',
-                          'candidate_deployed': False, 'live_schema_verified': False}))
+                          'candidate_deployed': False, 'live_routine_bodies_verified': True, 'full_live_schema_verified': False}))
     finally:
         if started:
             command([str(bin_dir / 'pg_ctl'), '-D', str(data), '-m', 'fast', '-w', 'stop'])

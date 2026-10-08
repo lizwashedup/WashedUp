@@ -1,7 +1,7 @@
 -- READ ONLY: catalog metadata only; no member rows, messages, tokens or secrets.
 -- Run against the intended WashedUp project after confirming its identity.
 -- Review results before any promotion of the separate policy candidate.
-SELECT 'rls' AS section, c.relname AS object_name,
+SELECT 'rls' AS section, c.relname::text AS object_name,
   jsonb_build_object('enabled',c.relrowsecurity,'forced',c.relforcerowsecurity) AS details
 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname='public' AND c.relname IN
@@ -21,7 +21,7 @@ FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
 WHERE n.nspname='public' AND p.proname IN
   ('yours_is_blocked_between','get_or_create_dm','get_circle','get_circle_chat_messages',
    'get_my_circle_chat_cards','get_person_profile','is_circle_member','private_chat_contact_allowed',
-   'record_push_registration_state')
+   'record_push_registration_state','edit_own_chat_message','edit_own_chat_message_with_mentions')
 UNION ALL
 SELECT 'column', c.table_name || '.' || c.column_name,
   jsonb_build_object('data_type',c.data_type,'udt_name',c.udt_name,'nullable',c.is_nullable)

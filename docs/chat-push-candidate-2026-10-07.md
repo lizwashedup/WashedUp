@@ -1,6 +1,6 @@
 # Chat and push integration candidate — October 7, 2026
 
-Status: locally integrated and checked; public release remains held. Sentry and live Supabase verification are awaiting the founder's browser sign-in. The combined candidate has not been installed on a phone or published.
+Status: locally integrated and checked; authenticated Sentry and Supabase catalog inspection completed. Five confirmed blocking RPC gaps have an additional locally tested review-only fix. Public release remains held. The combined candidate has not been installed on a phone or published. See `docs/sentry-blocking-live-audit-2026-10-07.md` for findings and remaining limits.
 
 ## Source provenance
 
@@ -13,7 +13,7 @@ Status: locally integrated and checked; public release remains held. Sentry and 
 - Push parent: `701c91bcbf80dfa1ab2f8535f217ce4bdd6fb955`.
 - Combined app-source commit: `3cbb1da2bd9dcc24f34c3dd24a4910ffa6093540`.
 
-The candidate began at the existing isolated chat feature tip and normally merged the exact newer push tip, without conflicts or cherry-picking. Both descend from the protected release source. Original chat, push, and release branches were preserved. No application logic was additionally changed during this integration. The new files from this pass are this record and the catalog inspection query.
+The candidate began at the existing isolated chat feature tip and normally merged the exact newer push tip, without conflicts or cherry-picking. Both descend from the protected release source. Original chat, push, and release branches were preserved. No application logic was additionally changed during this integration. The integration added this record and the catalog inspection query. The subsequent authenticated audit adds review-only SQL guards, exact catalog function fixtures, expanded local contracts and an evidence record; application/native source is unchanged by that audit.
 
 ## Verification
 
@@ -28,8 +28,8 @@ The pinned Node 20.20.1 runtime was downloaded from nodejs.org and verified agai
 | All changed Jest suites | 47/47 pass; 1,263 tests pass | `changed-suite-summary.json` |
 | Entire Jest inventory, each suite in a separate process | 567 suites: 541 pass, 25 fail, 1 times out; 8,501 passed tests, 129 failed, 1 pending | `node20/summary.json` |
 | Failed-suite comparison with unchanged main | All 26 reproduce on `d7bdb9a`, including the timeout; same failed test names and exit outcomes; zero candidate-only failed assertions | `baseline-comparison.json`, `baseline-node20/summary.json` |
-| Review-only block policy contracts | 99 assertions pass in disposable PostgreSQL 17.11; no live connection | `block-sql-contract.log` |
-| Catalog inspection SELECT | Executes successfully against disposable fixture | `catalog-select-fixture.log` |
+| Review-only block policy/RPC contracts | 210 assertions pass in disposable PostgreSQL 17.11, including exact live RPC bodies and source-drift rollback; no live test connection | `block-sql-contract-live-rpcs.log` |
+| Catalog inspection SELECT | Expanded query executes against disposable fixture; live catalog read completed separately | `block-sql-contract-live-rpcs.log`, audit record |
 | Deno notification and delivery policy tests | 28 pass, zero fail; local Deno 2.9.4, while CI specifies 2.9.5 | `deno-notifications.log` |
 | Required `qa:all` | Incomplete: stops at Docker-dependent consent-sync database contracts; `docker` unavailable | `mandatory-qa.log` |
 | Repository `qa/guinea-verify-washedup.sh` | Attempted; stops at the same Docker-dependent step; later cross-repository checks not reached | `guinea-verification.log` |
@@ -39,29 +39,15 @@ The required gate passed no-cloud-build, paid-ticket-flow, migration policy, aut
 
 No lint script is configured in package.json. No failures were hidden, skipped in the required command, or used to justify unrelated application changes.
 
-## Sentry hang reports — investigation pending authentication
+## Authenticated Sentry and database audit
 
-The WashedUp Sentry organization tab is at `https://sentry.io/auth/login/washedup/`. No event details, issue stacks, counts, affected-user counts, or occurrence times have been retrieved. The reported emails therefore have no established cause yet.
+See `docs/sentry-blocking-live-audit-2026-10-07.md` for event links, release/runtime provenance, exact findings, local fix boundaries and reproduction steps. Three App Hanging events in the last 14 days have native keyboard/clipboard wait stacks; chat scrolling is not established as their cause. Recent watchdog events include both private preview and production launches. No native root-cause fix is claimed and monitoring remains enabled.
 
-Read-only inspection after sign-in must establish:
+Catalog-only SELECTs in the verified WashedUp production project confirmed that existing private-chat reads and edits bypass the block boundary in five security-definer functions. The policy candidate now requires the review-only RPC companion `20261007140000_private_chat_rpc_block_boundary.sql`; neither has been deployed. The companion refuses changed source fingerprints and preserves existing function grants and other behavior. Its local regression tests use the exact catalog-exported bodies and synthetic data. Direct membership endpoints, active Realtime sessions, profile/storage visibility and deployed notification dispatch are not universally certified by this scoped fixture.
 
-1. Exact issue/event, first and latest occurrence, event time versus email delivery time, and frequency.
-2. Whether it is an iOS app hang, Android ANR, JavaScript error, or another issue category.
-3. Release, distribution, device/OS, Expo update channel and update ID, and embedded/emergency launch context.
-4. Available main-thread stack, JavaScript stack and breadcrumbs before the hang; whether chat, startup, keyboard, image loading, or another screen is implicated.
-5. Whether the relevant code exists in this candidate, with a focused reproduction before changing it.
+Live `get_member_chat_push_targets` includes the actor/recipient block check and is service-only. The two new-message triggers did not contain that block-helper call in their inspected source lines, so dispatch remains an important boundary. This catalog evidence does not verify the deployed Edge Function's use of that boundary or legacy notices without an actor.
 
-The installed Sentry SDK already provides Expo update context with `channel`, `update_id`, `runtime_version`, and `is_embedded_launch` when available. App version `1.0.7 (51)` alone cannot distinguish public code from the private push preview. A missing context is unknown, not evidence that the event came from production. Sentry settings, issue status, and filters have not been changed by this task.
-
-## Live blocking verification — pending authentication
-
-Intended Supabase project: `upstjumasqblszevlgik`. Its browser login is waiting for the founder. No production SQL was executed.
-
-`scripts/db-contracts/inspect-private-chat-blocks.sql` is a catalog-only SELECT. It inspects relevant RLS, policies, function bodies/execute permissions, and block-column types without reading member rows, messages, tokens, or secrets. It must be run only after the intended project is visibly confirmed.
-
-The existing review-only block policy remains in `docs/database/review-only/20261007120000_private_chat_block_boundary.sql`. It has not been promoted into active migrations or deployed. Local fixtures demonstrate its intended behavior; they do not establish the live database's behavior. Compare live security-definer RPCs, direct table access, Realtime, and notification paths before recommending a complete server-side blocking guarantee. Profile/storage visibility and shared-group history are separate from hiding an unnamed two-person DM.
-
-The merged push change includes active migration `20261007130000_push_registration_state.sql`. Its live presence and grants also need verification. This task has not deployed it. Push registration itself remains separate from the best-effort diagnostic writes.
+The push diagnostic table/RPC (`push_registration_state`, `record_push_registration_state`) are absent from the live catalog, matching the preview's diagnostic 404. Their migration is already in the push source but remains undeployed by this task. A diagnostic write failure alone does not prove registration failure.
 
 ## Phone and release boundary
 
@@ -71,7 +57,7 @@ Before private testing, prepare a delivery route with a verified recipient/chann
 
 There are no changes to native dependencies, package manifests/lockfiles, app configuration, EAS configuration, iOS, or Android directories against the release/main baseline. These JavaScript changes are compatible in principle with the verified Build 51 runtime and introduce no new native-build requirement. Database changes need separate verified deployment; OTA compatibility does not deploy policies or prove device behavior.
 
-No OTA, native build, store submission, remote Git push, production mutation, OneSignal notification, or Sentry state change was performed in this integration pass. Public release remains held for the outstanding live evidence, exact-device verification, and unresolved required release gate.
+No OTA, native build, store submission, remote Git push, production mutation, OneSignal notification, or Sentry state change was performed in this integration pass. Public release remains held for backend promotion/review, exact-device verification (including native hangs), and the unresolved required release gate.
 
 ## Changed-file inventory
 
@@ -108,6 +94,8 @@ A	docs/chat-phase2-audit-2026-10-07.md
 A	docs/chat-push-candidate-2026-10-07.md
 A	docs/chat-reliability-2026-10-06.md
 A	docs/database/review-only/20261007120000_private_chat_block_boundary.sql
+A	docs/database/review-only/20261007140000_private_chat_rpc_block_boundary.sql
+A	docs/sentry-blocking-live-audit-2026-10-07.md
 M	hooks/__tests__/useBlock.scope.test.tsx
 M	hooks/__tests__/useChat.anchor.test.tsx
 M	hooks/__tests__/useChat.ownership.test.tsx
@@ -177,4 +165,6 @@ M	scripts/db-contracts/migration-contracts.json
 A	scripts/db-contracts/test-private-chat-blocks.py
 A	supabase/migrations/20261007130000_push_registration_state.sql
 A	supabase/tests/contracts/20261007_private_chat_block_fixture.sql
+A	supabase/tests/contracts/20261007_private_chat_live_routines.json
+A	supabase/tests/contracts/20261007_private_chat_rpc_fixture.sql
 ```
