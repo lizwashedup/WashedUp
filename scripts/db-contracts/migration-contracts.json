@@ -1,7 +1,7 @@
 {
   "format": 3,
-  "migration_count": 310,
-  "inventory_sha256": "360aa38330fbd31a736673b93757fb2e46b7bd0a3a216d09093f332414424a2b",
+  "migration_count": 311,
+  "inventory_sha256": "0fa96816e0d21418d4af8424f4dd2fe6a3b1c2d3186c8518d877eaeaa7b937d1",
   "approved_untracked_migrations": [
     "20260830120000_free_rsvp_confirmation_outbox.sql",
     "20260830130000_audience_sync_outbox_and_suppression.sql",
@@ -33,7 +33,8 @@
     "20260906221000_attendee_message_test_send.sql",
     "20260906230000_refund_issuance_log_nullable_issuer.sql",
     "20260906231000_has_refund_authority_self_only.sql",
-    "20260908010000_block_ended_plan_entries.sql"
+    "20260908010000_block_ended_plan_entries.sql",
+    "20261007130000_push_registration_state.sql"
   ],
   "side_effect_union_count": 82,
   "approved_legacy_secret_literals": [
