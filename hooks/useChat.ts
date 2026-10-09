@@ -1,7 +1,7 @@
 import { subscribeChatWhenReady, nextChatDataChannelName } from '../lib/chatRealtimeSubscription';
 import { validOptionalMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from '../lib/chatMentionIdentity';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
@@ -399,11 +399,16 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
   }, [kind, conversationId, roomGeneration, isCurrentRoom, viewerId]);
 
   const fetchMessages = useCallback(async (silent = false) => {
-    if (!isCurrentRoom()) return;
+    if (!isCurrentRoom() || AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
     if (!operationScope) { if (!silent && viewerId === undefined) await retryIdentity(); return; }
     const request = ++newestRequestRef.current;
     const window = readWindowRef.current;
-    const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && newestRequestRef.current === request;
+    const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && newestRequestRef.current === request
+      && AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
+    // History work belongs to this foreground read, not just the room. A
+    // suspended getUser must not resume by queuing fallback/privacy/receipt
+    // work or publish a stale snapshot after the app becomes active again.
+    const readScope: ChatOperationScope = { userId: operationScope.userId, isCurrent };
     const startedWith = new Map(messagesRef.current.map(message => [message.id, message]));
     if (!silent) setLoading(true);
     try {
@@ -420,7 +425,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
           queryKey: ['profile-blocked', operationScope.userId],
           staleTime: 60_000,
           queryFn: async () => {
-            const { data: profile, error: profileError } = await scopedChatRequest(operationScope, () => supabase
+            const { data: profile, error: profileError } = await scopedChatRequest(readScope, () => supabase
               .from('profiles')
               .select('blocked_users')
               .eq('id', operationScope.userId)
@@ -441,13 +446,13 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
       };
       // Verify this exact account before accessing its private preferences,
       // but do not make that access wait for independent history delivery.
-      const verifiedUser = scopedChatRequest(operationScope, () => requestWithDeadline(readObservedUser(), 8_000))
+      const verifiedUser = scopedChatRequest(readScope, () => requestWithDeadline(readObservedUser(), 8_000))
           .then(({ data: d, error }) => { if (error) throw error; return d.user; })
           .catch(async (err) => {
-            assertChatScope(operationScope);
+            assertChatScope(readScope);
             logError(err, 'useChat.fetchMessages.getUser');
-            const { data: cached } = await scopedChatRequest(operationScope, () => requestWithDeadline(supabase.auth.getSession(), 4_000)).catch(() => {
-              assertChatScope(operationScope);
+            const { data: cached } = await scopedChatRequest(readScope, () => requestWithDeadline(supabase.auth.getSession(), 4_000)).catch(() => {
+              assertChatScope(readScope);
               return { data: { session: null } };
             });
             return cached.session?.user ?? null;
@@ -486,7 +491,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
         const msgIds = page.map((m: any) => m.id);
         // Mark this conversation read. Plans and circles use different unique
         // keys on chat_reads, so the onConflict target differs.
-        const readUpsert = () => scopedChatRequest(operationScope, () => kind === 'event'
+        const readUpsert = () => scopedChatRequest(readScope, () => kind === 'event'
           ? supabase.from('chat_reads').upsert(
               { event_id: conversationId, user_id: userId, last_read_at: new Date().toISOString() },
               { onConflict: 'event_id,user_id' },
@@ -497,7 +502,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
             ));
         // new_message notifications are event-only today; circles have no
         // notification type yet, so the circle branch skips the clear + badge.
-        const notifClear = () => scopedChatRequest(operationScope, () => kind === 'event'
+        const notifClear = () => scopedChatRequest(readScope, () => kind === 'event'
           ? supabase.from('app_notifications')
               .update({ status: 'read' })
               .eq('user_id', userId)
@@ -606,6 +611,16 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     }
   }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity]);
   refreshWindowRef.current = fetchMessages;
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'background' && state !== 'inactive') return;
+      // Retire history/hydration only. In-flight sends and their uncertain
+      // receipts retain their existing account/room ownership and drafts.
+      ++newestRequestRef.current;
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (!isCurrentRoom() || appliedWindowRef.current === readWindow) return;
