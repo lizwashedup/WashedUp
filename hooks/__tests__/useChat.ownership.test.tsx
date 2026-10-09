@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState, type AppStateStatus } from 'react-native';
+import { logError } from '../../lib/logger';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useChat, isObsoleteChatOperation, isUnconfirmedChatReaction, type ChatMessage, type ConversationKey } from '../useChat';
@@ -777,4 +778,105 @@ it.each([false, true])('bounds a stalled delete and respects account retirement 
     deletion.resolve(success); await flush(); await pending;
     jest.useRealTimers();
   }
+});
+
+
+describe('history reads across app suspension', () => {
+  let appStateListeners: Set<(state: AppStateStatus) => void>;
+  const changeState = (state: AppStateStatus) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+    act(() => { appStateListeners.forEach(listener => listener(state)); });
+  };
+  beforeEach(() => {
+    appStateListeners = new Set();
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+      appStateListeners.add(listener);
+      return { remove: () => { appStateListeners.delete(listener); } };
+    });
+  });
+  afterEach(() => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+    jest.useRealTimers();
+  });
+
+  it('retires an auth deadline on background without starting fallback work, then recovers on refresh', async () => {
+    jest.useFakeTimers();
+    const pending = deferred();
+    mockAuth.mockResolvedValueOnce(identity('alice')).mockReturnValueOnce(pending.promise);
+    const fixture = mount(); await flush();
+    changeState('background');
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_000); });
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockBlocks).not.toHaveBeenCalled();
+    expect(logError).not.toHaveBeenCalled();
+    expect(fixture.chat.loadError).toBe(false);
+    changeState('active');
+    await act(async () => { await fixture.chat.refetch(true); }); await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+    expect(fixture.chat.loading).toBe(false);
+  });
+
+  it('does not dispatch background history or fallback reads, even on a realtime readiness callback', async () => {
+    const fixture = mount(); await flush();
+    changeState('background');
+    mockAuth.mockClear(); mockRead.mockClear(); mockBlocks.mockClear(); mockSession.mockClear();
+    await act(async () => { await fixture.chat.refetch(true); });
+    await act(async () => { await mockChannels[mockChannels.length - 1].callbacks['undefined']?.({ status: 'ok', extension: 'postgres_changes' }); });
+    expect(mockAuth).not.toHaveBeenCalled(); expect(mockRead).not.toHaveBeenCalled();
+    expect(mockBlocks).not.toHaveBeenCalled(); expect(mockSession).not.toHaveBeenCalled();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+  });
+
+  it('cannot apply a pre-suspension result after returning to active', async () => {
+    const fixture = mount(); await flush();
+    const pending = deferred(); mockRead.mockReturnValueOnce(pending.promise);
+    let work!: Promise<void>;
+    act(() => { work = fixture.chat.refetch(true); }); await flush();
+    changeState('inactive'); changeState('background'); changeState('active');
+    await act(async () => { pending.resolve(result([message('stale')])); await work; }); await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('retains a confirmed send that finishes while history is suspended', async () => {
+    const fixture = mount(); await flush();
+    const pending = deferred(); mockWrite.mockReturnValueOnce(pending.promise);
+    const sending = start(() => fixture.chat.sendMessage('Keep this send', undefined, undefined, 'stable-send'));
+    await flush(); changeState('background');
+    await act(async () => { pending.resolve({ data: message('stable-send', { content: 'Keep this send' }), error: null }); });
+    expect(await sending).toBe(true);
+    expect(mockWrite).toHaveBeenCalledTimes(1);
+    expect(fixture.chat.messages.some(row => row.id === 'stable-send')).toBe(true);
+  });
+
+  it('does not publish a hydration timeout after suspension and keeps loaded history', async () => {
+    jest.useFakeTimers(); mockProfiles.mockReturnValueOnce(deferred().promise);
+    const fixture = mount(); await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+    changeState('background');
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_000); });
+    expect(logError).not.toHaveBeenCalled(); expect(fixture.chat.loadError).toBe(false);
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+  });
+
+  it('defers an initial background history load until the existing foreground refresh', async () => {
+    changeState('background');
+    const fixture = mount(); await flush();
+    expect(mockRead).not.toHaveBeenCalled(); expect(mockBlocks).not.toHaveBeenCalled();
+    changeState('active');
+    await act(async () => { await fixture.chat.refetch(true); }); await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+    expect(fixture.chat.loading).toBe(false);
+  });
+
+  it('still reports a foreground identity timeout and preserves same-account fallback', async () => {
+    jest.useFakeTimers();
+    mockAuth.mockResolvedValueOnce(identity('alice')).mockReturnValueOnce(deferred().promise);
+    const fixture = mount(); await flush();
+    await act(async () => { await jest.advanceTimersByTimeAsync(8_000); }); await flush();
+    expect(logError).toHaveBeenCalledWith(expect.objectContaining({ name: 'RequestDeadlineError' }), 'useChat.fetchMessages.getUser');
+    expect(mockSession).toHaveBeenCalledTimes(1);
+    expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
+  });
 });
