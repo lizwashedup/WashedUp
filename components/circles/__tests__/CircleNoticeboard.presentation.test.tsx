@@ -69,22 +69,22 @@ it('preserves exact callbacks, the plans hook scope, and current plan-list owner
   const plansScope = { userId: 'viewer', epoch: 2, isCurrent: () => true }; mockPlans = [plan('one')];
   const f = mount(board({ onOpenPlan, onPostPlan, onOpenChat, onAddPeople, onNameCircle, plansScope }));
   expect(mockPlansHook).toHaveBeenCalledWith('circle-a', plansScope);
-  ['Post a plan', 'Open chat', 'Invite', 'Name this circle'].forEach(label => act(() => f.button(label).props.onPress()));
+  ['Make a plan', 'Open chat', 'Invite', 'Name this circle'].forEach(label => act(() => f.button(label).props.onPress()));
   [onPostPlan, onOpenChat, onAddPeople, onNameCircle].forEach(callback => expect(callback).toHaveBeenCalledTimes(1));
   const open = f.button('View plan, Plan one').props.onPress; act(() => open()); expect(onOpenPlan).toHaveBeenCalledWith('one'); expect(mockPush).not.toHaveBeenCalled();
   mockPlans = []; f.update(board({ onOpenPlan })); act(() => open()); expect(onOpenPlan).toHaveBeenCalledTimes(1);
 });
 it('retires actions after a circle round trip or an external account/visit scope expires', () => {
   let current = true; const operationScope = { isCurrent: () => current }, onPostPlan = jest.fn();
-  const f = mount(board({ operationScope, onPostPlan })), oldPost = f.button('Post a plan').props.onPress;
+  const f = mount(board({ operationScope, onPostPlan })), oldPost = f.button('Make a plan').props.onPress;
   const second = payload(); second.circle.id = 'circle-b'; f.update(board({ payload: second, operationScope, onPostPlan })); f.update(board({ operationScope, onPostPlan })); act(() => oldPost()); expect(onPostPlan).not.toHaveBeenCalled();
-  const currentPost = f.button('Post a plan').props.onPress; current = false; act(() => currentPost()); expect(onPostPlan).not.toHaveBeenCalled();
+  const currentPost = f.button('Make a plan').props.onPress; current = false; act(() => currentPost()); expect(onPostPlan).not.toHaveBeenCalled();
 });
 it('distinguishes loading, error and retry from a genuinely empty upcoming list', async () => {
-  mockLoading = true; const f = mount(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('Loading plans'); expect(f.text()).not.toContain('No plans on the calendar');
-  mockLoading = false; mockError = true; f.update(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('Couldn’t load plans'); expect(f.text()).not.toContain('No plans on the calendar');
+  mockLoading = true; const f = mount(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('Loading plans'); expect(f.text()).not.toMatch(/No plans on the calendar|No plans yet/);
+  mockLoading = false; mockError = true; f.update(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('Couldn’t load plans'); expect(f.text()).not.toMatch(/No plans on the calendar|No plans yet/);
   const retry = f.button('Try again to load circle plans').props.onPress; act(() => { retry(); retry(); }); expect(mockRefetch).toHaveBeenCalledTimes(1);
-  await act(async () => { await Promise.resolve(); }); mockError = false; f.update(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('No plans on the calendar'); expect(f.button('Make a plan')).toBeTruthy();
+  await act(async () => { await Promise.resolve(); }); mockError = false; f.update(board({ onPostPlan: jest.fn() })); expect(f.text()).toContain('No plans yet'); expect(f.button('Make a plan')).toBeTruthy();
 });
 it('failed recent photos retain a stable noninteractive fallback; renewed URLs recover', () => {
   const f = mount(board()); const recent = f.photos().find(n => StyleSheet.flatten(n.props.style)?.width === 84)!; const oldError = recent.props.onError;
@@ -94,7 +94,7 @@ it('failed recent photos retain a stable noninteractive fallback; renewed URLs r
 it('staged member faces are full color and remain read-only with a separate Add action', () => {
   const data = [person('a', 'Amelia', 'https://example.invalid/a.jpg'), person('b', 'A very long first name')], onAdd = jest.fn();
   const f = mount(<CircleMembersRow members={data} appearance={appearance} onAdd={onAdd}/>);
-  expect(StyleSheet.flatten(f.photos()[0].props.style)).toMatchObject({ width: 54, height: 54, opacity: 1 });
+  expect(StyleSheet.flatten(f.photos()[0].props.style)).toMatchObject({ width: 44, height: 44, opacity: 1 });
   expect(f.tree.root.findAll(n => n.props.accessibilityLabel === 'Amelia' && n.props.onPress)).toHaveLength(0);
   act(() => f.button('Add people').props.onPress()); expect(onAdd).toHaveBeenCalledTimes(1);
   expect(f.tree.root.findByType(ScrollView).props.horizontal).toBe(true);
@@ -106,13 +106,14 @@ it('member photo failure uses the correct initial and does not poison replacemen
   f.update(<CircleMembersRow members={[person('b', 'Bea', 'https://example.invalid/broken.jpg')]} appearance={appearance}/>); act(() => oldError()); expect(f.photos()).toHaveLength(1); expect(f.text()).toContain('Bea');
 });
 it('legacy presentation remains opt-out while read failures are still honest', () => {
-  mockError = true; const f = mount(board({ appearance: undefined })); expect(f.text()).toContain('Couldn’t load plans'); expect(f.text()).not.toContain('No plans on the calendar');
+  mockError = true; const f = mount(board({ appearance: undefined })); expect(f.text()).toContain('Couldn’t load plans'); expect(f.text()).not.toMatch(/No plans on the calendar|No plans yet/);
 });
 
 
 it.each(['staged', 'legacy'] as const)('%s waits for a deferred cached-empty refresh before inviting another plan', async mode => {
   const props = { appearance: mode === 'staged' ? appearance : undefined, onPostPlan: jest.fn() };
-  const f = mount(board(props)); expect(f.text()).toContain('No plans on the calendar');
+  const emptyCopy = mode === 'staged' ? 'No plans yet' : 'No plans on the calendar';
+  const f = mount(board(props)); expect(f.text()).toContain(emptyCopy);
   let finish!: () => void;
   const refresh = new Promise<void>(resolve => { finish = resolve; }).then(() => {
     mockFetching = false;
@@ -120,15 +121,16 @@ it.each(['staged', 'legacy'] as const)('%s waits for a deferred cached-empty ref
   });
   mockFetching = true; f.update(board(props));
   expect(f.text()).toContain('Loading plans');
-  expect(f.text()).not.toContain('No plans on the calendar');
-  expect(f.button(mode === 'staged' ? 'Make a plan' : 'Make the first plan.')).toBeUndefined();
+  expect(f.text()).not.toMatch(/No plans on the calendar|No plans yet/);
+  // Staged creation remains in the permanent action bar; only legacy has an empty-state CTA.
+  expect(f.button('Make the first plan.')).toBeUndefined();
   await act(async () => { finish(); await refresh; });
-  expect(f.text()).not.toContain('Loading plans'); expect(f.text()).toContain('No plans on the calendar');
+  expect(f.text()).not.toContain('Loading plans'); expect(f.text()).toContain(emptyCopy);
 });
 
 it.each(['staged', 'legacy'] as const)('%s keeps existing rows readable while the plan list refreshes', mode => {
   mockPlans = [plan('saved')]; mockFetching = true;
   const f = mount(board({ appearance: mode === 'staged' ? appearance : undefined }));
   expect(f.text()).toContain('Plan saved'); expect(f.text()).not.toContain('Loading plans');
-  expect(f.text()).not.toContain('No plans on the calendar');
+  expect(f.text()).not.toMatch(/No plans on the calendar|No plans yet/);
 });

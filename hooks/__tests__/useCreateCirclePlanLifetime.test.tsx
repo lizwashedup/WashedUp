@@ -11,7 +11,7 @@ let hook:ReturnType<typeof useCreateCirclePlan>, tree:ReactTestRenderer, client:
 let current:boolean;
 const receipt={event_id:'7b42d4c2-8bd2-4f4a-8a52-37275f1c14ef',has_own_chat:true};
 const entryIsCurrent=()=>current;
-function args(extra:any={}):CreateCirclePlanArgs{return {circleId:'circle-a',title:'Beach',startTime:'2040-09-15T23:00:00.000Z',visibility:'circle_only',scope:{userId:'alice',isCurrent:entryIsCurrent},...extra};}
+function args(extra:any={}):CreateCirclePlanArgs{return {circleId:'circle-a',title:'Beach',creatorMessage:'Meet by the beach entrance.',startTime:'2040-09-15T23:00:00.000Z',visibility:'circle_only',scope:{userId:'alice',isCurrent:entryIsCurrent},...extra};}
 function Probe(){hook=useCreateCirclePlan();return null;}
 async function mount(){client=new QueryClient({defaultOptions:{mutations:{retry:false,gcTime:Infinity},queries:{retry:false,gcTime:Infinity}}});invalidate=jest.spyOn(client,'invalidateQueries').mockResolvedValue();await act(async()=>{tree=create(<QueryClientProvider client={client}><Probe/></QueryClientProvider>);});}
 async function flush(){await act(async()=>{await Promise.resolve();await Promise.resolve();});}
@@ -19,7 +19,7 @@ beforeEach(()=>{jest.clearAllMocks();mockGetUser.mockReset();mockRpc.mockReset()
 afterEach(()=>{act(()=>tree?.unmount());client?.clear();});
 it('preserves exact RPC fields, defaults, receipt and existing cache prefixes',async()=>{
  await mount();let result:any;await act(async()=>{result=await hook.mutateAsync(args({memberUserIds:['bob'],locationText:'Beach',primaryVibe:'outdoors'}));});
- expect(result).toEqual(receipt);expect(mockGetUser).toHaveBeenCalledTimes(1);expect(mockRpc).toHaveBeenCalledWith('create_circle_plan',{p_circle_id:'circle-a',p_title:'Beach',p_start_time:'2040-09-15T23:00:00.000Z',p_visibility:'circle_only',p_stranger_cap:null,p_gender_rule:'mixed',p_member_user_ids:['bob'],p_location_text:'Beach',p_description:null,p_primary_vibe:'outdoors'});
+ expect(result).toEqual(receipt);expect(mockGetUser).toHaveBeenCalledTimes(1);expect(mockRpc).toHaveBeenCalledWith('create_circle_plan',{p_circle_id:'circle-a',p_title:'Beach',p_start_time:'2040-09-15T23:00:00.000Z',p_visibility:'circle_only',p_stranger_cap:null,p_gender_rule:'mixed',p_member_user_ids:['bob'],p_location_text:'Beach',p_description:null,p_primary_vibe:'outdoors',p_host_message:'Meet by the beach entrance.',p_image_url:null});
  expect(invalidate.mock.calls.map(([v])=>v.queryKey)).toEqual([['circles','detail','circle-a'],['circle-plans','circle-a'],['events','feed'],['my-plans'],['feed-member-ids']]);
 });
 it.each(['retired','unavailable'] as const)('does not dispatch for %s scope',async kind=>{
@@ -146,4 +146,10 @@ it('protects an unscoped caller only for the same circle and account lifetime',a
  await act(async()=>{await expect(hook.mutateAsync(args({scope:undefined}))).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
  await act(async()=>{expect(await hook.mutateAsync(args({scope:undefined,circleId:'circle-b'}))).toEqual(receipt);});
  expect(mockRpc).toHaveBeenCalledTimes(2);
+});
+
+it.each(['', 'short', 'x'.repeat(151)])('rejects an invalid creator introduction before account lookup or dispatch (%s)', async creatorMessage => {
+ await mount();
+ await act(async () => { await expect(hook.mutateAsync(args({ creatorMessage }))).rejects.toBeInstanceOf(Error); });
+ expect(mockGetUser).not.toHaveBeenCalled(); expect(mockRpc).not.toHaveBeenCalled();
 });

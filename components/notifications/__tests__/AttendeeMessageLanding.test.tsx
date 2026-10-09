@@ -1,3 +1,5 @@
+// Profile header owns its query provider; this suite exercises the surrounding journey.
+jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockLoad = jest.fn(), mockRead = jest.fn(), mockReplace = jest.fn();

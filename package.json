@@ -37,7 +37,7 @@
     "qa:g0:local": "node scripts/deliverability/check-g0-rollout.mjs && npm run qa:consent-sync:local && deno check --no-config supabase/functions/transactional-email-drain/index.ts",
     "qa:migration-inventory": "sh scripts/db-contracts/test-release-inventory.sh",
     "qa:migration-drift": "sh scripts/db-contracts/test-drift-classifier.sh",
-    "qa:test": "jest --runInBand --ci",
+    "qa:test": "node --test qa/run-jest-suites.test.cjs qa/verify-ota-package.test.cjs && node qa/run-jest-suites.cjs",
     "qa:traceability": "node qa/check-traceability.cjs",
     "test:db:static": "node scripts/db-contracts/static-contracts.mjs",
     "test:db:private": "sh scripts/db-contracts/run-private-sql-contracts.sh"

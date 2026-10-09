@@ -82,7 +82,7 @@ function Journey() {
 const action = (title: string) => tree.root.findAllByType(PageAction).find(node => node.props.title === title);
 const field = (label: string) => tree.root.findAllByType(Field).find(node => node.props.label === label)!;
 async function press(title: string) { await act(async () => { const target = action(title); expect(target).toBeDefined(); expect(target!.props.disabled).not.toBe(true); target!.props.onPress(); }); }
-async function tap(label: string) { await act(async () => { tree.root.findAll(node => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function')[0].props.onPress(); }); }
+async function tap(label: string) { await act(async () => { const buttons = tree.root.findAll(node => typeof node.props.onPress === 'function'); expect(buttons.map(node => node.props.accessibilityLabel)).toContain(label); buttons.find(node => node.props.accessibilityLabel === label)!.props.onPress(); }); }
 async function type(label: string, value: string) { await act(async () => field(label).props.onChange(value)); }
 async function back() { await act(async () => tree.root.findByType(PageFrame).props.onBack()); }
 async function mount() { await act(async () => { tree = create(<Journey />); }); }
@@ -133,7 +133,7 @@ it('creates one page, saves in place, refines its preview, submits once, and ret
   await press('Edit private draft'); await press('Save draft'); await back();
   expect(mockStack).toEqual(['/(tabs)/friends', '/creator/pages', `/creator/page?id=${mockId}`]);
   await back(); expect(mockPath()).toBe('/creator/pages'); expect(mockStack).toHaveLength(2);
-  await tap('Manage Sunday Table LA'); expect(mockPath()).toBe(`/creator/page?id=${mockId}`);
+  await tap('Manage Sunday Table LA, Community · Private page'); expect(mockPath()).toBe(`/creator/page?id=${mockId}`);
   mockSubmissions[0].status = 'approved'; await press('Check review status');
   await press('Preview & publish'); expect(mockPath()).toBe(`/creator/page-edit?id=${mockId}&mode=approved`);
   expect(tree.root.findByProps({ testID: 'approved-editor' }).props.children).toBe(mockId);
@@ -151,7 +151,7 @@ it('continues the existing draft from workspace preview and returns to the same 
 
 it('retains existing legacy community identity without routing through new-page creation', async () => {
   mockLegacy.mockResolvedValue([{ id: 'existing-community', name: 'Existing community', kind: 'community', route: '/(creator)/today', legacy: { workspace: 'community', communityId: 'existing-community', status: 'active' } }]);
-  await mount(); await tap('Manage Existing community');
+  await mount(); await tap('Manage Existing community, Community');
   expect(mockSelect).toHaveBeenCalledWith('existing-community'); expect(mockWorkspace).toHaveBeenCalledWith('community');
   expect(mockPath()).toBe('/(creator)/today'); expect(mockStart).not.toHaveBeenCalled(); expect(mockSave).not.toHaveBeenCalled();
 });

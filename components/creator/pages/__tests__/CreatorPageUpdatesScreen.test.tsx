@@ -1,3 +1,4 @@
+// Fake request deadlines, but keep React act() scheduling live between tests.
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { TextInput } from 'react-native';
@@ -96,7 +97,7 @@ it('retiring the visit prevents late send feedback; a different account cannot s
 });
 
 it('ends a stalled review wait without creating a second update', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     mockPrepare.mockImplementation(() => new Promise(() => {}));
     await mount(); act(() => tree.root.findByType(TextInput).props.onChangeText(attempt.body));
@@ -114,7 +115,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 async function advance(ms: number) { await act(async () => { jest.advanceTimersByTime(ms); }); }
 
 it('recovers the original late prepared identity only after an explicit check', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     const write = deferred<any>(); mockPrepare.mockReturnValue(write.promise);
     await mount(); act(() => tree.root.findByType(TextInput).props.onChangeText(attempt.body));
@@ -132,7 +133,7 @@ it('recovers the original late prepared identity only after an explicit check', 
   } finally { jest.useRealTimers(); }
 });
 it('retires a stalled send and checks its eventual receipt without sending again', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     const send = deferred<any>(); pending = { ...attempt };
     mockSend.mockImplementation(() => { pending = { ...attempt, stage: 'dispatched' }; return send.promise; });
@@ -148,7 +149,7 @@ it('retires a stalled send and checks its eventual receipt without sending again
   } finally { jest.useRealTimers(); }
 });
 it('bounds checks and rejects an older check result after a newer check succeeds', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     pending = { ...attempt, stage: 'dispatched' }; await mount();
     const check = deferred<any>(); mockPending.mockReturnValueOnce(check.promise);
@@ -164,7 +165,7 @@ it('bounds checks and rejects an older check result after a newer check succeeds
   } finally { jest.useRealTimers(); }
 });
 it('preserves prepared text when an edit cleanup finishes after timeout', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     pending = { ...attempt }; const remove = deferred<string>(); mockEdit.mockReturnValue(remove.promise);
     await mount(); await press('Edit update'); await advance(25000);
@@ -175,7 +176,7 @@ it('preserves prepared text when an edit cleanup finishes after timeout', async 
   } finally { jest.useRealTimers(); }
 });
 it('keeps a confirmed receipt through timed-out cleanup and permits a new draft only after checking', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
   try {
     pending = { ...attempt, stage: 'dispatched' }; confirmed = receipt;
     const remove = deferred<any>(); mockResolve.mockReturnValue(remove.promise);

@@ -1,3 +1,5 @@
+// Profile header owns its query provider; this suite exercises the surrounding journey.
+jest.mock('../../../ProfileButton', () => ({ __esModule: true, default: () => null }));
 import React,{useEffect,useState} from 'react';import {act,create,type ReactTestRenderer} from 'react-test-renderer';import {Text,TextInput} from 'react-native';
 const mockResolve=jest.fn();let mockUser='0e6e1827-0f87-4e03-b42b-7ade8219725b',mockEpoch=0,mockAccountCurrent=true,mockFocused=true,mockScope:any;const mockAccount={get viewerId(){return mockUser;},get epoch(){return mockEpoch;},isCurrent:()=>mockAccountCurrent,isLoading:false,error:null};
 jest.mock('../../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:mockAccount})}));

@@ -37,6 +37,6 @@ describe('profile context access foundation', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../../app/(tabs)/profile.tsx'), 'utf8');
     expect(source).not.toContain('App build:');
     expect(source).not.toContain("from 'expo-updates'");
-    expect(source).toContain("label: 'Contact Us'");
+    expect(source).toContain("label: appearance ? 'Contact us' : 'Contact Us'");
   });
 });

@@ -1,3 +1,5 @@
+// Account lifecycle has dedicated tests; provide a settled signed-in reader here.
+jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'creator', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() }) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 let mockPagesEnabled = true;
@@ -20,10 +22,10 @@ let tree:ReactTestRenderer;
 const access=(extra={})=>({ledCommunities:[],hasLeaderGrant:false,hasEventHostGrant:false,isRevoked:false,...extra});
 function mount(){act(()=>{tree=create(<Layout/>)});}
 function screen(name:string){return tree.root.findAllByType('ManagementScreen' as any).find(node=>node.props.name===name);}
-beforeEach(()=>{mockPagesEnabled=true;mockWorkspace='community';mockRetry.mockReset();mockQuery={data:access(),isLoading:false,isError:false,isFetching:false,refetch:mockRetry};});
+beforeEach(()=>{mockPagesEnabled=true;mockWorkspace='community';mockRetry.mockReset();mockQuery={data:access(),isLoading:false,isError:false,isFetching:false,isFetchedAfterMount:true,refetch:mockRetry};});
 afterEach(()=>act(()=>tree?.unmount()));
 it('waits for legacy entitlement instead of redirecting an unknown account',()=>{
- mockQuery={...mockQuery,data:undefined,isLoading:true};mount();expect(tree.root.findAllByType('RouteRedirect' as any)).toHaveLength(0);expect(tree.root.findAllByType('ManagementTabs' as any)).toHaveLength(0);
+ mockQuery={...mockQuery,data:undefined,isLoading:true,isFetchedAfterMount:false};mount();expect(tree.root.findAllByType('RouteRedirect' as any)).toHaveLength(0);expect(tree.root.findAllByType('ManagementTabs' as any)).toHaveLength(0);
 });
 it('allows an existing live community creator through without a redirect loop',()=>{
  mockQuery.data=access({ledCommunities:[{id:'live',role:'leader',status:'active'}]});mount();

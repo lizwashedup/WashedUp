@@ -68,9 +68,8 @@ it('retries identity failures and keeps an explicit continue action', async () =
   expect(retryIdentity).toHaveBeenCalledTimes(1);
   expect(fixture.done).not.toHaveBeenCalled();
   act(() => fixture.renderer.root.findAll(node => node.props.accessibilityLabel === 'Continue without inviting' && typeof node.props.onPress === 'function')[0].props.onPress());
-  expect(fixture.done).not.toHaveBeenCalled();
-  expect(fixture.renderer.root.findByType(Modal).props.visible).toBe(false);
-  act(() => fixture.renderer.root.findByType(Modal).props.onDismiss());
+  // The caller owns closing this optional step; repeated completion is ignored.
+  act(() => fixture.renderer.root.findByType(Modal).props.onRequestClose());
   expect(fixture.done).toHaveBeenCalledTimes(1);
 });
 
@@ -93,8 +92,8 @@ it('waits for an empty-list refresh before skipping the optional step exactly on
   people = { ...people, isFetching: false };
   fixture.refresh();
   fixture.refresh();
-  expect(fixture.done).not.toHaveBeenCalled();
-  act(() => fixture.renderer.root.findByType(Modal).props.onDismiss());
+  // No native dismissal event is required to notify the parent.
+
   expect(fixture.done).toHaveBeenCalledTimes(1);
 });
 
@@ -105,8 +104,8 @@ it('prevents Android back dismissal during sending, including before state rende
   act(() => { inline.props.onBusyChange(true); requestClose(); });
   expect(fixture.done).not.toHaveBeenCalled();
   act(() => { inline.props.onBusyChange(false); requestClose(); });
-  expect(fixture.done).not.toHaveBeenCalled();
-  act(() => fixture.renderer.root.findByType(Modal).props.onDismiss());
+  // No native dismissal event is required to notify the parent.
+
   expect(fixture.done).toHaveBeenCalledTimes(1);
 });
 

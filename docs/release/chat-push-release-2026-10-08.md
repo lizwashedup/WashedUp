@@ -54,8 +54,8 @@ deployment or proof of device behavior.
 The full native traceability gate requires the real sibling web/admin repositories.
 The old Desktop siblings contain unrelated local changes/missing files and were
 not repaired or overwritten. Verification uses a separate exact native-source
-snapshot alongside the intact Documents siblings. No test expectations are changed
-or failures suppressed to obtain a release result.
+snapshot alongside the intact Documents siblings. The initial verification did not change tests. The explicitly authorized test-gate
+repair and its complete result are recorded below; no tests were disabled.
 
 ## Recovery
 
@@ -139,3 +139,49 @@ The existing Lima VM was initially stopped. It was started solely for verificati
 test containers were removed by the contract runner. The retained integration
 containers/data were not deleted. The VM is returned to its stopped state after
 verification. The isolated source snapshot is retained for a reproducible follow-up.
+
+
+## Regression lock repaired — October 8, 5:01 PM PDT
+
+Liz explicitly chose repairing the mandatory gate before OTA publication. The
+26 non-passing unchanged-main suites were investigated. Repairs align fixtures
+with the reconciled Build 51 source: observed account/query readiness, required
+plan introduction, the content-read v2 RPC, published discovery metadata,
+separate naming/edit sheets, current navigation/accessible labels, and the
+released parent-owned modal completion contract. Refund tests now provide UUID
+generation and isolated durable storage, so they actually reach and verify
+account retirement before/after dispatch. No app behavior was changed by this
+verification repair and no failing test was skipped.
+
+Two recovery suites now fake request deadlines without replacing React's
+setImmediate/nextTick/microtask scheduling. All 49 of their tests pass together,
+including stalled and late operations. The full gate discovers every Jest suite
+and runs each in its own bounded Node process (two workers). Any timeout, signal,
+missing report, runtime failure or nonzero exit fails the gate. Child processes
+are retired when the gate is interrupted. Eleven separate Node contract tests
+cover runner failure handling and the OTA package compatibility boundary.
+
+Complete `npm run qa:all` exited 0 against the exact candidate source snapshot:
+567/567 suites, 8,664 tests passed, zero failures, one existing pending test in
+workspaceContext (real-database owner-column acceptance). TypeScript, auth/signup
+and complete Docker database contracts, delivery/consent/notification/payout/
+ticket checks, traceability against the real sibling repositories, all 312 static
+migration checks, inventory and drift classifier passed. iOS Hermes export with
+source maps and web export both passed. Evidence and per-suite reports:
+`/Users/liz/Desktop/WashedUp_HQ/chat-verification-20261007/evidence/gate-repair-20261008`.
+The manifest there records the SHA256 of every input copied to the Docker-mounted
+verification checkout. The additional sibling-web runtime check could not start:
+its old dependency snapshot has no tsc executable. No unrelated sibling files
+were changed; this does not invalidate the complete native `qa:all` result.
+
+Only the package.json qa:test command changed. Native dependency versions,
+lockfiles, app/native configuration and the archived Build 51 hashes remain
+unchanged. The manual-archive OTA check now first authenticates the archive's
+package.json against its original pinned SHA256, then permits differences only
+in scripts. All other metadata and dependency fields must remain deeply equal;
+negative contract tests reject changed dependencies, overrides, version, entry
+point or archive provenance. This remains an iOS Build 51-compatible OTA.
+
+PR publication/CI, source-map upload access and exact-update phone evidence are
+still pending at this checkpoint. The existing Expo SENTRY_AUTH_TOKEN is secret
+and cannot be fetched by a local env:exec; no credential was changed or created.
