@@ -1,13 +1,16 @@
+import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
+import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from '../../components/chat/ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { ChatOptionsButton } from '../../components/chat/ChatOptionsButton';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
+import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
 import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
 import ProfileButton from '../../components/ProfileButton';
-import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
@@ -142,7 +145,8 @@ export default function CommunityTopicScreen() {
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollFollow = useChatScrollFollow(!anchor);
+  const { atBottomRef, followingLatest: isAtBottom, setFollowingLatest: setIsAtBottom, captureScrollIntent } = scrollFollow;
   const [unreadWhileScrolled, setUnreadWhileScrolled] = useState(0);
   const selectionRef = useRef({ start: 0, end: 0 });
   const composerInputRef = useRef<TextInput>(null);
@@ -364,13 +368,7 @@ export default function CommunityTopicScreen() {
     if (introLayout) void refreshMessages(true);
     return () => { coreFocused.current = false; };
   }, [!!introLayout, refreshMessages]));
-  useEffect(() => {
-    if (!introLayout) return;
-    const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active' && coreFocused.current) void refreshMessages(true);
-    });
-    return () => subscription.remove();
-  }, [!!introLayout, refreshMessages]);
+  useChatResumeRefresh(refreshMessages, entryIsCurrent, coreFocused);
   const retryIntroStatus = () => {
     if (!entryIsCurrent() || !coreFocused.current || !gateChecking || introRetryAttempt.current || introStatusFetching) return;
     const attempt = {};
@@ -527,32 +525,42 @@ export default function CommunityTopicScreen() {
   };
   const handleSend = async () => {
     if (!entryIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
+    const finishTiming = beginChatTiming('community-topic', 'send-to-confirmation');
+    let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendAttemptRef.current = token; setSending(true);
     const resumingOriginal = !!composerDraft.draft.attempt;
     let preparedOriginal = false;
+    let original: Awaited<ReturnType<typeof composerDraft.prepare>> | null = null;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
-      const original = await composerDraft.prepare();
+      original = await composerDraft.prepare({ detachText: true, onDetach: () => { composerInputRef.current?.clear(); draftRef.current = ''; setMentionQuery(null); } });
       preparedOriginal = true;
       if (!entryIsCurrent()) return;
-      if (!await checkTopicComposerAttempt(id, original, readableScope)) {
+      const alreadyConfirmed = (resumingOriginal || original.kind === 'edit') && await checkTopicComposerAttempt(id, original, readableScope);
+      if (!alreadyConfirmed) {
         if (resumingOriginal) await verifyTopicComposerTarget(id, original, readableScope);
         if (original.kind === 'edit') await editMessage(original.id, original.text, original.mentions, original.edit ?? undefined);
         else await sendMessage(original.text, undefined, original.replyId ?? undefined, undefined, original.id, original.mentions);
-        if (!await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
+        // New text sends return only after their exact receipt is validated.
+        if (original.kind === 'edit' && !await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
       }
       if (!entryIsCurrent()) return;
+      timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
       if (!entryIsCurrent()) return;
-      setMentionQuery(null); stopTyping();
       if (original.kind === 'send' && (gated || gateChecking)) { setJustSaidHi(true); queryClient.invalidateQueries({ queryKey: ['topic-said-hi', id, myId] }); }
-      if (anchor && original.kind === 'send') { setIsAtBottom(true); clearAnchor(); }
+      if (anchor && original.kind === 'send' && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
       else {
-        await refreshMessages(true);
-        if (entryIsCurrent() && !anchor) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+        // The confirmed bubble is already present. History refresh owns its
+        // own loading/error state and must not keep the composer locked.
+        void refreshMessages(true).catch(() => {});
+        if (entryIsCurrent() && !anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       }
     } catch (error) {
+      timingOutcome = 'error';
+      if (original) composerDraft.restoreFailedText(original);
       if (entryIsCurrent() && !isObsoleteTopicOperation(error)) setAlertInfo({ title: preparedOriginal || resumingOriginal ? 'Message not confirmed' : editingMessageId ? 'Changes not saved' : 'Message not sent', message: friendlyError(error, 'Your original message is kept. Check it before trying again.') });
-    } finally { if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
+    } finally { finishTiming(entryIsCurrent() ? timingOutcome : 'retired'); if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
 
   const handleNotifications = async () => {
@@ -576,7 +584,9 @@ export default function CommunityTopicScreen() {
       if (entryIsCurrent()) hapticLight();
     } catch (e) {
       if (!entryIsCurrent() || isObsoleteTopicOperation(e)) return;
-      setAlertInfo({ title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
+      setAlertInfo(e instanceof RequestDeadlineError
+        ? { title: 'Removal not confirmed', message: 'The connection took too long. Reopen this chat to check whether the message was removed.' }
+        : { title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
     }
   };
 
@@ -698,6 +708,7 @@ export default function CommunityTopicScreen() {
     const session = photoSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && photoAttemptRef.current === attempt;
     const sendScope = { userId: myId, isCurrent };
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       let imageUrl = session.uploadedUrl(asset.uri);
       if (!imageUrl) {
@@ -721,8 +732,8 @@ export default function CommunityTopicScreen() {
       setPhotoPreviewOpen(false);
       setPendingPhoto(null);
       session.clear(); photoReplyRef.current = null;
-      if (anchor) { setIsAtBottom(true); clearAnchor(); }
-      else { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
     } catch (e) {
       if (!isCurrent() || isObsoleteTopicOperation(e)) return;
       setPhotoError(session.hasCaption(asset.uri) ? 'Couldn’t confirm delivery. Retry keeps the same photo and caption.' : friendlyError(e, 'Your photo is kept. Try again.'));
@@ -739,14 +750,15 @@ export default function CommunityTopicScreen() {
     const attempt = {}; locationAttemptRef.current = attempt;
     const session = locationSendSessionRef.current;
     const isCurrent = () => attachmentIsCurrent() && locationAttemptRef.current === attempt;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const sendId = session.idFor(JSON.stringify({ latitude, longitude, address }), null);
       await requestWithDeadline(sendLocation(latitude, longitude, address, sendId, { userId: myId, isCurrent }), 25_000);
       if (!isCurrent()) return false;
       session.clear();
       setLocationPickerOpen(false);
-      if (anchor) { setIsAtBottom(true); clearAnchor(); }
-      else { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
+      if (anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); clearAnchor(); }
+      else if (!anchor && scrollIntentIsCurrent()) { setIsAtBottom(true); listRef.current?.scrollToOffset({ offset: 0, animated: false }); }
       return true;
     } catch (error) {
       if (isCurrent() && !isObsoleteTopicOperation(error)) logError(error, 'communityTopic.sendLocation');
@@ -1191,9 +1203,16 @@ export default function CommunityTopicScreen() {
               onLayout={() => {
                 if (!entryIsCurrent()) return;
                 if (anchor) anchorScroll.schedule();
-                else if (isAtBottom) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
               }}
               onScrollToIndexFailed={anchorScroll.onScrollToIndexFailed}
+              onScrollBeginDrag={() => {
+                if (!entryIsCurrent()) return;
+                scrollFollow.onScrollBeginDrag(); anchorScroll.cancel();
+              }}
+              onScrollEndDrag={event => { if (entryIsCurrent()) scrollFollow.onScrollEndDrag(event); }}
+              onMomentumScrollBegin={() => { if (entryIsCurrent()) scrollFollow.onMomentumScrollBegin(); }}
+              onMomentumScrollEnd={event => { if (entryIsCurrent()) scrollFollow.onMomentumScrollEnd(event); }}
               contentContainerStyle={styles.listContent}
               ListFooterComponent={hasOlder || loadingOlder || olderLoadError ? (
                 <TouchableOpacity style={styles.olderButton} onPress={() => { void loadOlder(); }} disabled={loadingOlder} accessibilityRole="button" accessibilityLabel={olderLoadError ? 'Retry loading earlier messages' : 'Load earlier messages'}>
@@ -1204,15 +1223,14 @@ export default function CommunityTopicScreen() {
               ) : null}
               onScroll={(event) => {
                 if (!entryIsCurrent()) return;
-                const atBottom = event.nativeEvent.contentOffset.y <= 80;
-                setIsAtBottom(atBottom);
+                const atBottom = scrollFollow.onScroll(event);
                 if (atBottom) setUnreadWhileScrolled(0);
               }}
-              scrollEventThrottle={100}
+              scrollEventThrottle={16}
               onContentSizeChange={() => {
                 if (!entryIsCurrent()) return;
                 if (anchor) anchorScroll.schedule();
-                else if (isAtBottom) listRef.current?.scrollToOffset({ offset: 0, animated: false });
+                else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
               }}
               ListEmptyComponent={
                 <Text style={styles.emptyLine}>nobody has said anything here yet. go first.</Text>
@@ -1222,6 +1240,7 @@ export default function CommunityTopicScreen() {
               <TouchableOpacity
                 style={styles.scrollLatestBtn}
                 onPress={() => {
+                  setIsAtBottom(true);
                   listRef.current?.scrollToOffset({ offset: 0, animated: true });
                   setUnreadWhileScrolled(0);
                 }}

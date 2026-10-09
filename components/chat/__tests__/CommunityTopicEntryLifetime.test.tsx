@@ -10,7 +10,7 @@ import { MessageActionsMenu } from '../MessageActionsMenu';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, Text, TextInput, TouchableOpacity } from 'react-native';
+import { AppState, FlatList, Text, TextInput, TouchableOpacity } from 'react-native';
 import CommunityTopicScreen from '../../../app/community-topic/[id]';
 import { BrandedAlert } from '../../BrandedAlert';
 import { CommunityChatComposer } from '../CommunityChatComposer';
@@ -31,7 +31,8 @@ const mockPush = jest.fn(), mockInvalidate = jest.fn().mockResolvedValue(undefin
 const mockRefresh = jest.fn().mockResolvedValue(undefined);
 const mockConfirmed = new Set<string>();
 const mockVerifyTarget = jest.fn();
-jest.mock('../../../lib/topicComposerDraft', () => ({ ...jest.requireActual('../../../lib/topicComposerDraft'), verifyTopicComposerTarget: (...args:any[]) => mockVerifyTarget(...args), checkTopicComposerAttempt: async (_room: string, attempt: {id: string}) => mockConfirmed.has(attempt.id) }));
+const mockCheckAttempt = jest.fn();
+jest.mock('../../../lib/topicComposerDraft', () => ({ ...jest.requireActual('../../../lib/topicComposerDraft'), verifyTopicComposerTarget: (...args:any[]) => mockVerifyTarget(...args), checkTopicComposerAttempt: (...args:any[]) => mockCheckAttempt(...args) }));
 const mockReact = jest.fn();
 const mockEdit = jest.fn();
 const mockLocation = jest.fn();
@@ -128,7 +129,7 @@ async function flush() { await act(async () => { for (let i = 0; i < 24; i++) aw
 function type(text: string) { act(() => input().props.onChangeText(text)); }
 beforeEach(async () => {
   mockLocation.mockReset().mockResolvedValue(undefined);
-  await AsyncStorage.clear(); mockConfirmed.clear();
+  await AsyncStorage.clear(); mockConfirmed.clear(); mockCheckAttempt.mockReset().mockImplementation(async (_room: string, attempt: {id:string}) => mockConfirmed.has(attempt.id));
   jest.clearAllMocks(); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
   mockMessagesLoading=false;mockLedCommunities=[];mockFirstMessage=null;mockMessages=[];mockMembers=[];mockArchived=false;
   mockSend.mockResolvedValue(undefined); mockRefresh.mockResolvedValue(undefined); mockVerifyTarget.mockResolvedValue(undefined);
@@ -152,7 +153,7 @@ it('a retired send cannot clear a new room draft or release its active send lock
   mockRoomId='22222222-2222-4222-8222-222222222222';await update();expect(composer().sending).toBe(false);type('B message');
   let freshSend!:Promise<void>;act(()=>{freshSend=composer().onSend();});
   await act(async()=>{old.resolve();await oldSend;});
-  expect(input().props.value).toBe('B message');expect(composer().sending).toBe(true);
+  expect(input().props.value).toBe('');expect(composer().sending).toBe(true);
   await act(async()=>{fresh.resolve();await freshSend;});expect(composer().sending).toBe(false);
 });
 
@@ -278,6 +279,7 @@ it('keeps a mention chosen during an earlier text send', async () => {
   const pending = deferred(); mockSend.mockReturnValue(pending.promise);
   await mount(); type('@A');
   let work!: Promise<void>; act(() => { work = composer().onSend(); });
+  type('@A'); // A new mention belongs to the next draft after the original detaches.
   act(() => mention()!.props.onPress());
   expect(input().props.value).toBe('@Amelia ');
   await act(async () => { pending.resolve(); await work; });
@@ -495,7 +497,7 @@ it('keeps the selected topic mention and UUID in an uncertain send attempt',asyn
  await act(async()=>{await composer().onSend();});
  const raw=await AsyncStorage.getItem(`topic-composer:v1:${mockViewerId}:${mockRoomId}`);const stored=JSON.parse(raw!);
  expect(stored.draft.attempt.mentions.references[0].userId).toBe(mockMembers[0].id);
- expect(stored.draft.mentions.references[0].userId).toBe(mockMembers[0].id);
+ expect(stored.draft.mentions).toBeNull();expect(stored.draft.attemptDetached).toBe(true);
  await act(async()=>{await composer().onSend();});
  expect(mockSend.mock.calls[1][4]).toBe(mockSend.mock.calls[0][4]);expect(mockSend.mock.calls[1][5]).toEqual(mockSend.mock.calls[0][5]);
 });
@@ -695,4 +697,93 @@ it('does not open the camera when camera permission returns after the account ch
   await act(async () => { permission.resolve({ status: 'granted' }); await work; });
   expect(mockCamera).not.toHaveBeenCalled();
   expect(preview().visible).toBe(false);
+});
+
+
+it('finishes a confirmed new topic send without duplicate receipt reads or waiting for history refresh', async () => {
+ mockCheckAttempt.mockReturnValue(new Promise(()=>{}));
+ mockRefresh.mockReturnValue(new Promise(()=>{}));
+ await mount();type('A new topic message');let done=false;
+ act(()=>{void composer().onSend().then(()=>{done=true;});});await flush();await flush();
+ expect(mockSend).toHaveBeenCalledTimes(1);
+ expect(mockCheckAttempt).not.toHaveBeenCalled();
+ expect(done).toBe(true);expect(composer().sending).toBe(false);expect(input().props.value).toBe('');
+});
+
+
+it('catches up an ordinary topic on foreground return and ignores later returns after blur', async () => {
+  const callbacks = new Set<(state: any) => void>();
+  const originalState = AppState.currentState;
+  const originalListener = jest.isMockFunction(AppState.addEventListener) ? jest.mocked(AppState.addEventListener).getMockImplementation() : undefined;
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
+  });
+  const emit = (state: string) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+    act(() => callbacks.forEach(callback => callback(state)));
+  };
+  try {
+    await mount(); await flush(); mockRefresh.mockClear();
+    emit('background'); emit('active'); await flush();
+    expect(mockRefresh).toHaveBeenCalledTimes(1); expect(mockRefresh).toHaveBeenCalledWith(true);
+    emit('active'); await flush(); expect(mockRefresh).toHaveBeenCalledTimes(1);
+    act(() => mockFocusCleanup?.()); emit('background'); emit('active'); await flush();
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => tree?.unmount()); spy.mockRestore();
+    // spyOn reuses the preset's jest.fn; restore its subscription contract.
+    if (originalListener && jest.isMockFunction(AppState.addEventListener)) jest.mocked(AppState.addEventListener).mockImplementation(originalListener);
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
+  }
+});
+
+it('describes an owned-message delete timeout as unconfirmed instead of a definite refusal', async () => {
+  const { RequestDeadlineError } = jest.requireActual('../../../lib/requestWithDeadline');
+  mockDeleteOwn.mockRejectedValueOnce(new RequestDeadlineError());
+  mockMessages = [{...historyMessage('message-a',1),sender_id:mockViewerId}]; await mount();
+  act(() => topicBubble().props.onLongPress());
+  const remove = topicMenu().buttons.find((button:any) => button.text === 'delete this message');
+  expect(remove).toBeDefined();
+  await act(async () => remove.onPress());
+  expect(alert().title).toBe('Removal not confirmed');
+  expect(alert().message).toContain('Reopen this chat');
+  expect(mockDeleteOwn).toHaveBeenCalledTimes(1);
+});
+
+
+it('does not snap back during a drag or a same-turn near-edge scroll and layout', async () => {
+  mockMessages = Array.from({ length: 60 }, (_, index) => historyMessage(`message-${index+1}`, index+1));
+  await mount();
+  const scroll = jest.spyOn(messageList().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    messageList().props.onScrollBeginDrag?.();
+    messageList().props.onContentSizeChange(390, 5000);
+    messageList().props.onScroll({ nativeEvent: { contentOffset: { y: 10 } } });
+    messageList().props.onLayout();
+  });
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+
+it.each(['text', 'photo', 'location'] as const)('respects a newer reading position during delayed topic %s delivery', async kind => {
+  const pending = deferred();
+  (kind === 'location' ? mockLocation : mockSend).mockReturnValueOnce(pending.promise);
+  mockMessages = [historyMessage('message-a', 1)];
+  await mount();
+  let work!: Promise<unknown>;
+  if (kind === 'text') { type('Delayed message'); act(() => { work = composer().onSend(); }); }
+  if (kind === 'photo') { await act(async () => composer().photo.onPress()); act(() => { work = preview().onSend('Caption'); }); }
+  if (kind === 'location') act(() => { work = location().onConfirm(34, -118, 'Ocean Park'); });
+  await flush();
+  const list = () => tree.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => { pending.resolve(); await work; }); await flush();
+  expect(scroll).not.toHaveBeenCalled();
+  expect(composer().sending).toBe(false);
 });

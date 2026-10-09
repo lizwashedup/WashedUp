@@ -1,3 +1,5 @@
+// Profile header owns its query provider; this suite exercises the surrounding journey.
+jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null }));
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import Screen from '../../../app/community-rooms/[id]';

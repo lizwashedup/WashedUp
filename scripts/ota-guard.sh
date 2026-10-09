@@ -289,7 +289,9 @@ if [ "$platform" = "ios" ]; then
     }
     verify_pinned_sha app.json "$target_app_json_sha"
     verify_pinned_sha eas.json "$target_eas_json_sha"
-    verify_pinned_sha package.json "$target_package_json_sha"
+    if ! node scripts/verify-ota-package.cjs "$target_commit" "$target_package_json_sha"; then
+      fail "package.json does not preserve the signed build contract (only scripts may differ)."
+    fi
     verify_pinned_sha package-lock.json "$target_package_lock_sha"
 
     update_json="$(npx eas-cli update:view "$target_update_group" --json 2>/dev/null || true)"

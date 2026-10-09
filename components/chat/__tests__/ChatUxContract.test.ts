@@ -18,7 +18,7 @@ describe('chat and event-form UX contracts', () => {
   it('returns from a conversation to the Chats screen', () => {
     const thread = source('components/chat/ChatThread.tsx');
 
-    expect(thread).toContain("router.replace('/(tabs)/chats' as never)");
+    expect(thread).toContain("router.navigate('/(tabs)/chats' as never)");
   });
 
   it('starts a reply when a plain text message is tapped', () => {
@@ -39,8 +39,9 @@ describe('chat and event-form UX contracts', () => {
     expect(chat).toContain("logError(error, 'useChat.hydrateNewestPage')");
     expect(chat).not.toContain("logError(err, 'useChat.getUser')");
     expect(list).toContain('chatListMemoryCache');
-    expect(list).toContain('const circlePreviewsPromise');
-    expect(list).toContain('setChats(sortChatPreviews(firstPaint));');
+    expect(list).toContain('await Promise.all([loadEvents(), loadCircles()]);');
+    expect(list).toContain("publish('event', firstPaint.map(chat => {");
+    expect(list).toContain("publish('circle', rows, true);");
     expect(list).not.toContain('supabase.auth.getUser');
   });
 

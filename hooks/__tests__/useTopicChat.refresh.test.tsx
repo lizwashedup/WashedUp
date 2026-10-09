@@ -12,7 +12,8 @@ jest.mock('../../lib/topicLoadedHistory', () => ({ readLoadedTopicEdits: (...arg
 jest.mock('../../lib/chatReactionReader', () => ({ readLoadedTopicReactions: (...args: any[]) => mockReadLoadedReactions(...args) }));
 const mockInvalidate = jest.fn();
 const mockClient = { invalidateQueries: mockInvalidate };
-const mockRemoveChannel = jest.fn();
+const mockRemoveChannel = jest.fn(), mockSubscribe = jest.fn();
+let mockClosing = false;
 const mockChannels: Array<{ name: string; callbacks: Record<string, (payload?: any) => void> }> = [];
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient }));
 jest.mock('../../lib/communityChat', () => ({ getTopicMessages: (...args: any[]) => mockRead(...args) }));
@@ -20,6 +21,7 @@ jest.mock('../../lib/blocking', () => ({ getBlockedWith: (...args: any[]) => moc
 jest.mock('../../lib/logger', () => ({ logError: jest.fn() }));
 jest.mock('../../lib/contentFilter', () => ({ checkContent: () => ({ ok: true }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  realtime: {isDisconnecting: () => mockClosing},
   auth: {
     getUser: async () => ({ data: { user: { id: 'viewer' } }, error: null }),
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe: jest.fn() } } }),
@@ -39,7 +41,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
   channel: (name: string) => {
     const callbacks: Record<string, (payload?: any) => void> = {};
     mockChannels.push({ name, callbacks });
-    const channel: any = { on: (kind: string, filter: any, callback: any) => { callbacks[kind === 'system' ? 'system' : filter.table + (filter.event === 'DELETE' ? '_delete' : '')] = callback; return channel; }, subscribe: () => channel };
+    const channel: any = { on: (kind: string, filter: any, callback: any) => { callbacks[kind === 'system' ? 'system' : filter.table + (filter.event === 'DELETE' ? '_delete' : '')] = callback; return channel; }, subscribe: () => {mockSubscribe(name);return channel;} };
     return channel;
   },
   removeChannel: (...args: any[]) => mockRemoveChannel(...args),
@@ -73,6 +75,7 @@ function mount(initial: string | undefined = 'topic-a', initialAnchor: any = nul
 }
 async function flush() { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); }
 beforeEach(() => {
+  mockClosing=false;
   jest.clearAllMocks();
   mockRead.mockReset().mockResolvedValue(page([message(10)], true));
   mockBlocked.mockReset().mockResolvedValue(new Set());
@@ -508,11 +511,11 @@ it('keeps a send confirmed during a pending refresh and preserves another pendin
     sendA = fixture.chat.sendMessage('Same text', undefined, undefined, undefined, 'send-a');
     sendB = fixture.chat.sendMessage('Same text', undefined, undefined, undefined, 'send-b');
   });
-  await act(async () => { first.resolve({ data: { id: 'send-a', created_at: message(20).created_at }, error: null }); await sendA; });
+  await act(async () => { first.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-a', created_at: message(20).created_at }, error: null }); await sendA; });
   await act(async () => { stale.resolve(page([message(10)])); await refresh; });
   expect(fixture.chat.messages.map(row => row.id).sort()).toEqual(['message-10', 'send-a', 'send-b']);
   expect(fixture.chat.messages.find(row => row.id === 'send-b')?.delivery_state).toBe('sending');
-  await act(async () => { second.resolve({ data: { id: 'send-b', created_at: message(21).created_at }, error: null }); await sendB; });
+  await act(async () => { second.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-b', created_at: message(21).created_at }, error: null }); await sendB; });
 });
 
 it('accepts the authoritative server row for the exact pending UUID without duplicating or dropping another send', async () => {
@@ -530,8 +533,8 @@ it('accepts the authoritative server row for the exact pending UUID without dupl
   expect(fixture.chat.messages.filter(row => row.id === 'send-a')).toEqual([confirmed]);
   expect(fixture.chat.messages.find(row => row.id === 'send-b')?.delivery_state).toBe('sending');
   await act(async () => {
-    first.resolve({ data: { id: 'send-a', created_at: confirmed.created_at }, error: null });
-    second.resolve({ data: { id: 'send-b', created_at: message(21).created_at }, error: null });
+    first.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-a', created_at: confirmed.created_at }, error: null });
+    second.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'Same text', id: 'send-b', created_at: message(21).created_at }, error: null });
     await Promise.all([sendA, sendB]);
   });
 });
@@ -579,7 +582,7 @@ it('returning to latest keeps ownership of a send already awaiting its receipt',
   let sending!: Promise<unknown>; act(() => { sending = fixture.chat.sendMessage('See you soon', undefined, undefined, undefined, 'owned-send'); }); await flush();
   fixture.anchor(null); await flush();
   expect(fixture.chat.messages.some(row => row.id === 'owned-send' && row.delivery_state === 'sending')).toBe(true);
-  await act(async () => { receipt.resolve({ data: { id: 'owned-send', created_at: '2026-09-21T12:00:00Z' }, error: null }); await sending; });
+  await act(async () => { receipt.resolve({ data: { topic_id: 'topic-a', sender_id: 'viewer', body: 'See you soon', id: 'owned-send', created_at: '2026-09-21T12:00:00Z' }, error: null }); await sending; });
   expect(fixture.chat.messages.find(row => row.id === 'owned-send')).toMatchObject({ body: 'See you soon', delivery_state: undefined });
 });
 
@@ -653,4 +656,17 @@ it('an unsuccessful delete superseding an edit does not leave older edit refresh
   act(() => mockChannels[0].callbacks.community_topic_messages({eventType:'UPDATE',new:{id:'message-1'}}));
   await flush();
   expect(fixture.chat.messages[0].body).toBe('Authoritative revision');
+});
+
+
+it('waits for socket close on rapid room return and retires earlier delayed joins', async () => {
+ jest.useFakeTimers();try {
+  mockClosing=true;const fixture=mount();await flush();
+  fixture.navigate('topic-b');await flush();fixture.navigate('topic-a');await flush();
+  expect(mockSubscribe).not.toHaveBeenCalled();
+  expect(new Set(mockChannels.map(channel=>channel.name)).size).toBe(3);
+  mockClosing=false;await act(async()=>{jest.advanceTimersByTime(100);});await flush();
+  expect(mockSubscribe).toHaveBeenCalledTimes(1);
+  expect(mockSubscribe).toHaveBeenCalledWith(mockChannels[2].name);
+ }finally{close.splice(0).forEach(fn=>fn());jest.useRealTimers();}
 });

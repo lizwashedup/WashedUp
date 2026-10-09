@@ -397,7 +397,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const [pushPrimerPending, setPushPrimerPending] = useState(false);
   const [pushPrimerFeedback, setPushPrimerFeedback] = useState<string | null>(null);
   const pushPrimerCheckRef = useRef<object | null>(null);
-  const pushPrimerVisitRef = useRef<{ identity: typeof authIdentityRef.current; reason?: PlanNotificationPromptReason; settings?: boolean } | null>(null);
+  const pushPrimerVisitRef = useRef<{ identity: typeof authIdentityRef.current; reason?: PlanNotificationPromptReason; settings?: boolean; upgrade?: boolean } | null>(null);
   const planPrimerShownRef = useRef(false);
   const [planPrimerRequest, setPlanPrimerRequest] = useState<(PlanNotificationPromptRequest & { identity: typeof authIdentityRef.current }) | null>(null);
   const pushPrimerAttemptRef = useRef<object | null>(null);
@@ -627,9 +627,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           if (!isCurrent()) return;
           if (snoozedAt && Date.now() - Number(snoozedAt) < PUSH_PRIMER_COOLDOWN_MS) return;
           const permission = await getPushPromptPermission();
-          if (!isCurrent() || (permission !== 'requestable' && permission !== 'denied')) return;
+          if (!isCurrent() || (permission !== 'requestable' && permission !== 'provisional' && permission !== 'denied')) return;
           pushPrimerVisitRef.current = { identity: planPrimerRequest.identity,
-            reason: planPrimerRequest.reason, settings: permission === 'denied' };
+            reason: planPrimerRequest.reason, settings: permission === 'denied', upgrade: permission === 'provisional' };
           setPushPrimerFeedback(null); setPushPrimerPending(false); setShowPushPrimer(true);
         } catch (error) { if (isCurrent()) logError(error, 'layout.planPushPrimerCheck'); }
         finally { if (isCurrent()) setPlanPrimerRequest(null); }
@@ -690,7 +690,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         if (isCurrent()) retirePushPrimer();
         return;
       }
-      let result = await registerPushNotificationsWithResult({ prompt: false, userId: authedUserId });
+      let result = visit.upgrade
+        ? await registerPushNotificationsWithResult({ prompt: true, userId: authedUserId, canPrompt: isCurrent })
+        : await registerPushNotificationsWithResult({ prompt: false, userId: authedUserId });
       if (!isCurrent()) return;
       // A retry after OS permission was granted only repairs registration;
       // it must not request permission again or silently reverse an opt-out.

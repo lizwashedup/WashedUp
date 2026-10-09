@@ -5,10 +5,12 @@ const root = path.join(__dirname, '..', '..');
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('call-critical creator UX contracts', () => {
-  it('offers a personal-profile exit anywhere the workspace switcher appears', () => {
+  it('offers the shared Yours exit anywhere the workspace switcher appears', () => {
     const source = read('components/creator/WorkspaceSwitcher.tsx');
-    expect(source).toContain("router.replace('/(tabs)/profile')");
-    expect(source).toContain('back to you');
+    expect(source).toContain('<BackToYoursButton');
+    const exit = read('components/creator/BackToYoursButton.tsx');
+    expect(exit).toContain("router.replace('/(tabs)/friends')");
+    expect(exit).toContain('Back to Yours');
     expect(source).not.toContain('if (!hasMultipleWorkspaces(access)) return null');
   });
 
@@ -40,6 +42,7 @@ describe('call-critical creator UX contracts', () => {
     expect(source).toContain('CommunityMessageActions');
     const actions = read('components/communities/CommunityMessageActions.tsx');
     expect(actions).toContain('Reply to this message');
-    expect(actions).toContain("const REACTIONS = ['❤️', '🔥', '👏']");
+    expect(actions).toContain('<ReactionChips');
+    expect(actions).toContain('onAddReaction={currentAction(onAddReaction)}');
   });
 });

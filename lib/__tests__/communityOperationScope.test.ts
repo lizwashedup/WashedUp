@@ -20,7 +20,7 @@ const auth = (id = 'account-a') => ({ data: { user: { id } }, error: null } as a
 const receipt = { id: 'client-uuid', created_at: '2026-09-13T20:00:00Z' };
 const row = { id: 'message-one', sender_id: 'account-a', created_at: receipt.created_at, body: 'hello', kind: 'message', payload: null, image_url: null, edited_at: null };
 function pending<T = any>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
-async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
+async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 const obsolete = { name: 'ObsoleteCommunityOperationError' };
 
 beforeEach(() => {
@@ -28,7 +28,7 @@ beforeEach(() => {
   getUser.mockResolvedValue(auth());
   blocked.mockResolvedValue(new Set());
   rpc.mockResolvedValue({ data: { cards: [], attendee_topics: [] }, error: null } as any);
-  execute.mockReset().mockImplementation((request: Request) => ({ data: request.operation === 'insert' ? receipt : [], error: null }));
+  execute.mockReset().mockImplementation((request: Request) => ({ data: request.operation === 'insert' ? { ...receipt, ...(request.payload as object) } : [], error: null }));
   from.mockImplementation(((table: string) => {
     const request: Request = { table, operation: 'select', filters: [], order: [] }; requests.push(request);
     const chain: any = {};
@@ -108,14 +108,16 @@ it('does not continue blocked filtering or enrichment after the primary page is 
   expect(requests).toHaveLength(1);
 });
 
-it('does not enrich the previous account page after a delayed block check', async () => {
+it('does not return or start further work after a delayed block check loses its account', async () => {
   const check = pending<Set<string>>(); blocked.mockReturnValueOnce(check.promise);
   execute.mockReturnValueOnce({ data: [row], error: null });
   const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
   const assertion = expect(operation).rejects.toMatchObject(obsolete);
-  await flush(); epoch++;
+  await flush();
+  expect(requests).toHaveLength(4);
+  epoch++;
   check.resolve(new Set()); await assertion;
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(4);
 });
 
 it('does not return account-specific reactions from a retired enrichment result', async () => {
@@ -345,21 +347,21 @@ const otherId='54000000-0000-4000-8000-000000000002';
 function alexMention(id=selectedId) { return addChatMentionReference('Hi @Alex',null,id,'Alex',3); }
 it('sends main mentions with the selected identity and confirms the exact saved body', async () => {
  const mentions=alexMention();
- execute.mockResolvedValueOnce({data:{...receipt,body:'Hi @Alex',mention_data:mentions},error:null});
+ execute.mockResolvedValueOnce({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:mentions},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),mentions)).resolves.toBeUndefined();
  expect(requests[0].payload).toMatchObject({body:'Hi @Alex',mention_data:mentions});
- expect(requests[0].columns).toBe('id, created_at, body, mention_data');
+ expect(requests[0].columns).toBe('id, created_at, community_id, sender_id, body, kind, image_url, mention_data');
 });
 it('does not confirm a send from a same-name different-person receipt', async () => {
- execute.mockResolvedValue({data:{...receipt,body:'Hi @Alex',mention_data:alexMention(otherId)},error:null});
+ execute.mockResolvedValue({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:alexMention(otherId)},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),alexMention())).rejects.toThrow('identity');
  expect(requests).toHaveLength(2);
  expect(requests[1].filters).toEqual([['id','client-uuid'],['community_id','community-a'],['sender_id','account-a']]);
 });
 it('can recover a lost main send response with the original mention identity', async () => {
- execute.mockResolvedValueOnce({data:null,error:Error('response lost')}).mockResolvedValueOnce({data:{...receipt,body:'Hi @Alex',mention_data:alexMention()},error:null});
+ execute.mockResolvedValueOnce({data:null,error:Error('response lost')}).mockResolvedValueOnce({data:{...receipt,community_id:'community-a',sender_id:'account-a',kind:'message',image_url:null,body:'Hi @Alex',mention_data:alexMention()},error:null});
  await expect(community.sendCommunityMessage('community-a','Hi @Alex',undefined,'client-uuid',scope(),alexMention())).resolves.toBeUndefined();
- expect(requests[1].columns).toBe('id, created_at, body, mention_data');
+ expect(requests[1].columns).toBe('id, created_at, community_id, sender_id, body, kind, image_url, mention_data');
 });
 it('clears explicit mention identity atomically when editing and checks the exact original revision', async () => {
  const original={id:'message-one',body:'Hi @Alex',edited_at:null,mentions:alexMention()};
@@ -438,7 +440,7 @@ it('bounds a main-chat media insert and reconciles its original receipt', async 
 
 it.each(['id', 'body', 'image_url'])('does not accept a different %s as confirmation of a main-chat photo', async field => {
   execute.mockResolvedValue({ data: { ...receipt, body: 'Caption', image_url: 'https://example.test/photo.jpg', [field]: 'different' }, error: null });
-  await expect(community.sendCommunityMessage('community-a', 'Caption', 'https://example.test/photo.jpg', receipt.id, scope())).rejects.toThrow('saved message differs');
+  await expect(community.sendCommunityMessage('community-a', 'Caption', 'https://example.test/photo.jpg', receipt.id, scope())).rejects.toThrow('saved message or mention identity differs');
 });
 
 it('bounds a stalled media receipt lookup without reporting delivery', async () => {
@@ -471,4 +473,186 @@ it('legacy topic join rejects mismatched auth even before the observer reports i
 it('legacy topic join preserves the initiating user and exact topic upsert', async () => {
  await community.joinTopic('topic-a',scope());
  expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({table:'community_topic_members',operation:'upsert',payload:{topic_id:'topic-a',user_id:'account-a'},conflict:{onConflict:'topic_id,user_id'}});
+});
+
+
+it.each([[200, 400], [400, 200]])('overlaps a %i ms privacy check with %i ms enrichment after history, without early disclosure', async (privacyMs, metadataMs) => {
+  jest.useFakeTimers();
+  try {
+    const hidden = { ...row, id: 'hidden', sender_id: 'blocked-peer' };
+    const delayed = (value: unknown, ms: number) => new Promise(resolve => setTimeout(() => resolve(value), ms));
+    blocked.mockImplementationOnce(() => delayed(new Set(['blocked-peer']), privacyMs) as Promise<Set<string>>);
+    execute.mockImplementation((request: Request) => delayed({ data: request.table === 'community_broadcasts' ? [row, hidden]
+      : request.table === 'profiles_public' ? [{ id: 'account-a', first_name_display: 'A' }]
+      : request.table === 'community_broadcast_reactions' ? [{ broadcast_id: row.id, emoji: 'heart', user_id: 'account-a' }]
+      : [{ broadcast_id: row.id }], error: null }, request.table === 'community_broadcasts' ? 100 : metadataMs));
+    let page: community.CommunityBroadcastPage | undefined;
+    const operation = community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true }).then(result => { page = result; });
+    await jest.advanceTimersByTimeAsync(499);
+    expect(page).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(page?.messages.map(message => message.id)).toEqual([row.id]);
+    expect(page?.messages[0]).toMatchObject({ sender_name: 'A', reply_count: 1, reactions: [{ emoji: 'heart', count: 1, mine: true }] });
+    expect(page?.olderCursor?.id).toBe(hidden.id);
+    await operation;
+  } finally { await jest.runAllTimersAsync(); jest.useRealTimers(); }
+});
+
+it('never returns messages when the account changes while privacy is pending after enrichment', async () => {
+  const privacy = pending<Set<string>>();
+  blocked.mockReturnValueOnce(privacy.promise);
+  execute.mockImplementation((request: Request) => ({ data: request.table === 'community_broadcasts' ? [row] : [], error: null }));
+  const owner = scope();
+  const operation = community.getCommunityBroadcasts('community-a', undefined, owner);
+  const assertion = expect(operation).rejects.toMatchObject(obsolete);
+  await flush();
+  expect(requests.map(request => request.table)).toContain('profiles_public');
+  epoch++;
+  privacy.resolve(new Set());
+  await assertion;
+});
+
+it('keeps a fully blocked page empty even if speculative metadata fails', async () => {
+  blocked.mockResolvedValueOnce(new Set(['account-a']));
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : Promise.reject(Error('Metadata unavailable')));
+  const page = await community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true });
+  expect(page.messages).toEqual([]);
+  expect(page.olderCursor).toEqual({ id: row.id, created_at: row.created_at });
+  await flush();
+});
+
+it('does not start privacy or metadata reads for an empty history page', async () => {
+  const page = await community.getCommunityBroadcasts('community-a', undefined, scope());
+  expect(page).toEqual({ messages: [], hasMore: false, olderCursor: null });
+  expect(blocked).not.toHaveBeenCalled();
+  expect(requests.map(request => request.table)).toEqual(['community_broadcasts']);
+});
+
+
+it('handles an early metadata rejection while privacy is still pending', async () => {
+  const privacy = pending<Set<string>>(), failure = Error('Metadata transport failed');
+  blocked.mockReturnValueOnce(privacy.promise);
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : Promise.reject(failure));
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
+  const assertion = expect(operation).rejects.toBe(failure);
+  await flush();
+  expect(requests).toHaveLength(4);
+  privacy.resolve(new Set());
+  await assertion;
+});
+
+it('fails closed if the privacy transport rejects after metadata has completed', async () => {
+  let rejectPrivacy!: (error: Error) => void;
+  blocked.mockReturnValueOnce(new Promise<Set<string>>((_resolve, reject) => { rejectPrivacy = reject; }));
+  execute.mockImplementation((request: Request) => ({ data: request.table === 'community_broadcasts' ? [row] : [], error: null }));
+  const failure = Error('Privacy unavailable');
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope());
+  const assertion = expect(operation).rejects.toBe(failure);
+  await flush();
+  expect(requests).toHaveLength(4);
+  rejectPrivacy(failure);
+  await assertion;
+});
+
+it('returns a fully blocked page without waiting for stalled metadata', async () => {
+  const metadata = pending();
+  blocked.mockResolvedValueOnce(new Set(['account-a']));
+  execute.mockImplementation((request: Request) => request.table === 'community_broadcasts'
+    ? { data: [row], error: null } : metadata.promise);
+  let result: community.CommunityBroadcastPage | undefined;
+  const operation = community.getCommunityBroadcasts('community-a', undefined, scope(), { strictEnrichment: true }).then(page => { result = page; });
+  await flush();
+  expect(result?.messages).toEqual([]);
+  await operation;
+  epoch++;
+  metadata.resolve({ data: [], error: null });
+  await flush();
+});
+
+
+it('recovers a stalled reply insert using the same receipt after its phase deadline', async () => {
+ jest.useFakeTimers(); const insert=pending();
+ execute.mockReturnValueOnce(insert.promise).mockResolvedValueOnce({data:{...receipt,id:'reply-id',body:'Hello',sender_id:'account-a',broadcast_id:'parent-id'},error:null});
+ const operation=community.sendBroadcastReply('parent-id','Hello',scope(),'reply-id').catch(error=>error);
+ try {
+  await jest.advanceTimersByTimeAsync(12_001);
+  expect(requests).toHaveLength(2);
+  expect(await operation).toBeUndefined();
+  expect(requests[1].filters).toEqual([['id','reply-id'],['broadcast_id','parent-id'],['sender_id','account-a']]);
+ } finally {insert.resolve({data:null,error:Error('Late response')});await operation;jest.useRealTimers();}
+});
+
+it('ends a stalled reply identity check without dispatching a write', async () => {
+ jest.useFakeTimers();const identity=pending();getUser.mockReturnValueOnce(identity.promise);
+ let finished=false;const operation=community.sendBroadcastReply('parent-id','Hello',scope(),'reply-id').catch(error=>{finished=true;return error;});
+ try {
+  await jest.advanceTimersByTimeAsync(8_001);expect(finished).toBe(true);
+  expect(await operation).toMatchObject({name:'RequestDeadlineError'});expect(requests).toHaveLength(0);
+ } finally {identity.resolve(auth());await operation;jest.useRealTimers();}
+});
+
+
+it.each(['id','community_id','sender_id','body','kind','image_url','mention_data'])('rejects a main text receipt with different %s', async field => {
+ const saved={...receipt,community_id:'community-a',sender_id:'account-a',body:'Hello',kind:'message',image_url:null,mention_data:null,[field]:'wrong'};
+ execute.mockResolvedValue({data:saved,error:null});
+ await expect(community.sendCommunityMessage('community-a','Hello',undefined,receipt.id,scope())).rejects.toThrow();
+ expect(requests.filter(request=>request.operation==='insert')).toHaveLength(1);
+ expect(requests[1].filters).toEqual([['id',receipt.id],['community_id','community-a'],['sender_id','account-a']]);
+});
+
+it('bounds both reply write and receipt lookup without dispatching a second write', async () => {
+ jest.useFakeTimers(); const insert = pending(), lookup = pending();
+ execute.mockReturnValueOnce(insert.promise).mockReturnValueOnce(lookup.promise);
+ let finished = false;
+ const operation = community.sendBroadcastReply('parent-id', 'Hello', scope(), 'reply-id').catch(error => { finished = true; return error; });
+ try {
+  await jest.advanceTimersByTimeAsync(12_001);
+  expect(finished).toBe(false); expect(requests).toHaveLength(2);
+  await jest.advanceTimersByTimeAsync(8_000);
+  expect(finished).toBe(true); expect(await operation).toMatchObject({ name: 'RequestDeadlineError' });
+  expect(requests.filter(request => request.operation === 'insert')).toHaveLength(1);
+ } finally {
+  insert.resolve({ data: null, error: Error('Late insert') }); lookup.resolve({ data: null, error: null });
+  await operation; jest.useRealTimers();
+ }
+});
+
+it('publishes read-only text after privacy, before slow metadata, then returns complete details',async()=>{
+ const privacy=pending<Set<string>>(),metadata=pending();blocked.mockReturnValueOnce(privacy.promise);
+ execute.mockImplementation((r:Request)=>r.table==='community_broadcasts'?{data:[row,{...row,id:'blocked',sender_id:'blocked-person'}],error:null}:metadata.promise);
+ const onBasicPage=jest.fn();const operation=community.getCommunityBroadcasts('community-a',undefined,scope(),{strictEnrichment:true,onBasicPage});
+ await flush();expect(onBasicPage).not.toHaveBeenCalled();
+ privacy.resolve(new Set(['blocked-person']));await flush();
+ expect(onBasicPage).toHaveBeenCalledTimes(1);expect(onBasicPage.mock.calls[0][0].messages).toMatchObject([{id:row.id,metadata_pending:true,reactions:[],reply_count:0}]);
+ metadata.resolve({data:[],error:null});const full=await operation;expect(full.messages).toHaveLength(1);expect(full.messages[0].metadata_pending).toBeUndefined();
+});
+it('publishes no early text when privacy fails or the account retires',async()=>{
+ const privacy=pending<Set<string>>();blocked.mockReturnValueOnce(privacy.promise);execute.mockImplementation((r:Request)=>({data:r.table==='community_broadcasts'?[row]:[],error:null}));
+ const onBasicPage=jest.fn();const operation=community.getCommunityBroadcasts('community-a',undefined,scope(),{onBasicPage});const failure=expect(operation).rejects.toMatchObject(obsolete);
+ await flush();epoch++;privacy.resolve(new Set());await failure;expect(onBasicPage).not.toHaveBeenCalled();
+});
+it('does not promote missing metadata to confirmed empty reactions after early text',async()=>{
+ execute.mockImplementation((r:Request)=>r.table==='community_broadcasts'?{data:[row],error:null}:{data:null,error:Error('Metadata failed')});
+ const onBasicPage=jest.fn();await expect(community.getCommunityBroadcasts('community-a',undefined,scope(),{strictEnrichment:true,onBasicPage})).rejects.toThrow('Metadata failed');
+ expect(onBasicPage.mock.calls[0][0].messages[0].metadata_pending).toBe(true);
+});
+
+it('bounds topic moderation deletion without repeating its write', async () => {
+  jest.useFakeTimers();
+  const deletion = pending(); let operation!: Promise<unknown>;
+  try {
+    execute.mockReturnValueOnce(deletion.promise);
+    let settled = false;
+    operation = community.deleteTopicMessage('message-one').catch(error => error).then(value => {settled=true;return value;});
+    await flush(); await jest.advanceTimersByTimeAsync(12000); await flush();
+    expect(settled).toBe(true);
+    expect(await operation).toMatchObject({name:'RequestDeadlineError'});
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({table:'community_topic_messages',operation:'delete',filters:[['id','message-one']]});
+  } finally {
+    deletion.resolve({error:null}); await operation;
+    jest.useRealTimers();
+  }
 });

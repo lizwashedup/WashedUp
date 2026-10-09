@@ -2,15 +2,25 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useBlock } from '../useBlock';
+import { chatListMemoryCache, subscribeChatListPrivacy } from '../../lib/chatListCache';
+import { consumeChatListDirty } from '../../lib/chatListSignal';
 
 const mockGetUser = jest.fn(), mockRead = jest.fn(), mockWrite = jest.fn(), mockReport = jest.fn(), mockInvalidate = jest.fn();
+const mockWriteFilters = jest.fn();
 const mockQueryClient = { invalidateQueries: mockInvalidate };
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockQueryClient }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: (...args: any[]) => mockGetUser(...args) },
   from: (table: string) => table === 'reports' ? { insert: (...args: any[]) => mockReport(...args) } : {
     select: () => ({ eq: (_key: string, id: string) => ({ single: () => mockRead(id) }) }),
-    update: (value: unknown) => ({ eq: (_key: string, id: string) => mockWrite(id, value) }),
+    update: (value: unknown) => {
+      let id = '';
+      const query: any = {
+        eq: (key: string, next: string) => { if (key === 'id') id = next; else mockWriteFilters(key, next); return query; },
+        is: (key: string, next: null) => { mockWriteFilters(key, next); return query; },
+        select: () => query, maybeSingle: () => mockWrite(id, value),
+      }; return query;
+    },
   },
 } }));
 let tree: ReactTestRenderer, controller: ReturnType<typeof useBlock>;
@@ -24,9 +34,10 @@ async function mount() { await act(async () => { tree = create(<Harness />); });
 async function open(context?: ReturnType<typeof scope>) { await act(async () => controller.blockUser('target', 'Jamie', after, context)); }
 function confirm() { return (jest.mocked(Alert.alert).mock.calls[0][2]![1].onPress as () => Promise<void>); }
 beforeEach(() => {
+  chatListMemoryCache.clear(); consumeChatListDirty();
   jest.useFakeTimers(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); current = 'alice';
   mockGetUser.mockResolvedValue(user('alice')); mockRead.mockResolvedValue({ data: { blocked_users: ['existing'] }, error: null });
-  mockWrite.mockResolvedValue({ error: null }); mockReport.mockResolvedValue({ error: null }); mockInvalidate.mockResolvedValue(undefined);
+  mockWrite.mockImplementation(async (id: string, value: any) => ({ data: { id, ...value }, error: null })); mockReport.mockResolvedValue({ error: null }); mockInvalidate.mockResolvedValue(undefined);
 });
 afterEach(async () => { await act(async () => tree?.unmount()); jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
@@ -78,6 +89,28 @@ it.each(['read', 'write'] as const)('does not report success when a scoped %s re
   expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
 });
 
+it.each(['auth', 'read', 'write', 'missing-profile'] as const)('does not report unscoped success or remove previews after %s fails', async stage => {
+  const row = { is_dm: true, dm_user_id: 'target', conversationId: 'dm-target' } as any;
+  chatListMemoryCache.set('alice', [row]);
+  if (stage === 'auth') mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'alice' } }, error: new Error('auth failed') });
+  else (stage === 'write' ? mockWrite : mockRead).mockResolvedValueOnce({ data: null, error: stage === 'missing-profile' ? null : new Error('failed') });
+  await mount(); await open(); await act(async () => confirm()()); act(() => jest.runOnlyPendingTimers());
+  expect(after).not.toHaveBeenCalled(); expect(mockReport).not.toHaveBeenCalled();
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+  expect(chatListMemoryCache.get('alice')).toEqual([row]); expect(consumeChatListDirty()).toBe(false);
+});
+
+it.each([false, true])('removes only the matching account/private preview after confirmation (already blocked: %s)', async alreadyBlocked => {
+  const row = (conversationId: string, dm_user_id: string, is_dm = true) => ({ conversationId, dm_user_id, is_dm, title: 'Same display name' }) as any;
+  chatListMemoryCache.set('alice', [row('target-dm', 'target'), row('other-dm', 'other'), row('shared-circle', 'target', false)]);
+  chatListMemoryCache.set('bob', [row('bob-dm', 'target')]);
+  if (alreadyBlocked) mockRead.mockResolvedValueOnce({ data: { blocked_users: ['target'] }, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(chatListMemoryCache.get('alice')?.map(chat => chat.conversationId)).toEqual(['other-dm', 'shared-circle']);
+  expect(chatListMemoryCache.get('bob')?.map(chat => chat.conversationId)).toEqual(['bob-dm']);
+  expect(consumeChatListDirty()).toBe(true); expect(after).toHaveBeenCalledTimes(1);
+});
+
 
 it('serializes repeated scoped confirmation callbacks before auth resolves', async () => {
   const pending = deferred<any>(); mockGetUser.mockReturnValueOnce(pending.promise);
@@ -106,4 +139,50 @@ it('does not let an old completion release a new account block attempt', async (
 it('retires an open scoped native confirmation when its hook unmounts', async () => {
   await mount(); await open(scope()); const commit = confirm(); await act(async () => tree.unmount());
   await act(async () => commit()); expect(mockGetUser).not.toHaveBeenCalled(); expect(mockWrite).not.toHaveBeenCalled();
+});
+
+it.each([null, { id: 'bob', blocked_users: ['existing', 'target'] }, { id: 'alice', blocked_users: ['existing'] },
+  { id: 'alice', blocked_users: ['target'] }])('requires a matching saved block receipt: %j', async receipt => {
+  mockWrite.mockResolvedValueOnce({ data: receipt, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(after).not.toHaveBeenCalled(); expect(mockReport).not.toHaveBeenCalled();
+  expect(consumeChatListDirty()).toBe(false);
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+});
+it.each([null, [], ['existing']])('compares the stored array before writing so concurrent blocks cannot be overwritten: %j', async stored => {
+  mockRead.mockResolvedValueOnce({ data: { blocked_users: stored }, error: null });
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(mockWriteFilters).toHaveBeenCalledWith('blocked_users', stored === null ? null : `{${stored.join(',')}}`);
+  expect(after).toHaveBeenCalledTimes(1);
+});
+it('finishes a confirmed block even if the best-effort report never resolves', async () => {
+  mockReport.mockReturnValueOnce(new Promise(() => {}));
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(after).toHaveBeenCalledTimes(1); expect(controller.blocking).toBe(false);
+  expect(consumeChatListDirty()).toBe(true);
+});
+it('does not repeat or revive an unscoped confirmation after unmount', async () => {
+  const pending = deferred<any>(); mockGetUser.mockReturnValueOnce(pending.promise);
+  await mount(); await open(); const commit = confirm(); let first!: Promise<void>;
+  act(() => { first = commit(); void commit(); }); expect(mockGetUser).toHaveBeenCalledTimes(1);
+  act(() => tree.unmount()); await act(async () => { pending.resolve(user('alice')); await first; await commit(); });
+  expect(mockWrite).not.toHaveBeenCalled(); expect(after).not.toHaveBeenCalled();
+});
+it.each(['auth', 'read', 'write'] as const)('ends a stalled %s with an error and no false success', async stage => {
+  ({ auth: mockGetUser, read: mockRead, write: mockWrite })[stage].mockReturnValueOnce(new Promise(() => {}));
+  await mount(); await open(scope()); let work!: Promise<void>; act(() => { work = confirm()(); });
+  await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+  await act(async () => { jest.advanceTimersByTime(12_000); await work; });
+  expect(after).not.toHaveBeenCalled(); expect(controller.blocking).toBe(false);
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+});
+
+it('invalidates the initiating account before the privacy signal retires its chat entry', async () => {
+  const stop = subscribeChatListPrivacy(() => { current = 'retired'; });
+  try {
+    await mount(); await open(scope()); await act(async () => confirm()());
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['profile-blocked'] });
+    expect(mockInvalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: expect.arrayContaining(['alice']) }));
+    expect(consumeChatListDirty()).toBe(true); expect(after).not.toHaveBeenCalled();
+  } finally { stop(); }
 });

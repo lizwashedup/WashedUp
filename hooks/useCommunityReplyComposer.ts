@@ -1,3 +1,4 @@
+import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../lib/chatSendReceipt';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TextInput } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
@@ -54,18 +55,20 @@ export function useCommunityReplyComposer(parentId: string, parentScope: Communi
     try{
       const previous=composer.draft.attempt;
       if(checkOnly&&!previous)return;
-      const attempt=previous??await composer.prepare();
+      const attempt=previous??await composer.prepare({detachText:true,onDetach:()=>{
+        input.current?.clear();textRef.current='';caret.current=0;setQuery(null);
+      }});
       if(!scope.isCurrent())return;
       const confirmed=previous?await checkTopicComposerAttempt(room,attempt,scope):false;
       if(!confirmed){
         if(checkOnly){setFailure('Your reply is kept. Retry the original when you’re ready.');return;}
         if(previous)await verifyTopicComposerTarget(room,attempt,scope);
-        await requestWithDeadline(sendBroadcastReply(parentId,attempt.text,scope,attempt.id,attempt.mentions??null),12_000);
+        await requestWithDeadline(sendBroadcastReply(parentId,attempt.text,scope,attempt.id,attempt.mentions??null),CHAT_SEND_ATTEMPT_DEADLINE_MS);
       }
       if(!scope.isCurrent())return;
       await composer.finish(attempt);
       if(!scope.isCurrent())return;
-      setQuery(null);onSent();
+      onSent();
     }catch(error){if(scope.isCurrent())setFailure(friendlyError(error,'Your reply is kept. Check the original before trying again.'));}
     finally{if(attemptRef.current===token){attemptRef.current=null;if(current())setSending(false);}}
   };

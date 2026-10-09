@@ -3,9 +3,11 @@ import { act, create } from 'react-test-renderer';
 import { useTypingIndicator } from '../useTypingIndicator';
 
 const mockChannels: any[] = [];
+let mockDisconnecting = false;
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  realtime: { isDisconnecting: () => mockDisconnecting },
   channel: (name: string) => {
-    const channel: any = { name, send: jest.fn().mockResolvedValue(undefined), on: (_type: string, _filter: any, callback: any) => { channel.receive = callback; return channel; }, subscribe: (callback: any) => { channel.status = callback; return channel; } };
+    const channel: any = { name, send: jest.fn().mockResolvedValue(undefined), on: (_type: string, _filter: any, callback: any) => { channel.receive = callback; return channel; }, subscribe: jest.fn((callback: any) => { if (!mockDisconnecting) channel.status = callback; return channel; }) };
     mockChannels.push(channel); return channel;
   },
   removeChannel: jest.fn(),
@@ -18,7 +20,7 @@ function mount(scene = initial) { act(() => { tree = create(<Harness scene={scen
 function update(scene: Scene) { act(() => { tree.update(<Harness scene={scene} />); }); }
 function subscribe(index = mockChannels.length - 1) { act(() => mockChannels[index].status('SUBSCRIBED')); }
 function receive(index: number, userId = 'friend', name = 'Friend', isTyping = true) { act(() => mockChannels[index].receive({ payload: { userId, name, isTyping } })); }
-beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-09-13T12:00:00Z')); mockChannels.splice(0); });
+beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-09-13T12:00:00Z')); mockChannels.splice(0); mockDisconnecting = false; });
 afterEach(() => { act(() => tree?.unmount()); jest.clearAllTimers(); jest.useRealTimers(); });
 
 it('clears an old room’s rendered peers even when the next room receives no broadcasts', () => {
@@ -80,4 +82,64 @@ it.each(['event', 'circle', 'community-topic'] as const)('preserves %s channel n
   receive(0); act(() => jest.advanceTimersByTime(3001)); act(() => typing.broadcastTyping()); expect(channel.send).toHaveBeenCalledTimes(2);
   act(() => jest.advanceTimersByTime(5000)); expect(typing.typingUsers).toEqual([]);
   expect(channel.send).toHaveBeenLastCalledWith({ type: 'broadcast', event: 'typing', payload: { userId: 'alice', name: 'Alice', isTyping: false } });
+});
+
+it('does not consume the typing throttle before the channel is ready', () => {
+  mount(); act(() => typing.broadcastTyping()); subscribe(); act(() => typing.broadcastTyping());
+  expect(mockChannels[0].send).toHaveBeenCalledTimes(1);
+});
+it.each(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])('clears stale peers and suspends broadcasts after %s', status => {
+  mount(); subscribe(); receive(0); act(() => typing.broadcastTyping());
+  const channel = mockChannels[0]; act(() => channel.status(status));
+  expect(typing.typingUsers).toEqual([]);
+  act(() => { jest.advanceTimersByTime(5001); typing.broadcastTyping(); });
+  expect(channel.send).toHaveBeenCalledTimes(1);
+  subscribe(); act(() => typing.broadcastTyping()); expect(channel.send).toHaveBeenCalledTimes(2);
+});
+it('ignores malformed peer identity/state and makes a malformed name renderable', () => {
+  mount(); const channel = mockChannels[0];
+  act(() => {
+    channel.receive({ payload: { userId: {}, isTyping: true } });
+    channel.receive({ payload: { userId: 'friend', isTyping: 'true' } });
+  });
+  expect(typing.typingUsers).toEqual([]);
+  act(() => channel.receive({ payload: { userId: 'friend', isTyping: true, name: { bad: 'payload' } } }));
+  expect(typing.typingUsers).toEqual([{ userId: 'friend', name: 'Someone' }]);
+});
+
+
+it('waits for the last socket to close before joining the shared typing channel', () => {
+  mockDisconnecting = true;
+  mount();
+  const channel = mockChannels[0];
+  expect(channel.subscribe).not.toHaveBeenCalled();
+  act(() => jest.advanceTimersByTime(150));
+  expect(channel.subscribe).not.toHaveBeenCalled();
+  mockDisconnecting = false;
+  act(() => jest.advanceTimersByTime(50));
+  expect(channel.subscribe).toHaveBeenCalledTimes(1);
+  subscribe();
+  act(() => typing.broadcastTyping());
+  expect(channel.send).toHaveBeenCalledTimes(1);
+  expect(channel.name).toBe('typing:plan-a');
+});
+
+it('retires a delayed typing join when the room changes or unmounts', () => {
+  mockDisconnecting = true;
+  mount();
+  const old = mockChannels[0];
+  update({ ...initial, id: 'plan-b' });
+  const current = mockChannels[1];
+  mockDisconnecting = false;
+  act(() => jest.advanceTimersByTime(50));
+  expect(old.subscribe).not.toHaveBeenCalled();
+  expect(current.subscribe).toHaveBeenCalledTimes(1);
+  mockDisconnecting = true;
+  update(initial);
+  const retired = mockChannels[2];
+  act(() => tree.unmount());
+  mockDisconnecting = false;
+  act(() => jest.advanceTimersByTime(100));
+  expect(retired.subscribe).not.toHaveBeenCalled();
+  expect(jest.getTimerCount()).toBe(0);
 });

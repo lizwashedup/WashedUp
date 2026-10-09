@@ -156,3 +156,59 @@ it('surfaces a stalled ordinary draft save and recovers the same words before se
     expect(hook.error).toBe(false); expect(hook.draft).toMatchObject({ text: 'Words awaiting storage', attempt: null });
   } finally { blockedWrite.resolve(); await flush(); }
 });
+
+it('detaches before a slow storage write and preserves identical next typing across a saved reload', async () => {
+  await act(async () => { tree = create(<Harness />); });
+  await act(async () => hook.change({ text: 'Hello' })); await flush();
+  const blockedWrite = deferred(); const write = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce((key, value) => blockedWrite.promise.then(() => write(key, value)));
+  const transport = jest.fn(); let preparing!: Promise<ChatDraftAttempt>;
+  act(() => { preparing = hook.prepare({detachText:true}).then(value => { transport(); return value; }); }); await flush();
+  expect(hook.draft.text).toBe(''); expect(hook.draft.attempt?.text).toBe('Hello'); expect(transport).not.toHaveBeenCalled();
+  await act(async () => hook.change({text:'Hello'}));
+  blockedWrite.resolve(); await flush(); const original = await preparing;
+  expect(transport).toHaveBeenCalledTimes(1);
+  await act(async () => hook.retry()); // Reload the serialized distinction, not just in-memory state.
+  await act(async () => hook.finish(original));
+  expect(hook.draft.text).toBe('Hello'); expect(hook.draft.attempt).toBeNull();
+});
+
+it('preserves an identical revision made during reply validation without clearing its native editor',async()=>{
+ const checking=deferred();const library=require('../../lib/chatComposerDraft');
+ const verify=jest.spyOn(library,'verifyChatComposerTarget').mockReturnValue(checking.promise);
+ try{
+  await act(async()=>{tree=create(<Harness/>);});await act(async()=>hook.change({text:'Hello',reply:{id:'parent',content:'Parent',senderName:'Amelia'}}));await flush();
+  const clear=jest.fn();let preparing!:Promise<ChatDraftAttempt>;
+  act(()=>{preparing=hook.prepare({detachText:true,onDetach:clear});});
+  await act(async()=>hook.change({text:'Hello'}));
+  checking.resolve();await flush();const original=await preparing;
+  expect(clear).not.toHaveBeenCalled();
+  await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');
+ }finally{verify.mockRestore();}
+});
+
+it('keeps a newer durably saved draft usable when the original preparation write rejects', async () => {
+  await act(async () => { tree = create(<Harness />); });
+  await act(async () => hook.change({ text: 'Original awaiting storage' })); await flush();
+  let reject!: (error: Error) => void;
+  const blocked = new Promise<void>((_yes, no) => { reject = no; });
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(() => blocked);
+  const transport = jest.fn(); let failure: unknown;
+  let preparing!: Promise<void>;
+  act(() => { preparing = hook.prepare({ detachText: true }).then(transport).catch(error => { failure = error; }); });
+  await flush();
+  const original = hook.draft.attempt!;
+  await act(async () => hook.change({ text: 'Next words safely queued' })); await flush();
+  await act(async () => { reject(Error('Original write failed')); await preparing; }); await flush();
+  expect(failure).toBeInstanceOf(Error);
+  expect(transport).not.toHaveBeenCalled();
+  expect(hook.draft).toMatchObject({ text: 'Next words safely queued', attempt: original });
+  const saved = await jest.requireActual('../../lib/chatComposerDraft').readChatComposer(room, owner);
+  expect(saved.unsaved).toBe(false);
+  expect(saved.draft).toMatchObject({ text: 'Next words safely queued', attempt: original });
+  expect(hook.error).toBe(false);
+  let retry!: ChatDraftAttempt;
+  await act(async () => { retry = await hook.prepare({detachText:true}); });
+  expect(retry.id).toBe(original.id);
+  expect(hook.draft.text).toBe('Next words safely queued');
+});

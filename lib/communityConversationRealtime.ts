@@ -1,18 +1,10 @@
+import { subscribeChatWhenReady } from './chatRealtimeSubscription';
 import { supabase } from './supabase';
 
 let nextSubscription = 0;
 
 function subscribeWhenReady(channel: ReturnType<typeof supabase.channel>, current: () => boolean) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const start = () => {
-    if (!current()) return;
-    // The SDK ignores connect() during its asynchronous last-channel close.
-    // A rapid room return must wait for that close before issuing its join.
-    if (supabase.realtime.isDisconnecting()) { timer = setTimeout(start, 50); return; }
-    channel.subscribe();
-  };
-  start();
-  return () => { if (timer) clearTimeout(timer); };
+  return subscribeChatWhenReady(() => supabase.realtime.isDisconnecting(), () => { channel.subscribe(); }, current);
 }
 
 type Refresh = {

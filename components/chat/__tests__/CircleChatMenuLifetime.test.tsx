@@ -11,7 +11,7 @@ import { buildComposerWithPerson } from '../../../lib/composerLink';
 
 let mockAnchor: string | undefined;
 let mockRoomId = 'circle-one', mockViewerId: string | null = 'account-a', mockEpoch = 1;
-let mockError = false, mockNamed = false, mockLoading = false;
+let mockError = false, mockNamed = false, mockLoading = false, mockUnavailable = false;
 const mockRefetch = jest.fn();
 const mockPush = jest.fn(), mockBack = jest.fn();
 const mockMember = (id: string, name: string) => ({ user_id: id, first_name_display: name, profile_photo_url: null });
@@ -29,14 +29,14 @@ jest.mock('../../../hooks/useCircle', () => ({ useCircle: (id: string) => {
   const isCurrentViewer = React.useCallback(() => viewerId === mockViewerId && viewerEpoch === mockEpoch, [viewerId, viewerEpoch]);
   return {
     isError: mockError, isLoading: mockLoading, isFetching: mockLoading, refetch: mockRefetch, viewerId, viewerEpoch, isCurrentViewer,
-    data: mockLoading ? undefined : { circle: { id, name: mockNamed ? 'Our circle' : '' }, members: [mockMember(mockViewerId ?? 'account-a', 'Me'), mockMember('member-one', 'Jamie')] },
+    data: mockLoading ? undefined : mockUnavailable ? null : { circle: { id, name: mockNamed ? 'Our circle' : '' }, members: [mockMember(mockViewerId ?? 'account-a', 'Me'), mockMember('member-one', 'Jamie')] },
   };
 } }));
 jest.mock('../ChatThread', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../menu/MenuCard', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../circles/AddPeopleSheet', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../circles/plan/CirclePlanComposer', () => ({ __esModule: true, default: () => null }));
-jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
+jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('lucide-react-native', () => ({ CalendarPlus: () => null, Users: () => null, ChevronLeft: () => null, MessageCircle: () => null }));
 
 let tree: ReactTestRenderer | undefined;
@@ -60,7 +60,7 @@ function chooseDm(key: 'plan' | 'circle') {
   return menu().onClosed;
 }
 beforeEach(() => {
-  mockAnchor=undefined; jest.clearAllMocks(); mockRoomId = 'circle-one'; mockViewerId = 'account-a'; mockEpoch = 1; mockNamed = false; mockError = false; mockLoading = false;
+  mockAnchor=undefined; jest.clearAllMocks(); mockRoomId = 'circle-one'; mockViewerId = 'account-a'; mockEpoch = 1; mockNamed = false; mockError = false; mockLoading = false; mockUnavailable = false;
   nativeMenus = []; androidMenus = [];
   jest.replaceProperty(Platform, 'OS', 'ios');
   jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((options, choose) => { nativeMenus.push({ options, choose }); });
@@ -200,4 +200,19 @@ it('offers retry after Circle or direct chat details fail', async () => {
 it.each([true,false])('passes a reaction target through an admitted named-circle=%s route', async named => {
  mockNamed=named;mockAnchor='33333333-3333-4333-8333-000000000100';await mount();
  expect(thread().reactionMessageId).toBe(mockAnchor);expect(thread().reactionMessageSource).toBe('chat');
+});
+
+it('shows the neutral unavailable entry without mounting private chat or exposing the peer', async () => {
+  mockUnavailable = true; await mount();
+  expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
+  expect(tree!.root.findAllByType(MenuCard)).toHaveLength(0);
+  const text = tree!.root.findAllByType(Text).map(node => node.props.children);
+  expect(text).toContain('Chat unavailable'); expect(text).not.toContain('Jamie');
+});
+it('removes a newly blocked conversation and rejects its retained profile and plan actions', async () => {
+  await mount(); const viewPerson = thread().onViewContext;
+  openPlus(); const closed = chooseDm('plan'); mockUnavailable = true; mockEpoch++; await update();
+  act(() => { closed(); viewPerson(); }); expect(mockPush).not.toHaveBeenCalled();
+  expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
+  expect(tree!.root.findAllByType(CirclePlanComposer)).toHaveLength(0);
 });

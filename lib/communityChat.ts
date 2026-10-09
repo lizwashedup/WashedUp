@@ -1,3 +1,4 @@
+import { measureChatPhase } from './chatPerformance';
 import { validOptionalMentionDocument, trimChatMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from './chatMentionIdentity';
 import type { TopicDraftEdit } from './topicComposerDraft';
 import { requestWithDeadline } from './requestWithDeadline';
@@ -388,6 +389,8 @@ export interface IntroPayload {
 }
 
 export interface CommunityBroadcast {
+  /** Text passed privacy checks; reactions, reply counts and sender details are not ready. */
+  metadata_pending?: boolean;
   mention_data?: ChatMentionDocument | null;
   id: string;
   body: string;
@@ -449,6 +452,8 @@ export interface CommunityBroadcastPage {
 
 /** Exact-source reads let the D09 reader reuse enrichment without scanning another room. */
 export interface CommunityMessageReadOptions {
+  /** Opt-in read-only first paint, after privacy. Default readers remain fully enriched. */
+  onBasicPage?: (page: CommunityBroadcastPage) => void | Promise<void>;
   messageIds?: readonly string[];
   strictEnrichment?: boolean;
   resolveReplyParents?: boolean;
@@ -464,7 +469,7 @@ export async function getCommunityBroadcasts(
   scope?: CommunityOperationScope,
   options?: CommunityMessageReadOptions,
 ): Promise<CommunityBroadcastPage> {
-  const user = await communityOperationUser(scope);
+  const user = await measureChatPhase('community-main', 'identity', () => communityOperationUser(scope));
   assertCommunityScope(scope);
   const viewerId = user?.id;
   if (options?.messageIds?.length === 0) return { messages: [], hasMore: false, olderCursor: null };
@@ -490,7 +495,7 @@ export async function getCommunityBroadcasts(
   if (options?.broadcastKind === 'main') query = query.neq('kind', 'intro');
 
   if (olderThan) query = query.or(olderChatFilter(olderThan));
-  const { data: rows, error } = await scopedCommunityRequest(scope, () => query);
+  const { data: rows, error } = await measureChatPhase('community-main', 'history', () => scopedCommunityRequest(scope, () => query));
   assertCommunityScope(scope);
   if (error) throw error;
   const fetched = rows ?? [];
@@ -501,24 +506,37 @@ export async function getCommunityBroadcasts(
   };
   if (fetched.length === 0) return { messages: [], ...pageMeta };
 
-  // hide messages from anyone blocked (either direction). System cards with a
-  // null sender always stay. This runs for the initial load AND every realtime
-  // refetch (the thread screen invalidates this query on insert).
-  const blocked = await scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id)));
-  assertCommunityScope(scope);
-  const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
-  if (broadcasts.length === 0) return { messages: [], ...pageMeta };
-
-  const ids = broadcasts.map((b) => b.id);
-  const senderIds = Array.from(new Set(broadcasts.map((b) => b.sender_id).filter(Boolean))) as string[];
-  const [{ data: reactions, error: reactionsError }, { data: replies, error: repliesError }, { data: profiles, error: profilesError }] = await scopedCommunityRequest(scope, () => Promise.all([
+  // Privacy and display metadata both depend on the fetched page, not on
+  // each other. Start them together, but never return a row before the mutual
+  // block check succeeds. Metadata is read only for the fetched page.
+  const privacy = measureChatPhase('community-main', 'privacy', () => scopedCommunityRequest(scope, () => getBlockedWith(viewerId, fetched.map((b) => b.sender_id))));
+  const ids = fetched.map((b) => b.id);
+  const senderIds = Array.from(new Set(fetched.map((b) => b.sender_id).filter(Boolean))) as string[];
+  const enrichment = measureChatPhase('community-main', 'metadata', () => scopedCommunityRequest(scope, () => Promise.all([
     supabase.from('community_broadcast_reactions').select('broadcast_id, emoji, user_id').in('broadcast_id', ids),
     supabase.from('community_broadcast_replies').select('broadcast_id').in('broadcast_id', ids),
     senderIds.length > 0
       ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', senderIds)
       : Promise.resolve({ data: [] } as any),
-  ]));
+  ]))).then(data => ({ data }), error => ({ error }));
+  // Attach the rejection handler immediately: a fast metadata failure must
+  // not become unhandled while privacy is pending (or after an empty return).
+  const blocked = await privacy;
   assertCommunityScope(scope);
+  const broadcasts = fetched.filter((b) => !b.sender_id || !blocked.has(b.sender_id));
+  if (broadcasts.length === 0) return { messages: [], ...pageMeta };
+
+  if (options?.onBasicPage) {
+    await options.onBasicPage({ ...pageMeta, messages: broadcasts.map(b => ({ ...b,
+      sender_name: null, sender_photo: null, reactions: [], reply_count: 0, metadata_pending: true,
+    })) });
+    assertCommunityScope(scope);
+  }
+
+  const metadata = await enrichment;
+  assertCommunityScope(scope);
+  if ('error' in metadata) throw metadata.error;
+  const [{ data: reactions, error: reactionsError }, { data: replies, error: repliesError }, { data: profiles, error: profilesError }] = metadata.data;
 
   if (options?.strictEnrichment && (reactionsError || repliesError || profilesError)) throw reactionsError || repliesError || profilesError;
 
@@ -568,12 +586,20 @@ export async function sendCommunityMessage(communityId: string, body: string, im
   const mentionData = mentions ? trimChatMentionDocument(body, mentions) : null;
   const savedBody = trimmed.slice(0, 4000);
   const media = !!imageUrl || !!parseCommunityLocation(savedBody);
-  const columns = media ? `id, created_at, body, image_url${mentions !== undefined ? ', mention_data' : ''}` : mentions !== undefined ? 'id, created_at, body, mention_data' : 'id, created_at';
+  const columns = media ? `id, created_at, body, image_url${mentions !== undefined ? ', mention_data' : ''}`
+    : 'id, created_at, community_id, sender_id, body, kind, image_url, mention_data';
   const sendId = sendIdOverride ?? Crypto.randomUUID();
-  const checkedReceipt = (result: any) => result.data &&
-    ((media && (result.data.id !== sendId || result.data.body !== savedBody || result.data.image_url !== (imageUrl ?? null))) ||
-      (mentions !== undefined && (result.data.body !== savedBody || !sameChatMentionIdentity(savedBody, mentionData, result.data.mention_data))))
-      ? { data: null, error: Error(media ? 'The saved message differs. Your original is kept.' : 'The saved mention identity differs. Your message is kept.') } : result;
+  const checkedReceipt = (result: any) => {
+    const row = result.data;
+    if (!row) return result;
+    const matches = media
+      ? row.id === sendId && row.body === savedBody && row.image_url === (imageUrl ?? null)
+        && (mentions === undefined || sameChatMentionIdentity(savedBody, mentionData, row.mention_data))
+      : row.id === sendId && row.community_id === communityId && row.sender_id === senderId
+        && row.body === savedBody && row.kind === 'message' && !row.image_url
+        && sameChatMentionIdentity(savedBody, mentionData, row.mention_data);
+    return matches ? result : { data: null, error: Error('The saved message or mention identity differs. Your original is kept.') };
+  };
   const { receipt, failure } = await resolveChatSendReceipt(
     async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcasts').insert({
       id: sendId,
@@ -719,7 +745,7 @@ export async function getBroadcastReplyMembers(broadcastId: string, scope?: Comm
 }
 
 export async function sendBroadcastReply(broadcastId: string, body: string, scope?: CommunityOperationScope, sendId?: string, mentions?: ChatMentionDocument | null): Promise<void> {
-  const user = await communityOperationUser(scope);
+  const user = await requestWithDeadline(communityOperationUser(scope), 8_000);
   if (!user) throw new Error('Not signed in');
   const trimmed = body.trim();
   if (!trimmed || trimmed.length > 4000) throw Error('Write a reply of up to 4,000 characters.');
@@ -729,7 +755,7 @@ export async function sendBroadcastReply(broadcastId: string, body: string, scop
     ...(sendId ? {id: sendId} : {}), ...(mentions !== undefined ? {mention_data: mentionData} : {}) };
   // Existing callers keep their original contract until their durable composer is connected.
   if (!sendId) {
-    const {error} = await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies').insert(payload));
+    const {error} = await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies').insert(payload)), 12_000);
     if (error) throw error;
     return;
   }
@@ -739,10 +765,10 @@ export async function sendBroadcastReply(broadcastId: string, body: string, scop
     mentions !== undefined && !sameChatMentionIdentity(trimmed, mentionData, result.data.mention_data))
       ? {data:null,error:Error('Your original reply could not be confirmed. Your draft is kept.')} : result;
   const {receipt, failure} = await resolveChatSendReceipt(
-    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
-      .insert(payload).select(columns).single())),
-    async () => checkedReceipt(await scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
-      .select(columns).eq('id',sendId).eq('broadcast_id',broadcastId).eq('sender_id',user.id).maybeSingle())),
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .insert(payload).select(columns).single()), 12_000)),
+    async () => checkedReceipt(await requestWithDeadline(scopedCommunityRequest(scope, () => supabase.from('community_broadcast_replies')
+      .select(columns).eq('id',sendId).eq('broadcast_id',broadcastId).eq('sender_id',user.id).maybeSingle()), 8_000)),
   );
   assertCommunityScope(scope);
   if (!receipt) throw failure ?? Error('Delivery could not be confirmed. Your reply is kept.');
@@ -1053,7 +1079,7 @@ export async function getCommunityChatMembers(communityId: string, scope?: Commu
  * RPC needed since the policy already covers it.
  */
 export async function deleteTopicMessage(messageId: string): Promise<void> {
-  const { error } = await supabase.from('community_topic_messages').delete().eq('id', messageId);
+  const { error } = await requestWithDeadline(supabase.from('community_topic_messages').delete().eq('id', messageId), 12_000);
   if (error) throw error;
 }
 

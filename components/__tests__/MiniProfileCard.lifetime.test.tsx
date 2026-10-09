@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { removeBlockedPrivateChatPreviews } from '../../lib/chatListCache';
 import MiniProfileCard from '../MiniProfileCard';
 const mockGetUser = jest.fn(), mockFrom = jest.fn(), mockRpc = jest.fn();
 const mockListeners = new Set<(event: string, session?: any) => void>();
@@ -21,7 +22,7 @@ const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find
 beforeEach(() => {
   jest.useFakeTimers(); jest.clearAllMocks(); mockListeners.clear(); mockGetUser.mockResolvedValue(auth('viewer'));
   mockFrom.mockImplementation(() => { const q: any = { select: () => q, eq: () => q, single: async () => peer('Peer') }; return q; });
-  mockRpc.mockResolvedValue({ data: [], error: null });
+  mockRpc.mockImplementation(async name => ({ data: name === 'yours_is_blocked_between' ? false : [], error: null }));
 });
 afterEach(() => { act(() => tree?.unmount()); jest.useRealTimers(); });
 it('makes no hidden auth or profile reads, then verifies identity on opening', async () => {
@@ -43,7 +44,7 @@ it('does not leak an old target profile or continue its marks lookup', async () 
   mockFrom.mockImplementation(() => { const q: any = { select: () => q, eq: (_k: string, id: string) => { target = id; return q; }, single: () => target === 'peer' ? pending.promise : Promise.resolve(peer('New peer')) }; return q; });
   await mount(); await act(async () => tree.update(screen(true, 'new-peer'))); expect(texts()).toContain('New peer');
   await act(async () => pending.resolve(peer('Old peer'))); expect(texts()).not.toContain('Old peer');
-  expect(mockRpc.mock.calls.map(a => a[1].p_user_id)).toEqual(['new-peer']);
+  expect(mockRpc.mock.calls.filter(a => a[0] === 'get_user_profile_marks').map(a => a[1].p_user_id)).toEqual(['new-peer']);
 });
 it('rejects an old auth result after account change', async () => {
   const pending = deferred(); mockGetUser.mockReturnValueOnce(pending.promise).mockResolvedValue(auth('peer')); await mount();
@@ -63,4 +64,27 @@ it('cancels delayed moderation after an auth change', async () => {
 it('ends a stalled auth read with no moderation or profile work', async () => {
   mockGetUser.mockReturnValue(new Promise(() => {})); await mount(); await act(async () => { jest.advanceTimersByTime(12000); });
   expect(button('Report Member')).toBeUndefined(); expect(mockFrom).not.toHaveBeenCalled();
+});
+
+it.each([true, null, 'false'])('does not fetch a blocked or unverified profile/photo or offer moderation: %j', async blocked => {
+  mockRpc.mockResolvedValue({ data: blocked, error: null }); await mount();
+  expect(mockFrom).not.toHaveBeenCalled(); expect(texts()).toContain('Profile unavailable');
+  expect(button('Block Peer')).toBeUndefined(); expect(button('Report Member')).toBeUndefined();
+});
+it('holds profile reads until the mutual check finishes and rejects a retired result', async () => {
+  const privacy = deferred(); mockRpc.mockReturnValueOnce(privacy.promise); await mount();
+  expect(mockFrom).not.toHaveBeenCalled(); await act(async () => tree.update(screen(false, null)));
+  await act(async () => privacy.resolve({ data: false, error: null })); expect(mockFrom).not.toHaveBeenCalled();
+});
+it('hides an open mini-profile immediately when its person is blocked from another mounted surface', async () => {
+  await mount(); expect(texts()).toContain('Peer');
+  mockRpc.mockResolvedValue({ data: true, error: null });
+  await act(async () => removeBlockedPrivateChatPreviews('viewer', 'peer'));
+  expect(texts()).not.toContain('Peer'); expect(texts()).toContain('Profile unavailable');
+  expect(button('Block Peer')).toBeUndefined();
+});
+it('does not cancel the profile for an unrelated account or person block', async () => {
+  await mount(); const reads = mockGetUser.mock.calls.length;
+  await act(async () => { removeBlockedPrivateChatPreviews('other', 'peer'); removeBlockedPrivateChatPreviews('viewer', 'other'); });
+  expect(texts()).toContain('Peer'); expect(mockGetUser).toHaveBeenCalledTimes(reads);
 });

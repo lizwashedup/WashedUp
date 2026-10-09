@@ -152,6 +152,23 @@ it.each(['same', 'room', 'account'] as const)('keeps measured menu opening with 
   else expect(open).not.toHaveBeenCalled();
 });
 
+it('finishes a confirmed text send without a second receipt request and preserves newer typing', async () => {
+  const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
+  // A redundant confirmation would stall indefinitely on this connection.
+  mockCheckOriginal.mockReturnValue(new Promise(() => {}));
+  await mount(); type('First message'); act(() => sendTap()({}, true)); await flush();
+  expect(input().props.value).toBe('');
+  type('Second message');
+  await act(async () => pending.resolve(true)); await flush();
+  expect(mockCheckOriginal).not.toHaveBeenCalled();
+  expect(input().props.value).toBe('Second message');
+  expect(action('Check original message')).toBeUndefined();
+  act(() => sendTap()({}, true)); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(2);
+  expect(mockSend.mock.calls.map(call => call[0])).toEqual(['First message', 'Second message']);
+  expect(mockSend.mock.calls[0][3]).not.toBe(mockSend.mock.calls[1][3]);
+});
+
 it('keeps an unconfirmed original separate from newer typing and locks duplicate taps', async () => {
   const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
   await mount(); type('First draft'); const tap = sendTap(); act(() => { tap({}, true); tap({}, true); });
@@ -678,15 +695,15 @@ it('keeps the chosen duplicate-name member through composer storage and send',as
  expect(mockSend.mock.calls[0][0]).toBe('@Alex');
  expect(mockSend.mock.calls[0][5]).toMatchObject({text:'@Alex',references:[{userId:members[1].id,label:'Alex',start:0,end:5}]});
 });
-it('retains selected identities when an uncertain send restores its draft',async()=>{
+it('retains selected identities in an uncertain original while leaving the next draft empty',async()=>{
  const member={id:'11111111-1111-4111-8111-111111111111',first_name:'Alex',avatar_url:null};
  mockSend.mockResolvedValue(false);
  await act(async()=>{tree=create(<ChatThread {...baseProps} members={[member]} id={mockRoomId} readOnly={null}/>);});
  type('@Al');act(()=>tree!.root.findByType(require('../ChatMentionPicker').ChatMentionPicker).props.onSelect(member));await flush();
  act(()=>sendTap()({},true));await flush();
- expect(input().props.value).toBe('@Alex');
+ expect(input().props.value).toBe('');
  const keys=await AsyncStorage.getAllKeys();const saved=JSON.parse((await AsyncStorage.getItem(keys.find(k=>k.startsWith('chat-composer:'))!))!);
- expect(saved.draft.mentions.references[0].userId).toBe(member.id);expect(saved.draft.attempt.mentions.references[0].userId).toBe(member.id);
+ expect(saved.draft.mentions).toBeNull();expect(saved.draft.attempt.mentions.references[0].userId).toBe(member.id);
 });
 
 
@@ -896,4 +913,18 @@ it('surfaces a failed shared reaction preflight instead of silently accepting th
   const open = openMoreReactionAction(); act(() => open()); await act(async () => reactionPicker().onSelect('🔥'));
   expect(alert().title).toBe('Reaction not confirmed'); expect(alert().message).toBe('Please try again.');
   expect(alert().buttons).toBeUndefined();
+});
+
+it('keeps one recording upload identity after response loss and starts another after confirmation', async () => {
+  mockUploadAudio.mockRejectedValueOnce(Error('Response lost'));
+  await mount(); await makeVoiceDraft();
+  await act(async () => voiceControls().onSend());
+  const uploadId = mockUploadAudio.mock.calls[0][4];
+  expect(uploadId).toEqual(expect.any(String));
+  expect(voiceControls().retryAvailable).toBe(true);
+  await act(async () => voiceControls().onSend());
+  expect(mockUploadAudio.mock.calls[1][4]).toBe(uploadId);
+  expect(mockChat.sendAudio.mock.calls[0][3]).toBe(uploadId);
+  await makeVoiceDraft(); await act(async () => voiceControls().onSend());
+  expect(mockUploadAudio.mock.calls[2][4]).not.toBe(uploadId);
 });

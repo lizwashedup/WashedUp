@@ -114,3 +114,103 @@ it('keeps real per-room storage writes ordered through timeout and explicit same
   expect((await actual.readTopicComposer(room,owner)).draft).toMatchObject({text:'Newer queued text',attempt:original});
  }finally{jest.useRealTimers();}
 });
+
+it.each([topic,{kind:'main',id:topic}])('detaches %j before storage finishes and keeps identical next text after confirmation',async room=>{
+ await act(async()=>{tree=create(<Harness room={room}/>);});await act(async()=>hook.change({text:'Hello'}));
+ let release!:()=>void;mockSave.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ let preparing!:Promise<any>;const send=jest.fn();
+ act(()=>{preparing=hook.prepare({detachText:true}).then(value=>{send();return value;});});
+ await act(async()=>{for(let i=0;i<10;i++)await Promise.resolve();});
+ expect(hook.draft.text).toBe('');expect(hook.draft.attempt?.text).toBe('Hello');expect(send).not.toHaveBeenCalled();
+ await act(async()=>hook.change({text:'Hello'}));
+ let original:any;await act(async()=>{release();original=await preparing;});
+ mockRead.mockResolvedValueOnce({draft:JSON.parse(JSON.stringify(hook.draft)),unsaved:false});await act(async()=>hook.retry());
+ await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');expect(hook.draft.attempt).toBeNull();
+});
+
+it('keeps identically retyped text while reply validation is pending without clearing native input',async()=>{
+ let release!:()=>void;mockVerify.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ await act(async()=>{tree=create(<Harness/>);});await act(async()=>hook.change({text:'Hello',reply:{id:topic,body:'Parent',sender_name:'Amelia'}}));
+ const clear=jest.fn();let preparing!:Promise<any>;
+ act(()=>{preparing=hook.prepare({detachText:true,onDetach:clear});});
+ await act(async()=>hook.change({text:'Hello'}));
+ let original:any;await act(async()=>{release();original=await preparing;});
+ expect(clear).not.toHaveBeenCalled();
+ await act(async()=>hook.finish(original));expect(hook.draft.text).toBe('Hello');
+});
+
+
+it.each(['resolve', 'reject'])('a delayed draft re-read cannot replace or disable newer typing (%s)', async outcome => {
+ await act(async () => { tree = create(<Harness/>); });
+ await act(async () => hook.change({text: 'Saved earlier'}));
+ let resolve!:(value:any)=>void, reject!:(error:Error)=>void;
+ mockRead.mockImplementationOnce(() => new Promise((yes,no) => {resolve=yes;reject=no;}));
+ let reading!:Promise<void>;
+ await act(async () => {reading=hook.retry(); await Promise.resolve();});
+ await act(async () => hook.change({text: 'New writing while storage reads'}));
+ await act(async () => {
+  if(outcome==='resolve') resolve({draft:{...emptyTopicComposer(),text:'Saved earlier'},unsaved:false});
+  else reject(Error('Old read failed'));
+  await reading;
+ });
+ expect(hook.draft.text).toBe('New writing while storage reads');
+ expect(hook.error).toBe(false);
+ expect(hook.ready).toBe(true);
+});
+it('a delayed re-read cannot resurrect an attempt after confirmation', async () => {
+ await act(async () => {tree=create(<Harness/>);});
+ await act(async () => hook.change({text:'Original'}));
+ let original:any; await act(async () => {original=await hook.prepare({detachText:true});});
+ const oldDraft=hook.draft;
+ let resolve!:(value:any)=>void;
+ mockRead.mockImplementationOnce(() => new Promise(yes => {resolve=yes;}));
+ let reading!:Promise<void>; await act(async () => {reading=hook.retry();await Promise.resolve();});
+ await act(async () => hook.finish(original));
+ await act(async () => {resolve({draft:oldDraft,unsaved:false});await reading;});
+ expect(hook.draft.attempt).toBeNull();
+ expect(hook.draft.text).toBe('');
+});
+it('an older confirmation-cleanup failure cannot disable a newer successfully saved draft', async () => {
+ await act(async () => {tree=create(<Harness/>);});
+ await act(async () => hook.change({text:'Original'}));
+ let original:any;await act(async () => {original=await hook.prepare({detachText:true});});
+ let reject!:(error:Error)=>void;
+ mockSave.mockImplementationOnce(() => new Promise((_yes,no) => {reject=no;}));
+ let finishing!:Promise<void>;act(() => {finishing=hook.finish(original);});
+ await act(async () => hook.change({text:'Saved next message'}));
+ await act(async () => {reject(Error('Earlier cleanup failed'));await finishing;});
+ expect(hook.draft).toMatchObject({text:'Saved next message',attempt:null});
+ expect(hook.error).toBe(false);
+});
+
+it.each(['52000000-0000-4000-8000-000000000025',
+ {kind:'main',id:'52000000-0000-4000-8000-000000000025'},
+ {kind:'reply',id:'52000000-0000-4000-8000-000000000025'}])(
+ 'keeps the newer durable %j draft usable after an earlier preparation write fails', async room => {
+  const actual = jest.requireActual('../../lib/topicComposerDraft');
+  const storage = require('@react-native-async-storage/async-storage');
+  mockSave.mockImplementation(actual.saveTopicComposer);
+  mockRead.mockImplementation(actual.readTopicComposer);
+  await act(async () => { tree = create(<Harness room={room}/>); });
+  await act(async () => hook.change({text:'Original awaiting storage'}));
+  let reject!: (error: Error) => void;
+  const blocked = new Promise<void>((_yes,no) => {reject=no;});
+  storage.setItem.mockImplementationOnce(() => blocked);
+  const transport = jest.fn(); let failure: unknown; let preparing!: Promise<void>;
+  act(() => { preparing = hook.prepare({detachText:true}).then(transport).catch(error => {failure=error;}); });
+  await act(async () => {for(let i=0;i<30;i++) await Promise.resolve();});
+  const original = hook.draft.attempt!;
+  await act(async () => hook.change({text:'Next words safely queued'}));
+  await act(async () => {reject(Error('Original write failed'));await preparing;});
+  await act(async () => {for(let i=0;i<30;i++) await Promise.resolve();});
+  expect(failure).toBeInstanceOf(Error);
+  expect(transport).not.toHaveBeenCalled();
+  expect(hook.draft).toMatchObject({text:'Next words safely queued',attempt:original});
+  const saved = await actual.readTopicComposer(room,owner);
+  expect(saved.unsaved).toBe(false);
+  expect(saved.draft).toMatchObject({text:'Next words safely queued',attempt:original});
+  expect(hook.error).toBe(false);
+  let retry: any; await act(async () => {retry=await hook.prepare({detachText:true});});
+  expect(retry.id).toBe(original.id);
+  expect(hook.draft.text).toBe('Next words safely queued');
+ });

@@ -118,7 +118,7 @@ it('retires a room send without clearing the new draft or releasing its current 
   mockRoomId = '22222222-2222-4222-8222-222222222222'; await update(); expect(input().props.value).toBe(''); expect(composer().sending).toBe(false);
   type('B draft'); let second!: Promise<void>; act(() => { second = composer().onSend(); }); await flush();
   await act(async () => { old.resolve(); await first; });
-  expect(input().props.value).toBe('B draft'); expect(composer().sending).toBe(true);
+  expect(input().props.value).toBe(''); expect(composer().sending).toBe(true);
   await act(async () => { fresh.resolve(); await second; }); expect(composer().sending).toBe(false);
 });
 
@@ -212,7 +212,8 @@ it('keeps unknown membership delegated to the existing server gate', async () =>
 it('keeps the same client UUID for an unchanged failed draft and retires it after confirmation', async () => {
   mockSend.mockRejectedValueOnce(new Error('unconfirmed')).mockResolvedValue(undefined);
   await mount(); type('Try this once'); await act(async () => composer().onSend());
-  expect(input().props.value).toBe('Try this once');
+  expect(input().props.value).toBe('');
+  expect(tree.root.findByType(FlatList).props.data[0]).toMatchObject({ body: 'Try this once', localDelivery: 'unconfirmed' });
   const failedId = mockSend.mock.calls[0][3]; expect(typeof failedId).toBe('string');
   await act(async () => composer().onSend());
   expect(mockSend.mock.calls[1][3]).toBe(failedId); expect(input().props.value).toBe('');
@@ -368,8 +369,8 @@ it('ends a stalled main send and retains the original attempt for an explicit re
   const wait=deferred();mockSend.mockReturnValueOnce(wait.promise);
   await mount();type('Keep this original');let work!:Promise<void>;act(()=>{work=composer().onSend();});await flush();
   const original=mockSend.mock.calls[0];expect(original).toBeDefined();
-  await act(async()=>{await jest.advanceTimersByTimeAsync(12_000);await work;});
-  expect(composer().sending).toBe(false);expect(input().props.value).toBe('Keep this original');expect(original[4].isCurrent()).toBe(false);
+  await act(async()=>{await jest.advanceTimersByTimeAsync(35_000);await work;});
+  expect(composer().sending).toBe(false);expect(input().props.value).toBe('');expect(tree.root.findByType(FlatList).props.data[0]).toMatchObject({body:'Keep this original',localDelivery:'unconfirmed'});expect(original[4].isCurrent()).toBe(false);
   expect(tree.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==='Retry original message')).toBe(true);
   await act(async()=>{await composer().onSend();});expect(mockSend.mock.calls[1][3]).toBe(original[3]);expect(input().props.value).toBe('');
   await act(async()=>{wait.resolve();});
@@ -509,4 +510,40 @@ it('does not open the camera when camera permission returns after the account ch
   await act(async () => { permission.resolve({ status: 'granted' }); await work; });
   expect(mockCamera).not.toHaveBeenCalled();
   expect(preview().visible).toBe(false);
+});
+
+
+it('allows a confirmed main send to finish recovery after twelve seconds', async () => {
+ jest.useFakeTimers(); const wait=deferred(); mockSend.mockReturnValueOnce(wait.promise);
+ let work: Promise<void> | undefined;
+ try {
+  await mount(); type('Recover original'); act(()=>{work=composer().onSend();}); await flush();
+  await act(async()=>{await jest.advanceTimersByTimeAsync(14_000);});
+  expect(composer().sending).toBe(true);
+  expect(mockSend.mock.calls[0][4].isCurrent()).toBe(true);
+  await act(async()=>{wait.resolve();await work;});
+  expect(composer().sending).toBe(false);expect(input().props.value).toBe('');expect(mockSend).toHaveBeenCalledTimes(1);
+ } finally {wait.resolve();await work;jest.useRealTimers();}
+});
+
+
+it.each(['text', 'photo', 'location'] as const)('respects a newer reading position during delayed main %s delivery', async kind => {
+  const pending = deferred();
+  mockSend.mockReturnValueOnce(pending.promise);
+  await mount();
+  let work!: Promise<unknown>;
+  if (kind === 'text') { type('Delayed message'); act(() => { work = composer().onSend(); }); }
+  if (kind === 'photo') { await act(async () => composer().photo.onPress()); act(() => { work = preview().onSend('Caption'); }); }
+  if (kind === 'location') act(() => { work = location().onConfirm(34, -118, 'Ocean Park'); });
+  await flush();
+  const list = () => tree.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => { pending.resolve(); await work; }); await flush();
+  expect(scroll).not.toHaveBeenCalled();
+  expect(composer().sending).toBe(false);
 });

@@ -1,3 +1,5 @@
+// Account lifecycle has dedicated tests; provide a settled signed-in reader here.
+jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'creator', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() }) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Text, TextInput, TouchableOpacity } from 'react-native';
@@ -5,7 +7,7 @@ const mockCreate = jest.fn(), mockAccess = jest.fn(), mockFind = jest.fn(), mock
 const mockPush = jest.fn(), mockReplace = jest.fn(), mockDismissTo = jest.fn();
 const mockInvalidate = jest.fn();
 jest.mock('expo-router', () => ({ router: { push: (...a: unknown[]) => mockPush(...a), replace: (...a: unknown[]) => mockReplace(...a), dismissTo: (...a: unknown[]) => mockDismissTo(...a), back: jest.fn() }, Stack: { Screen: () => null } }));
-jest.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: { ledCommunities: [{ id: 'older-community' }] } }), useQueryClient: () => ({ invalidateQueries: (...a: unknown[]) => mockInvalidate(...a) }) }));
+jest.mock('@tanstack/react-query', () => ({ useQuery: () => ({ isFetchedAfterMount: true, data: { ledCommunities: [{ id: 'older-community' }] } }), useQueryClient: () => ({ invalidateQueries: (...a: unknown[]) => mockInvalidate(...a) }) }));
 jest.mock('../../../lib/creatorMode', () => ({ getCreatorAccess: (...a: unknown[]) => mockAccess(...a), isLeaderAccess: () => true, createCommunity: (...a: unknown[]) => mockCreate(...a), suggestHandle: () => 'new-community', findLedCommunityByHandle: (...a: unknown[]) => mockFind(...a), HANDLE_SHAPE: /^[a-z-]{3,40}$/ }));
 jest.mock('../../../lib/selectedCommunity', () => ({ setSelectedCommunityId: (...a: unknown[]) => mockSelect(...a) }));
 jest.mock('../../../lib/houseCommunity', () => ({ isHouseCommunity: () => false }));

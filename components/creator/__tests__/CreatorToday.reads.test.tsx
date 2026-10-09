@@ -1,3 +1,6 @@
+jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'creator', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() }) }));
+// Profile header owns its query provider; this suite exercises the surrounding journey.
+jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch = jest.fn(async () => ({}));
@@ -19,7 +22,7 @@ jest.mock('../../events/EventMediaImage', () => ({EventMediaImage:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
 import Screen from '../../../app/(creator)/today';
 let tree: ReactTestRenderer;
-const result=(data:unknown)=>({data,isError:false,isLoading:false,isFetching:false,isRefetching:false,refetch:mockRefetch});
+const result=(data:unknown)=>({data,isFetchedAfterMount:true,isError:false,isLoading:false,isFetching:false,isRefetching:false,refetch:mockRefetch});
 beforeEach(()=>{
  jest.clearAllMocks();
  mockQueries={

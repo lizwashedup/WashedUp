@@ -1,6 +1,9 @@
 import { formatEventDateLA, getLADayParts, getTodayInLA } from './laDate';
 
 const MENTION_AT_CARET = /(?:^|[\s([{])@([\p{L}\p{M}\p{N}_'’\-]*)$/u;
+// Grouping is fixed to LA, so the formatter can survive device-zone changes.
+// Reuse it across visible rows; keep relative today/yesterday labels live below.
+let chatDayFormatter: Intl.DateTimeFormat | undefined;
 
 export function mentionQueryAt(text: string, caret: number): string | null {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
@@ -19,9 +22,10 @@ export function insertMentionAt(text: string, caret: number, firstName: string):
 }
 
 export function isSameChatDay(a: string, b: string): boolean {
-  const left = getLADayParts(a);
-  const right = getLADayParts(b);
-  return left.y === right.y && left.m === right.m && left.d === right.d;
+  chatDayFormatter ??= new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric',
+  });
+  return chatDayFormatter.format(new Date(a)) === chatDayFormatter.format(new Date(b));
 }
 
 export function formatChatDay(iso: string): string {

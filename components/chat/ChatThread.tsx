@@ -1,8 +1,12 @@
+import { useChatReplyScroll } from '../../hooks/useChatReplyScroll';
+import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
+import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { parseMemberReactionAnchor } from '../../lib/memberChatMessageAnchor';
 import { useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
 import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
+import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
 import LinkifiedText from '../LinkifiedText';
 import { ChatMentionPicker } from './ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
@@ -734,7 +738,6 @@ const SEND_ARROW_ICON_SIZE = 18;
 // Scroll-to-bottom button thresholds (inverted list: contentOffset.y grows as
 // you scroll up toward older messages; 0 = pinned to newest).
 const SCROLL_SHOW_THRESHOLD = 300;
-const SCROLL_AT_BOTTOM_THRESHOLD = 24;
 const SCROLL_BTN_GAP = 12;
 
 // Inline attachment panel height used until a real keyboard height is observed
@@ -1242,8 +1245,11 @@ function ChatThread(props: ChatThreadProps) {
   // 2026-05-18 "chat is slow" reports.
   const lastChatFocusFetchRef = useRef(0);
   const hasFocusedChatRef = useRef(false);
+  const chatFocusedRef = useRef(false);
+  useChatResumeRefresh(refetch, isCurrentEntry, chatFocusedRef);
   useFocusEffect(
     useCallback(() => {
+      chatFocusedRef.current = true;
       const nowTs = Date.now();
       const isFirstFocus = !hasFocusedChatRef.current;
       hasFocusedChatRef.current = true;
@@ -1255,6 +1261,7 @@ function ChatThread(props: ChatThreadProps) {
         refetch(true);
       }
       Notifications.setBadgeCountAsync(0).catch(() => {});
+      return () => { chatFocusedRef.current = false; };
     }, [refetch]),
   );
 
@@ -1403,11 +1410,13 @@ function ChatThread(props: ChatThreadProps) {
     }
   }, [props.fetchReportMembers, router, blockUser, isCurrentEntry, moderationScope]);
 
+  const cancelReplyScroll = useRef<() => void>(() => {});
   // Explicit jumps happen immediately. New rows at the live edge do not use
   // visible-position preservation: that would pin the previous message and
   // place the new bubble underneath the composer until server confirmation.
   const scrollToBottom = useCallback(() => {
     if (!isCurrentEntry()) return;
+    cancelReplyScroll.current();
     atBottomRef.current = true;
     setFollowingLatest(true);
     if (anchorId) { clearAnchor(); return; }
@@ -1417,8 +1426,8 @@ function ChatThread(props: ChatThreadProps) {
   // Floating scroll-to-bottom button + "new messages below" counter.
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [unreadBelow, setUnreadBelow] = useState(0);
-  const atBottomRef = useRef(true);
-  const [followingLatest, setFollowingLatest] = useState(!anchorId);
+  const scrollFollow = useChatScrollFollow(!anchorId);
+  const { atBottomRef, followingLatest, setFollowingLatest, captureScrollIntent } = scrollFollow;
   const incomingTracker = useRef<{ entry: typeof entry; ids: Set<string>; newest: number } | null>(null);
   useLayoutEffect(() => {
     // A new room or history window starts with its own list position.
@@ -1432,11 +1441,10 @@ function ChatThread(props: ChatThreadProps) {
   const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!isCurrentEntry()) return;
     const y = e.nativeEvent.contentOffset.y;
-    atBottomRef.current = y <= SCROLL_AT_BOTTOM_THRESHOLD;
-    setFollowingLatest(atBottomRef.current);
+    scrollFollow.onScroll(e);
     setShowScrollBtn(y > SCROLL_SHOW_THRESHOLD);
     if (atBottomRef.current) setUnreadBelow(0);
-  }, [isCurrentEntry]);
+  }, [isCurrentEntry, scrollFollow.onScroll]);
 
   // Track arrivals by identity and time, not array length: pagination adds
   // history above, and a delete plus arrival can leave the length unchanged.
@@ -1488,47 +1496,52 @@ function ChatThread(props: ChatThreadProps) {
   const handleSend = useCallback(async (retryOriginal = false) => {
     if (!canWrite() || !draftOwner || sendingRef.current || uploading || (composerDraft.draft.attempt && !retryOriginal)) return;
     if (!inputTextRef.current.trim() && !composerDraft.draft.attempt) return;
+    const finishTiming = beginChatTiming(props.kind, 'send-to-confirmation');
+    let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendingRef.current = token; setSendingText(true);
     const revision = draftRevision.current;
     const contextRevision = draftContextRevision.current;
     let original: ChatDraftAttempt | null = null;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       if (!composerDraft.draft.attempt) {
         const filtered = checkContent(inputTextRef.current.trim());
         if (!filtered.ok) throw Error(filtered.reason ?? 'Please revise your message.');
       }
-      original = await composerDraft.prepare();
+      original = await composerDraft.prepare({ detachText: true, onDetach: () => { textInputRef.current?.clear(); inputTextRef.current = ''; setMentionQuery(null); stopTyping(); } });
       if (!canWrite()) return;
-      // Only the original composer is cleared. Text typed during preflight stays.
-      if (!retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; }
-      setMentionQuery(null); stopTyping();
+      // Fresh text detaches atomically before its storage wait in the draft hook.
+      // Edits retain the existing clear-after-preparation behavior.
+      if (original.edit && !retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; setMentionQuery(null); stopTyping(); }
       if (!retryOriginal || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) {
         if (retryOriginal) await verifyChatComposerTarget(draftRoom, original, draftOwner);
         const confirmed = original.edit
           ? await editMessage(original.id, original.text, entryScope, original.edit.content, original.mentions, original.edit.mentions, { errorPresentation: 'caller' })
           : await sendMessage(original.text, undefined, original.replyId ?? undefined, original.id, entryScope, original.mentions);
         if (!canWrite()) return;
-        if (!confirmed || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) throw Error('Your original message has not been confirmed yet.');
+        // Text sends already return an exact, account-and-room-scoped receipt.
+        // Keep edit verification and the pre-retry check for uncertain attempts.
+        if (!confirmed || (original.edit && !await checkChatComposerAttempt(draftRoom, original, draftOwner))) throw Error('Your original message has not been confirmed yet.');
       }
       if (!canWrite()) return;
+      timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
-      if (canWrite()) scrollToBottom();
+      if (canWrite() && scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
+      timingOutcome = 'error';
       if (!canWrite()) return;
       // An unresolved original is shown separately from newer typing/context.
       // Never merge it into a newer message that could later resend it as new.
-      if (original && draftContextRevision.current === contextRevision && !inputTextRef.current) {
-        const restored = restoreChatDraft(original.text, '');
-        changeDraft({ text: restored, mentions: original.mentions ?? null }); inputTextRef.current = restored;
-      }
+      if (original && draftContextRevision.current === contextRevision) composerDraft.restoreFailedText(original);
       // A definitive refusal of this new edit made no change. Older uncertain
       // attempts remain protected even if a later retry is refused.
       if (original && !retryOriginal && isChatEditRefused(error)) await composerDraft.refuseFresh(original).catch(() => undefined);
       if (canWrite()) setAlertInfo({ title: original && (!isChatEditRefused(error) || retryOriginal) ? 'Message not confirmed' : 'Message not sent', message: error instanceof Error ? error.message : 'Your message is kept. Check it before trying again.' });
     } finally {
+      finishTiming(isCurrentEntry() ? timingOutcome : 'retired');
       if (sendingRef.current === token) { sendingRef.current = null; setSendingText(false); }
     }
-  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, setInputText, stopTyping, changeDraft]);
+  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, captureScrollIntent, setInputText, stopTyping, changeDraft]);
 
   // Send button morph (mic when empty, send when typing). A single shared value
   // drives the crossfade so the two stacked icon layers animate in opposition.
@@ -1574,16 +1587,17 @@ function ChatThread(props: ChatThreadProps) {
     setDraft({ uri, durationSeconds }); setRecordingMode('draft'); setAudioSending(true); setAudioError(null);
     const attemptScope = { userId: currentUserId, isCurrent: () => audioSendAttempt.current === attempt && canWrite() };
     const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Voice attempt ended'); };
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       if (!session.url) {
-        const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope), 30_000);
+        const url = await requestWithDeadline(uploadAudioToStorage(id, currentUserId, uri, attemptScope, session.sendId), 30_000);
         requireAttempt(); session.url = url;
       }
       requireAttempt();
       const confirmed = await requestWithDeadline(sendAudio(session.url, session.durationSeconds, attemptScope, session.sendId), 25_000);
       requireAttempt();
       if (!confirmed) throw new Error('Voice delivery is unconfirmed');
-      resetRecording(); scrollToBottom();
+      resetRecording(); if (scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       if (!canWrite()) return;
       logError(error, 'chat.uploadAndSendAudio');
@@ -1594,7 +1608,7 @@ function ChatThread(props: ChatThreadProps) {
         if (canWrite()) setAudioSending(false);
       }
     }
-  }, [canWrite, currentUserId, id, sendAudio, scrollToBottom, resetRecording]);
+  }, [canWrite, currentUserId, id, sendAudio, scrollToBottom, captureScrollIntent, resetRecording]);
 
   const beginRecording = useCallback(async (initialMode: 'holding' | 'locked' = 'holding') => {
     if (!canWrite() || voiceCapture.current || audioSendAttempt.current || voiceStopAttempt.current) return;
@@ -1796,12 +1810,13 @@ function ChatThread(props: ChatThreadProps) {
     let sendId = gifPendingIds.current.get(url);
     if (!sendId) { sendId = Crypto.randomUUID(); gifPendingIds.current.set(url, sendId); }
     setActivePanel(null); setAlertInfo(null);
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const sent = await requestWithDeadline(sendMessage('', url, undefined, sendId, sendScope), 25_000);
       if (!isCurrent()) return;
       if (!sent) throw Error('GIF delivery is unconfirmed.');
       gifPendingIds.current.delete(url);
-      scrollToBottom();
+      if (scrollIntentIsCurrent()) scrollToBottom();
     } catch {
       if (isCurrent()) setAlertInfo({
         title: 'GIF not confirmed',
@@ -1814,7 +1829,7 @@ function ChatThread(props: ChatThreadProps) {
     } finally {
       if (gifAttempt.current === attempt) gifAttempt.current = null;
     }
-  }, [canWrite, sendMessage, scrollToBottom, entryScope]);
+  }, [canWrite, sendMessage, scrollToBottom, captureScrollIntent, entryScope]);
 
   // Pick first, then preserve the selected batch/caption through explicit retry.
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
@@ -1860,6 +1875,7 @@ function ChatThread(props: ChatThreadProps) {
     const requireAttempt = () => { if (!attemptScope.isCurrent()) throw new Error('Photo attempt ended'); };
     const session = photoSendSessionRef.current;
     const alreadyCaptioned = photoCaptionSentRef.current;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       await sendPhotoBatch(assets, async (asset) => {
         requireAttempt();
@@ -1885,7 +1901,7 @@ function ChatThread(props: ChatThreadProps) {
       if (!canWrite()) return;
       setPendingPhotos([]); setPhotoPreviewOpen(false);
       photoCaptionSentRef.current = false;
-      session.clear(); scrollToBottom();
+      session.clear(); if (scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       if (!canWrite()) return;
       const failure = error as PhotoBatchFailure;
@@ -1902,7 +1918,7 @@ function ChatThread(props: ChatThreadProps) {
         if (canWrite()) setUploading(false);
       }
     }
-  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom, canWrite, requireEntry, entryScope]);
+  }, [pendingPhotos, currentUserId, sendMessage, scrollToBottom, captureScrollIntent, canWrite, requireEntry, entryScope]);
 
   const handleLocationConfirm = useCallback(async (latitude: number, longitude: number, address: string) => {
     if (!canWrite() || locationAttempt.current) return false;
@@ -1913,17 +1929,18 @@ function ChatThread(props: ChatThreadProps) {
       locationSession.current = { pin, sendId: Crypto.randomUUID() };
     }
     const session = locationSession.current;
+    const scrollIntentIsCurrent = captureScrollIntent();
     try {
       const confirmed = await requestWithDeadline(sendLocation(latitude, longitude, address, attemptScope, session.sendId), 25_000);
       if (!attemptScope.isCurrent()) return false;
-      if (confirmed) { locationSession.current = null; setLocationPickerOpen(false); scrollToBottom(); }
+      if (confirmed) { locationSession.current = null; setLocationPickerOpen(false); if (scrollIntentIsCurrent()) scrollToBottom(); }
       return confirmed;
     } catch {
       return false; // The existing preview retains its pin and presents inline retry.
     } finally {
       if (locationAttempt.current === attempt) locationAttempt.current = null;
     }
-  }, [sendLocation, scrollToBottom, canWrite, entryScope]);
+  }, [sendLocation, scrollToBottom, captureScrollIntent, canWrite, entryScope]);
 
   const composerInputHeight = useChatInputHeight(textInputRef, inputText, conversationFonts.regular, 100, COMMUNITY_CHAT_GROUPING_ENABLED);
   // Keep iOS native multiline sizing: fixed height can stop Fabric size events.
@@ -2046,14 +2063,17 @@ function ChatThread(props: ChatThreadProps) {
   // updates -- depending on enrichedItems directly would re-break the memo every
   // time a new message lands.
   const enrichedItemsRef = useRef(enrichedItems);
-  useEffect(() => { enrichedItemsRef.current = enrichedItems; }, [enrichedItems]);
+  enrichedItemsRef.current = enrichedItems;
+  const replyScrollScope = useMemo(() => ({}), [entry, anchorId]);
+  const replyScroll = useChatReplyScroll(listRef, replyScrollScope,
+    useCallback((msgId: string) => enrichedItemsRef.current.findIndex(item => !('type' in item) && item.id === msgId), []));
+  cancelReplyScroll.current = replyScroll.cancel;
   const handleReplyTap = useCallback((msgId: string) => {
-    const items = enrichedItemsRef.current;
-    const idx = items.findIndex(item => !('type' in item) && item.id === msgId);
-    if (idx >= 0) {
-      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
-    }
-  }, []);
+    if (!isCurrentEntry()) return;
+    anchorScroll.cancel();
+    setFollowingLatest(false);
+    replyScroll.scrollToMessage(msgId);
+  }, [isCurrentEntry, anchorScroll.cancel, setFollowingLatest, replyScroll.scrollToMessage]);
   const handleAvatarPress = useCallback((uid: string) => {
     if (isCurrentEntry()) setMiniProfileUserId(uid);
   }, [isCurrentEntry]);
@@ -2421,6 +2441,13 @@ function ChatThread(props: ChatThreadProps) {
               if (anchorId) anchorScroll.schedule();
               else if (atBottomRef.current) listRef.current?.scrollToOffset({ offset: 0, animated: false });
             }}
+            onScrollBeginDrag={() => {
+              if (!isCurrentEntry()) return;
+              scrollFollow.onScrollBeginDrag(); anchorScroll.cancel(); replyScroll.cancel();
+            }}
+            onScrollEndDrag={event => { if (isCurrentEntry()) scrollFollow.onScrollEndDrag(event); }}
+            onMomentumScrollBegin={() => { if (isCurrentEntry()) scrollFollow.onMomentumScrollBegin(); }}
+            onMomentumScrollEnd={event => { if (isCurrentEntry()) scrollFollow.onMomentumScrollEnd(event); }}
             onScroll={handleListScroll}
             onEndReached={() => { void loadOlder(); }}
             onEndReachedThreshold={0.2}
@@ -2429,11 +2456,9 @@ function ChatThread(props: ChatThreadProps) {
             // side), so the typing dots sit just above the input bar.
             ListHeaderComponent={typingUsers.length > 0 ? <TypingIndicator /> : null}
             onScrollToIndexFailed={(info) => {
-              if (anchorId) { anchorScroll.onScrollToIndexFailed(info); return; }
-              listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
-              setTimeout(() => {
-                listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
-              }, 300);
+              if (!isCurrentEntry()) return;
+              anchorScroll.onScrollToIndexFailed(info);
+              replyScroll.onScrollToIndexFailed(info);
             }}
             ListEmptyComponent={anchorUnavailable ? null :
               <View style={chatStyles.emptyState}>

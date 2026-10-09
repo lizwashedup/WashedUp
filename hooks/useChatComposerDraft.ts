@@ -14,6 +14,8 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
   const load = useCallback(async () => {
     if (!owner || !current()) return;
     const stamp = ++epoch.current;
+    // A restore started before typing/confirmation must not overwrite it.
+    const readingRevision = revision.current;
     try {
       // Bound the UI wait, including a queued earlier write. The storage queue
       // keeps its original ordering; a timeout must never replace an unknown
@@ -22,8 +24,8 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
         if (ref.current.owner === owner && ref.current.ready && ref.current.error) await saveChatComposer(room, owner, ref.current.draft);
         return readChatComposer(room, owner);
       })(), 12_000);
-      if (current() && stamp === epoch.current) publish({ owner, draft: saved.draft, ready: true, error: saved.unsaved });
-    } catch { if (current() && stamp === epoch.current) publish({ ...ref.current, owner, error: true }); }
+      if (current() && stamp === epoch.current && readingRevision === revision.current) publish({ owner, draft: saved.draft, ready: true, error: saved.unsaved });
+    } catch { if (current() && stamp === epoch.current && readingRevision === revision.current) publish({ ...ref.current, owner, error: true }); }
   }, [room, owner, current, publish]);
   useEffect(() => {
     ++epoch.current; revision.current++;
@@ -53,26 +55,29 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
     const fields = typeof patch === 'function' ? patch(ref.current.draft) : patch;
     void persist({ ...ref.current.draft, ...fields }).catch(() => undefined);
   }, [owner, current, persist]);
-  const prepare = useCallback(async () => {
+  const prepare = useCallback(async (options?: { detachText?: boolean; onDetach?: () => void }) => {
     if (!owner || !current() || ref.current.owner !== owner || !ref.current.ready || ref.current.error) throw Error('Check your saved message first.');
     const existing = ref.current.draft.attempt;
+    const preparingRevision = revision.current;
     const attempt = prepareChatComposer(ref.current.draft);
-    if (!existing) await verifyChatComposerTarget(room, attempt, owner);
+    if (!existing && (!options?.detachText || attempt.edit || attempt.replyId)) await verifyChatComposerTarget(room, attempt, owner);
     if (!current() || ref.current.owner !== owner) throw Error('This conversation visit changed.');
-    try {
-      // The send may start only after its original attempt is durably kept.
-      // Bound this waiter, not the ordered storage operation: timing out must
-      // retain the same UUID and require recovery before any transport.
-      await persist({ ...ref.current.draft, attempt });
-    } catch (error) {
-      if (current() && ref.current.owner === owner && ref.current.draft.attempt === attempt) {
-        publish({ ...ref.current, error: true });
-      }
-      throw error;
-    }
+    // The send may start only after its original attempt is durably kept.
+    // Bound this waiter, not the ordered storage operation: timing out must
+    // retain the same UUID and require recovery before any transport.
+    const independentDraft = !existing && !attempt.edit && options?.detachText;
+    const detach = independentDraft && revision.current === preparingRevision;
+    const saving = persist({ ...ref.current.draft,
+      ...(detach ? { text: '', mentions: null, reply: null } : {}),
+      ...(independentDraft ? { attemptDetached: true } : {}), attempt });
+    // Request native clearing at the same handoff as the controlled value.
+    // The original already lives in the ordered draft write.
+    if (detach) { try { options?.onDetach?.(); } catch { /* controlled value still clears */ } }
+    await saving;
+    // persist alone owns storage error state through its write revision.
     if (!current()) throw Error('This conversation visit changed.');
     return attempt;
-  }, [room, owner, current, persist, publish]);
+  }, [room, owner, current, persist]);
   const finish = useCallback(async (attempt: ChatDraftAttempt) => {
     if (!current() || ref.current.owner !== owner) return;
     try { await persist(finishChatComposer(ref.current.draft, attempt)); }
@@ -80,13 +85,18 @@ export function useChatComposerDraft(room: ConversationKey, owner: ChatOperation
       // Delivery is already confirmed. Keep the cleared attempt and any newer
       // typing in memory, and recover storage without reporting a send failure
       // (which would restore the delivered text as a new, resendable message).
-      if (current() && ref.current.owner === owner) publish({ ...ref.current, error: true });
+      // persist marks failure only while this write is still current. A later
+      // successfully saved draft must not be disabled by this older failure.
     }
-  }, [owner, current, persist, publish]);
+  }, [owner, current, persist]);
   const refuseFresh = useCallback(async (attempt: ChatDraftAttempt) => {
     if (!current() || ref.current.owner !== owner || JSON.stringify(ref.current.draft.attempt) !== JSON.stringify(attempt)) return;
     await persist({ ...ref.current.draft, attempt: null });
   }, [owner, current, persist]);
+  const restoreFailedText = useCallback((attempt: ChatDraftAttempt) => {
+    if (!current() || ref.current.owner !== owner || ref.current.draft.attemptDetached || ref.current.draft.text || ref.current.draft.attempt?.id !== attempt.id) return;
+    void persist({ ...ref.current.draft, text: attempt.text, mentions: attempt.mentions ?? null }).catch(() => undefined);
+  }, [current, owner, persist]);
   const owned = state.owner === owner;
-  return { draft: owned ? state.draft : emptyChatComposer(), ready: owned && state.ready, error: owned && state.error, change, prepare, finish, refuseFresh, retry: load, isCurrent: current };
+  return { draft: owned ? state.draft : emptyChatComposer(), ready: owned && state.ready, error: owned && state.error, change, prepare, finish, restoreFailedText, refuseFresh, retry: load, isCurrent: current };
 }

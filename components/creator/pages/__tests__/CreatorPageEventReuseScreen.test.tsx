@@ -1,3 +1,4 @@
+// Fake request deadlines, but keep React act() scheduling live between tests.
 import React from 'react';import {act,create,type ReactTestRenderer} from 'react-test-renderer';
 const mockRead=jest.fn(),mockWorkspace=jest.fn(),mockSelection=jest.fn(),mockPrepare=jest.fn(),mockStart=jest.fn(),mockAcknowledge=jest.fn(),mockGetEvent=jest.fn(),mockReplace=jest.fn();
 let mockCurrent=true;const mockScope={userId:'0e6e1827-0f87-4e03-b42b-7ade8219725b',isCurrent:()=>mockCurrent};
@@ -43,7 +44,7 @@ it('pausing Keep retires its operation and preserves recovery without opening',a
 
 
 describe('stalled copy recovery',()=>{
- beforeEach(()=>jest.useFakeTimers());
+ beforeEach(()=>jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] }));
  afterEach(()=>jest.useRealTimers());
  it('a stalled initial check releases the screen for an explicit fresh check',async()=>{
   let finish!:(value:any)=>void;mockRead.mockReturnValueOnce(new Promise(r=>{finish=r;}));await mount();
@@ -72,7 +73,7 @@ describe('stalled copy recovery',()=>{
 });
 
 it('keeps a progressing copy active beyond ordinary request deadlines, and ignores progress after Pause',async()=>{
- jest.useFakeTimers();try{
+ jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });try{
   await mount();let progress!:(v:any)=>void;
   mockStart.mockImplementationOnce((_page,_scope,_action,callback)=>{progress=callback;return{cancel:jest.fn(),done:new Promise(()=>{})};});
   act(()=>{void action('Create draft').props.onPress();});await flush();

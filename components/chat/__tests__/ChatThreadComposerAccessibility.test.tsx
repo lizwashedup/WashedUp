@@ -4,7 +4,7 @@ import ReactionEmojiPicker from '../ReactionEmojiPicker';
 import { Modal } from 'react-native';
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert, Animated as NativeAnimated, FlatList, Keyboard, Platform, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { AppState, Alert, Animated as NativeAnimated, FlatList, Keyboard, Platform, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import ChatThread from '../ChatThread';
 import AttachmentPanel from '../AttachmentSheet';
@@ -14,6 +14,8 @@ import ScrollToBottomButton from '../ScrollToBottomButton';
 import { ChatContextHeader } from '../ChatContextHeader';
 import { GestureDetector } from 'react-native-gesture-handler';
 
+let mockRunFocus = false;
+const mockFocusCleanups = new Set<() => void>();
 let mockScopeCurrent = true;
 const mockOperationScope = { userId: 'account-a', isCurrent: () => mockScopeCurrent };
 jest.mock('../../../lib/chatComposerDraft', () => ({ ...jest.requireActual('../../../lib/chatComposerDraft'), verifyChatComposerTarget: async () => undefined, checkChatComposerAttempt: async () => true }));
@@ -39,7 +41,12 @@ jest.mock('../../../lib/uploadAudio', () => ({ uploadAudioToStorage: jest.fn() }
 jest.mock('../../../lib/logger', () => ({ logError: jest.fn() }));
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn(), hapticMedium: jest.fn(), hapticHeavy: jest.fn(), hapticSelection: jest.fn(), hapticSuccess: jest.fn(), hapticWarning: jest.fn(), hapticError: jest.fn() }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn().mockResolvedValue(undefined) }));
-jest.mock('expo-router', () => ({ useRouter: () => ({ replace: mockReplace, navigate: mockNavigate, back: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock('expo-router', () => ({ useRouter: () => ({ replace: mockReplace, navigate: mockNavigate, back: jest.fn() }), useFocusEffect: (callback: any) => require('react').useEffect(() => {
+  if (!mockRunFocus) return;
+  const cleanup = callback();
+  if (cleanup) mockFocusCleanups.add(cleanup);
+  return () => { if (cleanup) { mockFocusCleanups.delete(cleanup); cleanup(); } };
+}, [callback]) }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 34, left: 0, right: 0 }) }));
 jest.mock('react-native-keyboard-controller', () => {
   const height = new (require('react-native').Animated.Value)(0);
@@ -490,4 +497,69 @@ it.each([true, false])('returns to the retained Chats tab and dismisses the keyb
 it.each(['ios', 'android'] as const)('uses supported drag-to-dismiss keyboard behavior on %s', async platform => {
   await mount(platform);
   expect(tree!.root.findByType(FlatList).props.keyboardDismissMode).toBe(platform === 'ios' ? 'interactive' : 'on-drag');
+});
+
+
+it.each(['ios', 'android'] as const)('refreshes the visible %s shared chat after suspension without waiting for a socket event', async platform => {
+  const callbacks = new Set<(state: any) => void>();
+  const originalState = AppState.currentState;
+  const originalListener = jest.isMockFunction(AppState.addEventListener) ? jest.mocked(AppState.addEventListener).getMockImplementation() : undefined;
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
+  });
+  const emit = (state: string) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+    act(() => callbacks.forEach(callback => callback(state)));
+  };
+  try {
+    mockRunFocus = true; await mount(platform); mockRead.mockClear();
+    emit('background'); emit('active'); await act(async () => { await Promise.resolve(); });
+    expect(mockRead).toHaveBeenCalledTimes(1); expect(mockRead).toHaveBeenCalledWith(true);
+    emit('active'); await act(async () => { await Promise.resolve(); }); expect(mockRead).toHaveBeenCalledTimes(1);
+    act(() => mockFocusCleanups.forEach(cleanup => cleanup()));
+    emit('background'); emit('active'); await act(async () => { await Promise.resolve(); });
+    expect(mockRead).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => tree?.unmount()); tree = undefined; mockRunFocus = false; mockFocusCleanups.clear(); spy.mockRestore();
+    if (originalListener && jest.isMockFunction(AppState.addEventListener)) jest.mocked(AppState.addEventListener).mockImplementation(originalListener);
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
+  }
+});
+
+
+it('lets a finger drag win over content and keyboard changes before the first scroll event', async () => {
+  mockChat.messages = [message('existing')]; await mount('ios');
+  const list = () => tree!.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  act(() => {
+    list().props.onScrollBeginDrag?.();
+    const show = (Keyboard.addListener as jest.Mock).mock.calls.find(([name]) => name === 'keyboardWillShow')[1];
+    show({ endCoordinates: { height: 300 } });
+    list().props.onContentSizeChange(390, 900);
+    list().props.onLayout();
+  });
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => list().props.onScroll({ nativeEvent: { contentOffset: { y: 10 } } }));
+  act(() => list().props.onContentSizeChange(390, 950));
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+
+it.each([false, true])('respects a newer scroll gesture during shared text delivery (reader moved: %s)', async moved => {
+  const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
+  mockChat.messages = [message('existing')]; await mount(); type('Delayed message');
+  act(() => control('Send message').props.onAccessibilityTap()); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  const list = () => tree!.root.findByType(FlatList);
+  const scroll = jest.spyOn(list().instance, 'scrollToOffset').mockImplementation(() => {});
+  if (moved) act(() => {
+    list().props.onScrollBeginDrag();
+    list().props.onScroll({ nativeEvent: { contentOffset: { y: 600 } } });
+    list().props.onScrollEndDrag({ nativeEvent: { contentOffset: { y: 600 } } });
+  });
+  await act(async () => pending.resolve(true)); await flush();
+  if (moved) expect(scroll).not.toHaveBeenCalled();
+  else expect(scroll).toHaveBeenCalledWith({ offset: 0, animated: false });
+  expect(mockSend).toHaveBeenCalledTimes(1);
 });

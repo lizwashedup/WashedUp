@@ -293,7 +293,7 @@ it('obsolete entry cleanup preserves a newer attempt that reused the same UUID',
   const next = start(() => fixture.chat.sendMessage('New entry draft', undefined, undefined, 'entry-id', { userId: 'alice', isCurrent: () => true })); await flush();
   await act(async () => { oldInsert.resolve({ data: null, error: new Error('Unknown old result') }); await pending; });
   expect(fixture.chat.messages.filter(row => row.id === 'optimistic-entry-id').map(row => row.content)).toEqual(['New entry draft']);
-  await act(async () => { newInsert.resolve({ data: { id: 'entry-id', created_at: '2026-09-13T12:00:00Z' }, error: null }); await next; });
+  await act(async () => { newInsert.resolve({ data: message('entry-id', { content: 'New entry draft', created_at: '2026-09-13T12:00:00Z' }), error: null }); await next; });
   expect(fixture.chat.messages.find(row => row.id === 'entry-id')?.content).toBe('New entry draft');
 });
 
@@ -389,12 +389,12 @@ it('sends the selected identity and keeps it on the optimistic and confirmed mes
  const send=start(()=>f.chat.sendMessage('@Alex',undefined,undefined,'mention-send',undefined,identityMention));await flush();
  expect(mockWrite.mock.calls[0][0]).toMatchObject({content:'@Alex',mention_data:identityMention});
  expect(f.chat.messages.find(m=>m.id==='optimistic-mention-send')?.mention_data).toEqual(identityMention);
- await act(async()=>{pending.resolve({data:{id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex',mention_data:identityMention},error:null});await send;});await flush();
+ await act(async()=>{pending.resolve({data:{event_id:'plan-a',user_id:'alice',message_type:'user',id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex',mention_data:identityMention},error:null});await send;});await flush();
  expect(f.chat.messages.find(m=>m.id==='mention-send')?.mention_data).toEqual(identityMention);
 });
 it('does not confirm an identity-bearing send from a text-only or wrong-person receipt',async()=>{
- mockWrite.mockResolvedValue({data:{id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex'},error:null});
- mockReceipt.mockResolvedValue({data:{id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex',mention_data:{...identityMention,references:[{...identityMention.references[0],userId:'22222222-2222-4222-8222-222222222222'}]}},error:null});
+ mockWrite.mockResolvedValue({data:{event_id:'plan-a',user_id:'alice',message_type:'user',id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex'},error:null});
+ mockReceipt.mockResolvedValue({data:{event_id:'plan-a',user_id:'alice',message_type:'user',id:'mention-send',created_at:'2026-09-13T11:00:00Z',content:'@Alex',mention_data:{...identityMention,references:[{...identityMention.references[0],userId:'22222222-2222-4222-8222-222222222222'}]}},error:null});
  const f=mount();await flush();let result:boolean|undefined;await act(async()=>{result=await f.chat.sendMessage('@Alex',undefined,undefined,'mention-send',undefined,identityMention);});await flush();
  expect(result).toBe(false);expect(f.chat.messages.some(m=>m.id==='mention-send')).toBe(false);
 });
@@ -521,7 +521,7 @@ it.each(['reply', 'mention'] as const)('recovers a stalled %s send from its orig
   try {
     const insert = deferred(); mockWrite.mockReturnValueOnce(insert.promise);
     const content = mode === 'mention' ? '@Alex' : 'Reply words';
-    mockReceipt.mockResolvedValueOnce({ data: { id: 'stable-context', created_at: '2026-09-27T12:00:00Z', content, ...(mode === 'mention' ? { mention_data: identityMention } : {}) }, error: null });
+    mockReceipt.mockResolvedValueOnce({ data: { event_id: 'plan-a', user_id: 'alice', message_type: 'user', reply_to_message_id: mode === 'reply' ? 'old' : null, id: 'stable-context', created_at: '2026-09-27T12:00:00Z', content, ...(mode === 'mention' ? { mention_data: identityMention } : {}) }, error: null });
     let outcome: unknown = 'pending';
     const work = start(async () => { outcome = await f.chat.sendMessage(content, undefined, mode === 'reply' ? 'old' : undefined, 'stable-context', undefined, mode === 'mention' ? identityMention : undefined); });
     await flush(); await act(async () => jest.advanceTimersByTime(12000)); await flush();
@@ -710,4 +710,71 @@ it('caller-owned edit presentation cannot restore or report an old failure after
   expect(isObsoleteChatOperation(outcome)).toBe(true);
   expect(fixture.chat.messages.map(row => row.id)).toEqual(['new-alice']);
   expect(Alert.alert).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ['id', 'wrong-id'], ['event_id', 'wrong-room'], ['user_id', 'bob'],
+  ['content', 'Different words'], ['message_type', 'system'],
+  ['image_url', 'unexpected-photo.jpg'], ['reply_to_message_id', 'old'],
+  ['mention_data', { invalid: true }],
+])('does not confirm a text receipt with different %s on either insert or recovery', async (field, value) => {
+  const row = message('stable-text', { content: 'Original words', [field as string]: value });
+  mockWrite.mockResolvedValueOnce({ data: row, error: null });
+  mockReceipt.mockResolvedValueOnce({ data: row, error: null });
+  const f = mount(); await flush();
+  await act(async () => { expect(await f.chat.sendMessage('Original words', undefined, undefined, 'stable-text')).toBe(false); });
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockReceipt).toHaveBeenCalledWith({ id: 'stable-text', event_id: 'plan-a', user_id: 'alice' });
+  expect(f.chat.messages.some(row => row.id === 'stable-text' || row.id === 'optimistic-stable-text')).toBe(false);
+});
+
+it.each(['event', 'circle'] as const)('confirms an exact %s text receipt immediately, without a recovery read', async kind => {
+  const f = mount(); await flush();
+  f.navigate({ kind, id: 'room-one' }); await flush();
+  await act(async () => { expect(await f.chat.sendMessage('Original words', undefined, undefined, 'stable-text')).toBe(true); });
+  expect(mockReceipt).not.toHaveBeenCalled();
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockWrite.mock.calls[0][0]).toMatchObject({ [kind === 'event' ? 'event_id' : 'circle_id']: 'room-one' });
+});
+
+it('recovers an uncertain text insert from an exact receipt without sending twice', async () => {
+  mockWrite.mockResolvedValueOnce({ data: null, error: Error('Lost acknowledgement') });
+  mockReceipt.mockResolvedValueOnce({ data: message('stable-text', { content: 'Original words' }), error: null });
+  const f = mount(); await flush();
+  await act(async () => { expect(await f.chat.sendMessage('Original words', undefined, undefined, 'stable-text')).toBe(true); });
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockReceipt).toHaveBeenCalledTimes(1);
+  expect(f.chat.messages.filter(row => row.id === 'stable-text')).toHaveLength(1);
+});
+
+it.each([false, true])('bounds a stalled delete and respects account retirement (%s)', async retire => {
+  jest.useFakeTimers();
+  const deletion = deferred();
+  let pending: Promise<unknown> | undefined;
+  try {
+    const fixture = mount(); await flush();
+    mockMutation.mockReturnValueOnce(deletion.promise);
+    let settled = false;
+    pending = start(() => fixture.chat.deleteMessage('old')).then(value => {settled=true;return value;});
+    await flush();
+    if (retire) {emitIdentity('bob');await flush();}
+    await act(async () => jest.advanceTimersByTime(12000)); await flush();
+    expect(settled).toBe(true);
+    const outcome = await pending;
+    if (retire) {
+      expect(outcome).toMatchObject({name:'ObsoleteChatOperationError'});
+      expect(Alert.alert).not.toHaveBeenCalled();
+    } else {
+      expect(fixture.chat.messages.some(row => row.id === 'old')).toBe(true);
+      expect(Alert.alert).toHaveBeenCalledWith('Removal not confirmed', expect.any(String));
+    }
+    expect(mockMutation).toHaveBeenCalledTimes(1);
+    const before = fixture.chat.messages;
+    await act(async () => deletion.resolve(success)); await flush();
+    expect(fixture.chat.messages).toEqual(before);
+  } finally {
+    deletion.resolve(success); await flush(); await pending;
+    jest.useRealTimers();
+  }
 });

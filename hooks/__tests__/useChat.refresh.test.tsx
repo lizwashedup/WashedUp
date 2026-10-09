@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useChat, ChatMessage, ConversationKey } from '../useChat';
 
+let mockClosing=false;
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  realtime: {isDisconnecting: () => mockClosing},
   from: jest.fn(), channel: jest.fn(), removeChannel: jest.fn(),
   auth: { getUser: jest.fn(), getSession: jest.fn(), onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })) },
 } }));
@@ -57,6 +59,7 @@ async function emit(event: string, row: ChatMessage) {
 }
 
 beforeEach(() => {
+  mockClosing=false;
   jest.clearAllMocks();
   readMessages.mockReset();
   readProfiles.mockReset().mockResolvedValue({ data: [{ id: 'other', first_name_display: 'Alex', profile_photo_url: 'local-test-photo' }] });
@@ -88,6 +91,27 @@ beforeEach(() => {
   });
 });
 afterEach(() => cleanup.splice(0).forEach(close => close()));
+
+it.each(['event', 'circle'] as const)('retires every %s subscription across 40 visits and ignores callbacks from departed rooms', async kind => {
+  readMessages.mockResolvedValue(result(message(1)));
+  const fixture = mount({ kind, id: 'visit-0' }); await flush();
+  const retired: Array<(payload: any) => void | Promise<void>> = [];
+  for (let visit = 1; visit <= 40; visit++) {
+    retired.push(callbacks.INSERT);
+    fixture.navigate({ kind, id: `visit-${visit}` }); await flush();
+    expect(supabase.removeChannel).toHaveBeenCalledTimes(visit);
+    expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id]);
+    await act(async () => { await retired[visit - 1]({ new: message(visit + 10) }); });
+    await flush();
+    expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id]);
+  }
+  cleanup.splice(0).forEach(close => close());
+  expect(supabase.channel).toHaveBeenCalledTimes(41);
+  expect(supabase.removeChannel).toHaveBeenCalledTimes(41);
+  const readsBefore = readMessages.mock.calls.length;
+  await act(async () => { for (const callback of retired) await callback({ new: message(99) }); });
+  expect(readMessages).toHaveBeenCalledTimes(readsBefore);
+});
 
 it.each(['event', 'circle'] as const)('recovers a persisted %s message when PostgreSQL streaming becomes ready', async kind => {
   readMessages.mockResolvedValueOnce(result(message(1)));
@@ -358,8 +382,8 @@ it('reconciles the exact optimistic UUID while retaining a different in-flight s
   await flush();
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id, 'send-a', 'optimistic-send-b']);
   await act(async () => {
-    first.resolve({ data: { id: 'send-a', created_at: confirmed.created_at }, error: null });
-    second.resolve({ data: { id: 'send-b', created_at: message(3).created_at }, error: null });
+    first.resolve({ data: confirmed, error: null });
+    second.resolve({ data: message(3, { id: 'send-b', user_id: 'viewer', content: 'Same text' }), error: null });
     await Promise.all([sendFirst, sendSecond]);
   });
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(1).id, 'send-a', 'send-b']);
@@ -522,4 +546,64 @@ it.each(['event', 'circle'] as const)('starts the %s privacy gate while history 
   await flush();
   expect(fixture.chat.messages.map(row => row.id)).toEqual([message(2).id]);
   expect(fixture.chat.loading).toBe(false);
+});
+
+it.each(['event', 'circle'] as const)('renders %s history after its required reads without waiting for five-second profile enrichment', async kind => {
+  jest.useFakeTimers();
+  try {
+    readMessages.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(result(message(1))), 200)));
+    readBlocked.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: { blocked_users: [] }, error: null }), 100)));
+    readProfiles.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: [{ id: 'other', first_name_display: 'Alex' }], error: null }), 5000)));
+    const fixture = mount({ kind, id: 'plan-a' }); await flush();
+    await act(async () => { await jest.advanceTimersByTimeAsync(199); }); await flush();
+    expect(fixture.chat.loading).toBe(true);
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); }); await flush();
+    expect(fixture.chat.loading).toBe(false);
+    expect(fixture.chat.messages.map(row => row.content)).toEqual(['Message 1']);
+    expect(fixture.chat.messages[0].sender).toBeFalsy();
+    await act(async () => { await jest.advanceTimersByTimeAsync(5000); }); await flush();
+    expect(fixture.chat.messages[0].sender?.first_name).toBe('Alex');
+  } finally {
+    cleanup.splice(0).forEach(close => close());
+    jest.clearAllTimers(); jest.useRealTimers();
+  }
+});
+
+it('shows a pending text bubble through a three-second acknowledgement and keeps one confirmed copy', async () => {
+  jest.useFakeTimers();
+  try {
+    readMessages.mockResolvedValue(result(message(1)));
+    const fixture = mount(); await flush();
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const receipt = { ...message(2), id, user_id: 'viewer', content: 'Slow delivery' };
+    writeMessage.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ data: receipt, error: null }), 3000)));
+    let sent!: Promise<boolean>;
+    act(() => { sent = fixture.chat.sendMessage('Slow delivery', undefined, undefined, id); }); await flush();
+    expect(fixture.chat.messages.filter(row => row.content === 'Slow delivery').map(row => row.id)).toEqual([`optimistic-${id}`]);
+    await act(async () => { await jest.advanceTimersByTimeAsync(2999); }); await flush();
+    expect(fixture.chat.messages.at(-1)?.id).toBe(`optimistic-${id}`);
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); await sent; }); await flush();
+    expect(fixture.chat.messages.filter(row => row.content === 'Slow delivery').map(row => row.id)).toEqual([id]);
+    await emit('INSERT', receipt); await flush();
+    expect(fixture.chat.messages.filter(row => row.id === id)).toHaveLength(1);
+  } finally {
+    cleanup.splice(0).forEach(close => close());
+    jest.clearAllTimers(); jest.useRealTimers();
+  }
+});
+
+
+it.each(['event','circle'] as const)('joins only the current %s visit after a pending socket close', async kind => {
+ jest.useFakeTimers();try {
+  readMessages.mockResolvedValue(result(message(1)));mockClosing=true;
+  const fixture=mount({kind,id:'room-a'});await flush();
+  fixture.navigate({kind,id:'room-b'});await flush();fixture.navigate({kind,id:'room-a'});await flush();
+  const channels=jest.mocked(supabase.channel).mock.results.map(result=>result.value);
+  expect(channels).toHaveLength(3);
+  expect(new Set(jest.mocked(supabase.channel).mock.calls.map(call=>call[0])).size).toBe(3);
+  channels.forEach(channel=>expect(channel.subscribe).not.toHaveBeenCalled());
+  mockClosing=false;await act(async()=>{jest.advanceTimersByTime(100);});await flush();
+  expect(channels[0].subscribe).not.toHaveBeenCalled();expect(channels[1].subscribe).not.toHaveBeenCalled();
+  expect(channels[2].subscribe).toHaveBeenCalledTimes(1);
+ }finally{cleanup.splice(0).forEach(close=>close());jest.useRealTimers();}
 });

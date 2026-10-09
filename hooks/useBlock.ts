@@ -3,6 +3,8 @@ import { Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
+import { removeBlockedPrivateChatPreviews } from '../lib/chatListCache';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 
 export interface BlockOperationScope {
   userId: string;
@@ -27,7 +29,7 @@ export function useBlock() {
     onSuccess?: () => void,
     scope?: BlockOperationScope,
   ) => {
-    const isCurrent = () => !scope || (mounted.current && scope.isCurrent());
+    const isCurrent = () => mounted.current && (!scope || scope.isCurrent());
     if (!isCurrent()) return;
     Alert.alert(
       `Block ${blockedName}?`,
@@ -38,47 +40,58 @@ export function useBlock() {
           text: 'Block',
           style: 'destructive',
           onPress: async () => {
-            if (!isCurrent() || (scope && pending.current && (!pending.current.scope || pending.current.scope.isCurrent()))) return;
+            if (!isCurrent() || (pending.current && (!pending.current.scope || pending.current.scope.isCurrent()))) return;
             const attempt = { scope }; pending.current = attempt; setOwner(attempt);
             setBlocking(true);
             try {
-              const { data: { user }, error: authError } = await supabase.auth.getUser();
+              const { data: { user }, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
               if (!isCurrent() || (scope && user?.id !== scope.userId)) return;
-              if (scope && authError) throw authError;
-              if (!user) return;
+              if (authError) throw authError;
+              if (!user) throw new Error('Could not confirm this account.');
 
-              const { data: profile, error: readError } = await supabase
+              const { data: profile, error: readError } = await requestWithDeadline(supabase
                 .from('profiles')
                 .select('blocked_users')
                 .eq('id', user.id)
-                .single();
+                .single(), 12_000);
               if (!isCurrent()) return;
-              if (scope && readError) throw readError;
+              if (readError) throw readError;
+              if (!profile) throw new Error('Could not read blocked people.');
 
               const current: string[] = profile?.blocked_users ?? [];
               if (!current.includes(blockedId)) {
-                const { error: writeError } = await supabase
+                let write = supabase
                   .from('profiles')
                   .update({ blocked_users: [...current, blockedId] })
                   .eq('id', user.id);
+                // Compare against the array actually read. Another device or
+                // sheet changing it must never have its newer blocks replaced.
+                write = profile.blocked_users === null
+                  ? write.is('blocked_users', null)
+                  : write.eq('blocked_users', `{${current.join(',')}}`);
+                const { data: receipt, error: writeError } = await requestWithDeadline(
+                  write.select('id, blocked_users').maybeSingle(), 12_000);
                 if (!isCurrent()) return;
-                if (scope && writeError) throw writeError;
+                if (writeError) throw writeError;
+                if (receipt?.id !== user.id || !Array.isArray(receipt.blocked_users) ||
+                    ![...current, blockedId].every(id => receipt.blocked_users.includes(id))) {
+                  throw new Error('The block could not be confirmed. Please try again.');
+                }
 
                 // Apple 1.2: Notify developer of inappropriate content when user blocks
                 try {
-                  await supabase.from('reports').insert({
+                  void Promise.resolve(supabase.from('reports').insert({
                     reporter_user_id: user.id,
                     reported_user_id: blockedId,
                     reason: 'Blocked by user',
                     reported_event_id: null,
                     details: `User blocked ${blockedName}. They will no longer appear in their feed or be able to contact them.`,
-                  });
+                  })).catch(() => {});
                 } catch {
                   // Report insert is best-effort; block still succeeds
                 }
               }
               if (!isCurrent()) return;
-
               // Apple 1.2: Instant removal from feed — invalidate all relevant queries
               queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
               queryClient.invalidateQueries({ queryKey: ['events', 'detail'] });
@@ -97,8 +110,7 @@ export function useBlock() {
               queryClient.invalidateQueries({ queryKey: ['topic-first-message'] });
 
               // Yours surfaces: sever the blocked person from the grid + their
-              // profile/keep caches so access dies on the next read (the block
-              // RPC also re-gates server-side; this clears the local cache).
+              // profile/keep caches so access dies on the next read.
               queryClient.invalidateQueries({ queryKey: yoursKeys.grid(user.id) });
               queryClient.invalidateQueries({ queryKey: yoursKeys.backlog(user.id) });
               queryClient.invalidateQueries({ queryKey: yoursKeys.requests(user.id) });
@@ -109,7 +121,10 @@ export function useBlock() {
                 queryKey: yoursKeys.personProfile(user.id, blockedId),
               });
 
-              onSuccess?.();
+              // Notify privacy observers after the account's invalidations:
+              // closing a blocked DM can retire this component's own scope.
+              removeBlockedPrivateChatPreviews(user.id, blockedId);
+              if (isCurrent()) onSuccess?.();
               setTimeout(() => {
                 if (isCurrent()) Alert.alert('Blocked', `${blockedName} has been blocked.`);
               }, 300);

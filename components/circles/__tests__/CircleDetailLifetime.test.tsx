@@ -9,9 +9,9 @@ import CirclePlanComposer from '../plan/CirclePlanComposer';
 import { BrandedAlert } from '../../BrandedAlert';
 import { COPY } from '../../yours/state/constants';
 let mockCircle='circle-a',mockUser:string|null='alice',mockEpoch=1,mockError=false,mockLoading=false,mockEnabled=true,mockName='Friends',mockRole='admin',mockCount=3,mockPending=false,mockFocused=true;
-const mockPush=jest.fn(),mockBack=jest.fn(),mockDismiss=jest.fn(),mockRefetch=jest.fn(),mockLeave=jest.fn();
+const mockDismissTo=jest.fn(),mockPush=jest.fn(),mockBack=jest.fn(),mockDismiss=jest.fn(),mockRefetch=jest.fn(),mockLeave=jest.fn();
 const mockMember=(id:string,name:string)=>({user_id:id,first_name_display:name,profile_photo_url:null,role:id===mockUser?mockRole:'member'});
-jest.mock('expo-router',()=>({Redirect:()=>null,useLocalSearchParams:()=>({id:mockCircle}),useRouter:()=>({push:mockPush,back:mockBack,dismissAll:mockDismiss})}));
+jest.mock('expo-router',()=>({Redirect:()=>null,useLocalSearchParams:()=>({id:mockCircle}),useRouter:()=>({push:mockPush,dismissTo:mockDismissTo,back:mockBack,dismissAll:mockDismiss})}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('../../../constants/FeatureFlags',()=>({get GROUPS_ENABLED(){return mockEnabled;}}));
 jest.mock('../../yours/state/useAuthUserId',()=>({useAuthUserId:()=>({data:'alice'})}));
@@ -35,7 +35,7 @@ jest.mock('lucide-react-native',()=>({ChevronLeft:()=>null,MoreHorizontal:()=>nu
 let tree:ReactTestRenderer;
 const board=()=>tree.root.findByType(CircleNoticeboard).props;
 const add=()=>tree.root.findByType(AddPeopleSheet).props;
-const name=()=>tree.root.findByType(NameCircleSheet).props;
+const name=()=>tree.root.findAllByType(NameCircleSheet).find(n=>n.props.mode!=='edit')!.props;
 const plan=()=>tree.root.findByType(CirclePlanComposer).props;
 const alert=()=>tree.root.findByType(BrandedAlert).props;
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label && typeof n.props.onPress==='function')[0].props;
@@ -54,15 +54,15 @@ it('passes the active account scope to plans and preserves direct plan navigatio
  await render();expect(board().plansScope).toBe(scope);
  act(()=>board().onOpenPlan('plan-a'));expect(mockPush).toHaveBeenCalledWith('/plan/plan-a');mockPush.mockClear();
  await move('account');expect(scope.isCurrent()).toBe(false);
- act(()=>old.onOpenPlan('old-plan'));expect(mockPush).not.toHaveBeenCalled();
+ act(()=>old.onOpenPlan('old-plan'));expect(mockPush).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();
  expect(board().plansScope).toMatchObject({userId:'bob',epoch:2});
 });
 it('preserves current sheet actions, IDs, chat route and close-before-post navigation',async()=>{
- await render();act(()=>board().onOpenChat());expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-a');mockPush.mockClear();
+ await render();act(()=>board().onOpenChat());expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-a');mockDismissTo.mockClear();
  mockFocused=false;await render();mockFocused=true;await render();
  act(()=>{board().onPostPlan();board().onAddPeople();});expect(add().existingMemberIds).toEqual(['alice','jamie','cara']);expect(plan()).toMatchObject({circleId:'circle-a',circleName:'Friends',isDm:false});
  const callbacks=plan();act(()=>{callbacks.onClose();callbacks.onPosted({event_id:'plan-a',has_own_chat:true});});expect(plan().visible).toBe(false);expect(mockPush).toHaveBeenCalledWith('/plan/plan-a');
- mockPush.mockClear();act(()=>plan().onPosted({event_id:'whole-circle',has_own_chat:false}));expect(mockPush).not.toHaveBeenCalled();act(()=>add().onClose());expect(add().visible).toBe(false);
+ mockPush.mockClear();act(()=>plan().onPosted({event_id:'whole-circle',has_own_chat:false}));expect(mockPush).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();act(()=>add().onClose());expect(add().visible).toBe(false);
 });
 it('coalesces repeated plan and chat navigation and retires callbacks on focus return',async()=>{
  await render();const old=board(),scope=board().plansScope;
@@ -70,7 +70,7 @@ it('coalesces repeated plan and chat navigation and retires callbacks on focus r
  mockFocused=false;await render();expect(scope.isCurrent()).toBe(true);expect(board().plansScope).toBe(scope);
  act(()=>board().onOpenChat());expect(mockPush).toHaveBeenCalledTimes(1);
  mockFocused=true;await render();act(()=>old.onOpenPlan('old'));expect(mockPush).toHaveBeenCalledTimes(1);
- act(()=>board().onOpenChat());expect(mockPush).toHaveBeenCalledTimes(2);
+ act(()=>board().onOpenChat());expect(mockPush).toHaveBeenCalledTimes(1);expect(mockDismissTo).toHaveBeenCalledTimes(1);
 });
 it('permits only one back action for a focused visit',async()=>{
  await render();const back=button(COPY.circleHomeBack);act(()=>{back.onPress();back.onPress();});expect(mockBack).toHaveBeenCalledTimes(1);
@@ -79,11 +79,11 @@ it.each(['room','account','access'] as const)('retires old opens, closes, post a
  await render();const oldBoard=board(),oldPlan=plan(),oldAdd=add(),oldBack=button(COPY.circleHomeBack).onPress;act(()=>{oldBoard.onPostPlan();oldBoard.onAddPeople();});await move(kind);
  if(kind==='access'){mockError=false;await render();}
  act(()=>{board().onPostPlan();board().onAddPeople();});expect(plan().visible).toBe(true);expect(add().visible).toBe(true);
- act(()=>{oldPlan.onClose();oldAdd.onClose();oldPlan.onPosted({event_id:'old',has_own_chat:true});oldBoard.onOpenChat();oldBack();});expect(plan().visible).toBe(true);expect(add().visible).toBe(true);expect(mockPush).not.toHaveBeenCalled();expect(mockBack).not.toHaveBeenCalled();
+ act(()=>{oldPlan.onClose();oldAdd.onClose();oldPlan.onPosted({event_id:'old',has_own_chat:true});oldBoard.onOpenChat();oldBack();});expect(plan().visible).toBe(true);expect(add().visible).toBe(true);expect(mockPush).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();expect(mockBack).not.toHaveBeenCalled();
  act(()=>{plan().onClose();add().onClose();oldBoard.onPostPlan();oldBoard.onAddPeople();});expect(plan().visible).toBe(false);expect(add().visible).toBe(false);
 });
 it('retires callbacks after account ABA before any parent rerender',async()=>{
- await render();const old=board(),oldPlan=plan();mockEpoch+=2;act(()=>{old.onPostPlan();old.onOpenChat();oldPlan.onPosted({event_id:'old',has_own_chat:true});});expect(mockPush).not.toHaveBeenCalled();expect(plan().visible).toBe(false);
+ await render();const old=board(),oldPlan=plan();mockEpoch+=2;act(()=>{old.onPostPlan();old.onOpenChat();oldPlan.onPosted({event_id:'old',has_own_chat:true});});expect(mockPush).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();expect(plan().visible).toBe(false);
 });
 it('revokes the old admission scope permanently across access error and recovery',async()=>{
  await render();const scope=plan().scope;act(()=>board().onPostPlan());mockError=true;await render();expect(scope.isCurrent()).toBe(false);expect(plan().visible).toBe(false);expect(add().visible).toBe(false);
@@ -115,7 +115,7 @@ it('keeps the current error retry and loading back action usable while retiring 
  mockError=false;mockLoading=true;await render();act(()=>button(COPY.circleHomeBack).onPress());expect(mockBack).toHaveBeenCalledTimes(1);
 });
 it('retires retained parent callbacks on unmount',async()=>{
- await render();const oldBoard=board(),oldPlan=plan(),oldScope=plan().scope;act(()=>tree.unmount());act(()=>{oldBoard.onOpenChat();oldPlan.onPosted({event_id:'old',has_own_chat:true});});expect(mockPush).not.toHaveBeenCalled();expect(oldScope.isCurrent()).toBe(false);
+ await render();const oldBoard=board(),oldPlan=plan(),oldScope=plan().scope;act(()=>tree.unmount());act(()=>{oldBoard.onOpenChat();oldPlan.onPosted({event_id:'old',has_own_chat:true});});expect(mockPush).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();expect(oldScope.isCurrent()).toBe(false);
 });
 it('keeps the existing feature and missing-route redirect gates',async()=>{
  mockEnabled=false;await render();expect(tree.root.findAllByType(CircleNoticeboard)).toHaveLength(0);mockEnabled=true;mockCircle='';await render();expect(tree.root.findAllByType(CircleNoticeboard)).toHaveLength(0);

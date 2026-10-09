@@ -71,6 +71,28 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+it('releases every keyboard listener through 40 visits with repeated keyboard/panel handoffs', () => {
+  for (let visit = 0; visit < 40; visit++) {
+    mount(34);
+    expect(subscriptions.filter(entry => entry.active)).toHaveLength(3);
+    for (const height of [300, 432, 280]) {
+      motion(height); emit('keyboardDidShow', height);
+      expect(reservation()).toBe(height);
+      updateInset(240);
+      expect([translation('viewport'), translation('dock')]).toEqual([-height, -height]);
+      emit('keyboardWillHide'); motion(0); emit('keyboardDidHide');
+      expect(reservation()).toBe(240);
+      expect([translation('viewport'), translation('dock')]).toEqual([-240, -240]);
+      updateInset(34);
+      expect(reservation()).toBe(34);
+    }
+    act(() => tree!.unmount()); tree = undefined;
+    expect(subscriptions.filter(entry => entry.active)).toHaveLength(0);
+  }
+  expect(subscriptions).toHaveLength(120);
+  expect(subscriptions.every(entry => entry.remove.mock.calls.length === 1)).toBe(true);
+});
+
 it('matches the larger keyboard or panel/safe-area footprint at exact handoff boundaries', () => {
   mount();
   for (const inset of [0, 34, 180, 240]) {

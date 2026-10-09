@@ -44,10 +44,11 @@ it('uses factual staged copy and warning without growth pressure or unsupported 
 it.each(['posted', 'joined'] as const)('uses the original single close callback for the staged %s destination', variant => {
   const fixture = mount({ appearance, variant }); const exit = action(tree.root, variant === 'posted' ? 'View plan' : 'Open chat').props.onPress;
   act(() => { exit(); exit(); tree.root.findByType(Modal).props.onRequestClose(); });
-  expect(fixture.props.onClose).not.toHaveBeenCalled();
-  expect(tree.root.findByType(Modal).props.visible).toBe(false);
-  act(() => { tree.root.findByType(Modal).props.onDismiss(); tree.root.findByType(Modal).props.onDismiss(); });
+  // The released caller owns hiding the modal/navigation; no onDismiss dependency.
   expect(fixture.props.onClose).toHaveBeenCalledTimes(1); expect(share).not.toHaveBeenCalled();
+  fixture.update({ visible: false });
+  act(() => exit());
+  expect(fixture.props.onClose).toHaveBeenCalledTimes(1);
 });
 it('locks two immediate Share taps until native sharing settles, then allows a deliberate new share', async () => {
   const pending = deferred<any>(); share.mockReturnValueOnce(pending.promise); mount({ appearance });

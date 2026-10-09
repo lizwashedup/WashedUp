@@ -229,6 +229,22 @@ it('closes on an already-granted successful preflight without requesting permiss
   expect(primers()).toHaveLength(0); expect(await AsyncStorage.getItem(SNOOZE_KEY)).toBeNull();
 });
 
+it('uses a contextual primer CTA to upgrade provisional permission without a passive short-circuit', async () => {
+  mockEligibility.mockResolvedValue('answered');
+  mockPromptPermission.mockResolvedValue('provisional');
+  await mount();
+  act(() => requestPlanNotificationPrompt({
+    userId: PERSON_A.id,
+    planId: 'plan-provisional-upgrade',
+    reason: 'joined',
+  }, () => true));
+  await flush(); await tick(400); await enable();
+  expect(mockRegister.mock.calls).toEqual([[
+    { prompt: true, userId: PERSON_A.id, canPrompt: expect.any(Function) },
+  ]]);
+  expect(primers()).toHaveLength(0);
+});
+
 it.each([false, true])('closes after a real denial (native request: %s) without opening Settings', async (prompted) => {
   if (prompted) mockRegister.mockResolvedValueOnce({ status: 'permission-required' });
   mockRegister.mockResolvedValueOnce({ status: 'permission-denied' });

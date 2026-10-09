@@ -174,7 +174,7 @@ it('a send can finish across the change from anchored history to Latest', async 
   const receipt = deferred<any>(); writeMessage.mockReturnValueOnce(receipt.promise);
   let sent!: Promise<boolean>; act(() => { sent = fixture.chat.sendMessage('Still here', undefined, undefined, 'send-id'); }); await flush();
   fixture.anchor(null); await flush();
-  await act(async () => receipt.resolve({ data: { id: 'send-id', created_at: '2026-09-21T12:00:00Z' }, error: null }));
+  await act(async () => receipt.resolve({ data: { ...message(2), id: 'send-id', user_id: 'viewer', content: 'Still here', created_at: '2026-09-21T12:00:00Z' }, error: null }));
   await act(async () => expect(await sent).toBe(true)); await flush();
   expect(fixture.chat.messages.some(row => row.id === 'send-id' && row.content === 'Still here')).toBe(true);
 });
