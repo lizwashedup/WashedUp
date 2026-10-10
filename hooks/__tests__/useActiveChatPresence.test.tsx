@@ -2,6 +2,7 @@ import React from 'react';
 import { AppState } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { useActiveChatPresence, type ActiveChatPresenceScope } from '../useActiveChatPresence';
+import { logError } from '../../lib/logger';
 
 let mockFocused = true;
 const mockAuth = jest.fn(), mockWrite = jest.fn(), mockListeners = new Set<(state: string) => void>();
@@ -29,6 +30,7 @@ function focus(value: boolean) { mockFocused = value; act(() => tree!.update(<Ha
 function appState(value: string) { (AppState as any).currentState = value; act(() => mockListeners.forEach(callback => callback(value))); }
 async function flush() { await act(async () => { for (let i = 0; i < 70; i++) await Promise.resolve(); }); }
 beforeEach(() => {
+  jest.useFakeTimers();
   mockFocused = true; currentScope = null; tree = null; mockListeners.clear();
   mockAuth.mockReset().mockResolvedValue(identity('alice')); mockWrite.mockReset().mockResolvedValue({ error: null });
   (AppState as any).currentState = 'active';
@@ -36,7 +38,11 @@ beforeEach(() => {
     mockListeners.add(callback); return { remove: () => mockListeners.delete(callback) };
   });
 });
-afterEach(async () => { act(() => { tree?.unmount(); extraTrees.splice(0).forEach(extra => extra.unmount()); }); tree = null; await flush(); jest.restoreAllMocks(); });
+afterEach(async () => {
+  act(() => { tree?.unmount(); extraTrees.splice(0).forEach(extra => extra.unmount()); });
+  tree = null; await flush(); await jest.runAllTimersAsync(); await flush();
+  jest.restoreAllMocks(); jest.useRealTimers();
+});
 
 it('clears a set that completes after focus was lost instead of stranding push suppression', async () => {
   const pending = deferred(); mockWrite.mockReturnValueOnce(pending.promise); mount(); await flush(); focus(false);
@@ -149,4 +155,73 @@ it('handles rejected auth reads without an unhandled promise or wrong profile wr
   mockAuth.mockRejectedValueOnce(new Error('Auth unavailable')); mount(); await flush();
   expect(mockWrite).not.toHaveBeenCalled();
   appState('active'); await flush(); expect(mockWrite).toHaveBeenLastCalledWith({ active_chat_event_id: 'plan-a' }, { id: 'alice' });
+});
+
+const networkFailure = () => Object.assign(new Error('Network request failed'), { name: 'AuthRetryableFetchError' });
+async function advance(milliseconds: number) {
+  await act(async () => { await jest.advanceTimersByTimeAsync(milliseconds); });
+  await flush();
+}
+
+it('recovers a transient identity failure while the same chat remains open', async () => {
+  mockAuth.mockResolvedValueOnce({ data: { user: null }, error: networkFailure() });
+  mount(); await flush(); expect(mockWrite).not.toHaveBeenCalled();
+  await advance(600);
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockWrite).toHaveBeenCalledWith({ active_chat_event_id: 'plan-a' }, { id: 'alice' });
+  expect(logError).toHaveBeenCalledWith(expect.objectContaining({ name: 'AuthRetryableFetchError' }), 'useActiveChatPresence');
+});
+
+it('recovers a temporary getUser server error but does not retry a rejected identity', async () => {
+  mockAuth.mockResolvedValueOnce({ data: { user: null }, error: { status: 500, message: 'context canceled' } })
+    .mockResolvedValueOnce({ data: { user: null }, error: { status: 403, message: 'token is expired' } });
+  mount(); await flush(); await advance(600); await advance(30000);
+  expect(mockAuth).toHaveBeenCalledTimes(2);
+  expect(mockWrite).not.toHaveBeenCalled();
+});
+
+it('stops a retry after the chat loses focus without writing stale presence', async () => {
+  mockAuth.mockRejectedValueOnce(networkFailure()); mount(); await flush();
+  focus(false); await advance(600);
+  expect(mockAuth).toHaveBeenCalledTimes(1);
+  expect(mockWrite).not.toHaveBeenCalled();
+});
+
+it('does not adopt a switched account when the retry resumes', async () => {
+  mockAuth.mockRejectedValueOnce(networkFailure()); mount(); await flush();
+  mockAuth.mockResolvedValue(identity('bob'));
+  update({ id: 'plan-b', scope: scope('bob') }); await flush(); await advance(600);
+  expect(mockWrite.mock.calls).toEqual([[{ active_chat_event_id: 'plan-b' }, { id: 'bob' }]]);
+});
+
+it('bounds persistent network failures instead of retrying forever', async () => {
+  mockAuth.mockRejectedValue(networkFailure()); mount(); await flush();
+  await advance(600); await advance(1800); await advance(60000);
+  expect(mockAuth).toHaveBeenCalledTimes(3);
+  expect(mockWrite).not.toHaveBeenCalled();
+});
+
+it('retries a lost cleanup response with the original account and room condition', async () => {
+  mount(); await flush(); mockWrite.mockResolvedValueOnce({ error: networkFailure() });
+  focus(false); await flush(); await advance(600);
+  expect(mockWrite.mock.calls.slice(1)).toEqual([
+    [{ active_chat_event_id: null }, { id: 'alice', active_chat_event_id: 'plan-a' }],
+    [{ active_chat_event_id: null }, { id: 'alice', active_chat_event_id: 'plan-a' }],
+  ]);
+});
+
+it('preserves a same-plan replacement when a retired cleanup retries', async () => {
+  mount(); await flush(); mockAuth.mockRejectedValueOnce(networkFailure());
+  focus(false); await flush();
+  focus(true); await flush(); await advance(600);
+  expect(mockWrite.mock.calls.every(([payload]) => payload.active_chat_event_id === 'plan-a')).toBe(true);
+});
+
+it('a stalled identity check cannot hold the presence queue forever or write after its deadline', async () => {
+  const pending = deferred(); mockAuth.mockReturnValueOnce(pending.promise);
+  mount(); await flush(); update({ id: 'plan-b', scope: scope() }); await flush();
+  await advance(8000);
+  expect(mockWrite.mock.calls).toEqual([[{ active_chat_event_id: 'plan-b' }, { id: 'alice' }]]);
+  await act(async () => pending.resolve(identity('alice'))); await flush();
+  expect(mockWrite).toHaveBeenCalledTimes(1);
 });
