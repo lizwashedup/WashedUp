@@ -225,3 +225,30 @@ it('a stalled identity check cannot hold the presence queue forever or write aft
   await act(async () => pending.resolve(identity('alice'))); await flush();
   expect(mockWrite).toHaveBeenCalledTimes(1);
 });
+
+const postgrestAbort = {code:'', details:'Error: Aborted', hint:'Request was aborted (timeout or manual cancellation)', message:'AbortError: Aborted'};
+it('recovers the actual PostgREST abort shape when background presence cleanup times out', async () => {
+  mount(); await flush(); mockWrite.mockResolvedValueOnce({error:postgrestAbort});
+  appState('background'); await flush(); await advance(600);
+  expect(mockWrite.mock.calls.slice(1)).toEqual([
+    [{active_chat_event_id:null},{id:'alice',active_chat_event_id:'plan-a'}],
+    [{active_chat_event_id:null},{id:'alice',active_chat_event_id:'plan-a'}],
+  ]);
+});
+it('bounds repeated aborted writes and retains cleanup on the next focus change', async () => {
+  mockWrite.mockResolvedValue({error:postgrestAbort}); mount(); await flush();
+  await advance(600); await advance(1800); await advance(60000);
+  expect(mockWrite).toHaveBeenCalledTimes(3);
+  mockWrite.mockResolvedValue({error:null}); focus(false); await flush();
+  expect(mockWrite).toHaveBeenLastCalledWith({active_chat_event_id:null},{id:'alice',active_chat_event_id:'plan-a'});
+});
+it('does not retry a permission refusal even when it includes an abort-shaped message', async () => {
+  mockWrite.mockResolvedValue({error:{...postgrestAbort,status:403}}); mount(); await flush(); await advance(60000);
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+});
+it('an aborted activation rechecks the current account before retrying', async () => {
+  mockWrite.mockResolvedValueOnce({error:postgrestAbort}); mount(); await flush();
+  mockAuth.mockResolvedValue(identity('bob')); update({id:'plan-b',scope:scope('bob')}); await flush(); await advance(600);
+  expect(mockWrite.mock.calls.filter(([,filters])=>filters.id==='alice')).toHaveLength(1);
+  expect(mockWrite).toHaveBeenLastCalledWith({active_chat_event_id:'plan-b'},{id:'bob'});
+});

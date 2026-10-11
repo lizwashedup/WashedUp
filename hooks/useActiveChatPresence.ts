@@ -33,9 +33,12 @@ function isTransientFailure(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const { name, status, message } = error as { name?: string; status?: number; message?: string };
   if (typeof status === 'number' && status >= 400 && status < 500) return false;
-  return name === 'AuthRetryableFetchError' || name === 'RequestDeadlineError' ||
+  return name === 'AuthRetryableFetchError' || name === 'RequestDeadlineError' || name === 'AbortError' ||
     (typeof status === 'number' && status >= 500 && status <= 599) ||
-    /network request failed|failed to fetch|fetch failed|networkerror/i.test(message ?? '');
+    // PostgREST returns transport aborts as plain objects, without a name or
+    // status. Presence has no caller cancellation; its fetch timeout is safe
+    // to recover using the same conditional, idempotent intent.
+    /network request failed|failed to fetch|fetch failed|networkerror|^AbortError:\s*Aborted$/i.test(message ?? '');
 }
 
 async function updatePresence(owner: PresenceOwner): Promise<void> {

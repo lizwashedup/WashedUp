@@ -5,6 +5,8 @@ import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useChat, isObsoleteChatOperation, isUnconfirmedChatReaction, type ChatMessage, type ConversationKey } from '../useChat';
 
+const mockRealtimeReactions = jest.fn();
+jest.mock('../../lib/chatReactionReader', () => ({readLoadedChatReactions: (...args: any[]) => mockRealtimeReactions(...args)}));
 const mockReplyBlocks = jest.fn();
 jest.mock('../../lib/blocking', () => ({ getBlockedWith: (...args: any[]) => mockReplyBlocks(...args) }));
 const mockAuth = jest.fn(), mockSession = jest.fn(), mockRead = jest.fn(), mockWrite = jest.fn();
@@ -91,7 +93,7 @@ function mount() {
   return { get chat() { return chat; }, navigate: (room: ConversationKey) => act(() => tree.update(render(room))), unmount };
 }
 beforeEach(() => {
-  jest.clearAllMocks(); mockReplyBlocks.mockReset().mockResolvedValue(new Set()); mockListeners.clear(); mockChannels.splice(0);
+  jest.clearAllMocks(); mockRealtimeReactions.mockReset().mockResolvedValue([]); mockReplyBlocks.mockReset().mockResolvedValue(new Set()); mockListeners.clear(); mockChannels.splice(0);
   mockAuth.mockReset().mockResolvedValue(identity('alice'));
   mockSession.mockReset().mockResolvedValue({ data: { session: { user: { id: 'alice' }, access_token: 'test-token' } } });
   mockRead.mockReset().mockResolvedValue(result([message()]));
@@ -879,4 +881,69 @@ describe('history reads across app suspension', () => {
     expect(mockSession).toHaveBeenCalledTimes(1);
     expect(fixture.chat.messages.map(row => row.id)).toEqual(['old']);
   });
+  it('does not hydrate realtime messages or reactions while backgrounded', async () => {
+    const fixture=mount(); await flush(); changeState('background'); mockProfiles.mockClear();
+    await act(async()=>{
+      await mockChannels.at(-1).callbacks.INSERT({new:message('new')});
+      await mockChannels.at(-1).callbacks['*']({eventType:'INSERT',new:{message_id:'old'}});
+    }); await flush();
+    expect(mockProfiles).not.toHaveBeenCalled(); expect(mockRealtimeReactions).not.toHaveBeenCalled();
+    expect(fixture.chat.messages.map(row=>row.id)).toEqual(['old']);
+    changeState('active'); mockRead.mockResolvedValue(result([message('old'),message('new')]));
+    await act(async()=>{await fixture.chat.refetch(true);}); await flush();
+    expect(fixture.chat.messages.map(row=>row.id)).toEqual(['new','old']);
+  });
+  it('a realtime sender result from before suspension cannot reappear after foreground refresh', async () => {
+    const fixture=mount(); await flush(); const pending=deferred(); mockProfiles.mockReturnValueOnce(pending.promise);
+    const work=start(()=>mockChannels.at(-1).callbacks.INSERT({new:message('stale')})); await flush();
+    changeState('background'); changeState('active');
+    await act(async()=>{await fixture.chat.refetch(true);}); await flush();
+    await act(async()=>{pending.resolve({data:[],error:null});await work;});
+    expect(fixture.chat.messages.map(row=>row.id)).toEqual(['old']); expect(logError).not.toHaveBeenCalled();
+  });
+  it('retains history and offers retry when foreground realtime sender hydration fails', async () => {
+    const fixture=mount(); await flush(); mockProfiles.mockResolvedValueOnce({data:null,error:{message:'AbortError: Aborted'}});
+    await act(async()=>{await mockChannels.at(-1).callbacks.INSERT({new:message('new')});});
+    expect(fixture.chat.messages.map(row=>row.id)).toEqual(['old']); expect(fixture.chat.loadError).toBe(true);
+    expect(logError).toHaveBeenCalledWith(expect.objectContaining({message:'AbortError: Aborted'}),'useChat.realtimeSender');
+    mockRead.mockResolvedValue(result([message('new')])); await act(async()=>{await fixture.chat.refetch(true);}); await flush();
+    expect(fixture.chat.messages.map(row=>row.id)).toEqual(['new']); expect(fixture.chat.loadError).toBe(false);
+  });
+  it('retires a realtime sender timeout after suspension without publishing a false load failure', async () => {
+    jest.useFakeTimers(); const fixture=mount(); await flush(); mockProfiles.mockReturnValueOnce(deferred().promise);
+    const work=start(()=>mockChannels.at(-1).callbacks.INSERT({new:message('new')})); await flush();
+    changeState('background'); changeState('active');
+    await act(async()=>{await jest.advanceTimersByTimeAsync(12000);}); await work;
+    expect(fixture.chat.loadError).toBe(false); expect(logError).not.toHaveBeenCalled();
+  });
+  it('retires realtime reaction snapshots across a background/foreground cycle', async () => {
+    const fixture=mount(); await flush(); const pending=deferred(); mockRealtimeReactions.mockReturnValueOnce(pending.promise);
+    act(()=>mockChannels.at(-1).callbacks['*']({eventType:'INSERT',new:{message_id:'old'}})); await flush();
+    const [,isCurrent]=mockRealtimeReactions.mock.calls[0]; changeState('background'); changeState('active');
+    expect(isCurrent()).toBe(false);
+    await act(async()=>pending.resolve([{message_id:'old',user_id:'friend',reaction:'❤️'}])); await flush();
+    expect(fixture.chat.messages[0].reactions).toEqual([]);
+    mockRealtimeReactions.mockResolvedValue([{message_id:'old',user_id:'friend',reaction:'👍'}]);
+    act(()=>mockChannels.at(-1).callbacks['*']({eventType:'INSERT',new:{message_id:'old'}})); await flush();
+    expect(fixture.chat.messages[0].reactions).toEqual([{user_id:'friend',reaction:'👍'}]);
+  });
+  it('still exposes a foreground realtime reaction failure for explicit history recovery', async () => {
+    const fixture=mount(); await flush(); mockRealtimeReactions.mockRejectedValueOnce(new Error('network request failed'));
+    act(()=>mockChannels.at(-1).callbacks['*']({eventType:'INSERT',new:{message_id:'old'}})); await flush();
+    expect(fixture.chat.loadError).toBe(true); expect(fixture.chat.messages.map(row=>row.id)).toEqual(['old']);
+    expect(logError).toHaveBeenCalledWith(expect.any(Error),'useChat.realtimeReactions');
+  });
+  it('an older-page response cannot publish after suspension or block a new foreground page', async () => {
+    const page=Array.from({length:60},(_,i)=>message('m'+i,{created_at:new Date(Date.UTC(2026,8,13,10,i)).toISOString()}));
+    mockRead.mockResolvedValue(result(page)); const fixture=mount(); await flush();
+    const pending=deferred(); mockRead.mockReturnValueOnce(pending.promise);
+    const old=start(()=>fixture.chat.loadOlder()); await flush(); changeState('background');
+    const reads=mockRead.mock.calls.length; await act(async()=>{await fixture.chat.loadOlder();}); expect(mockRead).toHaveBeenCalledTimes(reads);
+    changeState('active'); mockRead.mockResolvedValueOnce(result([message('older',{created_at:'2026-09-12T00:00:00Z'})]));
+    await act(async()=>{await fixture.chat.loadOlder();}); await flush();
+    await act(async()=>{pending.resolve(result([message('stale')]));await old;});
+    expect(fixture.chat.messages.some(row=>row.id==='older')).toBe(true); expect(fixture.chat.messages.some(row=>row.id==='stale')).toBe(false);
+    expect(fixture.chat.olderLoadError).toBe(false);
+  });
+
 });
