@@ -118,14 +118,17 @@ export function usePlanDeparture(options: Options) {
       call.state.outcome = 'confirmed';
       if (!call.isCurrent()) return false;
       const result: PlanDepartureResult = { action: call.action };
-      // A whole-circle plan has no event conversation. Do not invent a Circle
-      // announcement contract or send this message into an unused event chat.
-      if (call.hasOwnChat) {
+      // Leaving removes this member's permission to post in the event chat.
+      // Do not send a guaranteed-forbidden follow-up or announce before the
+      // departure is confirmed. A future departure notice must be server-owned
+      // and atomic with the membership change. Cancellation retains membership.
+      // Whole-circle plans still have no event conversation to announce into.
+      if (call.hasOwnChat && call.action === 'cancel') {
         try {
           const message = await supabase.from('messages').insert({
             event_id: call.eventId,
             user_id: call.viewerId,
-            content: call.action === 'leave' ? 'had to leave the plan' : 'cancelled this plan',
+            content: 'cancelled this plan',
             message_type: 'system',
           });
           if (message?.error !== null) {

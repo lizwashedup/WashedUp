@@ -227,6 +227,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     throw new ObsoleteChatOperationError();
   }, [operationScope]);
   const newestRequestRef = useRef(0);
+  const foregroundReadEpochRef = useRef(0);
 
   useEffect(() => {
     activeRoomGenerationRef.current = roomGeneration;
@@ -252,30 +253,36 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     // Event channel name kept byte-identical to before; circles use a distinct name.
     const channelName = kind === 'event' ? `chat:${conversationId}` : `chat:circle:${conversationId}`;
     const filter = `${parentCol}=eq.${conversationId}`;
+    const captureForegroundRead = () => {
+      const epoch = foregroundReadEpochRef.current;
+      return () => isCurrentRoom() && foregroundReadEpochRef.current === epoch &&
+        AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
+    };
 
     // Reactions have no conversation column. Read only this visit's loaded
     // message IDs through RLS, coalescing bursts without reloading the thread.
     const reactionQueue = { pending: false, running: false };
     const refreshReactions = async () => {
-      if (!isCurrentRoom()) return;
+      const isCurrentRead = captureForegroundRead();
+      if (!isCurrentRead()) return;
       reactionQueue.pending = true;
       if (reactionQueue.running) return;
       reactionQueue.running = true;
       try {
-        while (isCurrentRoom() && reactionQueue.pending) {
+        while (isCurrentRead() && reactionQueue.pending) {
           reactionQueue.pending = false;
           const snapshot = new Map(messagesRef.current.filter(message => !message.id.startsWith('optimistic-'))
             .map(message => [message.id, message.reactions]));
           if (!snapshot.size) continue;
-          const data = await readLoadedChatReactions([...snapshot.keys()], isCurrentRoom);
-          if (!data || !isCurrentRoom()) return;
+          const data = await readLoadedChatReactions([...snapshot.keys()], isCurrentRead);
+          if (!data || !isCurrentRead()) return;
           const byMessage = new Map<string, MessageReaction[]>();
           for (const row of data ?? []) {
             const reactions = byMessage.get(row.message_id) ?? [];
             reactions.push({ user_id: row.user_id, reaction: row.reaction });
             byMessage.set(row.message_id, reactions);
           }
-          setMessages(previous => isCurrentRoom() ? previous.map(message => {
+          setMessages(previous => isCurrentRead() ? previous.map(message => {
             if (!snapshot.has(message.id)) return message;
             const beforeMine = snapshot.get(message.id)?.find(reaction => reaction.user_id === viewerId);
             const currentMine = message.reactions?.find(reaction => reaction.user_id === viewerId);
@@ -291,7 +298,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
           }) : previous);
         }
       } catch (error) {
-        if (isCurrentRoom()) logError(error, 'useChat.realtimeReactions');
+        if (isCurrentRead()) { logError(error, 'useChat.realtimeReactions'); setLoadError(true); }
       } finally {
         reactionQueue.running = false;
         // A later event can arrive while a snapshot fails. Drain that event,
@@ -306,17 +313,21 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter },
         async (payload) => {
+          const isCurrentRead = captureForegroundRead();
           const newMsg = payload.new as any;
           const window = readWindowRef.current;
           const inWindow = () => readWindowRef.current === window && (!window.anchorId || (window.ready &&
             (!window.upper || compareChatSequence(newMsg, window.upper) <= 0)));
-          if (!isCurrentRoom() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return;
+          if (!isCurrentRead() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return;
           let enriched: ChatMessage[];
           try { enriched = await attachSenders([newMsg]); }
-          catch (error) { if (isCurrentRoom()) logError(error, 'useChat.realtimeSender'); return; }
-          if (isCurrentRoom()) {
+          catch (error) {
+            if (isCurrentRead()) { logError(error, 'useChat.realtimeSender'); setLoadError(true); }
+            return;
+          }
+          if (isCurrentRead()) {
             setMessages(prev => {
-              if (!isCurrentRoom() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return prev;
+              if (!isCurrentRead() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return prev;
               const incoming = enriched[0];
               // Already present as the real row (the insert response may have
               // already swapped the optimistic id for this id).
@@ -618,6 +629,8 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
       // Retire history/hydration only. In-flight sends and their uncertain
       // receipts retain their existing account/room ownership and drafts.
       ++newestRequestRef.current;
+      ++foregroundReadEpochRef.current;
+      loadingOlderRef.current = false;
     });
     return () => subscription.remove();
   }, []);
@@ -635,9 +648,13 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
   }, [readWindow, isCurrentRoom, fetchMessages]);
 
   const loadOlder = useCallback(async (retry = false) => {
-    if (!isCurrentRoom() || loadingOlderRef.current || !hasOlderRef.current || (olderLoadError && !retry)) return;
+    if (!isCurrentRoom() || AppState.currentState === 'background' || AppState.currentState === 'inactive' ||
+        loadingOlderRef.current || !hasOlderRef.current || (olderLoadError && !retry)) return;
     const window = readWindowRef.current;
-    const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && (!window.anchorId || window.ready);
+    const epoch = foregroundReadEpochRef.current;
+    const isCurrent = () => isCurrentRoom() && foregroundReadEpochRef.current === epoch &&
+      AppState.currentState !== 'background' && AppState.currentState !== 'inactive' &&
+      readWindowRef.current === window && (!window.anchorId || window.ready);
     const cursor = window.older ?? oldestChatCursor(
       messagesRef.current.filter(message => !message.id.startsWith('optimistic-')),
     );

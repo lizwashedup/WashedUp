@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { logError } from '../lib/logger';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 
 export interface ActiveChatPresenceScope {
   readonly userId: string;
@@ -28,40 +29,71 @@ function wantsActive(owner: PresenceOwner): boolean {
   return !owner.disposed && owner.appActive && owner.scope.isCurrent() && activeOwners.get(owner.userId) === owner;
 }
 
+function isTransientFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { name, status, message } = error as { name?: string; status?: number; message?: string };
+  if (typeof status === 'number' && status >= 400 && status < 500) return false;
+  return name === 'AuthRetryableFetchError' || name === 'RequestDeadlineError' || name === 'AbortError' ||
+    (typeof status === 'number' && status >= 500 && status <= 599) ||
+    // PostgREST returns transport aborts as plain objects, without a name or
+    // status. Presence has no caller cancellation; its fetch timeout is safe
+    // to recover using the same conditional, idempotent intent.
+    /network request failed|failed to fetch|fetch failed|networkerror|^AbortError:\s*Aborted$/i.test(message ?? '');
+}
+
+async function updatePresence(owner: PresenceOwner): Promise<void> {
+  if (!wantsActive(owner) && !owner.mayBeActive) return;
+  // Cleanup must be allowed after the viewing scope retires, but must never
+  // adopt the next signed-in user. It writes only this captured user's row.
+  const { data: { user }, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 8000);
+  if (authError) throw authError;
+  if (user?.id !== owner.userId) return;
+
+  if (wantsActive(owner)) {
+    // Even an error response may describe an accepted update whose response
+    // was lost. Keep cleanup eligible before dispatch, not only on success.
+    owner.mayBeActive = true;
+    const { error } = await supabase.from('profiles')
+      .update({ active_chat_event_id: owner.eventId }).eq('id', owner.userId);
+    if (error) throw error;
+    return;
+  }
+  if (!owner.mayBeActive) return;
+  const replacement = activeOwners.get(owner.userId);
+  if (replacement && replacement !== owner && replacement.eventId === owner.eventId && wantsActive(replacement)) {
+    // A newer visit now owns this same room. A room-ID-only conditional
+    // clear cannot distinguish those visits, so leave its presence intact.
+    // Transfer responsibility even if its own activation later fails.
+    replacement.mayBeActive = true;
+    owner.mayBeActive = false;
+    return;
+  }
+  const { error } = await supabase.from('profiles')
+    .update({ active_chat_event_id: null })
+    .eq('id', owner.userId).eq('active_chat_event_id', owner.eventId);
+  if (error) throw error;
+  owner.mayBeActive = false;
+}
+
 function schedule(owner: PresenceOwner): void {
   const previous = accountQueues.get(owner.userId) ?? Promise.resolve();
   const work = previous.then(async () => {
-    if (!wantsActive(owner) && !owner.mayBeActive) return;
-    // Cleanup must be allowed after the viewing scope retires, but must never
-    // adopt the next signed-in user. It writes only this captured user's row.
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError) throw authError;
-    if (user?.id !== owner.userId) return;
-
-    if (wantsActive(owner)) {
-      // Even an error response may describe an accepted update whose response
-      // was lost. Keep cleanup eligible before dispatch, not only on success.
-      owner.mayBeActive = true;
-      const { error } = await supabase.from('profiles')
-        .update({ active_chat_event_id: owner.eventId }).eq('id', owner.userId);
-      if (error) throw error;
-      return;
+    // Retry only this captured owner's idempotent presence intent. Each attempt
+    // re-verifies identity and the latest room/focus state. Never sign out,
+    // fall back to another account, or replay a chat-message mutation here.
+    const delays = [600, 1800];
+    for (let attempt = 0; ; attempt++) {
+      if (!wantsActive(owner) && !owner.mayBeActive) return;
+      try {
+        await updatePresence(owner);
+        return;
+      } catch (error) {
+        logError(error, 'useActiveChatPresence');
+        if (!isTransientFailure(error) || attempt >= delays.length ||
+            (!wantsActive(owner) && !owner.mayBeActive)) return;
+        await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      }
     }
-    if (!owner.mayBeActive) return;
-    const replacement = activeOwners.get(owner.userId);
-    if (replacement && replacement !== owner && replacement.eventId === owner.eventId && wantsActive(replacement)) {
-      // A newer visit now owns this same room. A room-ID-only conditional
-      // clear cannot distinguish those visits, so leave its presence intact.
-      // Transfer responsibility even if its own activation later fails.
-      replacement.mayBeActive = true;
-      owner.mayBeActive = false;
-      return;
-    }
-    const { error } = await supabase.from('profiles')
-      .update({ active_chat_event_id: null })
-      .eq('id', owner.userId).eq('active_chat_event_id', owner.eventId);
-    if (error) throw error;
-    owner.mayBeActive = false;
   }).catch(error => { logError(error, 'useActiveChatPresence'); });
   accountQueues.set(owner.userId, work);
   void work.then(() => { if (accountQueues.get(owner.userId) === work) accountQueues.delete(owner.userId); });
