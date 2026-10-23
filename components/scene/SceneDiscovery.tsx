@@ -68,19 +68,14 @@ import { getLeaderCards } from '../../lib/communityLeader';
 type SceneDestination = 'events' | 'communities';
 
 const DESTINATIONS: ReadonlyArray<readonly [SceneDestination, string]> = [
-  ['communities', 'communities'],
   ['events', 'events'],
+  ['communities', 'communities'],
 ];
 
-// size follows importance: this many lead events render full-size
-// Selected Scene composition: two square artwork columns; one at narrow widths or larger text.
-function sceneColumnWidth(width: number, fontScale: number, available = width - 40) { return width >= 360 && fontScale <= 1.3 ? (available - 12) / 2 : available; }
-
 export function SceneDiscovery({ communitiesEnabled = false }: { communitiesEnabled?: boolean }) {
-  // Communities leads when available; retain Events behind the community gate.
+  // Events leads; Communities keeps its existing release gate.
   // Keep mounted tab state so returning preserves searches and scroll position.
-  const [destination, setDestination] = useState<SceneDestination>(() =>
-    communitiesEnabled ? 'communities' : 'events');
+  const [destination, setDestination] = useState<SceneDestination>('events');
   // SC-01: which destinations have ever been visited this mount, so a
   // switched-away destination stays mounted (display:none) instead of
   // unmounting -- keeps its ScrollView's native scroll offset on return.
@@ -148,8 +143,8 @@ export function SceneDiscovery({ communitiesEnabled = false }: { communitiesEnab
 
 function EventsDestination({ communitiesEnabled, active }: { communitiesEnabled: boolean; active: boolean }) {
   const router = useRouter();
-  const { width, fontScale } = useWindowDimensions();
-  const [gridWidth, setGridWidth] = useState<number>();
+  const { width } = useWindowDimensions();
+  const [listWidth, setListWidth] = useState<number>();
   const [category, setCategory] = useState<string | null>(null);
   const [filters, setFilters] = useState(emptySceneFilters);
   const query = filters.query;
@@ -185,7 +180,7 @@ function EventsDestination({ communitiesEnabled, active }: { communitiesEnabled:
     events.some((e) => eventMatchesCategory(e,c)),
   );
 
-  const cardWidth = sceneColumnWidth(width, fontScale, gridWidth);
+  const cardWidth = listWidth ?? width - 40;
 
   return (
     <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
@@ -241,8 +236,8 @@ function EventsDestination({ communitiesEnabled, active }: { communitiesEnabled:
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear event filters" style={styles.retryBtn} onPress={clearFilters}><Text style={styles.retryBtnText}>Clear filters</Text></TouchableOpacity>
         </View> : <Text style={styles.emptyLine}>No upcoming events yet.</Text>
       )) : (
-        <View style={styles.eventGrid} onLayout={event => setGridWidth(event.nativeEvent.layout.width)}>
-          {filtered.map(event => <EventPoster key={event.id} event={event} width={cardWidth} variant="grid"
+        <View style={styles.eventList} onLayout={event => setListWidth(event.nativeEvent.layout.width)}>
+          {filtered.map(event => <EventPoster key={event.id} event={event} width={cardWidth} variant="feed"
             onPress={() => router.push(`/event/${event.id}` as never)} />)}
         </View>
       )}
@@ -257,8 +252,8 @@ function EventsDestination({ communitiesEnabled, active }: { communitiesEnabled:
 
 function CommunitiesDestination({ active }: { active: boolean }) {
   const router = useRouter();
-  const { width, fontScale } = useWindowDimensions();
-  const [gridWidth, setGridWidth] = useState<number>();
+  const { width } = useWindowDimensions();
+  const [listWidth, setListWidth] = useState<number>();
   const [filters, setFilters] = useState(emptySceneFilters);
   const query = filters.query;
   const [filterOpen, setFilterOpen] = useState(false);
@@ -316,13 +311,13 @@ function CommunitiesDestination({ active }: { active: boolean }) {
           )}
 
           {filtered.length > 0 && (
-            <View style={styles.communitiesList} onLayout={event => setGridWidth(event.nativeEvent.layout.width)}>
+            <View style={styles.communitiesList} onLayout={event => setListWidth(event.nativeEvent.layout.width)}>
               {filtered.map((c) => (
                 <CommunityCard
                   key={c.id}
                   community={c}
                   leaderCard={leaderCards.get(c.id) ?? null}
-                  width={sceneColumnWidth(width, fontScale, gridWidth)}
+                  width={listWidth ?? width - 40}
                   surface="scene"
                   onPress={() => router.push(`/community/${c.id}` as never)}
                 />
@@ -381,7 +376,7 @@ const styles = StyleSheet.create({
   // Q2 token set (new Scene/Block-B screen): cream, not the legacy parchment
   container: { flex: 1 },
   safe: { flex: 1 },
-  eventGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  eventList: { gap: 16 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -422,7 +417,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 10,
   },
-  communitiesList: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 4 },
+  communitiesList: { gap: 16, marginBottom: 4 },
   chipRow: { gap: 8, marginBottom: 14 },
   filterSummary: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Scene.supporting, marginBottom: 12 },
   emptyResults: { gap: 12, alignItems: 'flex-start', paddingVertical: 12 },

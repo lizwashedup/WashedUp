@@ -111,9 +111,9 @@ it('connected category refresh failure keeps cached cards and separates errors f
  press('try again');expect(mockRetry).toHaveBeenCalledTimes(1);
 });
 
-it('connected event cards use full-width layouts on narrow screens and enlarged text',()=>{
+it('connected event cards stay full-width across ordinary, narrow and enlarged-text screens',()=>{
  connectCards();
- for(const [width,fontScale,cardWidth] of [[390,1,169],[320,1,280],[390,1.35,350]]){
+ for(const [width,fontScale,cardWidth] of [[390,1,350],[320,1,280],[390,1.35,350]]){
   mockDimensions={width,height:740,fontScale,scale:1};act(()=>tree.update(<SceneDiscovery communitiesEnabled/>));
   expect(tree.root.findAllByType(EventPoster).every(n=>n.props.width===cardWidth)).toBe(true);
  }

@@ -26,6 +26,7 @@ it('remeasures both tab labels through a mounted size roundtrip without losing d
  const previous=Dimensions.get('window');act(()=>Dimensions.set({window:{...previous,width:390,fontScale:1}}));
  try{
   act(()=>{tree=create(<SceneDiscovery communitiesEnabled/>);});
+  press('communities');
   act(()=>input('communities').props.onChangeText('community draft'));
   press('events');press('Filter events');act(()=>tree.root.findByType(SceneFilterForm).props.onApply({query:'',area:'Santa Monica',from:'',through:''}));
   act(()=>input('events').props.onChangeText('event draft'));press('communities');
