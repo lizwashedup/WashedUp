@@ -35,13 +35,13 @@ interface CommunityCardProps {
 export function CommunityCard({ community: c, leaderCard, width, onPress, surface = 'light' }: CommunityCardProps) {
   const [brokenCover, setBrokenCover] = useState<string | null>(null);
   const sunset = surface === 'scene';
-  const coverHeight = sunset ? width : COVER_HEIGHT;
+  const coverHeight = sunset ? width * 0.56 : COVER_HEIGHT;
   const textColor = sunset ? { color: Scene.text } : undefined;
   const mutedColor = sunset ? { color: Scene.supporting } : undefined;
   const message = (c.tagline ?? c.description ?? '').trim();
   const firstName = leaderCard?.display_name?.trim().split(/\s+/)[0] ?? null;
   return (
-    <TouchableOpacity style={[styles.card, { width }, sunset && { backgroundColor: Scene.surface, borderColor: Scene.border, borderRadius: 8 }]} onPress={onPress} activeOpacity={0.85}
+    <TouchableOpacity style={[styles.card, { width }, sunset && { backgroundColor: Scene.surface, borderColor: Scene.border }]} onPress={onPress} activeOpacity={0.85}
       accessibilityRole="button" accessibilityLabel={`${c.name}, community${message ? `. ${message}` : ''}`}>
       {c.cover_media_id ? <PublishedPageCover pageId={c.id} mediaId={c.cover_media_id} height={coverHeight} surface={surface} /> : c.cover_image && brokenCover !== c.cover_image ? (
         <Image source={{ uri: c.cover_image }} style={[styles.cover, { height: coverHeight }]} contentFit="cover" onError={() => setBrokenCover(c.cover_image)} />
@@ -66,7 +66,7 @@ export function CommunityCard({ community: c, leaderCard, width, onPress, surfac
             : /* LIZ COPY: warmth instead of arithmetic under the threshold */ 'founding members'}
         </Text>
         {!!message && (
-          <Text style={[styles.message, mutedColor]} numberOfLines={1}>
+          <Text style={[styles.message, mutedColor]} numberOfLines={sunset ? 2 : 1}>
             {message}
           </Text>
         )}

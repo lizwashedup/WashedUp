@@ -24,7 +24,7 @@ beforeEach(() => {
 // header-icon-navigates-to-/communities coverage now that Communities is a
 // destination inside Scene itself, not a screen you navigate away to.
 
-it('renders Communities before Events and selects Communities on ordinary entry', () => {
+it('renders Events before Communities and selects Events on ordinary entry', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
     tree = create(<SceneDiscovery communitiesEnabled />);
@@ -34,9 +34,9 @@ it('renders Communities before Events and selects Communities on ordinary entry'
   const communitiesTab = tree!.root.findByProps({ accessibilityLabel: 'communities' });
   expect(eventsTab).toBeTruthy();
   expect(communitiesTab).toBeTruthy();
-  expect(eventsTab.props.accessibilityState).toEqual({ selected: false });
-  expect(communitiesTab.props.accessibilityState).toEqual({ selected: true });
-  expect(tree!.root.findAll((node) => node.type === require('react-native').TouchableOpacity && node.props.accessibilityRole === 'tab').map(node => node.props.accessibilityLabel)).toEqual(['communities', 'events']);
+  expect(eventsTab.props.accessibilityState).toEqual({ selected: true });
+  expect(communitiesTab.props.accessibilityState).toEqual({ selected: false });
+  expect(tree!.root.findAll((node) => node.type === require('react-native').TouchableOpacity && node.props.accessibilityRole === 'tab').map(node => node.props.accessibilityLabel)).toEqual(['events', 'communities']);
 });
 
 it('ships event discovery without exposing Communities before its release gate opens', () => {
@@ -50,7 +50,7 @@ it('ships event discovery without exposing Communities before its release gate o
   expect(tree!.root.findAllByType(Text).some((node) => node.props.children === 'tell us about it')).toBe(false);
 });
 
-it('switches to Events on tap, retaining the shared shell', () => {
+it('switches to Communities on tap, retaining the shared shell', () => {
   let tree: ReturnType<typeof create>;
   act(() => {
     tree = create(<SceneDiscovery communitiesEnabled />);
@@ -58,13 +58,13 @@ it('switches to Events on tap, retaining the shared shell', () => {
 
   const eventsTab = tree!.root.findByProps({ accessibilityLabel: 'events' });
   act(() => {
-    eventsTab.props.onPress();
+    tree!.root.findByProps({ accessibilityLabel: 'communities' }).props.onPress();
   });
 
   const eventsTabAfter = tree!.root.findByProps({ accessibilityLabel: 'events' });
   const communitiesTabAfter = tree!.root.findByProps({ accessibilityLabel: 'communities' });
-  expect(communitiesTabAfter.props.accessibilityState).toEqual({ selected: false });
-  expect(eventsTabAfter.props.accessibilityState).toEqual({ selected: true });
+  expect(communitiesTabAfter.props.accessibilityState).toEqual({ selected: true });
+  expect(eventsTabAfter.props.accessibilityState).toEqual({ selected: false });
 });
 
 it('switching destination never navigates away — Scene stays one shared screen', () => {
@@ -146,13 +146,13 @@ it('shows a loading indicator, not the recruit card, while the communities query
   expect(tree!.root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
 });
 
-it('retains an explicit Events tab selection when the shared shell re-renders', () => {
+it('retains an explicit Communities tab selection when the shared shell re-renders', () => {
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<SceneDiscovery communitiesEnabled />); });
-  act(() => tree.root.findByProps({ accessibilityLabel: 'events' }).props.onPress());
+  act(() => tree.root.findByProps({ accessibilityLabel: 'communities' }).props.onPress());
   act(() => tree.update(<SceneDiscovery communitiesEnabled />));
-  expect(tree.root.findByProps({ accessibilityLabel: 'events' }).props.accessibilityState.selected).toBe(true);
-  expect(tree.root.findByProps({ accessibilityLabel: 'communities' }).props.accessibilityState.selected).toBe(false);
+  expect(tree.root.findByProps({ accessibilityLabel: 'communities' }).props.accessibilityState.selected).toBe(true);
+  expect(tree.root.findByProps({ accessibilityLabel: 'events' }).props.accessibilityState.selected).toBe(false);
   act(() => tree.unmount());
 });
 
