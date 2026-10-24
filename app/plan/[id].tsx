@@ -16,20 +16,17 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import {
     ArrowLeft,
     Calendar,
-    ImagePlus,
     MapPin,
     MessageCircle,
     MoreHorizontal,
     Ticket,
-    Users,
-    X
+    Users
 } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
     Keyboard,
-    KeyboardAvoidingView,
     Linking,
     Modal,
     Platform,
@@ -37,16 +34,12 @@ import {
     ScrollView,
     Share,
     StyleSheet,
-    Switch,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
-import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
+import { type GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
-import WashedUpCalendar from '../../components/calendar/WashedUpCalendar';
-import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import MiniProfileCard from '../../components/MiniProfileCard';
 import { ReportModal } from '../../components/modals/ReportModal';
@@ -65,6 +58,8 @@ import { PlanDepartureSheet } from '../../components/plans/PlanDepartureSheet';
 import { usePlanJoin } from '../../hooks/usePlanJoin';
 import { usePlanExceptionActions } from '../../hooks/usePlanExceptionActions';
 import { PlanJoinSheet } from '../../components/plans/PlanJoinSheet';
+import { ManagePlanEditor } from '../../components/plans/ManagePlanEditor';
+import { detailAppearance } from '../../components/plans/planDetailAppearance';
 import { PlanDetailOverview } from '../../components/plans/PlanDetailOverview';
 // Lazy so a circle component's module-scope code (its StyleSheet) is never
 // evaluated for non-circle users on this universally-reachable shipped screen.
@@ -75,8 +70,8 @@ const CirclePlanCoordination = React.lazy(
 import { COPY } from '../../components/yours/state/constants';
 import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
 import Colors, { AfterglowColors } from '../../constants/Colors';
-import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
-import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
+import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
+import { Fonts, FontSizes } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
 import { getParticipationNoticeStatus } from '../../lib/participationTerms';
 import { ObsoletePlanParticipation, recordScopedPlanAssent } from '../../lib/planParticipationScope';
@@ -86,8 +81,7 @@ import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
 import { joinErrorSurface } from '../../lib/planJoinSafety';
-import { savedAgeLabel } from '../../lib/planEditRules';
-import { AGE_RANGES, type AgeRange, preparePlanEdit } from '../../lib/planEditDraft';
+import { type AgeRange, preparePlanEdit } from '../../lib/planEditDraft';
 import {
   fetchWaitlistManager,
   waitlistAlertMessage,
@@ -104,31 +98,9 @@ try { showLocation = require('react-native-map-link').showLocation; } catch {}
 import { MapView, Marker } from '../../components/MapView';
 
 // Google Maps key: shared env-first module with fallback (single source).
-import { GOOGLE_MAPS_API_KEY } from '../../lib/googleMapsKey';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * (9 / 16);
-
-const MANAGE_CATEGORIES = [
-  'Art', 'Business', 'Comedy', 'Film', 'Fitness',
-  'Food', 'Gaming', 'Music', 'Nightlife', 'Outdoors',
-  'Sports', 'Tech', 'Wellness', 'Other',
-] as const;
-
-// Manage-Plan description limit. Matches the composer's DESC_LIMIT (2000) so
-// editing never silently truncates a description created at the higher cap.
-const EDIT_DESC_LIMIT = 2000;
-const EDIT_DESC_WARN_MARGIN = 200; // counter turns warn-colored within this many chars of the cap
-
-// ─── Date/time picker constants ───────────────────────────────────────────────
-// Keep display values aligned with the shared creation controls.
-
-const MINUTE_OPTIONS = ['00', '15', '30', '45'];
-const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
-
-function displayPickerTime(hour: number, minute: string, period: 'AM' | 'PM'): string {
-  return `${hour}:${minute} ${period}`;
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -421,8 +393,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const appearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? { fonts } : undefined, [fonts]);
   const styles = useMemo(() => appearance ? detailAppearance(legacyStyles, fonts) : legacyStyles, [appearance, fonts]);
   const joinStyles = useMemo(() => appearance ? detailAppearance(legacyJoinStyles, fonts) : legacyJoinStyles, [appearance, fonts]);
-  const manageStyles = useMemo(() => appearance ? manageAppearance(legacyManageStyles, fonts) : legacyManageStyles, [appearance, fonts]);
-  const managePlacesStyles = useMemo(() => appearance ? detailAppearance(legacyManagePlacesStyles, fonts) : legacyManagePlacesStyles, [appearance, fonts]);
   const duplicateSheetStyles = useMemo(() => appearance ? detailAppearance(legacyDuplicateSheetStyles, fonts) : legacyDuplicateSheetStyles,[appearance,fonts]);
   const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
   const ink = appearance ? AfterglowColors.ink : Colors.asphalt;
@@ -1067,7 +1037,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     editor.toggleAgeRange(range);
   };
 
-  const pickEditImage = edit.pickPhoto;
 
   const handleSaveEdit = async () => {
     if (isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
@@ -1984,535 +1953,30 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
-        <KeyboardAvoidingView style={manageStyles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={manageStyles.sheet}>
-            <View style={manageStyles.headerRow}>
-              <Text style={manageStyles.title}>Manage Plan</Text>
-              <TouchableOpacity style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                <Text style={manageStyles.closeX}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              decelerationRate="normal"
-              showsVerticalScrollIndicator={true}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              contentContainerStyle={{
-                // Android edge-to-edge: Modal renders full-screen behind
-                // the nav/gesture bar, so the ScrollView needs explicit
-                // insets.bottom padding or the last item (Cancel This Plan)
-                // ends up clipped by the system bar. iOS unchanged.
-                paddingBottom: 24 + (Platform.OS === 'android' ? insets.bottom : 0),
-              }}
-              scrollIndicatorInsets={{ right: 2 }}
-            >
-<View pointerEvents={edit.isBusy || edit.unknown ? "none" : "auto"}>
-              {/* Title */}
-              <Text style={manageStyles.label}>Title</Text>
-              <TextInput
-                editable={!edit.isBusy && !edit.unknown}
-                style={manageStyles.input}
-                accessibilityLabel="Plan title"
-                value={draft.title}
-                onChangeText={(value) => editor.setField('title', value)}
-                maxLength={80}
-                placeholder="Plan title"
-                placeholderTextColor={Colors.textLight}
-                returnKeyType="done"
-                onSubmitEditing={Keyboard.dismiss}
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              />
-
-              {/* Plan photo */}
-              <Text style={manageStyles.label}>Plan photo</Text>
-              <View style={manageStyles.photoRow}>
-                {draft.imageUrl ? (
-                  <View style={manageStyles.photoThumbWrap}>
-                    <Image source={{ uri: draft.imageUrl }} style={manageStyles.photoThumb} contentFit="cover" />
-                    {editImageLoading ? (
-                      <View style={manageStyles.photoThumbOverlay}><ActivityIndicator color={Colors.white} /></View>
-                    ) : (
-                      <TouchableOpacity accessibilityRole="button" style={manageStyles.photoRemove} accessibilityLabel="Remove photo" disabled={edit.isBusy || edit.unknown} onPress={() => { if (edit.canChange()) { hapticLight(); editor.setField('imageUrl', null); } }} hitSlop={8}>
-                        <X size={13} color={Colors.white} strokeWidth={2.5} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ) : (
-                  <TouchableOpacity accessibilityRole="button" style={manageStyles.photoAdd} disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} activeOpacity={0.7}>
-                    <ImagePlus size={15} color={Colors.secondary} strokeWidth={2} />
-                    <Text style={manageStyles.photoAddText} numberOfLines={1}>Add photo</Text>
-                  </TouchableOpacity>
-                )}
-                {draft.imageUrl && <TouchableOpacity accessibilityRole="button" disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} style={manageStyles.photoAdd}>
-                  <Text style={manageStyles.photoAddText} numberOfLines={1}>Change photo</Text>
-                </TouchableOpacity>}
-                {editImageLoading && <Text accessibilityLiveRegion="polite" style={manageStyles.hint}>Adding photo…</Text>}
-              </View>
-
-              {/* Date & time */}
-              <Text style={manageStyles.label}>Date & time</Text>
-              <View style={manageStyles.dateTimeRow}>
-                <TouchableOpacity accessibilityRole="button"
-                  disabled={edit.isBusy || edit.unknown}
-                style={[manageStyles.input, manageStyles.dateTimeBtn]}
-                  onPress={() => { hapticLight(); openEditDatePicker(); }}
-                  activeOpacity={0.85}
-                >
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
-                    {new Date(draft.year, draft.month, draft.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button"
-                  disabled={edit.isBusy || edit.unknown}
-                style={[manageStyles.input, manageStyles.dateTimeBtn, { marginLeft: 8 }]}
-                  onPress={() => { hapticLight(); openEditTimePicker(); }}
-                  activeOpacity={0.85}
-                >
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
-                    {displayPickerTime(draft.hour, draft.minute, draft.period)}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Description */}
-              <View style={manageStyles.descLabelRow}>
-                <Text style={[manageStyles.label, { marginTop: 0, marginBottom: 0 }]}>Plan description</Text>
-                <Text
-                  style={[
-                    manageStyles.charCounter,
-                    draft.description.length >= EDIT_DESC_LIMIT - EDIT_DESC_WARN_MARGIN && manageStyles.charCounterWarn,
-                  ]}
-                >
-                  {draft.description.length}/{EDIT_DESC_LIMIT}
-                </Text>
-              </View>
-              <TextInput
-                editable={!edit.isBusy && !edit.unknown}
-                style={[manageStyles.input, manageStyles.textArea]}
-                accessibilityLabel="Plan description"
-                value={draft.description}
-                onChangeText={(value) => editor.setField('description', value)}
-                multiline
-                maxLength={EDIT_DESC_LIMIT}
-                placeholder="What's the plan? Dress code, what to expect..."
-                placeholderTextColor={Colors.textLight}
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              />
-
-              {/* Creator note */}
-              <Text style={manageStyles.label}>Your message</Text>
-              <TextInput
-                editable={!edit.isBusy && !edit.unknown}
-                style={[manageStyles.input, manageStyles.creatorMessageInput]}
-                accessibilityLabel="Your message"
-                value={draft.creatorMessage}
-                onChangeText={(value) => editor.setField('creatorMessage', value)}
-                multiline
-                maxLength={150}
-                placeholder="A personal note to people joining"
-                placeholderTextColor={Colors.textLight}
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              />
-              <Text style={manageStyles.hint}>Up to 150 characters</Text>
-
-              {/* Location */}
-              <Text style={manageStyles.label}>Location</Text>
-              <View style={{ zIndex: 10, elevation: 10 }}>
-                <GooglePlacesAutocomplete
-                  ref={managePlacesRef}
-                  placeholder="Venue or neighborhood"
-                  fetchDetails
-                  disableScroll={true}
-                  onPress={(data, details) => {
-                    if (!edit.canChange()) return;
-                    const lat = details?.geometry?.location?.lat ?? null;
-                    const lng = details?.geometry?.location?.lng ?? null;
-                    const name = data.structured_formatting?.main_text ?? data.description;
-                    editor.setField('location', name || data.description);
-                    editor.setField('locationLat', lat);
-                    editor.setField('locationLng', lng);
-                    hapticLight();
-                  }}
-                  query={{
-                    key: GOOGLE_MAPS_API_KEY,
-                    language: 'en',
-                    components: 'country:us',
-                    location: '34.0522,-118.2437',
-                    radius: '50000',
-                  }}
-                  styles={managePlacesStyles}
-                  textInputProps={{
-                    accessibilityLabel: "Location",
-                    editable: !edit.isBusy && !edit.unknown,
-                    onChangeText: (text: string) => {
-                      if (!edit.canChange()) return;
-                      editor.setField('location', text); editor.setField('locationLat', null); editor.setField('locationLng', null);
-                    },
-                    placeholderTextColor: Colors.textLight,
-                  }}
-                  enablePoweredByContainer={false}
-                  debounce={300}
-                  keepResultsAfterBlur={false}
-                  nearbyPlacesAPI="GooglePlacesSearch"
-                />
-              </View>
-
-              {/* Ticket link */}
-              <Text style={manageStyles.label}>Ticket link</Text>
-              <TextInput
-                editable={!edit.isBusy && !edit.unknown}
-                style={manageStyles.input}
-                accessibilityLabel="Ticket link"
-                value={draft.ticketUrl}
-                onChangeText={(value) => editor.setField('ticketUrl', value)}
-                placeholder="https://..."
-                placeholderTextColor={Colors.textLight}
-                autoCapitalize="none"
-                keyboardType="url"
-                returnKeyType="done"
-                onSubmitEditing={Keyboard.dismiss}
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              />
-
-              {/* Category */}
-              <Text style={manageStyles.label}>Category</Text>
-              <View style={manageStyles.pillWrap}>
-                {MANAGE_CATEGORIES.map((cat) => {
-                  const isSelected = draft.category === cat;
-                  return (
-                    <TouchableOpacity accessibilityRole="button"
-                      key={cat}
-                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
-                      disabled={edit.isBusy || edit.unknown}
-                      style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
-                      onPress={() => {
-                        hapticLight();
-                        editor.setField('category', cat);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{cat}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Who can join */}
-              <Text style={manageStyles.label}>Who can join</Text>
-              <View style={manageStyles.genderRow}>
-                {manageGenderOptions.map((opt) => {
-                  const isSelected = draft.genderRule === opt.value;
-                  return (
-                    <TouchableOpacity accessibilityRole="button"
-                      key={opt.value}
-                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
-                      disabled={edit.isBusy || edit.unknown}
-                      style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
-                      onPress={() => {
-                        hapticLight();
-                        editor.setField('genderRule', opt.value);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Age range */}
-              <Text style={manageStyles.label}>Age range</Text>
-              <View style={manageStyles.pillWrap}>
-                {AGE_RANGES.map((range) => {
-                  const isSelected = draft.ageRanges.includes(range);
-                  return (
-                    <TouchableOpacity accessibilityRole="button"
-                      key={range}
-                      accessibilityState={{ selected: isSelected, disabled: edit.isBusy || edit.unknown }}
-                      disabled={edit.isBusy || edit.unknown}
-                      style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
-                      onPress={() => toggleEditAgeRange(range)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[manageStyles.pillText, isSelected && manageStyles.pillTextSelected]}>{range}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <Text style={manageStyles.hint}>{!draft.ageChanged && draft.ageRanges.length === 0 && editOriginal ? `${savedAgeLabel(editOriginal.target_age_min, editOriginal.target_age_max)}. Kept unless you choose a range.` : 'Select up to 2 ranges, or All Ages'}</Text>
-
-              {/* Ordinary capacity does not describe a Circle’s outsider allowance. */}
-              {isCirclePlan ? <><Text style={manageStyles.label}>Circle plan</Text><Text style={manageStyles.hint}>Circle members aren’t included in the public spot limit. Your Circle’s existing joining settings stay the same.</Text></> : !draft.featured ? <>
-              <Text style={manageStyles.label}>How many to invite</Text>
-              <View style={manageStyles.stepperRow}>
-                <TouchableOpacity accessibilityRole="button"
-                  style={[manageStyles.stepperBtn, draft.groupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
-                  onPress={() => {
-                    if (draft.groupSize > (MIN_GROUP - 1)) {
-                      hapticLight();
-                      editor.setField('groupChanged', true); editor.setField('groupSize', (g) => g - 1);
-                    }
-                  }}
-                  accessibilityLabel="Fewer people"
-                  disabled={edit.isBusy || edit.unknown || draft.groupSize <= (MIN_GROUP - 1)}
-                >
-                  <Text style={manageStyles.stepperBtnText}>−</Text>
-                </TouchableOpacity>
-                <View style={manageStyles.stepperValue}>
-                  <Text style={manageStyles.stepperValueText}>{draft.groupSize + 1}</Text>
-                  <Text style={manageStyles.stepperValueSub}>people total</Text>
-                </View>
-                <TouchableOpacity accessibilityRole="button"
-                  style={[manageStyles.stepperBtn, draft.groupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
-                  onPress={() => {
-                    if (draft.groupSize < (MAX_GROUP - 1)) {
-                      hapticLight();
-                      editor.setField('groupChanged', true); editor.setField('groupSize', (g) => g + 1);
-                    }
-                  }}
-                  accessibilityLabel="More people"
-                  disabled={edit.isBusy || edit.unknown || draft.groupSize >= (MAX_GROUP - 1)}
-                >
-                  <Text style={manageStyles.stepperBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={manageStyles.stepperValueSub}>including you</Text></> : null}
-
-              {/* Featured Event toggle — official creators only */}
-              {isCreator && isOfficialCreator && !isCirclePlan && (
-                <View style={manageStyles.featuredSection}>
-                  <View style={manageStyles.featuredRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={manageStyles.label}>Feature this Plan</Text>
-                      <Text style={manageStyles.hint}>Allows custom capacity (50 to 500)</Text>
-                    </View>
-                    <Switch
-                      accessibilityLabel="Feature this plan"
-                      disabled={edit.isBusy || edit.unknown}                      value={draft.featured}
-                      onValueChange={(val) => {
-                        if (!edit.canChange()) return;
-                        hapticLight();
-                        editor.setField('featuredChanged', true); editor.setField('featured', val);
-                        if (val) {
-                          editor.setField('featuredCapacity', editOriginal?.is_featured ? (editOriginal.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
-                        }
-                      }}
-                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: appearance ? AfterglowColors.clay : draft.featuredType === 'birthday_party' ? Colors.birthdayPink : draft.featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
-                      thumbColor={Colors.white}
-                    />
-                  </View>
-                  {draft.featured && (
-                    <View style={manageStyles.featuredTypeRow}>
-                      <TouchableOpacity accessibilityRole="button"
-                        style={[
-                          manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (draft.featuredType === 'washedup_event' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg) },
-                        ]}
-                        disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: draft.featuredType === "washedup_event"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); editor.setField('featuredChanged', true); editor.setField('featuredType', 'washedup_event'); }}
-                        activeOpacity={0.85}
-                      >
-                        <Text
-                          style={[
-                            manageStyles.featuredTypePillText,
-                            { color: appearance ? (draft.featuredType === 'washedup_event' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary) },
-                          ]}
-                        >
-                          washedup event
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity accessibilityRole="button"
-                        style={[
-                          manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (draft.featuredType === 'birthday_party' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg) },
-                        ]}
-                        disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: draft.featuredType === "birthday_party"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); editor.setField('featuredChanged', true); editor.setField('featuredType', 'birthday_party'); }}
-                        activeOpacity={0.85}
-                      >
-                        <Text
-                          style={[
-                            manageStyles.featuredTypePillText,
-                            { color: appearance ? (draft.featuredType === 'birthday_party' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary) },
-                          ]}
-                        >
-                          birthday party
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity accessibilityRole="button"
-                        style={[
-                          manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (draft.featuredType === 'special_event' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg) },
-                        ]}
-                        disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: draft.featuredType === "special_event"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); editor.setField('featuredChanged', true); editor.setField('featuredType', 'special_event'); }}
-                        activeOpacity={0.85}
-                      >
-                        <Text
-                          style={[
-                            manageStyles.featuredTypePillText,
-                            { color: appearance ? (draft.featuredType === 'special_event' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary) },
-                          ]}
-                        >
-                          special event
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  {draft.featured && (
-                    <View style={manageStyles.capacitySection}>
-                      <Text style={manageStyles.capacityValue}>{draft.featuredCapacity} people</Text>
-                      <View style={manageStyles.stepperRow}>
-                        <TouchableOpacity accessibilityRole="button"
-                          style={[manageStyles.stepperBtn, draft.featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
-                          onPress={() => {
-                            if (draft.featuredCapacity > FEATURED_MIN_CAPACITY) {
-                              hapticLight();
-                              editor.setField('featuredChanged', true); editor.setField('featuredCapacity', (c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
-                            }
-                          }}
-                          accessibilityLabel="Lower capacity" disabled={edit.isBusy || edit.unknown || draft.featuredCapacity <= FEATURED_MIN_CAPACITY}
-                        >
-                          <Text style={manageStyles.stepperBtnText}>−</Text>
-                        </TouchableOpacity>
-                        <View style={manageStyles.stepperValue}>
-                          <Text style={manageStyles.stepperValueText}>{draft.featuredCapacity}</Text>
-                          <Text style={manageStyles.stepperValueSub}>capacity</Text>
-                        </View>
-                        <TouchableOpacity accessibilityRole="button"
-                          style={[manageStyles.stepperBtn, draft.featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
-                          onPress={() => {
-                            if (draft.featuredCapacity < FEATURED_MAX_CAPACITY) {
-                              hapticLight();
-                              editor.setField('featuredChanged', true); editor.setField('featuredCapacity', (c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
-                            }
-                          }}
-                          accessibilityLabel="Higher capacity" disabled={edit.isBusy || edit.unknown || draft.featuredCapacity >= FEATURED_MAX_CAPACITY}
-                        >
-                          <Text style={manageStyles.stepperBtnText}>+</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              )}
-
-</View>
-              {/* Duplicate: reuse the exact prefill pipeline the waitlist
-                  "Post your own" path uses, from the creator's own plan */}
-              {COMMUNITIES_ENABLED && (
-                <TouchableOpacity accessibilityRole="button"
-                  disabled={edit.isBusy || edit.unknown}
-                  style={manageStyles.duplicateBtn}
-                  onPress={() => {
-                    if (edit.unknown || !closeManageModal()) return;
-                    router.push({
-                      pathname: '/(tabs)/post',
-                      params: buildDuplicatePostParams(plan, id),
-                    });
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text numberOfLines={1} style={manageStyles.duplicateBtnText}>Post again</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Cancel plan */}
-              <TouchableOpacity accessibilityRole="button"
-                style={manageStyles.cancelBtn}
-                disabled={edit.isBusy || edit.unknown}
-                onPress={handleCancelPlan}
-                activeOpacity={0.7}
-              >
-                <Text numberOfLines={1} style={manageStyles.cancelBtnText}>Cancel plan</Text>
-              </TouchableOpacity>
-            </ScrollView>
-            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-              {edit.unknown && <View style={manageStyles.recovery}>
-                <Text style={manageStyles.label}>Check your changes</Text>
-                <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
-              </View>}
-              {edit.error && <Text accessibilityRole="alert" style={manageStyles.editError}>{edit.error}</Text>}
-              {/* Save button */}
-              <TouchableOpacity accessibilityRole="button"
-                style={[manageStyles.saveBtn, (editSaving || editImageLoading || draft.title.trim().length === 0) && manageStyles.saveBtnDisabled]}
-                onPress={edit.unknown ? edit.check : handleSaveEdit}
-                disabled={editSaving || editImageLoading || draft.title.trim().length === 0}
-                activeOpacity={0.85}
-              >
-                {editSaving ? (
-                  <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><ActivityIndicator size="small" color={Colors.white} /><Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Checking…" : "Saving…"}</Text></View>
-                ) : (
-                  <Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Check changes" : "Save changes"}</Text>
-                )}
-              </TouchableOpacity>
-
-
-            </View>
-          </View>
-          {/* Date picker overlay — child of the manage modal overlay so we
-              avoid the Modal-inside-Modal stacking issue on iOS. */}
-          {editor.datePickerVisible && (
-            <Pressable
-              accessible={false}
-              style={manageStyles.pickerOverlay}
-              onPress={() => editor.closeDatePicker()}
-            >
-              <Pressable accessible={false} style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
-                <Text style={manageStyles.pickerTitle}>Select date</Text>
-                <WashedUpCalendar
-                  mode="pick"
-                  selected={editor.dateSelection}
-                  onSelect={(day) => {
-                    if (!edit.canChange()) return;
-                    editor.selectDate(day);
-                  }}
-                />
-              </Pressable>
-            </Pressable>
-          )}
-
-          {/* Time picker overlay */}
-          {editor.timePickerVisible && (
-            <Pressable
-              accessible={false}
-              style={manageStyles.pickerOverlay}
-              onPress={() => editor.closeTimePicker()}
-            >
-              <Pressable accessible={false} style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
-                <Text style={manageStyles.pickerTitle}>Select time</Text>
-                <View style={manageStyles.pickerRow}>
-                  <TextInput style={manageStyles.directTimeInput} value={editor.timeSelection.hour ? String(editor.timeSelection.hour) : ''} onChangeText={(value) => editor.setTimeField('hour', Number(value.replace(/\D/g, '').slice(0, 2)))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Hour, 1 through 12" />
-                  <Text style={manageStyles.pickerItemText}>:</Text>
-                  <TextInput style={manageStyles.directTimeInput} value={editor.timeSelection.minute} onChangeText={(value) => editor.setTimeField('minute', value.replace(/\D/g, '').slice(0, 2))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Minute, 0 through 59" />
-                  {PERIODS.map((p) => (
-                    <Pressable key={p} style={[manageStyles.directPeriod, editor.timeSelection.period === p && manageStyles.pickerItemSelected]} onPress={() => editor.setTimeField('period', p)} accessibilityRole="button" accessibilityState={{ selected: editor.timeSelection.period === p }}>
-                      <Text style={[manageStyles.pickerItemText, editor.timeSelection.period === p && manageStyles.pickerItemTextSel]}>{p}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={manageStyles.directMinutes}>
-                  {MINUTE_OPTIONS.map((m) => (
-                    <Pressable key={m} style={[manageStyles.directPeriod, editor.timeSelection.minute === m && manageStyles.pickerItemSelected]} onPress={() => editor.setTimeField('minute', m)} accessibilityRole="button" accessibilityLabel={`${m} minutes`}>
-                      <Text style={[manageStyles.pickerItemText, editor.timeSelection.minute === m && manageStyles.pickerItemTextSel]}>:{m}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                {!editor.validTime && <Text style={manageStyles.directTimeError}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
-                <TouchableOpacity style={[manageStyles.pickerDoneBtn, !editor.validTime && { opacity: 0.45 }]} onPress={confirmEditTime} disabled={!editor.validTime} accessibilityRole="button" accessibilityState={{ disabled: !editor.validTime }}>
-                  <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
-                </TouchableOpacity>
-              </Pressable>
-            </Pressable>
-          )}
-
+        <ManagePlanEditor
+          editor={editor}
+          edit={edit}
+          managePlacesRef={managePlacesRef}
+          manageGenderOptions={manageGenderOptions}
+          appearance={appearance}
+          isCirclePlan={isCirclePlan}
+          isCreator={isCreator}
+          isOfficialCreator={isOfficialCreator}
+          onClose={closeManageModal}
+          onSave={handleSaveEdit}
+          onCancel={handleCancelPlan}
+          onDuplicate={COMMUNITIES_ENABLED ? () => {
+            if (edit.unknown || !closeManageModal()) return;
+            router.push({ pathname: '/(tabs)/post', params: buildDuplicatePostParams(plan, id) });
+          } : undefined}
+          onOpenDatePicker={openEditDatePicker}
+          onOpenTimePicker={openEditTimePicker}
+          onConfirmTime={confirmEditTime}
+          onToggleAgeRange={toggleEditAgeRange}
+        >
           {/* BrandedAlert inside the modal so it renders on top, not behind it */}
           <BrandedAlert
-        appearance={appearance}
+            appearance={appearance}
             visible={brandedAlert.visible}
             title={brandedAlert.title}
             message={brandedAlert.message}
@@ -2520,7 +1984,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             buttons={brandedAlert.buttons}
             onClose={closeBrandedAlert}
           />
-        </KeyboardAvoidingView>
+        </ManagePlanEditor>
       </Modal>
 
       {reportTarget && (
@@ -3331,354 +2795,6 @@ const ticketStyles = StyleSheet.create({
   },
 });
 
-const legacyManagePlacesStyles = {
-  container: { flex: 0 },
-  textInputContainer: { backgroundColor: 'transparent' },
-  textInput: {
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    height: 46,
-    marginBottom: 0,
-  },
-  listView: {
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    borderRadius: 12,
-    marginTop: 4,
-    overflow: 'hidden' as const,
-  },
-  row: { paddingHorizontal: 14, paddingVertical: 12, backgroundColor: Colors.white },
-  separator: { height: 1, backgroundColor: Colors.inputBg, marginHorizontal: 14 },
-  description: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
-  poweredContainer: { display: 'none' as const },
-};
-
-const legacyManageStyles = StyleSheet.create({
-  footer: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12, gap: 12 },
-  recovery: { marginTop: 0 },
-  editError: { color: Colors.errorRed, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, marginTop: 12 },
-  overlay: {
-    flex: 1,
-    backgroundColor: Colors.overlayDark,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    maxHeight: SCREEN_HEIGHT * 0.85,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  title: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
-  },
-  closeX: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.displaySM,
-    color: Colors.textLight,
-  },
-  label: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 6,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  creatorMessageInput: {
-    minHeight: 50,
-    textAlignVertical: 'top',
-  },
-  // Plan photo — same values as PlanComposerV2's photoRow/photoAdd/etc.
-  photoRow: { marginTop: 0 },
-  photoAdd: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start',
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
-  },
-  photoAddText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  photoThumbWrap: { width: 96, height: 60, borderRadius: 12, overflow: 'hidden' },
-  photoThumb: { width: '100%', height: '100%' },
-  photoThumbOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark40 },
-  photoRemove: {
-    position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.overlayDark60,
-  },
-  hint: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.textLight,
-    marginTop: 4,
-  },
-  descLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginTop: 16,
-    marginBottom: 6,
-  },
-  charCounter: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-  },
-  charCounterWarn: {
-    color: Colors.errorBrand,
-    fontFamily: Fonts.sansSemibold,
-  },
-  pillWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    borderRadius: 20,
-  },
-  pillSelected: {
-    backgroundColor: Colors.terracotta,
-    borderColor: Colors.terracotta,
-  },
-  pillText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  pillTextSelected: {
-    color: Colors.white,
-    fontFamily: Fonts.sansBold,
-  },
-  genderRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  genderPill: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  stepperBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.parchment,
-    borderWidth: 1,
-    borderColor: Colors.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperBtnDisabled: { opacity: 0.35 },
-  stepperBtnText: { fontFamily: Fonts.sans, fontSize: FontSizes.displayMD, color: Colors.asphalt },
-  stepperValue: { flex: 1, alignItems: 'center' },
-  stepperValueText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayLG, color: Colors.terracotta },
-  stepperValueSub: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.textLight, marginTop: -2 },
-  saveBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  saveBtnDisabled: {
-    opacity: 0.4,
-  },
-  saveBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG },
-  cancelBtn: {
-    alignItems: 'center',
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  // muted, never red (C13)
-  cancelBtnText: { color: Colors.textMedium, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
-  duplicateBtn: { alignItems: 'center', paddingVertical: 12 },
-  duplicateBtnText: { color: Colors.terracotta, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD },
-  featuredSection: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  featuredRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  featuredTypeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-    justifyContent: 'center',
-  },
-  featuredTypePill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  featuredTypePillText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: 11,
-    letterSpacing: 0.3,
-  },
-  // Date / time editor in the manage modal
-  dateTimeRow: {
-    flexDirection: 'row',
-    marginTop: 4,
-  },
-  dateTimeBtn: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  dateTimeBtnText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  // Date / time picker overlays (inside the manage modal so they stack
-  // above the form sheet without spawning a nested RN Modal).
-  pickerOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: Colors.overlayDark40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    elevation: 24,
-  },
-  pickerSheet: {
-    width: '88%',
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 20,
-    maxHeight: '70%',
-  },
-  pickerTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  directTimeInput: {
-    width: 55,
-    minHeight: 50,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 6,
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  directPeriod: {
-    flex: 1,
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 6,
-  },
-  directMinutes: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  directTimeError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 10 },
-  pickerCol: {
-    flex: 1,
-  },
-  pickerColSm: {
-    flex: 0.7,
-  },
-  pickerItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  pickerItemSelected: {
-    backgroundColor: Colors.terracotta,
-  },
-  pickerItemText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  pickerItemTextSel: {
-    color: Colors.white,
-    fontFamily: Fonts.sansBold,
-  },
-  pickerDoneBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  pickerDoneBtnText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.white,
-  },
-  capacitySection: {
-    marginTop: 12,
-    alignItems: 'center',
-  },
-  capacityValue: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    marginBottom: 8,
-  },
-});
-
 const legacyDuplicateSheetStyles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -3742,44 +2858,3 @@ const legacyDuplicateSheetStyles = StyleSheet.create({
     color: Colors.terracotta,
   },
 });
-
-function detailAppearance<T extends Record<string, any>>(base: T, fonts: AfterglowFontFamilies): T {
-  const colorMap: Record<string, string> = {
-    [Colors.parchment]: AfterglowColors.paper, [Colors.asphalt]: AfterglowColors.ink,
-    [Colors.textLight]: AfterglowColors.muted,
-    [Colors.terracotta]: AfterglowColors.clay, [Colors.cardBg]: AfterglowColors.white,
-    [Colors.border]: AfterglowColors.subtleLine, [Colors.inputBg]: AfterglowColors.white,
-  };
-  const familyMap: Record<string, string> = { [Fonts.displayBold]: fonts.display, [Fonts.display]: fonts.regular,
-    [Fonts.sans]: fonts.regular, [Fonts.sansMedium]: fonts.medium, [Fonts.sansSemibold]: fonts.semibold, [Fonts.sansBold]: fonts.semibold };
-  return Object.fromEntries(Object.entries(base).map(([key, value]) => {
-    const style = { ...StyleSheet.flatten(value) } as any;
-    for (const prop of ['color', 'backgroundColor', 'borderColor', 'borderTopColor', 'borderBottomColor']) if (colorMap[style[prop]]) style[prop] = colorMap[style[prop]];
-    if (familyMap[style.fontFamily]) style.fontFamily = familyMap[style.fontFamily];
-    if (/Button$|Btn$/.test(key)) { style.minHeight = 48; style.borderRadius = 6; }
-    if (['joinButton', 'openChatButton', 'managePlanButton', 'waitlistButton'].includes(key)) style.borderRadius = 14;
-    if (key === 'headerIconButton') { style.width = 44; style.height = 44; style.backgroundColor = AfterglowColors.paper; style.borderWidth = 0; }
-    if (key === 'youreGoingBadge') { style.backgroundColor = AfterglowColors.paper; style.minHeight = 48; style.borderRadius = 0; style.justifyContent = 'center'; }
-    if (key === 'youreGoingText') style.color = AfterglowColors.muted;
-    if (key === 'scrollContent') style.paddingBottom = 28;
-    if (key === 'stickyBar') { style.position = 'relative'; style.bottom = undefined; style.left = undefined; style.right = undefined; style.borderTopColor = AfterglowColors.subtleLine; }
-    if (key === 'title') { Object.assign(style, AfterglowType.identity); }
-    if (key === 'sheet') { style.borderTopLeftRadius = 12; style.borderTopRightRadius = 12; }
-    return [key, style];
-  })) as T;
-}
-
-function manageAppearance<T extends Record<string, any>>(base: T, fonts: AfterglowFontFamilies): T {
-  const result = detailAppearance(base, fonts) as any;
-  Object.assign(result.sheet, { backgroundColor: AfterglowColors.paper, paddingHorizontal: 20, paddingTop: 12, maxHeight: '92%' });
-  Object.assign(result.title, { ...AfterglowType.identity, fontFamily: fonts.semibold });
-  Object.assign(result.label, { textTransform: 'none', letterSpacing: 0, fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: AfterglowColors.ink });
-  for (const key of ['input', 'photoAdd']) Object.assign(result[key], { backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderRadius: 6, minHeight: 48 });
-  Object.assign(result.saveBtn, { marginTop: 0, minHeight: 52 });
-  Object.assign(result.photoRow, { gap: 10 });
-  for (const key of ['pill', 'genderPill', 'featuredTypePill']) Object.assign(result[key], { borderRadius: 6, minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: AfterglowColors.line });
-  Object.assign(result.featuredTypePillText, { fontSize: FontSizes.bodySM });
-  Object.assign(result.hint, { color: AfterglowColors.muted });
-  Object.assign(result.photoRemove, { width: 44, height: 44, top: 0, right: 0, borderRadius: 6 });
-  return result;
-}

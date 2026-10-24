@@ -107,3 +107,49 @@ listed physical-device, backend and release checks.
 
 Both checkpoints are local only. Before another refactor, review these boundaries
 and select the next module based on concrete maintenance needs.
+
+## Third checkpoint: editor presentation
+
+Extracted the form, photo controls, date/time overlays, recovery footer and their
+styles into `components/plans/ManagePlanEditor.tsx` and
+`components/plans/managePlanEditorStyles.ts`. The existing shared appearance
+transform moved verbatim to `components/plans/planDetailAppearance.ts`, used by
+both the detail screen and editor. All moved style definitions were checked
+against checkpoint `9ce7103` and match exactly.
+
+The screen retains its native Modal and dismissal callback, the alert state,
+draft/save hooks, account and permission checks, save preparation, photo requests,
+and navigation/cancellation actions. The alert remains a child of the editor
+overlay so validation is visible over the native modal. The component does not
+own the draft or add a second save path. The screen is 925 lines shorter than
+checkpoint `9ce7103` (presentation code was moved, not removed from the app).
+
+Verification: the existing 205 tests across six suites passed, including iOS
+cancellation dismissal sequencing, uncertain-save recovery, photo handling,
+custom ages, exact timestamps and both appearance modes. App-wide TypeScript
+and diff whitespace checks passed. No new implementation-mirroring tests were
+needed for this extraction.
+
+The iPhone 17 Pro Max / iOS 26.4 local fixture verified unchanged form appearance,
+validation alert layering and draft retention, successful correction/save, native
+time controls with exact-minute preservation, and uncertain-save field locking,
+recovery footer and reconciliation without a duplicate update. The native cancel
+action correctly displayed its separate confirmation after the editor dismissed.
+No cancellation was submitted. Evidence and logs are under:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/editor-component`.
+
+### Follow-up found outside this extraction
+
+The existing `PlanDepartureSheet` exposes the cancellation confirmation as one
+accessibility element labelled “Dismiss confirmation”, without individual action
+buttons. Native automation could view the correct sheet but could not dismiss it
+through that element; coordinate control also failed with `noWindowsAvailable`.
+The fixture was restarted. The sheet has nested accessible Pressable wrappers,
+similar to the earlier picker issue, and is unchanged by this patch. Check and
+repair that accessibility boundary separately, including Keep plan and Cancel
+plan controls and the existing one-action/dismissal safeguards. Automated
+cancellation transition tests pass; full native confirmation interaction remains
+unverified.
+
+The existing fixture/physical-device/live-backend limitations still apply.
+This checkpoint contains no production changes, dependency changes or deployment.
