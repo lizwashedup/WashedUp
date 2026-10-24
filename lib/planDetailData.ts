@@ -156,4 +156,3 @@ export async function fetchMembers(planId: string): Promise<Member[]> {
     handle: row.handle ?? null,
   }));
 }
-

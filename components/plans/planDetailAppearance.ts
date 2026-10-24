@@ -27,4 +27,3 @@ export function detailAppearance<T extends Record<string, any>>(base: T, fonts: 
     return [key, style];
   })) as T;
 }
-

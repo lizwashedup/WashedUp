@@ -229,3 +229,37 @@ This verifies wiring; live Supabase permissions/RPC behavior is not newly verifi
 Evidence, source hashes and logs:
 `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/detail-data`.
 No query behavior, schema, permissions or release configuration changed.
+
+
+## Combined branch review
+
+Reviewed the complete change from baseline `fc419a5` through `7870246`, including
+editor state/reset behavior, validation and patch preparation, component callback
+wiring, modal dismissal, save recovery, account/visit ownership, data queries and
+appearance extraction. No blocking regression was identified within this scope.
+The final cleanup removes trailing blank lines from `planDetailAppearance.ts`
+and `planDetailData.ts`; it makes no runtime change.
+
+A TypeScript AST comparison confirmed that both extracted loader bodies, the
+appearance function and all six moved style definitions match the baseline
+exactly. Query scope and enablement remain in the screen; edit/departure mutation
+hooks and service implementations are unchanged by this branch. Existing style
+literals were moved verbatim rather than introducing a separate design change.
+
+Combined verification: 9 suites, 244 tests passed; app-wide TypeScript exited 0;
+cumulative `git diff --check fc419a5` passed after the whitespace cleanup.
+The combined run covers detail presentation, photo editing, edit/departure hooks,
+draft state, edit preparation/rules, departure presentation and the data loaders.
+No additional native run was needed for the final whitespace/documentation-only
+cleanup; native evidence for each preceding checkpoint is linked above.
+
+This is ready for integration review, not production acceptance. Live Supabase
+permissions/RPC integration, the actual Places widget, complete app navigation,
+full VoiceOver/physical-device checks and the pinned Node 20.20.1 CI environment
+remain outside the local fixture evidence. The combined run used Node 25.8.1.
+The earlier fixture location-display limitation remains recorded. Stop further
+mechanical extraction here and complete integration checks before expanding the
+refactor to another screen. Nothing was pushed, merged, built or deployed.
+
+Combined logs and source hashes:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/combined-review`.
