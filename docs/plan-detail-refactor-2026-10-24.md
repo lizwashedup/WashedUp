@@ -304,3 +304,49 @@ journeys, remote Google responses and live Supabase integration are still open;
 this fixture uses stubbed routing and an in-memory backend. The integration pass
 focused on fixing and verifying the reproduced location defect before broadening
 those checks. No build, push, merge, OTA or production write occurred.
+
+
+## Full-app navigation verification
+
+Adapted the preserved full-app fixture to this checkout. It imports the real
+ExpoRoot, route tree, app/tab layouts, Plans feed, detail, chat, waitlist and Post
+screens. Unlike earlier focused fixtures, Expo Router and identity/query/edit
+hooks are not stubbed. Supabase remains fictional and in memory, with only an
+owned event update allowed. External JavaScript network traffic is blocked;
+analytics, push, maps and Places results use fixture boundaries. No new binary
+was built and no real account or provider client was used.
+
+On the existing iPhone 17 Pro Max / iOS 26.4 development binary, verified:
+
+- Plans → creator detail → Manage Plan → save → detail → Back to Plans. Both the
+  detail and feed showed the saved title; reopening the editor retained it.
+- An unsaved title was discarded. Open Chat reached the actual chat screen;
+  View Plan returned to detail, and reopening Manage Plan showed the saved title.
+- Waitlist reached its actual empty queue screen; Back to plan restored detail.
+- Post again was absent with the default communities flag off. In a separate
+  fixture-only `EXPO_PUBLIC_COMMUNITIES_ENABLED=true` run it opened the real
+  composer with copied title/category/schedule/location/capacity. Cancel restored
+  Plans without submitting. No repository or release feature flag changed.
+
+The first run logged exactly one local event update. No chat messages, waitlist
+invitations or new plans were sent. These checks establish navigation/prefill
+behavior, not live service authorization or write behavior.
+
+Full route scanning exposed an unused duplicate `app/plan/plan-photo-edit.ts` as
+an invalid route. Deleted that file after confirming it was byte-identical to
+`lib/planPhotoEdit.ts` and that all consumers/tests already use the canonical lib
+copy. The subsequent full-tree native bundle (4,957 modules) no longer reports
+the invalid photo-helper route. No functional helper code changed.
+
+136 screen/photo tests passed, app-wide TypeScript passed and `git diff --check`
+passed. Evidence, fixture source, source hashes, save receipt and screenshots:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/full-app`.
+Start the default fixture with its `start.sh` on port 8847; use the explicit
+communities environment variable above only to repeat the gated path check.
+
+A read-only `supabase status` check could not find a local test backend because
+Docker/Podman is unavailable. Common installed Docker/OrbStack/runtime paths were
+also absent. Backend integration remains pending selection/setup of a disposable
+local environment or an identified staging environment. Production was not used
+as a substitute. Pinned-runtime CI and physical-device/VoiceOver limits remain.
+No push, merge, build, OTA or production write occurred.
