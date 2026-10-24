@@ -35,6 +35,7 @@ jest.mock('../../../../lib/supabase', () => {
   const profileChain = {
     select: jest.fn(function (this: unknown) { return this; }),
     eq: jest.fn(function (this: unknown) { return this; }),
+    or: jest.fn(function (this: unknown) { return this; }),
     maybeSingle: jest.fn(() => new Promise(() => { /* hangs unless overridden per test */ })),
     update: jest.fn(function (this: unknown) { return this; }),
   };
@@ -79,7 +80,7 @@ function setUser(id: string | null) {
 }
 
 function profileChain() {
-  return supabase.from('profiles') as unknown as { maybeSingle: jest.Mock; update: jest.Mock };
+  return supabase.from('profiles') as unknown as { maybeSingle: jest.Mock; update: jest.Mock; or: jest.Mock };
 }
 
 describe('basics.tsx onboarding-draft regressions', () => {
@@ -90,7 +91,8 @@ describe('basics.tsx onboarding-draft regressions', () => {
     (supabase.auth.getUser as jest.Mock).mockImplementation(
       () => new Promise(() => { /* hangs unless overridden below */ }),
     );
-    profileChain().maybeSingle.mockResolvedValue({ data: null });
+    profileChain().maybeSingle.mockReset().mockResolvedValue({ data: { id: 'user-a', onboarding_status: 'pending' }, error: null });
+    profileChain().or.mockClear();
     profileChain().update.mockClear();
     (supabase.functions.invoke as jest.Mock).mockClear().mockResolvedValue({ error: null });
     setUser('user-a');
@@ -141,6 +143,105 @@ describe('basics.tsx onboarding-draft regressions', () => {
     expect(supabase.functions.invoke).toHaveBeenCalledWith('add-to-resend-audience');
     expect(mockRouterReplace).toHaveBeenCalledWith('/onboarding/la-check');
     await act(async () => { tree.unmount(); });
+  });
+
+  it('sends completed members back to Plans without a profile write', async () => {
+    profileChain().maybeSingle.mockResolvedValue({ data: { onboarding_status: 'complete' }, error: null });
+    const tree = await mountAdultDraft('member@example.com');
+    expect(mockRouterReplace).toHaveBeenCalledWith('/(tabs)/plans');
+    expect(profileChain().update).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
+
+  it('rechecks completion before saving a previously opened form', async () => {
+    const tree = await mountAdultDraft('member@example.com');
+    profileChain().maybeSingle.mockResolvedValue({ data: { onboarding_status: 'complete' }, error: null });
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(profileChain().update).not.toHaveBeenCalled();
+    expect(mockRouterReplace).toHaveBeenCalledWith('/(tabs)/plans');
+    await act(async () => tree.unmount());
+  });
+
+  it('handles completion on another device between the read and write', async () => {
+    const tree = await mountAdultDraft('member@example.com');
+    profileChain().maybeSingle
+      .mockResolvedValueOnce({ data: { onboarding_status: 'pending' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { onboarding_status: 'complete' }, error: null });
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(profileChain().or).toHaveBeenCalledWith('onboarding_status.is.null,onboarding_status.neq.complete');
+    expect(mockRouterReplace).toHaveBeenCalledWith('/(tabs)/plans');
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
+
+  it.each([{ data: null, error: null }, { data: { onboarding_status: 'pending' }, error: { message: 'offline' } }])(
+    'keeps the draft without writing when the account read fails (%j)', async (result) => {
+      const tree = await mountAdultDraft('member@example.com');
+      profileChain().maybeSingle.mockResolvedValueOnce(result);
+      await act(async () => { await continueButton(tree).props.onPress(); });
+      expect(profileChain().update).not.toHaveBeenCalled();
+      expect(mockRouterReplace).not.toHaveBeenCalled();
+      await expect(loadDraft('basics')).resolves.toMatchObject({ email: 'member@example.com' });
+      await act(async () => tree.unmount());
+    },
+  );
+
+  it('does not advance or sync marketing without a matching save receipt', async () => {
+    const tree = await mountAdultDraft('member@example.com');
+    profileChain().maybeSingle
+      .mockResolvedValueOnce({ data: { onboarding_status: 'pending' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    await expect(loadDraft('basics')).resolves.toMatchObject({ email: 'member@example.com' });
+    await act(async () => tree.unmount());
+  });
+
+  it.each(['unmount', 'account change'])('retires a pending completion check after %s', async (exit) => {
+    const tree = await mountAdultDraft('member@example.com');
+    let resolve!: (value: unknown) => void;
+    profileChain().maybeSingle.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = continueButton(tree).props.onPress(); });
+    if (exit === 'unmount') await act(async () => tree.unmount());
+    else await act(async () => {
+      for (const [callback] of (supabase.auth.onAuthStateChange as jest.Mock).mock.calls) {
+        callback('SIGNED_IN', { user: { id: 'user-b' } });
+        callback('SIGNED_IN', { user: { id: 'user-a' } });
+      }
+    });
+    await act(async () => { resolve({ data: { onboarding_status: 'pending' }, error: null }); await pending; });
+    expect(profileChain().update).not.toHaveBeenCalled();
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    if (exit !== 'unmount') await act(async () => tree.unmount());
+  });
+
+  it.each(['unmount', 'account change'])('ignores a late save receipt after %s', async (exit) => {
+    const tree = await mountAdultDraft('member@example.com');
+    let resolve!: (value: unknown) => void;
+    profileChain().maybeSingle
+      .mockResolvedValueOnce({ data: { onboarding_status: 'pending' }, error: null })
+      .mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = continueButton(tree).props.onPress(); });
+    expect(profileChain().update).toHaveBeenCalledTimes(1);
+    if (exit === 'unmount') await act(async () => tree.unmount());
+    else await act(async () => {
+      for (const [callback] of (supabase.auth.onAuthStateChange as jest.Mock).mock.calls) {
+        callback('SIGNED_IN', { user: { id: 'user-b' } });
+      }
+      await seedDraft('user-b', 'basics', { firstName: 'Other', email: 'other@example.com' });
+    });
+    await act(async () => { resolve({ data: { id: 'user-a' }, error: null }); await pending; });
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+    if (exit === 'account change') {
+      expect(await AsyncStorage.getItem('wu.onboardingDraft.user-b.basics.v1')).toContain('other@example.com');
+      await act(async () => tree.unmount());
+    }
   });
 
   it('never overwrites a real draft with blanks when getUser() times out', async () => {

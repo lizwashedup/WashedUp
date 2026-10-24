@@ -21,6 +21,7 @@ import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import { withTimeout } from '../../../lib/withTimeout';
 import { getUserBounded } from '../../../lib/authGate';
+import { readOnboardingStatus, saveOnboardingBasics, type OnboardingBasicsUpdate } from '../../../lib/onboardingBasics';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
@@ -106,6 +107,32 @@ export default function OnboardingBasicsScreen() {
   // confirmDate() always sets them as one atomic unit.
   const editedFieldsRef = useRef<Set<string>>(new Set());
   const markEdited = (field: string) => { editedFieldsRef.current.add(field); };
+  const visitRef = useRef({ active: true, userId: null as string | null });
+  const acceptAccount = (userId: string) => {
+    const visit = visitRef.current;
+    if (!visit.active) return false;
+    if (visit.userId && visit.userId !== userId) {
+      visit.active = false;
+      cancelPendingSave('basics');
+      return false;
+    }
+    visit.userId = userId;
+    return true;
+  };
+
+  useEffect(() => {
+    const visit = { active: true, userId: null as string | null };
+    visitRef.current = visit;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (visitRef.current !== visit || !visit.active) return;
+      if (event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY'
+        || (visit.userId && session?.user?.id !== visit.userId)) {
+        visit.active = false;
+        cancelPendingSave('basics');
+      } else if (session?.user) acceptAccount(session.user.id);
+    });
+    return () => { visit.active = false; subscription.unsubscribe(); };
+  }, []);
 
   const years = getYears();
   const [tempMonth, setTempMonth] = useState<number | null>(null);
@@ -121,31 +148,38 @@ export default function OnboardingBasicsScreen() {
   // with empty names; email/OAuth users already have them from signup.
   useEffect(() => {
     let cancelled = false;
+    const visit = visitRef.current;
+    const isCurrent = () => !cancelled && visit.active && visitRef.current === visit;
     // Watchdog: never let the full-screen bootstrap spinner outlive the bounded
     // reads below. A stale session can make getUser/refresh stall; this forces
     // the form to render so the user is never trapped on a dead spinner.
     const watchdog = setTimeout(() => {
-      if (!cancelled) setBootstrapping(false);
+      if (isCurrent()) setBootstrapping(false);
     }, 8000);
     (async () => {
       try {
         // Bounded so a hung auth call (stale session) can't freeze this gate.
-        const { data: { user } } = await withTimeout(
+        const { data: { user }, error: accountError } = await withTimeout(
           supabase.auth.getUser(),
           4000,
           { data: { user: null } } as any,
         );
-        if (user) {
-          const { data: profile } = await withTimeout(
+        if (!isCurrent()) return;
+        if (user && !accountError && acceptAccount(user.id)) {
+          const { data: profile, error: profileError } = await withTimeout(
             supabase
               .from('profiles')
-              .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in')
+              .select('first_name_display, last_name, birthday, gender, email, marketing_opt_in, onboarding_status')
               .eq('id', user.id)
               .maybeSingle(),
             4000,
             { data: null } as any,
           );
-          if (!cancelled) {
+          if (isCurrent() && !profileError) {
+            if (profile?.onboarding_status === 'complete') {
+              router.replace('/(tabs)/plans');
+              return;
+            }
             if (profile?.first_name_display && !editedFieldsRef.current.has('firstName')) {
               setFirstName(profile.first_name_display);
             }
@@ -192,9 +226,10 @@ export default function OnboardingBasicsScreen() {
         // data loss this feature exists to prevent, and worst on a flaky
         // network, which is also when a user is likeliest to get backgrounded
         // and killed.
-        if (!cancelled) {
+        if (isCurrent()) {
           const draft = await loadDraft<BasicsDraft>('basics');
-          if (!cancelled && draft) {
+          if (!isCurrent()) return;
+          if (draft) {
             if (draft.firstName && !editedFieldsRef.current.has('firstName')) {
               setFirstName(draft.firstName);
             }
@@ -245,7 +280,7 @@ export default function OnboardingBasicsScreen() {
   // run, and this must never fire with blank defaults before a real draft-load
   // attempt actually happened.
   useEffect(() => {
-    if (!draftLoadAttempted) return;
+    if (!draftLoadAttempted || !visitRef.current.active) return;
     saveDraft<BasicsDraft>('basics', {
       firstName,
       lastName,
@@ -334,6 +369,9 @@ export default function OnboardingBasicsScreen() {
   const submit = useSubmitGuard();
 
   const handleContinue = async () => {
+    const visit = visitRef.current;
+    const isCurrent = () => visit.active && visitRef.current === visit;
+    if (!isCurrent()) return;
     const nextEmailError = validateEmail(email);
     setEmailError(nextEmailError);
     // Hard stop independent of canContinue/dateError: this is the one
@@ -351,6 +389,7 @@ export default function OnboardingBasicsScreen() {
     setLoading(true);
     try {
       const { user, resolved } = await getUserBounded();
+      if (!isCurrent()) return;
       if (!user) {
         setLoading(false);
         if (!resolved) {
@@ -359,20 +398,20 @@ export default function OnboardingBasicsScreen() {
           return;
         }
         setSaveError('session expired. signing you out…');
-        setTimeout(() => { clearAllDrafts(); supabase.auth.signOut(); }, 1500);
+        setTimeout(() => {
+          if (isCurrent()) { clearAllDrafts(); supabase.auth.signOut(); }
+        }, 1500);
+        return;
+      }
+      if (!acceptAccount(user.id)) return;
+      const status = await readOnboardingStatus(user.id);
+      if (!isCurrent()) return;
+      if (status === 'complete') {
+        router.replace('/(tabs)/plans');
         return;
       }
       const isoBirthday = toISODate(birthday);
-      type ProfileUpdate = {
-        birthday: string;
-        gender: string;
-        onboarding_status: string;
-        first_name_display?: string;
-        last_name?: string;
-        email: string | null;
-        marketing_opt_in: boolean;
-      };
-      const updates: ProfileUpdate = {
+      const updates: OnboardingBasicsUpdate = {
         birthday: isoBirthday,
         gender: GENDER_TO_ENUM[gender],
         onboarding_status: 'la_check',
@@ -381,11 +420,17 @@ export default function OnboardingBasicsScreen() {
         email: trimmedEmail || null,
         marketing_opt_in: marketingOptIn,
       };
-      const { error } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', user.id);
-      if (error) throw error;
+      const saved = await saveOnboardingBasics(user.id, updates);
+      if (!isCurrent()) return;
+      if (!saved || saved.error || saved.data?.id !== user.id) {
+        const latestStatus = await readOnboardingStatus(user.id);
+        if (!isCurrent()) return;
+        if (latestStatus === 'complete') {
+          router.replace('/(tabs)/plans');
+          return;
+        }
+        throw new Error("couldn’t confirm your save. your details are still here. try again.");
+      }
       clearDraft('basics');
       // Fire-and-forget Resend audience sync. The edge function reads the
       // persisted profile, so it must run for opt-in, opt-out, and blank-email
@@ -399,13 +444,14 @@ export default function OnboardingBasicsScreen() {
       hapticLight();
       router.replace('/onboarding/la-check');
     } catch (e: unknown) {
+      if (!isCurrent()) return;
       const message = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: string }).message)
         : 'something went wrong. try again.';
       setSaveError(message);
     } finally {
       submit.release();
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   };
 

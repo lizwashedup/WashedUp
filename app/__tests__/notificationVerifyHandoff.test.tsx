@@ -525,3 +525,96 @@ describe('cold-start session recovery', () => {
     expect(tree!.root.findAllByProps({ accessibilityLabel: 'Retry account check' })).toHaveLength(0);
   });
 });
+
+it('retries a timed-out profile without reusing the code or losing the notification', async () => {
+  await mount(); await tapNotification();
+  mockProfileRead.mockReturnValueOnce(new Promise(() => {}));
+  await verify(); await tick(600); await tick(4000);
+  expect(mockPath).toBe('/verify-code');
+  expect(mockRoutes.some((r) => r.href === '/onboarding/basics')).toBe(false);
+  expect(topicRoutes()).toHaveLength(0);
+  act(() => tree!.root.findByProps({ testID: 'retry-account-load' }).props.onPress());
+  await flush();
+  expect(topicRoutes()).toHaveLength(1);
+  expect(mockVerifyOtp).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { data: null, error: null },
+  { data: { onboarding_status: 'complete' }, error: { message: 'unavailable' } },
+  { data: { onboarding_status: 'unknown' }, error: null },
+])('does not turn a missing, errored or invalid profile into signup: %j', async (result) => {
+  await mount(); await tapNotification(); mockProfileRead.mockResolvedValueOnce(result);
+  await verify(); await tick(600);
+  expect(mockPath).toBe('/verify-code');
+  expect(tree!.root.findByProps({ testID: 'retry-account-load' })).toBeDefined();
+  expect(getVerificationDestination()?.destination).toBeNull();
+});
+
+it('retries a failed identity read after accepting the code', async () => {
+  await mount(); await tapNotification();
+  mockGetUser.mockResolvedValueOnce({ data: { user: mockUser }, error: { message: 'offline' } });
+  await verify(); await tick(600);
+  expect(mockPath).toBe('/verify-code');
+  act(() => tree!.root.findByProps({ testID: 'retry-account-load' }).props.onPress());
+  await flush();
+  expect(topicRoutes()).toHaveLength(1); expect(mockVerifyOtp).toHaveBeenCalledTimes(1);
+});
+
+it('ignores a retry result after the account changes', async () => {
+  await mount(); await tapNotification(); mockProfileRead.mockResolvedValueOnce({ data: null });
+  await verify(); await tick(600);
+  const profile = deferred<any>(); mockProfileRead.mockReturnValueOnce(profile.promise);
+  act(() => tree!.root.findByProps({ testID: 'retry-account-load' }).props.onPress()); await flush();
+  await emitAuth('SIGNED_IN', { id: 'person-b', phone: '+12025550101' });
+  profile.resolve({ data: { ...mockProfile }, error: null }); await flush();
+  expect(topicRoutes()).toHaveLength(0); expect(getVerificationDestination()).toBeNull();
+});
+
+it.each([null, 'pending'])('still starts signup for a successfully read new profile (%s)', async (status) => {
+  await mount(); await tapNotification();
+  mockProfileRead.mockResolvedValueOnce({ data: { onboarding_status: status, referral_source: null }, error: null });
+  await verify(); await tick(600);
+  expect(mockPath).toBe('/onboarding/basics'); expect(topicRoutes()).toHaveLength(0);
+});
+
+it('bounds a hanging identity read after the code is accepted', async () => {
+  await mount(); await tapNotification();
+  mockGetUser.mockReturnValueOnce(new Promise(() => {}));
+  await verify(); await tick(4000);
+  expect(mockPath).toBe('/verify-code');
+  expect(tree!.root.findByProps({ testID: 'retry-account-load' })).toBeDefined();
+  expect(getVerificationDestination()?.destination).toBeNull();
+  expect(mockVerifyOtp).toHaveBeenCalledTimes(1);
+});
+
+it('allows only one pending account retry and rejects a stale code callback', async () => {
+  await mount(); await tapNotification(); mockProfileRead.mockResolvedValueOnce({ data: null });
+  await verify(); await tick(600);
+  const profile = deferred<any>(); mockProfileRead.mockReturnValueOnce(profile.promise);
+  const retry = tree!.root.findByProps({ testID: 'retry-account-load' }).props.onPress;
+  act(() => { retry(); retry(); }); await flush();
+  await act(async () => { await tree!.root.findByType('OtpFixture' as any).props.onComplete('123456'); });
+  expect(mockProfileRead).toHaveBeenCalledTimes(2); expect(mockVerifyOtp).toHaveBeenCalledTimes(1);
+  profile.resolve({ data: { ...mockProfile }, error: null }); await flush();
+  expect(topicRoutes()).toHaveLength(1);
+});
+
+it('does not resume a retry after leaving verification', async () => {
+  await mount(); await tapNotification(); mockProfileRead.mockResolvedValueOnce({ data: null });
+  await verify(); await tick(600);
+  const profile = deferred<any>(); mockProfileRead.mockReturnValueOnce(profile.promise);
+  act(() => tree!.root.findByProps({ testID: 'retry-account-load' }).props.onPress()); await flush();
+  act(() => mockNavigate('replace', '/phone-entry')); await flush();
+  profile.resolve({ data: { ...mockProfile }, error: null }); await flush();
+  expect(mockPath).toBe('/phone-entry'); expect(topicRoutes()).toHaveLength(0);
+});
+
+it('does not sync or route when migration has not committed the phone', async () => {
+  await mount(); mockMode = 'migration'; mockVerifyEvent = 'USER_UPDATED';
+  mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'person-a', phone: '' } }, error: null });
+  await verify(); await tick(600);
+  expect(mockPhoneSync).not.toHaveBeenCalled();
+  expect(mockPath).toBe('/verify-code'); expect(getVerificationDestination()?.destination).toBeNull();
+  expect(tree!.root.findByProps({ testID: 'retry-account-load' })).toBeDefined();
+});

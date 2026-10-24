@@ -42,7 +42,9 @@ export async function getUserBounded(
     ms,
     UNRESOLVED,
   );
-  if (res === UNRESOLVED) return { user: null, resolved: false };
+  if (res === UNRESOLVED || !res || (res as { error?: unknown }).error) {
+    return { user: null, resolved: false };
+  }
   const user = (res as { data?: { user: User | null } })?.data?.user ?? null;
   return { user, resolved: true };
 }

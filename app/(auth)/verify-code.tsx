@@ -58,6 +58,8 @@ export default function VerifyCodeScreen() {
   const [microError, setMicroError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [syncFailedAlert, setSyncFailedAlert] = useState(false);
+  const [accountLoadError, setAccountLoadError] = useState<string | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
 
   const otpRef = useRef<OtpInputHandle>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -99,6 +101,8 @@ export default function VerifyCodeScreen() {
   const otpStateRef = useRef<OtpState>('idle');
   const isMountedRef = useRef(true);
   const destinationVisitRef = useRef<VerificationDestinationHandoff | null>(null);
+  const accountLoadRef = useRef<VerificationDestinationHandoff | null>(null);
+  const successHoldUntilRef = useRef(0);
 
   // Bail out if we landed here with no phone (e.g. someone deep-linked
   // /verify-code directly). Without a phone, verifyOtp would always fail
@@ -159,12 +163,89 @@ export default function VerifyCodeScreen() {
     [mode],
   );
 
+  const loadVerifiedAccount = useCallback(async (visit: VerificationDestinationHandoff) => {
+    const isCurrent = () => isMountedRef.current && destinationVisitRef.current === visit
+      && getVerificationDestination() === visit;
+    if (!isCurrent() || accountLoadRef.current) return;
+    accountLoadRef.current = visit;
+    setAccountLoading(true);
+    setAccountLoadError(null);
+    try {
+      const account = await withTimeout(supabase.auth.getUser(), 4000, null);
+      if (!isCurrent()) return;
+      const verifiedUser = account?.data?.user;
+      if (account?.error || !verifiedUser) throw new Error('ACCOUNT_UNAVAILABLE');
+      if (observeVerificationAccount(verifiedUser.id) !== visit) return;
+
+      const e164 = formatToE164(phone);
+      // Do not copy a phone into profiles until auth has committed it.
+      if (mode === 'migration') {
+        const expectedDigits = e164.replace(/\D/g, '');
+        const actualDigits = (verifiedUser.phone ?? '').replace(/\D/g, '');
+        if (actualDigits !== expectedDigits) throw new Error('PHONE_NOT_COMMITTED');
+      }
+      queryClient.setQueryData<AuthProfile | undefined>(
+        AUTH_PROFILE_KEY(verifiedUser.id),
+        (prev) => (prev ? { ...prev, phone_number: e164 } : prev),
+      );
+      if (mode === 'migration') {
+        const sync = await withTimeout(
+          supabase.from('profiles').update({ phone_number: e164 }).eq('id', verifiedUser.id),
+          4000,
+          null,
+        );
+        if (!isCurrent()) return;
+        if (!sync || sync.error) {
+          invalidateAuthProfile(queryClient, verifiedUser.id);
+          verifyCodeSelfRoutingRef.current = false;
+          setSyncFailedAlert(true);
+          return;
+        }
+      }
+      const result = await withTimeout(
+        supabase.from('profiles').select('onboarding_status, referral_source')
+          .eq('id', verifiedUser.id).maybeSingle(),
+        4000,
+        null,
+      );
+      if (!isCurrent()) return;
+      const profile = result?.data;
+      // A failed/missing read is not evidence of a new account. Null is a
+      // valid initial status only on an actual, successfully read row.
+      const statuses = [null, 'pending', 'la_check', 'waitlisted', 'referral', 'photo', 'vibes', 'complete'];
+      if (result?.error || !profile || !statuses.includes(profile.onboarding_status)) {
+        throw new Error('ACCOUNT_UNAVAILABLE');
+      }
+      const next = authedDest({
+        onboarding_status: profile.onboarding_status,
+        referral_source: profile.referral_source,
+        needs_phone_migration: false,
+      });
+      const complete = () => {
+        holdTimerRef.current = null;
+        if (isCurrent()) completeVerificationDestination(visit, verifiedUser.id, next);
+      };
+      const remainingHold = successHoldUntilRef.current - Date.now();
+      if (remainingHold > 0) holdTimerRef.current = setTimeout(complete, remainingHold);
+      else complete();
+    } catch (error) {
+      if (!isCurrent()) return;
+      setAccountLoadError(error instanceof Error && error.message === 'PHONE_NOT_COMMITTED'
+        ? "couldn’t save your number. go back to try again."
+        : "your code worked. we couldn’t load your account. try again.");
+    } finally {
+      if (accountLoadRef.current === visit) accountLoadRef.current = null;
+      if (isCurrent()) setAccountLoading(false);
+    }
+  }, [phone, mode, queryClient]);
+
   const handleVerify = useCallback(
     async (token: string) => {
-      if (verifyingRef.current || token.length !== CODE_LEN) return;
+      if (verifyingRef.current || otpStateRef.current === 'success' || token.length !== CODE_LEN) return;
       verifyingRef.current = true;
       setVerifying(true);
       setMicroError(null);
+      setAccountLoadError(null);
       const destinationVisit = beginVerificationDestination(mode === 'migration' ? authedUserIdRef.current : null);
       destinationVisitRef.current = destinationVisit;
       const isCurrent = () => isMountedRef.current && destinationVisitRef.current === destinationVisit
@@ -182,33 +263,12 @@ export default function VerifyCodeScreen() {
         if (!isCurrent()) return;
         if (error) throw error;
 
-        const e164 = formatToE164(phone);
-        const { data: { user: verifiedUser } } = await supabase.auth.getUser();
-        if (!isCurrent()) return;
-        if (verifiedUser && observeVerificationAccount(verifiedUser.id) !== destinationVisit) return;
-
-        // Post-commit assertion (migration only): verifyOtp can return
-        // success while Supabase fails to actually attach the phone to
-        // auth.users / auth.identities. If we then write profiles.phone_number
-        // anyway, the two stores drift — the next signInWithOtp won't match
-        // the user and creates an orphan account that steals the phone. Catch
-        // the half-commit here before doing anything else.
-        if (mode === 'migration') {
-          const expectedDigits = e164.replace(/\D/g, '');
-          const actualDigits = (verifiedUser?.phone ?? '').replace(/\D/g, '');
-          if (!verifiedUser || actualDigits !== expectedDigits) {
-            throw new Error('PHONE_NOT_COMMITTED');
-          }
-        }
-
-        // Tell the root auth listener to skip its SIGNED_IN auto-route —
-        // we own routing for the next ~600ms while the success animation
-        // plays. Cleared in finally.
+        // A verified code stays accepted even if the following account read
+        // fails. Retrying that read must not spend another one-time code.
         verifyCodeSelfRoutingRef.current = true;
-        // Plans tab consumes this on mount to show WelcomeLoading over
-        // the skeleton instead of a hard blink.
         postAuthTransitionRef.active = true;
         hapticSuccess();
+        otpStateRef.current = 'success';
         setOtpState('success');
         Animated.timing(successAnim, {
           toValue: 1,
@@ -216,86 +276,8 @@ export default function VerifyCodeScreen() {
           easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }).start();
-        let phoneSynced: Promise<boolean> = Promise.resolve(true);
-        if (verifiedUser) {
-          // Update the cached profile synchronously so the tabs guard reads
-          // the new phone on the next mount instead of the stale cached null.
-          // Without this, getAuthProfile returns the 60s-stale cache and
-          // bounces the user to /migration-gate in an infinite loop.
-          queryClient.setQueryData<AuthProfile | undefined>(
-            AUTH_PROFILE_KEY(verifiedUser.id),
-            (prev) => (prev ? { ...prev, phone_number: e164 } : prev),
-          );
-          // Migration mode only: phone_change verifyOtp updates auth.users.phone
-          // but doesn't fire the handle_new_user trigger (that's INSERT-only),
-          // so we manually sync to profiles. New signups are covered by the
-          // trigger writing NULLIF(NEW.phone, '') on auth.users INSERT.
-          //
-          // Start the sync alongside the success hold, but require it to
-          // finish before navigation. A late failure must not arrive after
-          // this account has already entered a protected destination.
-          if (mode === 'migration') {
-            phoneSynced = withTimeout(
-              supabase.from('profiles').update({ phone_number: e164 }).eq('id', verifiedUser.id),
-              4000,
-              { error: { message: 'timeout' } } as any,
-            ).then(({ error: syncError }) => {
-              if (!syncError) return true;
-              throw syncError;
-            }).catch((syncError) => {
-              if (!isCurrent()) return false;
-              console.warn('[phone-auth] profiles.phone_number sync failed:', syncError.message);
-              invalidateAuthProfile(queryClient, verifiedUser.id);
-              // Keep the visit suspended behind the existing continue alert.
-              // Dismissal proposes Tabs through the same ban/entry checks;
-              // account changes or leaving the screen still cancel it.
-              verifyCodeSelfRoutingRef.current = false;
-              if (holdTimerRef.current) {
-                clearTimeout(holdTimerRef.current);
-                holdTimerRef.current = null;
-              }
-              setSyncFailedAlert(true);
-              return false;
-            });
-          }
-        }
-
-        // Decide destination after a brief celebratory hold, single-sourced
-        // through authedDest (the same decision cold-start + the listener use).
-        // The user just verified a phone (migration) or logged in with one
-        // (sms), so they have a confirmed phone: needs_phone_migration is
-        // definitively false, and a 'complete' user lands on /(tabs)/plans while
-        // an onboarding-incomplete user resumes at the correct step.
-        holdTimerRef.current = setTimeout(async () => {
-          holdTimerRef.current = null;
-          if (!isCurrent() || !(await phoneSynced) || !isCurrent()) return;
-          if (!verifiedUser) {
-            cancelVerificationDestination(destinationVisit);
-            router.replace('/onboarding/basics');
-            return;
-          }
-          // Bounded so a stalled read can't strand the user on the success
-          // screen: on timeout, profile is null and authedDest falls back to
-          // the onboarding resume path, so navigation always happens.
-          const { data: profile } = await withTimeout(
-            supabase
-              .from('profiles')
-              .select('onboarding_status, referral_source')
-              .eq('id', verifiedUser.id)
-              .maybeSingle(),
-            4000,
-            { data: null } as any,
-          ).catch(() => ({ data: null }));
-          if (!isCurrent()) return;
-          const next = authedDest({
-            onboarding_status: profile?.onboarding_status,
-            referral_source: profile?.referral_source,
-            needs_phone_migration: false,
-          });
-          // Root commits this proposal only after its ban check approves
-          // the same visit. Tabs then approves the profile/phone entry gate.
-          completeVerificationDestination(destinationVisit, verifiedUser.id, next);
-        }, SUCCESS_HOLD_MS);
+        successHoldUntilRef.current = Date.now() + SUCCESS_HOLD_MS;
+        void loadVerifiedAccount(destinationVisit);
       } catch (e: unknown) {
         if (!isCurrent()) return;
         cancelVerificationDestination(destinationVisit);
@@ -308,11 +290,6 @@ export default function VerifyCodeScreen() {
 
         if (isRateLimit) {
           setMicroError('too many attempts. try again in a few minutes.');
-        } else if (message === 'PHONE_NOT_COMMITTED') {
-          // verifyOtp returned success but auth.users.phone didn't actually
-          // get set. Tell the user to retry from the migration gate so a
-          // fresh updateUser→verifyOtp pair runs. Don't write to profiles.
-          setMicroError("couldn't save your number. tap 'wrong number?' to try again.");
         } else {
           // Supabase returns the same "Token has expired or is invalid"
           // message for both wrong codes and truly expired ones — we can't
@@ -340,7 +317,7 @@ export default function VerifyCodeScreen() {
         if (isMountedRef.current) setVerifying(false);
       }
     },
-    [phone, mode, successAnim],
+    [phone, mode, successAnim, loadVerifiedAccount],
   );
 
   // Hoisted so OtpInput's prop identity is stable across parent re-renders.
@@ -432,7 +409,7 @@ export default function VerifyCodeScreen() {
               onPress={handleBack}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               style={styles.backHit}
-              disabled={otpState === 'success'}
+              disabled={otpState === 'success' && !accountLoadError}
             >
               <Ionicons
                 name="chevron-back"
@@ -453,9 +430,9 @@ export default function VerifyCodeScreen() {
             <TouchableOpacity
               onPress={handleBack}
               hitSlop={6}
-              disabled={otpState === 'success'}
+              disabled={otpState === 'success' && !accountLoadError}
             >
-              <Text style={styles.wrongNumber}>wrong number?</Text>
+              <Text style={[styles.wrongNumber, otpState === 'success' && styles.recoveryText]}>wrong number?</Text>
             </TouchableOpacity>
 
             <View style={styles.gap28} />
@@ -479,7 +456,27 @@ export default function VerifyCodeScreen() {
             </View>
 
             <View style={styles.microRow}>
-              {otpState === 'success' ? (
+              {accountLoadError || accountLoading ? (
+                <View style={styles.recovery} accessibilityLiveRegion="polite">
+                  <Text style={styles.recoveryText}>
+                    {accountLoading ? 'loading your account…' : accountLoadError}
+                  </Text>
+                  {!!accountLoadError && (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Try loading your account again"
+                      testID="retry-account-load"
+                      style={styles.retryButton}
+                      onPress={() => {
+                        const visit = destinationVisitRef.current;
+                        if (visit) void loadVerifiedAccount(visit);
+                      }}
+                    >
+                      <Text style={styles.retryLabel} numberOfLines={1}>try again</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : otpState === 'success' ? (
                 <View style={styles.successBadgeRow}>
                   <View style={styles.checkCircle}>
                     <Ionicons name="checkmark" size={18} color={Colors.gold} />
@@ -627,5 +624,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.gold,
   },
+  recovery: { alignItems: 'center', gap: 12 },
+  recoveryText: { color: Colors.surface, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  retryButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 24, borderRadius: 999, borderWidth: 1.5, borderColor: Colors.surface },
+  retryLabel: { color: Colors.surface, fontFamily: Fonts.sansSemibold, fontSize: 14 },
   bottomSpacer: { height: 32 },
 });
