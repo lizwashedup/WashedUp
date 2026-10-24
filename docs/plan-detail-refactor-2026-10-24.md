@@ -494,3 +494,28 @@ This completes the full local release-gate run and leaves the bounded plan-detai
 refactor ready for integration review. It is not hosted Ubuntu CI, current
 production schema parity or physical-device/VoiceOver acceptance. Those limits
 remain explicit; no push, merge, app build, OTA or production write occurred.
+
+## Local integration with current main
+
+Fetched current `origin/main` and found the newer Scene full-width card fix
+`6b85123` (#20). Its seven changed files do not overlap this refactor. Merged it
+into this branch without conflicts (`ce2fd2d`), then checked an isolated export
+of that combined source with pinned Node and the fresh locked dependencies.
+
+All 304 tests across the nine plan-refactor and seven Scene component suites
+passed, as did app-wide TypeScript. The complete pre-integration release gate
+above remains the broader baseline; the combined-head pass specifically covers
+both changes. No package manifest or backend change came from the upstream fix.
+
+Fast-forwarded local `main` in
+`/Users/liz/Desktop/WashedUp_HQ/washedup-chat-ios-publish-20261008` to the verified
+combined commit. Its preexisting `supabase/.temp/cli-latest` modification was
+checked before and after and preserved byte-for-byte. The separate foundation,
+moderation and Sentry worktrees were not changed. No GitHub push, remote merge,
+build, OTA or production action occurred.
+
+Evidence: `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/integration`.
+`source.json`, `checks.json` and `local-integration.json` identify source, results
+and the fast-forward receipt. User direction is to continue routine authorized
+implementation/testing/integration without asking for each checkpoint; genuine
+product decisions, missing access and release boundaries remain with Liz.
