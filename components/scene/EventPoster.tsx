@@ -7,7 +7,7 @@ import { EventMediaImage } from '../events/EventMediaImage';
  */
 
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import Colors, { SceneDetailColors as Scene } from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
@@ -24,11 +24,12 @@ interface EventPosterProps {
   width: number;
   onPress: () => void;
   /** slice 1 (doc 37): mixed density — one featured card, then compact */
-  variant?: 'featured' | 'compact' | 'grid';
+  variant?: 'featured' | 'compact' | 'grid' | 'feed';
 }
 
 export function EventPoster({ event: e, width, onPress, variant = 'featured' }: EventPosterProps) {
   const [brokenReference, setBrokenReference] = useState<string | null>(null);
+  const { fontScale } = useWindowDimensions();
   const posterHeight = (width - 40) * POSTER_RATIO;
   // one corner slot, one grammar (the people-first pack): a community event
   // wears the leader's FACE, a standalone brand listing wears the organizer
@@ -40,15 +41,20 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
   const when = formatTimestampLA(e.start_time) || formatEventDateLA(e.event_date);
   const chipIsFace = !!e.community_id;
 
-  if (variant === 'grid') {
-    return <TouchableOpacity style={[styles.gridCard, { width }]} onPress={onPress} activeOpacity={0.85}
+  if (variant === 'grid' || variant === 'feed') {
+    const feed = variant === 'feed';
+    // Landscape art leaves room for the listing details. The generated poster
+    // needs extra space for its three title lines when native text is enlarged.
+    const imageReference = e.image_url !== brokenReference ? e.image_url : null;
+    const artworkHeight = feed ? Math.max(width * POSTER_RATIO, imageReference ? 0 : 40 + (LineHeights.displayMD * 3 + LineHeights.bodySM) * fontScale) : width;
+    return <TouchableOpacity style={[styles.gridCard, feed && styles.feedCard, { width }]} onPress={onPress} activeOpacity={0.85}
       accessibilityRole="button" accessibilityLabel={[e.title, when, e.venue, byline].filter(Boolean).join(', ')}>
-      <View style={{ width: '100%', height: width, backgroundColor: Scene.surface }}>
-        {e.image_url && brokenReference !== e.image_url ? <EventMediaImage eventId={e.id} reference={e.image_url}
-          style={{ width: '100%', height: width }} contentFit="contain" onError={() => setBrokenReference(e.image_url)} />
-          : <GeneratedPoster title={e.title} category={e.category} venue={e.venue} height={width} surface="scene" />}
+      <View style={{ width: '100%', height: artworkHeight, backgroundColor: Scene.surface }}>
+        {imageReference ? <EventMediaImage eventId={e.id} reference={imageReference}
+          style={{ width: '100%', height: artworkHeight }} contentFit="contain" onError={() => setBrokenReference(imageReference)} />
+          : <GeneratedPoster title={e.title} category={e.category} venue={e.venue} height={artworkHeight} surface="scene" />}
       </View>
-      <View style={styles.gridBody}>
+      <View style={[styles.gridBody, feed && styles.feedBody]}>
         {!!eventKickerLabel(e) && <Text style={styles.gridKicker}>{eventKickerLabel(e)}</Text>}
         <Text style={styles.gridTitle} numberOfLines={3}>{e.title}</Text>
         {!!when && <Text style={styles.gridMeta}>{when}</Text>}
@@ -141,6 +147,8 @@ export function EventPoster({ event: e, width, onPress, variant = 'featured' }: 
 
 const styles = StyleSheet.create({
   gridCard: { backgroundColor: Scene.surface, borderRadius: 8, overflow: 'hidden' },
+  feedCard: { borderRadius: 16, borderWidth: 1, borderColor: Scene.border },
+  feedBody: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16 },
   gridBody: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 14 },
   gridTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyMD, color: Scene.text },
   gridKicker: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Scene.supporting, marginBottom: 5 },

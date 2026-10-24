@@ -5,7 +5,7 @@ import {EventPoster} from '../EventPoster';
 jest.mock('../../../lib/sceneDiscovery',()=>({eventKickerLabel:()=>null}));
 jest.mock('../GeneratedPoster',()=>({GeneratedPoster:()=>null}));
 const event:any={id:'same-event',title:'Dinner',event_date:null,venue:null,community_id:null,public_name:'Old override',organizer_name:'Old profile',organizer_logo:'old-logo',image_url:'event-art',published_page:{pageId:'page',name:'Exact organization'}};
-it.each(['featured','compact'] as const)('uses the exact page byline and event artwork in %s density',variant=>{
+it.each(['featured','compact','feed'] as const)('uses the exact page byline and event artwork in %s density',variant=>{
  let tree:any;const open=jest.fn();act(()=>{tree=create(<EventPoster event={event} width={390} onPress={open} variant={variant}/>);});
  expect(JSON.stringify(tree.toJSON())).toContain('Exact organization');expect(JSON.stringify(tree.toJSON())).not.toContain('Old override');
  expect(tree.root.findAllByType(Image).map((i:any)=>i.props.source.uri)).toEqual(['event-art']);
@@ -28,7 +28,7 @@ it('tries replacement artwork after a failed legacy image rather than keeping th
 });
 
 // A stored UTC instant must remain on the Los Angeles day and clock.
-it.each(['grid','compact','featured'] as const)('shows LA start time without requiring a separate date in %s',variant=>{
+it.each(['grid','compact','featured','feed'] as const)('shows LA start time without requiring a separate date in %s',variant=>{
  let tree:any;act(()=>{tree=create(<EventPoster event={{...event,event_date:null,start_time:'2026-09-20T01:30:00Z'}} width={170} onPress={()=>{}} variant={variant}/>);});
  const rendered=JSON.stringify(tree.toJSON());expect(rendered).toContain('Sep 19');expect(rendered).toContain('6:30 pm');expect(rendered).not.toContain('Sep 20');act(()=>tree.unmount());
 });
