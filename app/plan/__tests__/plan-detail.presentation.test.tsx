@@ -2,7 +2,7 @@ const mockNotificationRequest = jest.fn();
 jest.mock('../../../lib/planNotificationPrompt', () => ({ requestPlanNotificationPrompt: (...args: any[]) => mockNotificationRequest(...args) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import PlanDetailScreen from '../[id]';
 import { PlanDetailOverview } from '../../../components/plans/PlanDetailOverview';
 
@@ -367,6 +367,43 @@ it('ignores departure confirmation after the initiating visit retires',async()=>
 const manageInput = (value:string) => tree.root.findAllByType(require('react-native').TextInput).find(n=>n.props.value===value)!;
 const manageModal = () => tree.root.findAllByType(require('react-native').Modal).find(n=>n.props.visible&&n.props.animationType==='slide')!;
 async function openEditor(){mockPlan.creator_user_id='viewer';await mount();act(()=>button('Manage Plan').props.onPress());}
+it('renders the editor without raw text children in native Views', async () => {
+  await openEditor();
+  const rawText = tree.root.findAllByType(View).flatMap(view => view.children.filter(child => typeof child === 'string'));
+  expect(rawText).toEqual([]);
+});
+it('blocks invalid direct minutes and saves an explicit non-quarter-hour selection', async () => {
+  await openEditor();
+  act(() => button('10:00 AM').props.onPress());
+  const minuteInput = () => tree.root.findAllByType(TextInput)
+    .find(node => node.props.accessibilityLabel === 'Minute, 0 through 59')!;
+  act(() => minuteInput().props.onChangeText('99'));
+  expect(button('Done').props.disabled).toBe(true);
+  expect(allText()).toContain('Enter an hour from 1–12 and minutes from 00–59.');
+  act(() => minuteInput().props.onChangeText('07'));
+  expect(button('Done').props.disabled).toBe(false);
+  act(() => button('Done').props.onPress());
+  expect(button('10:07 AM')).toBeDefined();
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+  expect(mockUpdate.mock.calls[0][0].start_time).toBe('2040-09-16T17:07:00.000Z');
+});
+it('keeps a rejected edit open without writing and saves only after the creator corrects it', async () => {
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('hookup'));
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).not.toHaveBeenCalled();
+  expect(manageModal().props.visible).toBe(true);
+  const alert = tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert)
+    .find(node => node.props.title === 'Content not allowed')!;
+  expect(alert.props).toMatchObject({ visible: true, title: 'Content not allowed' });
+  expect(manageInput('hookup')).toBeDefined();
+  act(() => alert.props.onClose());
+  act(() => manageInput('hookup').props.onChangeText('Coffee tomorrow'));
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+  expect(mockUpdate.mock.calls[0][0].title).toBe('Coffee tomorrow');
+});
 it('preserves custom ages and exact stored schedule on a title-only creator edit',async()=>{
   mockPlan.target_age_min=25;mockPlan.target_age_max=35;mockPlan.start_time='2040-11-04T09:30:17.123Z';mockPlan.end_time='2040-11-04T11:30:17.123Z';
   await openEditor();expect(allText()).toContain('Ages 25–35. Kept unless you choose a range.');

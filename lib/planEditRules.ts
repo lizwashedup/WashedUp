@@ -13,8 +13,8 @@ type DraftRules = {
 };
 /** Only send rules the creator actually edited. Title-only changes must not
  * erase saved custom bounds, rewrite a DST-fold instant, or change Circle caps. */
-export function buildPlanEditRulePatch(original: OriginalRules, draft: DraftRules): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
+export function buildPlanEditRulePatch(original: OriginalRules, draft: DraftRules): Record<string, string | number | boolean | null> {
+  const patch: Record<string, string | number | boolean | null> = {};
   if (draft.ageChanged) {
     patch.target_age_min=draft.ages.min; patch.target_age_max=draft.ages.max;
   }

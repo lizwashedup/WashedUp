@@ -78,7 +78,6 @@ import Colors, { AfterglowColors } from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP, MIN_GROUP, FEATURED_MIN_CAPACITY, FEATURED_MAX_CAPACITY, FEATURED_DEFAULT_CAPACITY } from '../../constants/GroupLimits';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { useBlock } from '../../hooks/useBlock';
-import { checkContent } from '../../lib/contentFilter';
 import { getParticipationNoticeStatus } from '../../lib/participationTerms';
 import { ObsoletePlanParticipation, recordScopedPlanAssent } from '../../lib/planParticipationScope';
 import { supabase } from '../../lib/supabase';
@@ -87,15 +86,15 @@ import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
 import { joinErrorSurface } from '../../lib/planJoinSafety';
-import { buildPlanEditRulePatch, savedAgeLabel } from '../../lib/planEditRules';
-import { resolveManagePlanImageUrl } from '../../lib/planPhotoEdit';
+import { savedAgeLabel } from '../../lib/planEditRules';
+import { AGE_RANGES, type AgeRange, minMaxToAgeRanges, preparePlanEdit } from '../../lib/planEditDraft';
 import {
   fetchWaitlistManager,
   waitlistAlertMessage,
 } from '../../lib/waitlistExceptions';
 import { WAITLIST_MANAGER_KEY } from '../../constants/QueryKeys';
 import { isPlanPast } from '../../lib/planTime';
-import { getLAWallParts, isValidLAWallTime, laWallTimeToUTC } from '../../lib/laDate';
+import { getLAWallParts } from '../../lib/laDate';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -121,73 +120,11 @@ const MANAGE_CATEGORIES = [
 const EDIT_DESC_LIMIT = 2000;
 const EDIT_DESC_WARN_MARGIN = 200; // counter turns warn-colored within this many chars of the cap
 
-const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
-type AgeRange = typeof AGE_RANGES[number];
-
-const AGE_BUCKETS: Record<Exclude<AgeRange, 'All Ages'>, [number, number]> = {
-  '21+': [21, 99],
-  '20s': [20, 29],
-  '30s': [30, 39],
-  '40s': [40, 49],
-  '50s': [50, 59],
-  '60s': [60, 69],
-  '70+': [70, 99],
-};
-
-function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
-  if (ranges.length === 0 || ranges.includes('All Ages')) return { min: null, max: null };
-  let min = 99, max = 0;
-  for (const r of ranges) {
-    const b = AGE_BUCKETS[r as Exclude<AgeRange, 'All Ages'>];
-    if (b) {
-      if (b[0] < min) min = b[0];
-      if (b[1] > max) max = b[1];
-    }
-  }
-  return { min, max };
-}
-
-function minMaxToAgeRanges(min: number | null, max: number | null): AgeRange[] {
-  if (min === null && max === null) return ['All Ages'];
-  const entries = Object.entries(AGE_BUCKETS) as [Exclude<AgeRange, 'All Ages'>, [number, number]][];
-  for (const [range, [bMin, bMax]] of entries) {
-    if (bMin === min && bMax === max) return [range];
-  }
-  for (let i = 0; i < entries.length; i++) {
-    for (let j = i + 1; j < entries.length; j++) {
-      const [a, [aMin, aMax]] = entries[i];
-      const [b, [bMin, bMax]] = entries[j];
-      if (Math.min(aMin, bMin) === min && Math.max(aMax, bMax) === max) {
-        return [a, b];
-      }
-    }
-  }
-  return []; // Saved bounds do not fit a preset; keep them until explicitly changed.
-}
-
 // ─── Date/time picker constants ───────────────────────────────────────────────
 // Keep display values aligned with the shared creation controls.
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
 const MINUTE_OPTIONS = ['00', '15', '30', '45'];
 const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
-
-function buildDatetime(
-  month: number, day: number, year: number,
-  hour: number, minute: string, period: 'AM' | 'PM',
-): Date {
-  let h = hour;
-  if (period === 'PM' && h !== 12) h += 12;
-  if (period === 'AM' && h === 12) h = 0;
-  return laWallTimeToUTC(year, month, day, h, parseInt(minute, 10));
-}
-
-function displayPickerDate(month: number, day: number, year: number): string {
-  return `${MONTHS[month]} ${day}, ${year}`;
-}
 
 function displayPickerTime(hour: number, minute: string, period: 'AM' | 'PM'): string {
   return `${hour}:${minute} ${period}`;
@@ -1227,48 +1164,22 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     if (isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
     if (!plan || !editOriginal || !currentUserId || !edit.canChange() || !editTitle.trim()) return;
 
-    const editHour24 = editTimeHour % 12 + (editTimePeriod === 'PM' ? 12 : 0);
-    if (!isValidLAWallTime(editDateYear, editDateMonth, editDateDay, editHour24, Number(editTimeMinute))) {
-      setBrandedAlert({ visible: true, title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
-      return;
-    }
-
-    const fieldsToCheck = [editTitle, editDescription, editCreatorMessage, editLocation].filter(Boolean).join(' ');
-    const filter = checkContent(fieldsToCheck);
-    if (!filter.ok) {
-      setBrandedAlert({ visible: true, title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
-      return;
-    }
-
     try {
-      const newStartTime = buildDatetime(
-        editDateMonth, editDateDay, editDateYear,
-        editTimeHour, editTimeMinute, editTimePeriod,
-      );
-
-      const editAgeBounds = ageRangesToMinMax(editAgeRanges);
-
-      const updatePayload: Record<string, any> = {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        host_message: editCreatorMessage.trim() || null,
-        location_text: editLocation.trim() || null,
-        location_lat: editLocationLat,
-        location_lng: editLocationLng,
-        tickets_url: editTicketUrl.trim() || null,
-        image_url: resolveManagePlanImageUrl(editImageUrl),
-        primary_vibe: editCategory?.toLowerCase() ?? null,
-        gender_rule: editGenderRule,
-        ...buildPlanEditRulePatch(editOriginal, {
-          timeChanged: editTimeChanged, proposedStart: newStartTime,
-          ageChanged: editAgeChanged, ages: editAgeBounds,
-          circlePlan: isCirclePlan, groupChanged: editGroupChanged, maxInvites: editGroupSize,
-          officialCreator: isOfficialCreator, featuredChanged: editFeaturedChanged, featured: featuredToggle,
-          featuredType, featuredCapacity,
-        }),
-      };
-
-      await edit.save(updatePayload);
+      const prepared = preparePlanEdit(editOriginal, {
+        title: editTitle, description: editDescription, creatorMessage: editCreatorMessage,
+        location: editLocation, locationLat: editLocationLat, locationLng: editLocationLng,
+        ticketUrl: editTicketUrl, imageUrl: editImageUrl, category: editCategory, genderRule: editGenderRule,
+        year: editDateYear, month: editDateMonth, day: editDateDay,
+        hour: editTimeHour, minute: editTimeMinute, period: editTimePeriod,
+        timeChanged: editTimeChanged, ageRanges: editAgeRanges, ageChanged: editAgeChanged,
+        groupSize: editGroupSize, groupChanged: editGroupChanged,
+        featured: featuredToggle, featuredChanged: editFeaturedChanged, featuredType, featuredCapacity,
+      }, { circlePlan: isCirclePlan, officialCreator: isOfficialCreator });
+      if (!prepared.ok) {
+        setBrandedAlert({ visible: true, title: prepared.title, message: prepared.message });
+        return;
+      }
+      await edit.save(prepared.patch);
     } catch (e: any) {
       const rawMsg = e?.message ?? '';
       const msg = rawMsg.includes('events_host_message_length')
@@ -2620,7 +2531,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <Text numberOfLines={1} style={manageStyles.cancelBtnText}>Cancel plan</Text>
               </TouchableOpacity>
             </ScrollView>
-            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>              {edit.unknown && <View style={manageStyles.recovery}>
+            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              {edit.unknown && <View style={manageStyles.recovery}>
                 <Text style={manageStyles.label}>Check your changes</Text>
                 <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
               </View>}
@@ -2646,10 +2558,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               avoid the Modal-inside-Modal stacking issue on iOS. */}
           {showEditDatePicker && (
             <Pressable
+              accessible={false}
               style={manageStyles.pickerOverlay}
               onPress={() => setShowEditDatePicker(false)}
             >
-              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+              <Pressable accessible={false} style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
                 <Text style={manageStyles.pickerTitle}>Select date</Text>
                 <WashedUpCalendar
                   mode="pick"
@@ -2670,10 +2583,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           {/* Time picker overlay */}
           {showEditTimePicker && (
             <Pressable
+              accessible={false}
               style={manageStyles.pickerOverlay}
               onPress={() => setShowEditTimePicker(false)}
             >
-              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+              <Pressable accessible={false} style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
                 <Text style={manageStyles.pickerTitle}>Select time</Text>
                 <View style={manageStyles.pickerRow}>
                   <TextInput style={manageStyles.directTimeInput} value={tempEditHour ? String(tempEditHour) : ''} onChangeText={(value) => setTempEditHour(Number(value.replace(/\D/g, '').slice(0, 2)))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Hour, 1 through 12" />
