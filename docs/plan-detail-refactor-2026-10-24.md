@@ -203,3 +203,29 @@ visual acceptance.
 Source hashes, test logs and screenshot:
 `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/detail-styles`.
 All prior fixture, live-backend, pinned-runtime and release limitations still apply.
+
+## Sixth checkpoint: plan and attendee data loaders
+
+Moved the existing `fetchPlanDetail`, `fetchMembers`, and their response types
+into `lib/planDetailData.ts`. Both loader bodies match checkpoint `7c5e656`
+exactly. Supabase selections, RPC order, response normalization, profile-error
+handling and fallback behavior are unchanged. The screen retains account-scoped
+query keys, enablement, caching, lifecycle and accepted-People handle visibility.
+
+Added 12 direct tests in `lib/__tests__/planDetailData.test.ts`: public-only creator
+projection, exact timestamps/defaults and explicit false/zero/custom bounds,
+optional creator failure, primary read failure, reveal-name/avatar mapping,
+successful empty reveal, unavailable/malformed reveal fallback, public read errors
+and successful empty public results. These exercise the existing read contract,
+which the screen presentation mock does not directly execute.
+
+138 tests passed across the data-loader and screen suites (12 loader + 126 screen),
+with the corrected null/empty-array parameter table rerun independently. App-wide
+TypeScript and diff whitespace checks passed. The local iPhone 17 Pro Max / iOS
+26.4 fixture successfully loaded plan detail, four attendee entries and creator
+management controls through the real extracted loaders against fictional data.
+This verifies wiring; live Supabase permissions/RPC behavior is not newly verified.
+
+Evidence, source hashes and logs:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/detail-data`.
+No query behavior, schema, permissions or release configuration changed.
