@@ -403,3 +403,43 @@ parity or a complete migration replay. Photo storage, remote Places responses,
 SMS/push delivery and native-to-local-backend transport remain outside this pass.
 Node 25.8.1 was used; pinned Node 20.20.1 CI and physical-device/VoiceOver limits
 remain. No push, merge, app build, OTA or production write occurred.
+
+## Pinned Node/npm verification
+
+Exported committed source `14b4ea9` to an isolated audit checkout and installed
+fresh dependencies with `npm ci --no-audit --no-fund`, using the repository's
+exact Node 20.20.1 / npm 10.8.2 versions. Both package manifests stayed identical
+to committed source. The original checkout's shared dependency installation and
+simulator processes were untouched.
+
+All 249 tests across the nine scoped suites passed, with each suite in a separate
+process. This includes the five actual Places-widget regressions added after the
+244-test combined checkpoint. App-wide TypeScript passed. The same isolated
+checkout and fresh dependencies also passed all ten real local backend checks
+under Node 20.20.1. No app source or dependency upgrade was needed.
+
+Restarting the local VM exposed a test-helper readiness race: services resumed
+before PostgreSQL was healthy. The audit startup helper now waits up to 45
+seconds for an existing database to become healthy before invoking Supabase.
+The backend harness accepts explicit checkout/output paths so the pinned run
+uses the freshly installed dependency tree and preserves the previous evidence.
+A complete stop/start cycle passed with the corrected helper.
+
+The first PATH-based install selected npm 11.11.0; it was superseded by an
+explicit npm 10.8.2 CLI invocation before repeating the final checks. npm reports
+an existing engine mismatch: locked `@giphy/react-native-sdk@5.0.2` declares
+Node >=22.14.0 while this repository pins 20.20.1. Installation and scoped checks
+succeeded; this does not establish full Giphy/native compatibility. No version
+was changed to suppress that warning.
+
+Evidence, exact source/lockfile hashes, install log, per-suite JSON and backend
+results:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/pinned-runtime`.
+The neighboring `local-backend` directory retains the corrected startup helper.
+The disposable VM is stopped after verification; fictional data is preserved.
+
+This closes the scoped Node-version/dependency-install verification gap. It is
+local macOS verification, not hosted Ubuntu CI or the entire `npm run qa:all`
+release gate. The September 14 schema, external-provider, native-to-backend and
+physical-device/VoiceOver limits above remain. No push, merge, app build, OTA or
+production write occurred.
