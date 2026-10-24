@@ -443,3 +443,54 @@ local macOS verification, not hosted Ubuntu CI or the entire `npm run qa:all`
 release gate. The September 14 schema, external-provider, native-to-backend and
 physical-device/VoiceOver limits above remain. No push, merge, app build, OTA or
 production write occurred.
+
+## Full local release gate
+
+Ran all 17 component scripts from `npm run qa:all` against an isolated clone of
+`daa993a`, with release base `fc419a5`, Node 20.20.1, npm 10.8.2 and Deno 2.9.5.
+The clone used the preceding fresh locked dependency install; both package
+manifests match exactly. Each component ran independently to collect all results
+rather than stopping after an infrastructure failure. The external-evidence
+setting matches the single-repository CI workflow.
+
+All 17 components passed:
+
+- All 571 discovered Jest suites passed in separate processes: 8,766 tests passed,
+  one existing workspace-ownership acceptance test stayed skipped. The runner's
+  11 Node tests passed too. The skip is not promoted to verified acceptance.
+- App-wide TypeScript, no-cloud-build guard, paid-ticket flow, migration release
+  policy, auth regressions and traceability passed.
+- Confirmation, notification, payout, ticketing, local deliverability and consent
+  sync checks passed, including the Deno function checks.
+- Static database contracts, migration inventory and drift-classifier checks
+  passed. The private PostgreSQL suite and focused consent-sync SQL contract
+  both passed against disposable fixture databases.
+
+Database tests used a separate `washedup-release-test` Colima VM with only the
+audit checkout mounted read-only. The repository's runner used PostgreSQL 17,
+`--network none`, no published ports and read-only SQL mounts. The initial VM
+startup stalled at SSH user-session readiness; restarting only that new VM
+resolved it. Two initial infrastructure failures were retained, then those exact
+scripts passed after the daemon was ready. No application fix was needed.
+
+The stock Docker Hub image download was slow; the completed public-mirror image
+was verified against the official Hub ARM64 manifest before local tagging/use.
+Both resolve to
+`sha256:a717692f944862397bd102c6abee9b3f7927adbf7ee5f3a93e50b65aea0c5396`.
+Temporary contract containers were removed by their runner, and the VM was
+stopped after verification.
+
+Deno check added the already-declared keyboard-controller dependency to the
+audit clone's `deno.lock` workspace inventory. That one-line generated difference
+is preserved as evidence and was not applied to this branch. The preceding
+Giphy engine warning remains separate from this refactor.
+
+Full results, initial failures, per-suite reports, source/lockfile hashes and
+runtime/image isolation evidence:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/release-gate`.
+See `README.md`, `final-results.json`, `source.json` and the per-script logs.
+
+This completes the full local release-gate run and leaves the bounded plan-detail
+refactor ready for integration review. It is not hosted Ubuntu CI, current
+production schema parity or physical-device/VoiceOver acceptance. Those limits
+remain explicit; no push, merge, app build, OTA or production write occurred.
