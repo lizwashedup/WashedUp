@@ -350,3 +350,56 @@ also absent. Backend integration remains pending selection/setup of a disposable
 local environment or an identified staging environment. Production was not used
 as a substitute. Pinned-runtime CI and physical-device/VoiceOver limits remain.
 No push, merge, build, OTA or production write occurred.
+
+## Disposable backend integration verification
+
+Liz selected a disposable local environment. Installed Colima/Lima/Docker and
+created a dedicated `washedup-plan-test` VM (4 CPUs, 6 GiB RAM, no host mounts).
+Supabase CLI 2.117.0 / PostgreSQL 17 ran in an unlinked local project. All backend
+services used an internal-only network, with an unprivileged fixed-target bridge
+exposing API/database access on loopback. No default Docker context changed.
+This supersedes the local-runtime blocker described above.
+
+Restored the preserved September 14 schema-only derivative transactionally,
+without changing its SQL. SHA-256:
+`316d3eeb42771b44fd63cc93d3392dcc0e222e0ced6089ae5b85113bc139988f`.
+It contains 176 public tables and 258 policies. All application triggers and
+plan RLS remained enabled. Seeded three fictional phone accounts, one future
+plan and two memberships; creation used the authenticated creator and guest
+joining used the existing `join_event_atomic` RPC. No customer data was copied.
+Vault and stored objects were empty; the cron job table was absent. The preserved
+derivative disables four outbound callbacks, and service networking blocks
+external access.
+
+Ten checks passed over real Auth/PostgREST/Postgres using this checkout's
+unchanged detail loader, draft hook, preparation helper and edit hook:
+
+- Creator detail normalization; member reveal RPC; nonmember public fallback;
+  anonymous attendee denial and no public handle enrichment.
+- Authenticated save with confirmed receipt, preserving precise timestamps,
+  nonpreset age bounds and capacity when those controls were untouched.
+- Noncreator update affects no rows under real RLS.
+- Database rejection of an overlong creator message stays retryable without
+  changing the saved row.
+- Place name and coordinates persist together.
+- A response lost after a real committed PATCH enters uncertain-save recovery.
+  Check changes confirms it by reading; it sends no second PATCH.
+- Missing plans reject rather than fabricating detail.
+
+The harness adapts the focus lifecycle for React test renderer and stubs unused
+photo/logging boundaries. It does not replace database requests or policies.
+These backend checks complement the native navigation evidence; they are not a
+simulator connected to this backend. No app source fix was needed in this pass.
+
+Evidence and repeatable start/test/stop scripts:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/local-backend`.
+See its `README.md`, `client-results.json`, `restore-result.json`,
+`environment-verification.json` and `schema-provenance.json`. Local credentials
+remain in its private directory, outside this repository. The dedicated VM was
+stopped after verification; fictional data is retained for another run.
+
+This verifies the preserved September 14 schema contract, not current production
+parity or a complete migration replay. Photo storage, remote Places responses,
+SMS/push delivery and native-to-local-backend transport remain outside this pass.
+Node 25.8.1 was used; pinned Node 20.20.1 CI and physical-device/VoiceOver limits
+remain. No push, merge, app build, OTA or production write occurred.
