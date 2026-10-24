@@ -22,7 +22,7 @@
     "qa:release-policy": "node --test scripts/release/migration-policy.test.mjs && node scripts/release/migration-policy.mjs",
     "qa:auth-regression": "jest --runInBand --ci lib/__tests__/phoneFormat.test.ts lib/__tests__/authRouting.test.ts && node scripts/release/check-auth-invariants.mjs && sh scripts/db-contracts/run-private-sql-contracts.sh consent-sync",
     "qa:confirmations": "deno test --no-remote --no-config supabase/functions/_tests/confirmationRetry_test.ts supabase/functions/_tests/rsvpConfirmation_test.ts supabase/functions/_tests/deliveryPolicy_test.ts",
-    "qa:notifications": "deno test --no-remote --no-config supabase/functions/_tests/runTokenAuth_test.ts supabase/functions/_tests/pushFailureDiagnosis_test.ts",
+    "qa:notifications": "deno test --no-remote --no-config supabase/functions/_tests/runTokenAuth_test.ts supabase/functions/_tests/pushFailureDiagnosis_test.ts supabase/functions/_tests/pushHealthMonitor_test.ts",
     "qa:payouts": "deno test --no-remote --no-config supabase/functions/_tests/payoutReconciliation_test.ts supabase/functions/_tests/payoutBatchClaim_test.ts",
     "qa:ticketing": "node --test scripts/ticket-checkout/session-recovery.test.cjs && deno test --no-remote --no-config --allow-read=supabase/functions supabase/functions/_tests/webhookVerification_test.ts supabase/functions/_tests/ticketCheckout_test.ts supabase/functions/_tests/organizerOnboarding_test.ts supabase/functions/_tests/ticketResendReceiptContract_test.ts supabase/functions/_tests/ticketInboxDrainStarvationContract_test.ts",
     "qa:75": "bash scripts/verify-75-threshold.sh local",
