@@ -367,6 +367,31 @@ it('ignores departure confirmation after the initiating visit retires',async()=>
 const manageInput = (value:string) => tree.root.findAllByType(require('react-native').TextInput).find(n=>n.props.value===value)!;
 const manageModal = () => tree.root.findAllByType(require('react-native').Modal).find(n=>n.props.visible&&n.props.animationType==='slide')!;
 async function openEditor(){mockPlan.creator_user_id='viewer';await mount();act(()=>button('Manage Plan').props.onPress());}
+it('discards an unsaved draft and seeds the latest plan when the editor reopens', async () => {
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('Unsaved title'));
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+  mockPlan = { ...mockPlan, title: 'Updated elsewhere' };
+  await act(async () => tree.update(<PlanDetailScreen />));
+  act(() => button('Manage Plan').props.onPress());
+  expect(manageInput('Updated elsewhere')).toBeDefined();
+  expect(manageInput('Unsaved title')).toBeUndefined();
+  expect(mockUpdate).not.toHaveBeenCalled();
+});
+it('reopens an uncertain edit with its retained draft instead of reseeding from stale query data', async () => {
+  mockEditResponse = { data: null, error: null };
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('Unconfirmed title'));
+  await act(async () => button('Save changes').props.onPress());
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+  act(() => button('Manage Plan').props.onPress());
+  expect(manageInput('Unconfirmed title')).toBeDefined();
+  expect(button('Save changes')).toBeUndefined();
+  expect(button('Check changes')).toBeDefined();
+  mockEditResponse = undefined;
+  await act(async () => button('Check changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+});
 it('renders the editor without raw text children in native Views', async () => {
   await openEditor();
   const rawText = tree.root.findAllByType(View).flatMap(view => view.children.filter(child => typeof child === 'string'));

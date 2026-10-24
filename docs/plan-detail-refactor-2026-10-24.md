@@ -76,10 +76,34 @@ on the simulator. Regression tests cover raw View text and direct minute entry.
 Evidence, source hashes, screenshots and test logs:
 `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/simulator-test-results.md`.
 
-## Next decision
+## Second checkpoint: editor state
 
-Review this bounded extraction before expanding the refactor. A subsequent patch
-could move the editor's draft state and date/time picker state into a focused
-hook, using these payload tests and the existing screen tests as its baseline.
-The wider app refactor still needs an agreed sequence; this patch does not
-authorize or implement it.
+The first tested patch was committed as `ccbb5bc`. The second patch introduces
+`hooks/usePlanEditDraft.ts` and its dedicated tests, updates the screen to consume
+its typed draft, and adds screen regressions for fresh and uncertain reopenings.
+The screen is 104 lines shorter than the first checkpoint.
+
+The hook owns draft values, original snapshot, change flags, age-range selection,
+and temporary date/time picker state. It performs no I/O. Account/visit checks,
+modal lifecycle, keyboard/haptic effects, location-widget synchronization and
+save/photo recovery remain with their existing screen and save-hook owners.
+Fresh edits reset from the current plan; uncertain edits skip that reset.
+
+Verification: 205 tests across six suites passed; app-wide TypeScript and
+`git diff --check` passed. New cases cover cancelled picker input, minute
+confirmation, date selection, age limits, reset of change flags, unsaved editor
+reopening, and retained uncertain drafts. The same local iPhone 17 Pro Max / iOS
+26.4 harness passed discard/reopen, uncertain close/reopen/check without a duplicate
+write, invalid minute blocking, explicit 07-minute entry, changed calendar date,
+and save/reopen. Exact original timestamps, ages and capacity were preserved
+until intentionally changed. The new date retained the two-hour duration.
+
+Evidence for this checkpoint is under:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/draft-hook`.
+The fixture uses a stand-in Places widget; its input displayed a placeholder on
+uncertain reopening while the retained draft/payload kept the correct location.
+Real Places widget behavior remains outside these tests, as do the previously
+listed physical-device, backend and release checks.
+
+Both checkpoints are local only. Before another refactor, review these boundaries
+and select the next module based on concrete maintenance needs.
