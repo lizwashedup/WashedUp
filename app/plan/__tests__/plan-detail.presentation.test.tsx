@@ -6,6 +6,7 @@ import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpac
 import PlanDetailScreen from '../[id]';
 import { PlanDetailOverview } from '../../../components/plans/PlanDetailOverview';
 
+let mockRealPlaces = false;
 let mockMemberAppearance = true;
 let mockYoursEnabled = false;
 jest.mock('../../../constants/MemberAppearance', () => ({ get MEMBER_REDESIGN_APPEARANCE_ENABLED() { return mockMemberAppearance; } }));
@@ -92,7 +93,14 @@ jest.mock('../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: 
 jest.mock('expo-location', () => ({ geocodeAsync: async () => [] }));
 jest.mock('expo-image-picker', () => ({requestMediaLibraryPermissionsAsync:async()=>({status:'granted'}),launchImageLibraryAsync:async()=>({canceled:false,assets:[{uri:'file://sample'}]})}));
 jest.mock('expo-image-manipulator', () => ({SaveFormat:{JPEG:'jpeg'},manipulateAsync:async()=>({base64:'sample'})}));
-jest.mock('react-native-google-places-autocomplete', () => ({ GooglePlacesAutocomplete: (props:any) => {mockPlacesProps=props;return null;} }));
+jest.mock('react-native-google-places-autocomplete', () => ({ GooglePlacesAutocomplete: (props:any) => {
+  mockPlacesProps=props;
+  return mockRealPlaces ? require('react').createElement(jest.requireActual('react-native-google-places-autocomplete').GooglePlacesAutocomplete, {
+    ...props, minLength: 1000, query: { key: 'local-fixture-only' },
+    predefinedPlacesAlwaysVisible: true,
+    predefinedPlaces: [{ description: 'Fixture Cafe, Santa Monica', structured_formatting: { main_text: 'Fixture Cafe' }, geometry: { location: { lat: 34.01, lng: -118.49 } } }],
+  }) : null;
+} }));
 jest.mock('../../../components/MapView', () => ({ MapView: () => null, Marker: () => null }));
 jest.mock('../../../components/MiniProfileCard', () => () => null);
 jest.mock('../../../components/modals/ReportModal', () => ({ ReportModal: () => null }));
@@ -109,7 +117,7 @@ const allText = () => tree.root.findAllByType(Text).flatMap(n => [n.props.childr
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === label))!;
 async function mount() { await act(async () => { tree = create(<PlanDetailScreen />); }); }
 beforeEach(() => {
-  mockMemberAppearance = true; mockCanGoBack = false;
+  mockRealPlaces = false; mockMemberAppearance = true; mockCanGoBack = false;
   mockPeople=[];mockPeopleError=false;
   mockInterest={entry:null,ready:true,loading:false,busy:false,phase:null,error:null,send:mockInterestSend,retry:mockInterestRetry,refresh:jest.fn()};
   mockInvitePrepare.mockReturnValue(mockInviteComplete);mockInvitation={invitation:null,attempt:null,loading:false,busy:false,ready:true,error:null,decline:mockInviteDecline,refresh:mockInviteRefresh,retry:mockInviteRetry,prepareAcceptance:mockInvitePrepare,keepInvitation:jest.fn()};
@@ -689,4 +697,60 @@ it('remeasures fallback management labels without remounting its modal or discar
    act(()=>Dimensions.set({window:{...previous,width:390,fontScale}}));expect(label()).not.toBe(text);text=label();expect(manageModal()).toBe(modal);expect(tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Plan title')).toBe(input);expect(input.props.value).toBe('Unfinished sunset draft');expect(mockUpdate).not.toHaveBeenCalled();
   }
  }finally{act(()=>Dimensions.set({window:previous}));}
+});
+
+
+describe('real location widget integration', () => {
+  const locationInput = () => tree.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === 'Location')!;
+  beforeEach(() => { mockRealPlaces = true; jest.useFakeTimers(); });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  it('shows the saved place immediately when the editor mounts', async () => {
+    await openEditor();
+    expect(locationInput().props.value).toBe('Ocean Park');
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('saves a selected place and clears coordinates after subsequent typing: %s', async (typeAfterSelection) => {
+    await openEditor();
+    let row = tree.root.findAllByType(Text).find(n => n.props.children === 'Fixture Cafe, Santa Monica')!;
+    while (row && !row.props.onPress) row = row.parent!;
+    expect(row).toBeDefined();
+    act(() => row.props.onPress());
+    expect(locationInput().props.value).toBe('Fixture Cafe');
+    if (typeAfterSelection) act(() => locationInput().props.onChangeText('Different meeting point'));
+    await act(async () => button('Save changes').props.onPress());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject(typeAfterSelection
+      ? { location_text: 'Different meeting point', location_lat: null, location_lng: null }
+      : { location_text: 'Fixture Cafe', location_lat: 34.01, location_lng: -118.49 });
+  });
+
+  it('discards typed location and displays the latest saved place on a fresh reopening', async () => {
+    await openEditor();
+    act(() => locationInput().props.onChangeText('Discard this place'));
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+    mockPlan = { ...mockPlan, location_text: 'Updated park', location_lat: 34.02, location_lng: -118.5 };
+    await act(async () => tree.update(<PlanDetailScreen />));
+    act(() => button('Manage Plan').props.onPress());
+    expect(locationInput().props.value).toBe('Updated park');
+    await act(async () => button('Save changes').props.onPress());
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ location_text: 'Updated park', location_lat: 34.02, location_lng: -118.5 });
+  });
+
+  it('shows the retained location after an uncertain save is closed and reopened', async () => {
+    mockEditResponse = { data: null, error: null };
+    await openEditor();
+    act(() => jest.advanceTimersByTime(100));
+    act(() => locationInput().props.onChangeText('Unconfirmed cafe'));
+    await act(async () => button('Save changes').props.onPress());
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+    act(() => button('Manage Plan').props.onPress());
+    expect(locationInput().props.value).toBe('Unconfirmed cafe');
+    expect(locationInput().props.editable).toBe(false);
+    mockEditResponse = undefined;
+    await act(async () => button('Check changes').props.onPress());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ location_text: 'Unconfirmed cafe', location_lat: null, location_lng: null });
+  });
 });

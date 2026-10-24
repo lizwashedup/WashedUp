@@ -263,3 +263,44 @@ refactor to another screen. Nothing was pushed, merged, built or deployed.
 
 Combined logs and source hashes:
 `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/combined-review`.
+
+
+## Integration follow-up: location display and recovery
+
+Replacing the location stub with the actual installed Google Places autocomplete
+widget reproduced a concrete display defect: closing and reopening an uncertain
+save showed a blank location even though the draft and pending patch retained it.
+Fresh opens also relied on a 100 ms timer to populate the visible text. Two new
+regressions failed before this fix and passed afterward.
+
+`ManagePlanEditor` now supplies `draft.location` as the widget's text-input value.
+Removed the imperative Places ref, its prop plumbing and delayed initialization
+from the screen. Display and save preparation now read the same retained draft.
+Typing still clears old coordinates, selecting a place still sets its name and
+coordinates together, and the existing save/account/visit guards remain intact.
+No backend query, schema, permission or routing behavior changed.
+
+Five tests render the actual installed widget inside the real detail screen:
+immediate saved-place display, selection/save, typing after selection, fresh
+reopening from updated query data, and uncertain-save reopening/checking without
+a duplicate update. Only place results are supplied as fictional predefined
+entries; remote autocomplete search is not exercised. All 186 tests across the
+screen, edit hook, draft hook and preparation suites passed. App-wide TypeScript
+and diff whitespace checks passed.
+
+Native verification used the existing iPhone 17 Pro Max / iOS 26.4 development
+binary with the actual widget and fictional predefined results. Selecting Fixture
+Cafe saved its name with latitude 34.01 and longitude -118.49. Typing Integration
+recovery cafe cleared those coordinates; an uncertain save retained that visible
+text after close/reopen, locked editing, and ignored a place-result tap. Check
+changes reconciled the save and refreshed detail. Evidence records exactly two
+updates across the normal and uncertain cases, with no extra update on checking.
+This resolves the earlier fixture location-display limitation.
+
+Evidence, failing-before and passing-after logs, source hashes and screenshot:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/location-integration`.
+The existing navigation callback tests passed in the screen suite. Full router
+journeys, remote Google responses and live Supabase integration are still open;
+this fixture uses stubbed routing and an in-memory backend. The integration pass
+focused on fixing and verifying the reproduced location defect before broadening
+those checks. No build, push, merge, OTA or production write occurred.

@@ -1,8 +1,8 @@
-import React, { useMemo, type ReactNode, type RefObject } from 'react';
+import React, { useMemo, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { ImagePlus, X } from 'lucide-react-native';
-import { GooglePlacesAutocomplete, type GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScaledText as Text } from '../ScaledText';
 import WashedUpCalendar from '../calendar/WashedUpCalendar';
@@ -43,7 +43,6 @@ function displayPickerTime(hour: number, minute: string, period: 'AM' | 'PM'): s
 type Props = {
   editor: Omit<ReturnType<typeof usePlanEditDraft>, 'reset' | 'closePickers'>;
   edit: Pick<ReturnType<typeof usePlanEdit>, 'isBusy' | 'unknown' | 'error' | 'isSaving' | 'isPhotoPending' | 'canChange' | 'check' | 'pickPhoto'>;
-  managePlacesRef: RefObject<GooglePlacesAutocompleteRef | null>;
   manageGenderOptions: { label: string; value: string }[];
   appearance?: { fonts: AfterglowFontFamilies };
   isCirclePlan: boolean;
@@ -64,7 +63,7 @@ type Props = {
  * transition, current-account gates, save preparation, and navigation actions.
  * The draft stays in the parent, independent of the native modal presentation.
  */
-export function ManagePlanEditor({ editor, edit, managePlacesRef, manageGenderOptions,
+export function ManagePlanEditor({ editor, edit, manageGenderOptions,
   appearance, isCirclePlan, isCreator, isOfficialCreator, onClose, onSave, onCancel,
   onDuplicate, onOpenDatePicker, onOpenTimePicker, onConfirmTime, onToggleAgeRange, children,
 }: Props) {
@@ -210,7 +209,6 @@ export function ManagePlanEditor({ editor, edit, managePlacesRef, manageGenderOp
           <Text style={manageStyles.label}>Location</Text>
           <View style={{ zIndex: 10, elevation: 10 }}>
             <GooglePlacesAutocomplete
-              ref={managePlacesRef}
               placeholder="Venue or neighborhood"
               fetchDetails
               disableScroll={true}
@@ -234,6 +232,7 @@ export function ManagePlanEditor({ editor, edit, managePlacesRef, manageGenderOp
               styles={managePlacesStyles}
               textInputProps={{
                 accessibilityLabel: "Location",
+                value: draft.location,
                 editable: !edit.isBusy && !edit.unknown,
                 onChangeText: (text: string) => {
                   if (!edit.canChange()) return;

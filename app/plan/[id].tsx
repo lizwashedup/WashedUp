@@ -35,7 +35,6 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { type GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
@@ -294,7 +293,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
   const editor = usePlanEditDraft();
   const { draft, original: editOriginal } = editor;
-  const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const edit = usePlanEdit({
     eventId: id, viewerId: currentUserId, isCurrent: identity.isCurrent,
     canEdit: () => !!plan && isCreator && contextReady && !isClosedPlan,
@@ -849,11 +847,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     if (!plan || !contextReady || isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
     if (!edit.begin()) return;
     if (edit.unknown) { setManageModalVisible(true); return; }
-    const isCurrentEdit = edit.capture();
     const initialized = editor.reset(plan);
-    setTimeout(() => {
-      if (isCurrentEdit()) managePlacesRef.current?.setAddressText(plan.location_text ?? '');
-    }, 100);
     if (!initialized) return;
     setManageModalVisible(true);
   };
@@ -1795,7 +1789,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         <ManagePlanEditor
           editor={editor}
           edit={edit}
-          managePlacesRef={managePlacesRef}
           manageGenderOptions={manageGenderOptions}
           appearance={appearance}
           isCirclePlan={isCirclePlan}
