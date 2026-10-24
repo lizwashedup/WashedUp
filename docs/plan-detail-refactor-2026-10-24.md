@@ -153,3 +153,32 @@ unverified.
 
 The existing fixture/physical-device/live-backend limitations still apply.
 This checkpoint contains no production changes, dependency changes or deployment.
+
+## Fourth checkpoint: cancellation accessibility follow-up resolved
+
+`components/plans/PlanDepartureSheet.tsx` now marks the backdrop and inner card
+Pressables `accessible={false}`. These layout/touch wrappers no longer combine
+the heading, explanatory text and action buttons into one native accessibility
+element. Removed the backdrop's obsolete accessibility label; explicit Keep plan,
+Stay or Close buttons provide dismissal. Backdrop touch dismissal, accessibility
+escape, modal isolation and every action/busy/recovery handler are unchanged.
+
+Native verification on iPhone 17 Pro Max / iOS 26.4 now exposes the heading,
+Cancel plan and Keep plan individually. From Manage Plan, the confirmation
+appeared after modal dismissal. Keep plan returned to the active detail with
+zero cancellation attempts/writes. Reopening from the detail cancellation link
+and confirming produced one cancellation attempt and one write in the fictional
+backend. The success state exposed Back to Plans; activating it dismissed the
+sheet and invoked the existing navigation callback (routing is stubbed in this
+fixture). The real app's cancellation action was never sent to a live backend.
+
+153 tests across PlanDepartureSheet, usePlanDeparture and plan-detail presentation
+passed, including busy locks, retired callbacks, uncertain-outcome checking,
+exactly-once exit and iOS dismissal sequencing. App-wide TypeScript and diff
+whitespace checks passed. Native accessibility-tree interaction verifies the
+reported issue; this is not a full VoiceOver or physical-device audit.
+
+Evidence, screenshots, source hash and logs:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/departure-accessibility`.
+The previously recorded cancellation-button accessibility follow-up is resolved
+locally. Production, release and other fixture limitations remain unchanged.

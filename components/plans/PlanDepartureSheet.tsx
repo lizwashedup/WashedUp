@@ -34,8 +34,10 @@ export function PlanDepartureSheet(p: Props) {
       : p.action === 'cancel' ? 'This cancels the plan for everyone.' : 'You’ll be removed from the people going to this plan.';
   const button = p.busy ? p.unknown ? 'Checking…' : p.action === 'cancel' ? 'Cancelling…' : 'Leaving…' : p.result ? 'Back to Plans' : p.unknown ? 'Check status' : p.action === 'cancel' ? 'Cancel plan' : 'Leave plan';
   return <Modal visible transparent animationType="fade" onRequestClose={close} onAccessibilityEscape={close}>
-    <Pressable style={s.overlay} onPress={close} accessibilityLabel="Dismiss confirmation">
-      <Pressable style={[s.card, { maxHeight: Math.max(0, height - insets.top - insets.bottom - 32) }]} onPress={e => e.stopPropagation()} accessibilityViewIsModal>
+    {/* Keep the backdrop and card from grouping the heading and action buttons
+        into one native accessibility element. Explicit dismissal stays below. */}
+    <Pressable accessible={false} style={s.overlay} onPress={close}>
+      <Pressable accessible={false} style={[s.card, { maxHeight: Math.max(0, height - insets.top - insets.bottom - 32) }]} onPress={e => e.stopPropagation()} accessibilityViewIsModal>
         <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
           <Text accessibilityRole="header" style={s.title}>{title}</Text>
           <Text style={s.plan}>{p.planTitle}</Text>
