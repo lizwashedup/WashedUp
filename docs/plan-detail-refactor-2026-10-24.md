@@ -182,3 +182,24 @@ Evidence, screenshots, source hash and logs:
 `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/departure-accessibility`.
 The previously recorded cancellation-button accessibility follow-up is resolved
 locally. Production, release and other fixture limitations remain unchanged.
+
+## Fifth checkpoint: detail styles
+
+Moved the four remaining static style blocks (detail, join, ticket prompt and
+duplicate sheet) to `components/plans/planDetailStyles.ts`. The screen imports
+those definitions and retains its existing appearance selection. The four style
+blocks match checkpoint `2b02102` exactly; module-level window-width measurement
+is preserved. Removed an unused hero-height constant and obsolete comments.
+The screen is 837 lines shorter; no state, interaction or data path changed.
+
+Verification: all 126 plan-detail presentation tests passed, covering existing
+appearance modes and editor/navigation behavior. App-wide TypeScript and diff
+whitespace checks passed. The existing local iPhone 17 Pro Max / iOS 26.4 fixture
+rendered the detail screen with its hero, title, age/category metadata, creator
+note and fixed action area intact. This native smoke check covered the fixture's
+current appearance; alternate appearance coverage is automated, not a new native
+visual acceptance.
+
+Source hashes, test logs and screenshot:
+`/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/detail-styles`.
+All prior fixture, live-backend, pinned-runtime and release limitations still apply.
