@@ -2092,6 +2092,17 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         appearance={appearance}
         visible={shareAfterJoinVisible}
         onDismiss={() => finishPlanModalDismiss('share', modalTransition)}
+        onOpenChat={() => {
+          if (!shareAfterJoinVisible || !joinMutation.isCurrent() || modalTransitionRef.current) return;
+          // Open Chat is a destination, not an invitation to another sheet.
+          // Keep the iOS dismissal boundary, but don't put People loading,
+          // optional invitations or the external-ticket reminder in its way.
+          void afterPlanModalDismiss('share', joinMutation.isCurrent, () => {
+            finishJoinNotifications();
+            router.push(planChatPath as any);
+          }).catch(() => {});
+          setShareAfterJoinVisible(false);
+        }}
         onClose={() => {
           if (!shareAfterJoinVisible || !joinMutation.isCurrent() || modalTransitionRef.current) return;
           setShareAfterJoinVisible(false);
