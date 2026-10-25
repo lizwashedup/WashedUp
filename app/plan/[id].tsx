@@ -512,7 +512,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const noticeAgreeLock = useRef<object | null>(null);
   if (noticeAgreeLock.current && noticeAgreeLock.current !== noticePending) noticeAgreeLock.current = null;
   type DismissalTransition = {
-    source: 'join' | 'notice' | 'manage'; isCurrent: () => boolean; run: () => void;
+    source: 'join' | 'notice' | 'manage' | 'share'; isCurrent: () => boolean; run: () => void;
     resolve: () => void; cancel: () => void;
   };
   const [modalTransition, setModalTransition] = useState<DismissalTransition | null>(null);
@@ -2091,8 +2091,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       <SharePlanModal
         appearance={appearance}
         visible={shareAfterJoinVisible}
+        onDismiss={() => finishPlanModalDismiss('share', modalTransition)}
         onClose={() => {
-          if (!joinMutation.isCurrent()) return;
+          if (!shareAfterJoinVisible || !joinMutation.isCurrent() || modalTransitionRef.current) return;
           setShareAfterJoinVisible(false);
           const runRest = () => {
             if (plan?.tickets_url) {
@@ -2106,13 +2107,17 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               finishJoinNotifications(); router.push(planChatPath as any);
             }
           };
-          if (YOURS_PAGE_ENABLED) {
-            // Ping moment before chat / ticket prompt (spec: after join).
-            pendingNavRef.current = runRest;
-            setPingPlanId(id as string);
-          } else {
-            runRest();
-          }
+          // A native pageSheet must finish dismissing before the optional
+          // invitation or chat navigation starts. Pushing while it closes can
+          // leave the entire iOS app behind a black presentation surface.
+          void afterPlanModalDismiss('share', joinMutation.isCurrent, () => {
+            if (YOURS_PAGE_ENABLED) {
+              pendingNavRef.current = runRest;
+              setPingPlanId(id as string);
+            } else {
+              runRest();
+            }
+          }).catch(() => {});
         }}
         planTitle={plan?.title || ''}
         planId={id as string}
