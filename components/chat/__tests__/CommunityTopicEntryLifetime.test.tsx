@@ -45,6 +45,7 @@ let mockLiveVisit: object | null = null;
 jest.mock('expo-image-picker', () => ({ requestCameraPermissionsAsync: (...args: any[]) => mockCameraPermission(...args), launchCameraAsync: (...args: any[]) => mockCamera(...args), requestMediaLibraryPermissionsAsync: (...args: any[]) => mockPermission(...args), launchImageLibraryAsync: (...args: any[]) => mockPick(...args) }));
 jest.mock('expo-image-manipulator', () => ({ manipulateAsync: (...args: any[]) => mockManipulate(...args), SaveFormat: { JPEG: 'jpeg' } }));
 
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const cleanup=callback(); mockFocusCleanup=cleanup; return cleanup; }, [callback]), useRouter: () => ({ push: mockPush, back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({top:0,bottom:0,left:0,right:0}) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));

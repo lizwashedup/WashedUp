@@ -5,6 +5,7 @@ import {useQuery} from '@tanstack/react-query';
 import {router} from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ProfileButton from '../ProfileButton';
+jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
 jest.mock('@tanstack/react-query',()=>({useQuery:jest.fn()}));
 jest.mock('expo-router',()=>({router:{push:jest.fn()}}));
 jest.mock('../../lib/supabase',()=>({supabase:{}}));

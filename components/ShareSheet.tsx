@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -7,6 +8,8 @@ import {
   Pressable,
   StyleSheet,
   Share,
+  Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,39 +29,60 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
   const insets = useSafeAreaInsets();
   const deepLink = slug ? `https://washedup.app/plans/${slug}` : `https://washedup.app/e/${planId}`;
 
+  const focused = useIsFocused();
+  const [closing, setClosing] = useState(false);
+  const active = useRef(false);
+  const busy = useRef(false);
+  const pending = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    active.current = focused;
+    busy.current = false;
+    pending.current = null;
+    setClosing(false);
+    return () => { active.current = false; pending.current = null; };
+  }, [focused, visible, planId]);
+
+  const finishDismissal = () => {
+    const next = pending.current;
+    pending.current = null;
+    if (active.current) next?.();
+  };
+  const closeThen = (next?: () => void) => {
+    if (!visible || !active.current || busy.current) return;
+    busy.current = true;
+    pending.current = () => { onClose(); next?.(); };
+    setClosing(true);
+    if (Platform.OS !== 'ios') finishDismissal();
+  };
+  const share = (message: string) => {
+    // The native sheet may reject (for example if its presenter disappeared).
+    // Handle it without an unhandled promise or a second automatic dispatch.
+    void Share.share({ message }).catch(() => {
+      if (active.current) Alert.alert('Couldn’t share', 'Please open Share and try again.');
+    });
+  };
   const handleSendToFriend = () => {
     hapticLight();
-    onClose();
-    router.push('/(tabs)/friends' as any);
+    closeThen(() => router.push('/(tabs)/friends' as any));
   };
-
-  const handleCopyLink = async () => {
+  const handleCopyLink = () => {
     hapticLight();
-    // Use Share API as clipboard fallback — avoids needing native expo-clipboard rebuild
-    await Share.share({ message: deepLink });
-    onClose();
+    // Preserve the existing link-only native share fallback.
+    closeThen(() => share(deepLink));
   };
-
-  const handleShareVia = async () => {
+  const handleShareVia = () => {
     hapticLight();
-    onClose();
-    setTimeout(() => {
-      Share.share({
-        message: `${planTitle}\n${deepLink}`,
-      });
-    }, 300);
+    closeThen(() => share(`${planTitle}\n${deepLink}`));
   };
-
-  if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={[styles.sheet, { paddingBottom: Math.max(40, insets.bottom + 16) }]} onPress={(e) => e.stopPropagation()}>
+    <Modal visible={visible && focused && !closing} transparent animationType="slide" onRequestClose={() => closeThen()} onDismiss={finishDismissal} statusBarTranslucent>
+      <Pressable accessible={false} style={styles.overlay} onPress={() => closeThen()}>
+        <Pressable accessible={false} accessibilityViewIsModal style={[styles.sheet, { paddingBottom: Math.max(40, insets.bottom + 16) }]} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
           <Text style={styles.title}>Share this plan</Text>
 
-          <TouchableOpacity style={styles.option} onPress={handleSendToFriend} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.option} onPress={handleSendToFriend} disabled={closing} accessibilityRole="button" accessibilityLabel="Send to one of your people" activeOpacity={0.7}>
             <View style={styles.iconWrap}>
               <Ionicons name="people-outline" size={20} color="#B5522E" />
             </View>
@@ -69,7 +93,7 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
             <Ionicons name="chevron-forward" size={16} color="#A09385" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.option} onPress={handleCopyLink} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.option} onPress={handleCopyLink} disabled={closing} accessibilityRole="button" accessibilityLabel="Copy link" activeOpacity={0.7}>
             <View style={styles.iconWrap}>
               <Ionicons name="link-outline" size={20} color="#B5522E" />
             </View>
@@ -80,7 +104,7 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
             <Ionicons name="copy-outline" size={16} color="#A09385" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.option} onPress={handleShareVia} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.option} onPress={handleShareVia} disabled={closing} accessibilityRole="button" accessibilityLabel="Share via" activeOpacity={0.7}>
             <View style={styles.iconWrap}>
               <Ionicons name="share-outline" size={20} color="#B5522E" />
             </View>
