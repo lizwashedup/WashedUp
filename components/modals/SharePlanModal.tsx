@@ -19,6 +19,8 @@ export interface SharePlanModalProps {
   appearance?: { fonts: AfterglowFontFamilies };
   visible: boolean;
   onClose: () => void;
+  /** Explicit chat intent must not be routed through optional post-join prompts. */
+  onOpenChat?: () => void;
   /** iOS callers may advance only after the native sheet has finished closing. */
   onDismiss?: () => void;
   planTitle: string;
@@ -33,6 +35,7 @@ export interface SharePlanModalProps {
 export function SharePlanModal({
   visible,
   onClose,
+  onOpenChat,
   onDismiss,
   planTitle,
   planId,
@@ -56,6 +59,12 @@ export function SharePlanModal({
   const [failedVisit, setFailedVisit] = useState<object | null>(null);
   const isCurrent = () => mounted.current && latest.current.visible && latest.current.visit === visit && !visit.closed;
   const close = () => { if (!isCurrent()) return; visit.closed = true; onClose(); };
+  const continueToDestination = () => {
+    if (!isCurrent()) return;
+    visit.closed = true;
+    if (variant === 'joined' && onOpenChat) onOpenChat();
+    else onClose();
+  };
   const sharing = busyVisit === visit;
   const handleShare = async () => {
     if (!isCurrent() || visit.sharing) return;
@@ -131,7 +140,7 @@ export function SharePlanModal({
             </Text>
           </View>}
 
-          <TouchableOpacity style={styles.bottomBtn} onPress={close} accessibilityRole="button" accessibilityLabel={bottomLabel} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.bottomBtn} onPress={continueToDestination} accessibilityRole="button" accessibilityLabel={bottomLabel} activeOpacity={0.85}>
             <Text style={styles.bottomBtnText} numberOfLines={1}>{bottomLabel}</Text>
           </TouchableOpacity>
         </ScrollView>
