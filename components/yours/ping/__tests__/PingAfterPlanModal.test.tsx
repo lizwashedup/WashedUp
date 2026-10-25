@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { ActivityIndicator, Modal } from 'react-native';
+import { ActivityIndicator, Modal, Platform } from 'react-native';
 import PingAfterPlanModal from '../PingAfterPlanModal';
 import PingInline from '../PingInline';
 import { useObservedUser } from '../../../../hooks/useObservedUser';
@@ -31,13 +31,14 @@ function mount(id: string | null = 'plan-a') {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.replaceProperty(Platform, 'OS', 'ios');
   currentIdentity.mockReturnValue(true);
   identity = { viewerId: 'alice', epoch: 1, error: null, isLoading: false, retry: retryIdentity, isCurrent: currentIdentity };
   people = { data: [{ user_id: 'bob' }], isSuccess: true, isLoading: false, isFetching: false, refetch: retryPeople };
   observed.mockImplementation(() => identity);
   grid.mockImplementation(() => people as unknown as ReturnType<typeof useYoursGrid>);
 });
-afterEach(() => cleanup.splice(0).forEach(close => close()));
+afterEach(() => { cleanup.splice(0).forEach(close => close()); jest.restoreAllMocks(); });
 
 it('does not mount account or people reads when no invitation step is open', () => {
   const fixture = mount(null);
@@ -68,8 +69,10 @@ it('retries identity failures and keeps an explicit continue action', async () =
   expect(retryIdentity).toHaveBeenCalledTimes(1);
   expect(fixture.done).not.toHaveBeenCalled();
   act(() => fixture.renderer.root.findAll(node => node.props.accessibilityLabel === 'Continue without inviting' && typeof node.props.onPress === 'function')[0].props.onPress());
-  // The caller owns closing this optional step; repeated completion is ignored.
+  // Native dismissal must finish before the caller can navigate.
   act(() => fixture.renderer.root.findByType(Modal).props.onRequestClose());
+  expect(fixture.done).not.toHaveBeenCalled();
+  act(() => fixture.renderer.root.findByType(Modal).props.onDismiss());
   expect(fixture.done).toHaveBeenCalledTimes(1);
 });
 
@@ -92,12 +95,13 @@ it('waits for an empty-list refresh before skipping the optional step exactly on
   people = { ...people, isFetching: false };
   fixture.refresh();
   fixture.refresh();
-  // No native dismissal event is required to notify the parent.
-
+  expect(fixture.done).not.toHaveBeenCalled();
+  act(() => fixture.renderer.root.findByType(Modal).props.onDismiss());
   expect(fixture.done).toHaveBeenCalledTimes(1);
 });
 
 it('prevents Android back dismissal during sending, including before state renders', () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
   const fixture = mount();
   const inline = fixture.renderer.root.findByType(PingInline);
   const requestClose = fixture.renderer.root.findByType(Modal).props.onRequestClose;
@@ -129,5 +133,62 @@ it('ignores an old picker completion after unmount or an account event', () => {
   currentIdentity.mockReturnValue(true);
   fixture.unmount();
   act(() => finish());
+  expect(fixture.done).not.toHaveBeenCalled();
+});
+
+
+it('keeps the same native window when loading becomes a populated invitation', () => {
+  people = { ...people, data: undefined, isSuccess: false, isLoading: true };
+  const fixture = mount();
+  const window = fixture.renderer.root.findByType(Modal);
+  people = { ...people, data: [{ user_id: 'bob' }], isSuccess: true, isLoading: false };
+  fixture.refresh();
+  expect(fixture.renderer.root.findByType(Modal)).toBe(window);
+});
+
+it('waits for native iOS dismissal before continuing from an empty People response', () => {
+  const os = Platform.OS; Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+  try {
+    people = { ...people, data: undefined, isSuccess: false, isLoading: true };
+    const fixture = mount();
+    people = { ...people, data: [], isSuccess: true, isLoading: false };
+    fixture.refresh();
+    expect(fixture.done).not.toHaveBeenCalled();
+    const modal = fixture.renderer.root.findByType(Modal);
+    expect(modal.props.visible).toBe(false);
+    act(() => modal.props.onDismiss());
+    act(() => modal.props.onDismiss());
+    expect(fixture.done).toHaveBeenCalledTimes(1);
+  } finally { Object.defineProperty(Platform, 'OS', { value: os, configurable: true }); }
+});
+
+it('retires a pending iOS dismissal when the account changes', () => {
+  const os = Platform.OS; Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+  try {
+    const fixture = mount();
+    act(() => fixture.renderer.root.findByType(PingInline).props.onDone());
+    expect(fixture.done).not.toHaveBeenCalled();
+    const dismiss = fixture.renderer.root.findByType(Modal).props.onDismiss;
+    currentIdentity.mockReturnValue(false);
+    act(() => dismiss());
+    expect(fixture.done).not.toHaveBeenCalled();
+  } finally { Object.defineProperty(Platform, 'OS', { value: os, configurable: true }); }
+});
+
+
+it('skips a cached empty result without waiting for a window that was never shown', () => {
+  people = { ...people, data: [] };
+  const fixture = mount();
+  expect(fixture.done).toHaveBeenCalledTimes(1);
+  fixture.refresh();
+  expect(fixture.done).toHaveBeenCalledTimes(1);
+});
+
+it('ignores a pending dismissal after its invitation session unmounts', () => {
+  const fixture = mount();
+  act(() => fixture.renderer.root.findByType(PingInline).props.onDone());
+  const dismiss = fixture.renderer.root.findByType(Modal).props.onDismiss;
+  fixture.unmount();
+  act(() => dismiss());
   expect(fixture.done).not.toHaveBeenCalled();
 });
