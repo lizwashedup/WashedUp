@@ -194,7 +194,7 @@ it('keeps the confirmed Circle conversation during a context refresh after joini
   mockPlan.circle_id='circle-1';mockContext={is_circle_plan:true,circle_id:'circle-1',circle_visibility:'circle_only',has_own_chat:false,viewer_is_member:true};await mount();
   act(()=>mockJoinOptions.onJoined());mockContext=undefined;mockContextReady=false;await act(async()=>tree.update(<PlanDetailScreen/>));
   const Sharing=require('../../../components/modals/SharePlanModal').SharePlanModal;
-  act(()=>tree.root.findByType(Sharing).props.onClose());expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-1');
+  closeSharing();expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-1');
 });
 it('reveals only accepted People handles, ignoring handles supplied by public rows',async()=>{
   mockPlan.creator.handle='public.creator';mockMembers[1].handle='public.jamie';
@@ -258,6 +258,7 @@ it.each(['retired visit', 'dismissed alert', 'repeated tap'])('prevents recovery
 const joinSheet = () => tree.root.findByType(require('../../../components/plans/PlanJoinSheet').PlanJoinSheet).props;
 const participation = () => tree.root.findByType(require('../../../components/legal/ParticipationNotice').ParticipationNotice).props;
 const sharing = () => tree.root.findByType(require('../../../components/modals/SharePlanModal').SharePlanModal).props;
+function closeSharing() { act(() => sharing().onClose()); if (Platform.OS === 'ios') act(() => sharing().onDismiss()); }
 async function openTermsFromGreeting() {
   mockNotice.mockResolvedValue({ needsAssent: true }); await mount();
   act(() => button("Let's Go →").props.onPress());
@@ -462,13 +463,13 @@ it('keeps the existing member chat destination when using the live detail presen
 it('waits until the confirmed join share flow closes before requesting notifications', async () => {
   await mount(); act(() => mockJoinOptions.onJoined({})); expect(mockNotificationRequest).not.toHaveBeenCalled();
   const share = tree.root.findByType(require('../../../components/modals/SharePlanModal').SharePlanModal);
-  act(() => share.props.onClose()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
+  closeSharing(); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
   expect(mockNotificationRequest.mock.calls[0][0]).toEqual({ userId: 'viewer', planId: 'plan-1', reason: 'joined' });
   expect(mockPush).toHaveBeenCalled();
 });
 it('waits for the ticket step after a confirmed join before requesting notifications', async () => {
   mockPlan.tickets_url = 'https://example.test/tickets'; await mount(); act(() => mockJoinOptions.onJoined({}));
-  act(() => tree.root.findByType(require('../../../components/modals/SharePlanModal').SharePlanModal).props.onClose());
+  closeSharing();
   expect(mockNotificationRequest).not.toHaveBeenCalled();
   act(() => button("I'll remember").props.onPress()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
@@ -483,7 +484,7 @@ it('does not request join notifications from a retired share callback', async ()
 });
 it('waits for the optional friend ping before requesting join notifications', async () => {
   mockYoursEnabled = true; await mount(); act(() => mockJoinOptions.onJoined({}));
-  act(() => sharing().onClose()); expect(mockNotificationRequest).not.toHaveBeenCalled();
+  closeSharing(); expect(mockNotificationRequest).not.toHaveBeenCalled();
   const Ping = require('../../../components/yours/ping/PingAfterPlanModal');
   act(() => tree.root.findByType(Ping.default ?? Ping).props.onDone()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
@@ -627,4 +628,45 @@ it('remeasures fallback management labels without remounting its modal or discar
    act(()=>Dimensions.set({window:{...previous,width:390,fontScale}}));expect(label()).not.toBe(text);text=label();expect(manageModal()).toBe(modal);expect(tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Plan title')).toBe(input);expect(input.props.value).toBe('Unfinished sunset draft');expect(mockUpdate).not.toHaveBeenCalled();
   }
  }finally{act(()=>Dimensions.set({window:previous}));}
+});
+
+
+it.each([false, true])('waits for native share dismissal before advancing a confirmed iOS join (invitations %s)', async invitations => {
+  jest.replaceProperty(Platform, 'OS', 'ios'); mockYoursEnabled = invitations;
+  await mount(); act(() => mockJoinOptions.onJoined({}));
+  const close = sharing().onClose;
+  act(() => { close(); close(); });
+  expect(sharing().visible).toBe(false);
+  expect(mockPush).not.toHaveBeenCalled(); expect(mockNotificationRequest).not.toHaveBeenCalled();
+  const Ping = require('../../../components/yours/ping/PingAfterPlanModal');
+  if (invitations) expect(tree.root.findByType(Ping.default ?? Ping).props.planId).toBeNull();
+  const dismissed = sharing().onDismiss;
+  act(() => { dismissed(); dismissed(); });
+  if (invitations) {
+    expect(tree.root.findByType(Ping.default ?? Ping).props.planId).toBe('plan-1');
+    expect(mockPush).not.toHaveBeenCalled();
+    act(() => tree.root.findByType(Ping.default ?? Ping).props.onDone());
+  }
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
+});
+it('does not open the next iOS sheet before share dismissal on a ticketed join', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios'); mockPlan.tickets_url='https://example.test/tickets';
+  await mount(); act(() => mockJoinOptions.onJoined({})); act(() => sharing().onClose());
+  expect(button("I'll remember")).toBeUndefined();
+  act(() => sharing().onDismiss()); expect(button("I'll remember")).toBeDefined();
+  expect(mockPush).not.toHaveBeenCalled();
+});
+it('retires the pending iOS share handoff after account ownership changes', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios'); mockYoursEnabled=true;
+  await mount(); act(() => mockJoinOptions.onJoined({})); act(() => sharing().onClose());
+  mockCurrent.mockReturnValue(false); await act(async () => sharing().onDismiss());
+  const Ping = require('../../../components/yours/ping/PingAfterPlanModal');
+  expect(tree.root.findByType(Ping.default ?? Ping).props.planId).toBeNull();
+  expect(mockPush).not.toHaveBeenCalled(); expect(mockNotificationRequest).not.toHaveBeenCalled();
+});
+it('keeps Android join completion independent of the iOS-only dismissal event', async () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
+  await mount(); act(() => mockJoinOptions.onJoined({})); act(() => sharing().onClose());
+  expect(mockPush).toHaveBeenCalledTimes(1); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });

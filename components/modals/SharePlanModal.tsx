@@ -19,6 +19,8 @@ export interface SharePlanModalProps {
   appearance?: { fonts: AfterglowFontFamilies };
   visible: boolean;
   onClose: () => void;
+  /** iOS callers may advance only after the native sheet has finished closing. */
+  onDismiss?: () => void;
   planTitle: string;
   planId: string;
   slug?: string | null;
@@ -31,6 +33,7 @@ export interface SharePlanModalProps {
 export function SharePlanModal({
   visible,
   onClose,
+  onDismiss,
   planTitle,
   planId,
   slug,
@@ -76,6 +79,7 @@ export function SharePlanModal({
   return (
     <Modal
       visible={visible}
+      onDismiss={onDismiss}
       animationType="slide" onRequestClose={close} statusBarTranslucent
       presentationStyle="pageSheet"
     >
