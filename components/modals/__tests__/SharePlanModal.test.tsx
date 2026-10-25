@@ -44,7 +44,7 @@ it('uses factual staged copy and warning without growth pressure or unsupported 
 it.each(['posted', 'joined'] as const)('uses the original single close callback for the staged %s destination', variant => {
   const fixture = mount({ appearance, variant }); const exit = action(tree.root, variant === 'posted' ? 'View plan' : 'Open chat').props.onPress;
   act(() => { exit(); exit(); tree.root.findByType(Modal).props.onRequestClose(); });
-  // The released caller owns hiding the modal/navigation; no onDismiss dependency.
+  // Closing requests dismissal once; the caller owns any subsequent navigation.
   expect(fixture.props.onClose).toHaveBeenCalledTimes(1); expect(share).not.toHaveBeenCalled();
   fixture.update({ visible: false });
   act(() => exit());
@@ -72,4 +72,12 @@ it('shows a current share failure with retry, but keeps late failure out of a re
   fixture.update({ visible: false }); fixture.update({ visible: true });
   await act(async () => { pending.reject(new Error('old failure')); try { await pending.promise; } catch {} });
   expect(text()).not.toContain('Couldn’t open sharing. Try again.'); expect(action(tree.root, 'Share link').props.disabled).toBe(false);
+});
+
+it('forwards native dismissal separately from the close request', () => {
+  const dismissed=jest.fn(); const fixture=mount({variant:'joined',onDismiss:dismissed});
+  act(() => action(tree.root,'Open Chat').props.onPress());
+  expect(fixture.props.onClose).toHaveBeenCalledTimes(1); expect(dismissed).not.toHaveBeenCalled();
+  fixture.update({visible:false});
+  act(() => tree.root.findByType(Modal).props.onDismiss()); expect(dismissed).toHaveBeenCalledTimes(1);
 });
