@@ -562,3 +562,30 @@ Local logs, fixture source and screenshots:
 `/Users/liz/Desktop/Ops/Audits/2026-10-25-refactor-journeys/`.
 The emergency join fix is already live separately. This continuation remains
 in draft PR #21; the new application safeguard is not published.
+
+
+## October 25 continuation: delayed application prefill
+
+The prior checkpoint `f368ea9` passed the complete hosted release gate:
+https://github.com/lizwashedup/WashedUp/actions/runs/40175978901 .
+
+Two new screen regressions then reproduced late saved answers overwriting edits
+in both application forms. The Community name changed back to the saved name;
+the Organization type changed back to Venue after the member had chosen Just me.
+The shared draft guard now tracks edits per field setter. Profile/prior answers
+fill only untouched fields, preserving deliberate clearing, category removal,
+links and choices. Prefill does not mark the form dirty or accept creator terms.
+It stops after unmount and cannot update an active or completed submission.
+The prior-grant read also uses its existing expected-account argument.
+
+Verification: the original two regressions failed before the change and passed
+after it. Six new cases plus existing application, navigation, guidance, schema
+and account-read checks passed: 78 tests across five suites, pinned Node 20.20.1.
+Application TypeScript and diff checks passed. On iPhone 13 / iOS 26.4, the actual
+root/router Community form retained the typed name `New` after a 30-second
+fictional grant response; the untouched applicant name and Monthly cadence
+restored from that response. The form was opened through its app deep link after
+the deliberately slow status-page read. This is not real-service latency testing.
+
+Evidence: `/Users/liz/Desktop/Ops/Audits/2026-10-25-application-prefill/`.
+Existing diagnostic, backend-parity and release limitations still apply.

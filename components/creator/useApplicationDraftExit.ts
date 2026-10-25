@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { useObservedUser } from '../../hooks/useObservedUser';
@@ -8,6 +8,7 @@ export function useApplicationDraftExit(done: boolean, submitting: boolean) {
   const navigation = useNavigation();
   const viewer = useObservedUser();
   const [edited, setEdited] = useState(false);
+  const editedFields = useRef(new Set<unknown>());
   const live = useRef(false);
   const asking = useRef(false);
   const latest = useRef({ done, submitting });
@@ -32,7 +33,12 @@ export function useApplicationDraftExit(done: boolean, submitting: boolean) {
     ], { cancelable: true, onDismiss: reset });
   });
 
-  return function edit<T>(change: (value: T) => void) {
-    return (value: T) => { setEdited(true); change(value); };
-  };
+  const prefill = useCallback(<T,>(change: (value: T) => void, value: T) => {
+    // A response can arrive after typing, clearing a field, or submitting.
+    if (live.current && !latest.current.done && !latest.current.submitting && !editedFields.current.has(change)) change(value);
+  }, []);
+  function edit<T>(change: (value: T) => void) {
+    return (value: T) => { editedFields.current.add(change); setEdited(true); change(value); };
+  }
+  return { edit, prefill };
 }

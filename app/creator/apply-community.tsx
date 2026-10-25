@@ -63,7 +63,7 @@ export default function ApplyCommunityScreen() {
   const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  const edit = useApplicationDraftExit(done, submitting);
+  const { edit, prefill } = useApplicationDraftExit(done, submitting);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const [yourName, setYourName] = useState('');
@@ -80,17 +80,20 @@ export default function ApplyCommunityScreen() {
   const [terms, setTerms] = useState(false);
 
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!active || !user) return;
         const { data } = await supabase
           .from('profiles')
           .select('first_name_display')
           .eq('id', user.id)
           .single();
-        if (data?.first_name_display) setYourName((v) => v || data.first_name_display);
-        const grants = await fetchMyGrants();
+        if (!active) return;
+        if (data?.first_name_display) prefill(setYourName, (v) => v || data.first_name_display);
+        const grants = await fetchMyGrants(user.id);
+        if (!active) return;
         const prior = grants.find((g) => g.track === 'community_leader');
         // Screen 47 "resumable applications" (delta matrix): a withdrawn
         // application is the applicant's own reversible choice, not a no --
@@ -98,23 +101,24 @@ export default function ApplyCommunityScreen() {
         // what they already wrote, same as declined/needs_more_info.
         if (prior && ['declined', 'needs_more_info', 'withdrawn'].includes(prior.status)) {
           const a = prior.application as Record<string, any>;
-          if (a.your_name) setYourName(a.your_name);
-          if (a.community_name) setCommunityName(a.community_name);
-          if (a.concept) setConcept(a.concept);
-          if (a.audience) setAudience(a.audience);
-          if (a.cadence) setCadence(a.cadence);
-          if (a.cadence_other) setCadenceOther(a.cadence_other);
-          if (a.why_you) setWhyYou(a.why_you);
-          if (Array.isArray(a.proof_links)) setProofLinks([...a.proof_links, '', '', ''].slice(0, 3));
-          if (a.affiliation) setAffiliation(a.affiliation);
-          if (a.affiliation_detail) setAffiliationDetail(a.affiliation_detail);
-          if (a.responsibility_ack) setResponsibilityAck(true);
+          if (a.your_name) prefill(setYourName, a.your_name);
+          if (a.community_name) prefill(setCommunityName, a.community_name);
+          if (a.concept) prefill(setConcept, a.concept);
+          if (a.audience) prefill(setAudience, a.audience);
+          if (a.cadence) prefill(setCadence, a.cadence);
+          if (a.cadence_other) prefill(setCadenceOther, a.cadence_other);
+          if (a.why_you) prefill(setWhyYou, a.why_you);
+          if (Array.isArray(a.proof_links)) prefill(setProofLinks, [...a.proof_links, '', '', ''].slice(0, 3));
+          if (a.affiliation) prefill(setAffiliation, a.affiliation);
+          if (a.affiliation_detail) prefill(setAffiliationDetail, a.affiliation_detail);
+          if (a.responsibility_ack) prefill(setResponsibilityAck, true);
         }
       } catch {
         // prefill is best-effort
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [prefill]);
 
   const applicationDraft = {
     yourName, communityName, concept, audience, cadence, cadenceOther, whyYou,

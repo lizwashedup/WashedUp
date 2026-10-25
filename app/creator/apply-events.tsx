@@ -68,7 +68,7 @@ export default function ApplyEventsScreen() {
   const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  const edit = useApplicationDraftExit(done, submitting);
+  const { edit, prefill } = useApplicationDraftExit(done, submitting);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const [applicantType, setApplicantType] = useState<string | null>(null);
@@ -86,17 +86,20 @@ export default function ApplyEventsScreen() {
 
   // prefill name from profile, and prior answers if resubmitting
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!active || !user) return;
         const { data } = await supabase
           .from('profiles')
           .select('first_name_display')
           .eq('id', user.id)
           .single();
-        if (data?.first_name_display) setYourName((v) => v || data.first_name_display);
-        const grants = await fetchMyGrants();
+        if (!active) return;
+        if (data?.first_name_display) prefill(setYourName, (v) => v || data.first_name_display);
+        const grants = await fetchMyGrants(user.id);
+        if (!active) return;
         const prior = grants.find((g) => g.track === 'event_host');
         // Screen 47 "resumable applications" (delta matrix): a withdrawn
         // application is the applicant's own reversible choice, not a no --
@@ -104,23 +107,24 @@ export default function ApplyEventsScreen() {
         // what they already wrote, same as declined/needs_more_info.
         if (prior && ['declined', 'needs_more_info', 'withdrawn'].includes(prior.status)) {
           const a = prior.application as Record<string, any>;
-          if (a.applicant_type) setApplicantType(a.applicant_type);
-          if (a.applicant_type_other) setApplicantTypeOther(a.applicant_type_other);
-          if (a.your_name) setYourName(a.your_name);
-          if (a.public_name) setPublicName(a.public_name);
-          if (Array.isArray(a.event_categories)) setCategories(a.event_categories);
-          if (a.frequency) setFrequency(a.frequency);
-          if (Array.isArray(a.proof_links)) setProofLinks([...a.proof_links, '', '', ''].slice(0, 3));
-          if (a.venue_address) setVenueAddress(a.venue_address);
-          if (a.ticketing_today) setTicketing(a.ticketing_today);
-          if (a.ticketing_provider) setTicketingProvider(a.ticketing_provider);
-          if (a.about) setAbout(a.about);
+          if (a.applicant_type) prefill(setApplicantType, a.applicant_type);
+          if (a.applicant_type_other) prefill(setApplicantTypeOther, a.applicant_type_other);
+          if (a.your_name) prefill(setYourName, a.your_name);
+          if (a.public_name) prefill(setPublicName, a.public_name);
+          if (Array.isArray(a.event_categories)) prefill(setCategories, a.event_categories);
+          if (a.frequency) prefill(setFrequency, a.frequency);
+          if (Array.isArray(a.proof_links)) prefill(setProofLinks, [...a.proof_links, '', '', ''].slice(0, 3));
+          if (a.venue_address) prefill(setVenueAddress, a.venue_address);
+          if (a.ticketing_today) prefill(setTicketing, a.ticketing_today);
+          if (a.ticketing_provider) prefill(setTicketingProvider, a.ticketing_provider);
+          if (a.about) prefill(setAbout, a.about);
         }
       } catch {
         // prefill is best-effort
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [prefill]);
 
   const isJustMe = applicantType === 'just_me';
   const isVenue = applicantType === 'venue';

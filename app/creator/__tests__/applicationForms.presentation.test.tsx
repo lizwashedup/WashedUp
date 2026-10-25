@@ -9,7 +9,7 @@ import { ChoiceList, ChipMulti, TermsCheck, SubmitButton, Field } from '../../..
 const mockPrevent = jest.fn(), mockDispatch = jest.fn(), mockCurrent = jest.fn(() => true);
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ dispatch: mockDispatch }), usePreventRemove: (...args: unknown[]) => mockPrevent(...args) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'member', isCurrent: mockCurrent }) }));
-const mockBack = jest.fn(), mockSubmit = jest.fn(), mockReadGrants = jest.fn();
+const mockBack = jest.fn(), mockSubmit = jest.fn(), mockReadGrants = jest.fn(), mockReadProfile = jest.fn();
 let mockUser: { id: string } | null = null;
 jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }), Stack: { Screen: () => null } }));
 jest.mock('../../../components/ProfileButton', () => () => null);
@@ -18,11 +18,11 @@ jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => 
 jest.mock('../../../lib/operatorApplications', () => ({
   ...jest.requireActual('../../../lib/operatorApplications'),
   submitApplication: (...args: unknown[]) => mockSubmit(...args),
-  fetchMyGrants: () => mockReadGrants(),
+  fetchMyGrants: (...args: unknown[]) => mockReadGrants(...args),
 }));
 jest.mock('../../../lib/supabase', () => ({ supabase: {
   auth: { getUser: async () => ({ data: { user: mockUser } }) },
-  from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { first_name_display: 'Maya' } }) }) }) }),
+  from: () => ({ select: () => ({ eq: () => ({ single: () => mockReadProfile() }) }) }),
 } }));
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn(), hapticSuccess: jest.fn(), hapticError: jest.fn(), hapticSelection: jest.fn() }));
 let tree: ReactTestRenderer;
@@ -33,7 +33,7 @@ const select = (label: string, key: string) => act(() => tree.root.findAllByType
 const press = (label: string) => act(() => tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!.props.onPress());
 const copy = () => tree.root.findAllByType(Text).map(node => node.props.children);
 const submit = async () => { await act(async () => tree.root.findByType(SubmitButton).props.onPress()); };
-beforeEach(() => { jest.clearAllMocks(); mockCurrent.mockReturnValue(true); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); mockUser = null; mockReadGrants.mockResolvedValue([]); mockSubmit.mockReset().mockResolvedValue('saved-grant'); });
+beforeEach(() => { jest.clearAllMocks(); mockCurrent.mockReturnValue(true); jest.spyOn(Alert, 'alert').mockImplementation(() => {}); mockUser = null; mockReadProfile.mockResolvedValue({ data: { first_name_display: 'Maya' } }); mockReadGrants.mockResolvedValue([]); mockSubmit.mockReset().mockResolvedValue('saved-grant'); });
 afterEach(() => { if (tree) act(() => tree.unmount()); jest.restoreAllMocks(); });
 
 it.each([[Community, 'Apply for a community'], [Organization, 'Apply for an organization']] as const)('keeps clear invitation copy, review hold and Back for each form', async (Screen, heading) => {
@@ -213,4 +213,65 @@ it('blocks leaving an active submission and releases the guard after success', a
 it('retains exit protection after failed submission', async () => {
   await mount(Community); completeCommunity(); mockSubmit.mockRejectedValue(Error('Offline')); await submit();
   expect(exitGuard()[0]).toBe(true);
+});
+
+
+it('keeps newly typed and deliberately cleared Community answers when saved answers arrive late', async () => {
+  mockUser = { id: 'member' };
+  let resolve!: (grants: unknown[]) => void;
+  mockReadGrants.mockReturnValue(new Promise(done => { resolve = done; }));
+  await mount(Community);
+  fill('Community name', 'New community');
+  fill('Your name', '');
+  select('How often will you meet?', 'weekly');
+  fill('Links to your work: link 1', 'https://example.com/new');
+  await act(async () => resolve([{ track: 'community_leader', status: 'withdrawn', application: {
+    your_name: 'Old name', community_name: 'Old community', cadence: 'monthly',
+    concept: 'Restore this untouched answer', proof_links: ['https://example.com/old'],
+  } }]));
+  expect(input('Community name').props.value).toBe('New community');
+  expect(input('Your name').props.value).toBe('');
+  expect(input('What will your community do?').props.value).toBe('Restore this untouched answer');
+  expect(tree.root.findAllByType(ChoiceList).find(node => node.props.label === 'How often will you meet?')!.props.selected).toBe('weekly');
+  expect(input('Links to your work: link 1').props.value).toBe('https://example.com/new');
+});
+
+it('keeps Organization choices and category removals when saved answers arrive late', async () => {
+  mockUser = { id: 'member' };
+  let resolve!: (grants: unknown[]) => void;
+  mockReadGrants.mockReturnValue(new Promise(done => { resolve = done; }));
+  await mount(Organization);
+  select('Which best describes you?', 'just_me');
+  act(() => tree.root.findByType(ChipMulti).props.onToggle('art'));
+  act(() => tree.root.findByType(ChipMulti).props.onToggle('art'));
+  fill('Tell us about your events', 'New event idea');
+  await act(async () => resolve([{ track: 'event_host', status: 'needs_more_info', application: {
+    applicant_type: 'venue', event_categories: ['music'], about: 'Old idea',
+    frequency: 'monthly', proof_links: ['https://example.com/saved'],
+  } }]));
+  expect(tree.root.findAllByType(ChoiceList).find(node => node.props.label === 'Which best describes you?')!.props.selected).toBe('just_me');
+  expect(tree.root.findByType(ChipMulti).props.selected).toEqual([]);
+  expect(input('Tell us about your events').props.value).toBe('New event idea');
+  expect(input('Links to your work: link 1').props.value).toBe('https://example.com/saved');
+  expect(tree.root.findByType(TermsCheck).props.checked).toBe(false);
+});
+
+
+it.each([Community, Organization])('keeps an intentionally empty name when profile prefill arrives late', async Screen => {
+  mockUser = { id: 'member' };
+  let resolve!: (value: unknown) => void;
+  mockReadProfile.mockReturnValue(new Promise(done => { resolve = done; }));
+  await mount(Screen); fill('Your name', 'Draft name'); fill('Your name', '');
+  await act(async () => resolve({ data: { first_name_display: 'Maya' } }));
+  expect(input('Your name').props.value).toBe('');
+  expect(mockReadGrants).toHaveBeenCalledWith('member');
+});
+
+it.each([Community, Organization])('stops prefill work when its screen unmounts during the profile read', async Screen => {
+  mockUser = { id: 'member' };
+  let resolve!: (value: unknown) => void;
+  mockReadProfile.mockReturnValue(new Promise(done => { resolve = done; }));
+  await mount(Screen); act(() => tree.unmount());
+  await act(async () => resolve({ data: { first_name_display: 'Maya' } }));
+  expect(mockReadGrants).not.toHaveBeenCalled();
 });
