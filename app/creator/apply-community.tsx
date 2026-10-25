@@ -30,6 +30,7 @@ import {
   Confirmation,
 } from '../../components/creator/ApplyFormKit';
 import { COMMUNITY_CADENCES, fetchMyGrants, submitApplication } from '../../lib/operatorApplications';
+import { useApplicationDraftExit } from '../../components/creator/useApplicationDraftExit';
 import { useApplicationFormGuidance } from '../../components/creator/useApplicationFormGuidance';
 import { buildCommunityApplication, missingCommunityApplicationFields } from '../../lib/operatorApplicationForms';
 
@@ -62,6 +63,7 @@ export default function ApplyCommunityScreen() {
   const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const edit = useApplicationDraftExit(done, submitting);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const [yourName, setYourName] = useState('');
@@ -172,13 +174,13 @@ export default function ApplyCommunityScreen() {
             </Text>
             <Text style={styles.reviewNote}>We’ll review new applications when the refreshed Scene is ready.</Text>
 
-            <Field guidance={guidance.field("your name")} appearance={appearance} label="Your name" value={yourName} onChange={setYourName} maxLength={80} />
+            <Field guidance={guidance.field("your name")} appearance={appearance} label="Your name" value={yourName} onChange={edit(setYourName)} maxLength={80} />
 
             <Field guidance={guidance.field("name your community")} appearance={appearance}
               label="Community name"
               hint="A working name is fine."
               value={communityName}
-              onChange={setCommunityName}
+              onChange={edit(setCommunityName)}
               maxLength={80}
             />
 
@@ -186,7 +188,7 @@ export default function ApplyCommunityScreen() {
               label="What will your community do?"
               hint="Describe the activities or interests that will bring people together."
               value={concept}
-              onChange={setConcept}
+              onChange={edit(setConcept)}
               multiline
               maxLength={500}
             />
@@ -195,7 +197,7 @@ export default function ApplyCommunityScreen() {
               label="Who is your community for?"
               hint="Tell us who you hope will join."
               value={audience}
-              onChange={setAudience}
+              onChange={edit(setAudience)}
               multiline
               maxLength={300}
             />
@@ -205,17 +207,17 @@ export default function ApplyCommunityScreen() {
               hint="Choose the schedule you have in mind."
               options={COMMUNITY_CADENCE_LABELS}
               selected={cadence}
-              onSelect={setCadence}
+              onSelect={edit(setCadence)}
             />
             {cadence === 'other' && (
-              <Field guidance={guidance.field("tell us (how often)")} appearance={appearance} label="Your planned schedule" value={cadenceOther} onChange={setCadenceOther} maxLength={120} />
+              <Field guidance={guidance.field("tell us (how often)")} appearance={appearance} label="Your planned schedule" value={cadenceOther} onChange={edit(setCadenceOther)} maxLength={120} />
             )}
 
             <Field guidance={guidance.field("why you?")} appearance={appearance}
               label="Tell us about yourself"
               hint="Share why you want to create this community and any relevant experience."
               value={whyYou}
-              onChange={setWhyYou}
+              onChange={edit(setWhyYou)}
               multiline
               maxLength={300}
             />
@@ -224,7 +226,7 @@ export default function ApplyCommunityScreen() {
               label="Links to your work"
               hint="Add at least one link to your website, social profile, past events, or an existing community."
               links={proofLinks}
-              onChange={setProofLinks}
+              onChange={edit(setProofLinks)}
             />
 
             <ChoiceList guidance={guidance.field("are you connected to a business, venue, or brand?")} appearance={appearance}
@@ -232,10 +234,10 @@ export default function ApplyCommunityScreen() {
               hint="Let us know about any affiliation."
               options={AFFILIATION_OPTIONS}
               selected={affiliation}
-              onSelect={setAffiliation}
+              onSelect={edit(setAffiliation)}
             />
             {affiliation === 'yes' && (
-              <Field guidance={guidance.field("tell us (affiliation)")} appearance={appearance} label="Describe the affiliation" value={affiliationDetail} onChange={setAffiliationDetail} maxLength={200} />
+              <Field guidance={guidance.field("tell us (affiliation)")} appearance={appearance} label="Describe the affiliation" value={affiliationDetail} onChange={edit(setAffiliationDetail)} maxLength={200} />
             )}
 
             <View onLayout={guidance.field("agree a community is a responsibility").onLayout} style={styles.ackField}>
@@ -247,7 +249,7 @@ export default function ApplyCommunityScreen() {
               accessibilityState={{ checked: responsibilityAck }}
               onPress={() => {
                 hapticLight();
-                setResponsibilityAck((v) => !v);
+                edit(setResponsibilityAck)((v) => !v);
               }}
               activeOpacity={0.8}
             >
@@ -265,7 +267,7 @@ export default function ApplyCommunityScreen() {
             <FieldError message={guidance.field("agree a community is a responsibility").error} appearance={appearance} />
             </View>
 
-            <TermsCheck guidance={guidance.field("agree to the terms")} appearance={appearance} checked={terms} onToggle={() => setTerms((t) => !t)} />
+            <TermsCheck guidance={guidance.field("agree to the terms")} appearance={appearance} checked={terms} onToggle={() => edit(setTerms)((t) => !t)} />
             <SubmitButton appearance={appearance} label="Submit application" inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
           </ScrollView>
         </KeyboardAvoidingView>

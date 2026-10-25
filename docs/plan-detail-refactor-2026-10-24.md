@@ -519,3 +519,46 @@ Evidence: `/Users/liz/Desktop/Ops/Audits/2026-10-24-plan-refactor-simulator/inte
 and the fast-forward receipt. User direction is to continue routine authorized
 implementation/testing/integration without asking for each checkpoint; genuine
 product decisions, missing access and release boundaries remain with Liz.
+
+
+## October 25 continuation: production parity and application draft loss
+
+Merged production `c091331a0f2d425be51c2297b0280e7ffd0b2b0a` into this
+branch at `88e9e03`. The Share modal waits for native iOS dismissal before
+continuing a join. Both the new dismissal regressions and the location-widget
+regressions are retained. Five focused suites passed 184 tests; application
+TypeScript passed using pinned Node 20.20.1.
+
+The full-root iPhone 13 / iOS 26.4 diagnostic fixture passed join → share →
+chat with a two-second empty-People response. A fresh populated-People fixture
+also passed invitation skip → chat. Sending `A` and `hello teh` with the
+software keyboard cleared the composer and left it visible above the keyboard.
+An unsent draft survived View Plan → Back, and Back to Chats remained usable.
+The first send probe was invalidated by the fixture replacing caller-assigned
+message IDs; the fixture was corrected to preserve IDs and empty reaction reads,
+and the successful send checks used a fresh Metro cache. No application send
+code was changed for that fixture correction.
+
+Scene application validation focused the first invalid field visibly above the
+keyboard. Native exploration then reproduced silent loss of a typed Community
+name after Back → reopen. Both Community and Organization forms now mark only
+member edits and use a shared native navigation guard: Keep editing retains the
+answers; Discard changes deliberately replays the original navigation action.
+Automatic profile/server prefill does not warn, confirmed submission releases
+the guard, and an active submission asks the applicant to wait. Old confirmations
+cannot navigate after account retirement or unmount. This protects navigation
+within a running app; it does not add disk persistence or crash recovery for
+these application forms.
+
+Five application/form/guidance/service suites passed 72 tests (including nine
+new exit regressions), and application TypeScript passed. The iPhone 13 native
+check verified the prompt, Keep editing retaining the name, and a second Back
+followed by deliberate discard. These tests use fictional services with external
+network requests blocked and the existing private Scheduler diagnostic guard.
+They do not establish production backend behavior, physical keyboard parity,
+Android gesture behavior, or long-run stability.
+
+Local logs, fixture source and screenshots:
+`/Users/liz/Desktop/Ops/Audits/2026-10-25-refactor-journeys/`.
+The emergency join fix is already live separately. This continuation remains
+in draft PR #21; the new application safeguard is not published.
