@@ -81,3 +81,12 @@ it('forwards native dismissal separately from the close request', () => {
   fixture.update({visible:false});
   act(() => tree.root.findByType(Modal).props.onDismiss()); expect(dismissed).toHaveBeenCalledTimes(1);
 });
+
+it('routes Open Chat to its explicit destination once, separately from dismissing the share screen', () => {
+  const openChat = jest.fn();
+  const fixture = mount({ variant: 'joined', onOpenChat: openChat });
+  const open = action(tree.root, 'Open Chat').props.onPress;
+  act(() => { open(); open(); });
+  expect(openChat).toHaveBeenCalledTimes(1);
+  expect(fixture.props.onClose).not.toHaveBeenCalled();
+});

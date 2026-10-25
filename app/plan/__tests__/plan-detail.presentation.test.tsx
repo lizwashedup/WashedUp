@@ -670,3 +670,44 @@ it('keeps Android join completion independent of the iOS-only dismissal event', 
   await mount(); act(() => mockJoinOptions.onJoined({})); act(() => sharing().onClose());
   expect(mockPush).toHaveBeenCalledTimes(1); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
+
+it.each([false, true])('Open Chat goes straight to chat after native dismissal, without optional invitation or ticket sheets (ticketed %s)', async ticketed => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  mockYoursEnabled = true;
+  if (ticketed) mockPlan.tickets_url = 'https://example.test/tickets';
+  await mount(); act(() => mockJoinOptions.onJoined());
+  expect(typeof sharing().onOpenChat).toBe('function');
+  const open = sharing().onOpenChat;
+  act(() => { open(); open(); });
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockNotificationRequest).not.toHaveBeenCalled();
+  const dismissed = sharing().onDismiss;
+  act(() => { dismissed(); dismissed(); });
+  const Ping = require('../../../components/yours/ping/PingAfterPlanModal');
+  expect(tree.root.findByType(Ping.default ?? Ping).props.planId).toBeNull();
+  expect(tree.root.findAllByType(Modal).filter(node => node.props.visible)).toHaveLength(0);
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');
+  expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
+});
+
+it('retires a direct Open Chat transition when the account changes before dismissal', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  await mount(); act(() => mockJoinOptions.onJoined());
+  act(() => sharing().onOpenChat());
+  mockCurrent.mockReturnValue(false);
+  await act(async () => sharing().onDismiss());
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockNotificationRequest).not.toHaveBeenCalled();
+});
+
+it('opens the existing Circle conversation directly on Android when the plan has no own chat', async () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
+  mockYoursEnabled = true;
+  mockPlan.circle_id = 'circle-a';
+  mockContext = { is_circle_plan: true, has_own_chat: false, circle_id: 'circle-a', viewer_is_member: true };
+  await mount(); act(() => mockJoinOptions.onJoined());
+  act(() => sharing().onOpenChat());
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-a');
+  expect(mockPush).toHaveBeenCalledTimes(1);
+});
