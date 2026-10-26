@@ -21,6 +21,7 @@ const event = {
   end_time: '2026-09-19T23:00:00Z', venue: 'Ocean Park', status: 'Published',
   host_user_id: 'creator-a',
 };
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const cleanup = callback(); mockBlur = cleanup; return cleanup; }, [callback]), useRouter: () => ({ back: mockBack, push: mockPush }), useLocalSearchParams: () => ({ id: 'topic-a' }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true, CREATOR_PAGES_ENABLED: true }));

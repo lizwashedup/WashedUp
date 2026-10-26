@@ -25,6 +25,7 @@
  */
 
 import { supabase } from './supabase';
+import { CreatorPageScopeExpired, type CreatorPageScope } from './creatorPageReview';
 
 export interface FollowerBroadcast {
   id: string;
@@ -81,8 +82,12 @@ async function fanoutPushBestEffort(broadcastId: string): Promise<void> {
 export async function sendFollowerBroadcast(
   target: { kind: 'organizer' } | { kind: 'community'; communityId: string },
   body: string,
+  scope?: CreatorPageScope,
 ): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+  if (scope && !scope.isCurrent()) throw new CreatorPageScopeExpired();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (scope && (!scope.isCurrent() || user?.id !== scope.userId)) throw new CreatorPageScopeExpired();
+  if (authError) throw authError;
   if (!user) throw new Error('Not signed in');
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Message is empty');
@@ -114,11 +119,18 @@ export async function sendFollowerBroadcast(
 export async function sendFollowerBroadcastTestToSelf(
   target: { kind: 'organizer' } | { kind: 'community'; communityId: string },
   body: string,
+  scope?: CreatorPageScope,
 ): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Message is empty');
   if (trimmed.length > 2000) throw new Error('Message is too long');
 
+  if (scope) {
+    if (!scope.isCurrent()) throw new CreatorPageScopeExpired();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (!scope.isCurrent() || user?.id !== scope.userId) throw new CreatorPageScopeExpired();
+    if (error) throw error;
+  }
   const { error } = await supabase.rpc('send_follower_broadcast_test_to_self', {
     p_target_kind: target.kind,
     p_community_id: target.kind === 'community' ? target.communityId : null,

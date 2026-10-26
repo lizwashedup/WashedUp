@@ -2,12 +2,13 @@ import { ChatSizedText } from './chat/ChatSizedText';
 import { CreatorActionFill } from './creator/CreatorActionFill';
 import { useAfterglowFonts } from '../hooks/useAfterglowFonts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useIsFocused } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { Bell, User } from 'lucide-react-native';
 import React, { useRef, useState } from 'react';
-import { AppState, AppStateStatus, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, AppStateStatus, Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors, { SceneDetailColors } from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import { INBOX_COUNT_KEY, PROFILE_PHOTO_KEY } from '../constants/QueryKeys';
@@ -64,27 +65,6 @@ export default function ProfileButton({ surface = 'light', compact = false }: { 
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const hasCheckedPrompt = useRef(false);
 
-  const handleProfilePress = async () => {
-    if (compact) { router.push('/(tabs)/profile'); return; }
-    if (!hasCheckedPrompt.current) {
-      const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
-      hasCheckedPrompt.current = true;
-      if (!seen) {
-        setShowProfilePrompt(true);
-        return;
-      }
-    }
-    router.push('/(tabs)/profile');
-  };
-
-  const dismissPrompt = (navigate: boolean) => {
-    setShowProfilePrompt(false);
-    AsyncStorage.setItem(PROFILE_PROMPT_KEY, 'true').catch(() => {});
-    if (navigate) {
-      router.push('/(tabs)/profile?openEdit=true' as any);
-    }
-  };
-
   const { data: photoUrl, refetch } = useQuery({
     queryKey: PROFILE_PHOTO_KEY,
     queryFn: fetchProfilePhoto,
@@ -111,6 +91,61 @@ export default function ProfileButton({ surface = 'light', compact = false }: { 
     },
     staleTime: 60_000,
   });
+
+  const focused = useIsFocused();
+  const visit = useRef(0);
+  const active = useRef(false);
+  const profileBusy = useRef(false);
+  const promptClosing = useRef(false);
+  const afterDismiss = useRef<(() => void) | null>(null);
+  React.useLayoutEffect(() => {
+    visit.current++;
+    active.current = focused;
+    profileBusy.current = false;
+    promptClosing.current = false;
+    afterDismiss.current = null;
+    hasCheckedPrompt.current = false;
+    setShowProfilePrompt(false);
+    return () => { active.current = false; visit.current++; afterDismiss.current = null; };
+  }, [focused, userId]);
+
+  const handleProfilePress = async () => {
+    if (!active.current || profileBusy.current) return;
+    profileBusy.current = true;
+    const started = visit.current;
+    const isCurrent = () => active.current && visit.current === started;
+    if (compact) { router.push('/(tabs)/profile'); return; }
+    if (!hasCheckedPrompt.current) {
+      const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
+      if (!isCurrent()) return;
+      hasCheckedPrompt.current = true;
+      if (!seen) {
+        setShowProfilePrompt(true);
+        return;
+      }
+    }
+    if (isCurrent()) router.push('/(tabs)/profile');
+  };
+
+  const finishPromptDismissal = () => {
+    const next = afterDismiss.current;
+    afterDismiss.current = null;
+    next?.();
+  };
+  const dismissPrompt = (navigate: boolean) => {
+    if (!showProfilePrompt || promptClosing.current || !active.current) return;
+    promptClosing.current = true;
+    const started = visit.current;
+    afterDismiss.current = () => {
+      if (!active.current || visit.current !== started) return;
+      promptClosing.current = false;
+      if (navigate) router.push('/(tabs)/profile?openEdit=true' as any);
+      else profileBusy.current = false;
+    };
+    setShowProfilePrompt(false);
+    AsyncStorage.setItem(PROFILE_PROMPT_KEY, 'true').catch(() => {});
+    if (Platform.OS !== 'ios') finishPromptDismissal();
+  };
 
   // Staggered safety-net retries so the avatar appears even if the photo
   // URL lags right after login/onboarding. Only needed while the photo is
@@ -181,16 +216,19 @@ export default function ProfileButton({ surface = 'light', compact = false }: { 
         transparent
         animationType="fade"
         onRequestClose={() => dismissPrompt(false)}
+        onDismiss={finishPromptDismissal}
         statusBarTranslucent
       >
-        <Pressable style={styles.promptOverlay} onPress={() => dismissPrompt(false)}>
-          <Pressable style={styles.promptCard} onPress={() => {}}>
+        <Pressable accessible={false} style={styles.promptOverlay} onPress={() => dismissPrompt(false)}>
+          <Pressable accessible={false} accessibilityViewIsModal style={styles.promptCard} onPress={() => {}}>
             <Text style={[styles.promptTitle,{fontFamily:promptFonts.display}]}>Complete your profile!</Text>
             <Text style={[styles.promptBody,{fontFamily:promptFonts.regular}]}>
               Tell people a little about you so they get excited to meet you.
             </Text>
             <TouchableOpacity
               style={styles.promptButton}
+              accessibilityRole="button"
+              accessibilityLabel="Let's do it"
               onPress={() => dismissPrompt(true)}
               activeOpacity={0.8}
             >

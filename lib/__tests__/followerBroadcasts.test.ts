@@ -168,3 +168,24 @@ describe('getMyFollowerBroadcastHistory', () => {
     await expect(getMyFollowerBroadcastHistory({ kind: 'organizer' })).rejects.toThrow('boom');
   });
 });
+
+describe('follower send account/visit ownership', () => {
+  const scope = { userId: 'user-1', isCurrent: () => true };
+  it('rejects a changed account before inserting the draft', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-2' } } });
+    await expect(sendFollowerBroadcast({ kind: 'organizer' }, 'draft', scope)).rejects.toThrow();
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+  it('rejects a retired visit after a delayed identity read', async () => {
+    let current = true;
+    mockGetUser.mockImplementation(async () => { current = false; return { data: { user: { id: 'user-1' } } }; });
+    await expect(sendFollowerBroadcast({ kind: 'organizer' }, 'draft', { ...scope, isCurrent: () => current })).rejects.toThrow();
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+  it('does not dispatch test-to-self after an account change', async () => {
+    const { sendFollowerBroadcastTestToSelf } = require('../followerBroadcasts');
+    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-2' } } });
+    await expect(sendFollowerBroadcastTestToSelf({ kind: 'organizer' }, 'draft', scope)).rejects.toThrow();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
