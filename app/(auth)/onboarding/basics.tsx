@@ -108,6 +108,7 @@ export default function OnboardingBasicsScreen() {
   const editedFieldsRef = useRef<Set<string>>(new Set());
   const markEdited = (field: string) => { editedFieldsRef.current.add(field); };
   const visitRef = useRef({ active: true, userId: null as string | null });
+  const authRevisionRef = useRef(0);
   const acceptAccount = (userId: string) => {
     const visit = visitRef.current;
     if (!visit.active) return false;
@@ -125,11 +126,15 @@ export default function OnboardingBasicsScreen() {
     visitRef.current = visit;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (visitRef.current !== visit || !visit.active) return;
+      authRevisionRef.current += 1;
       if (event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY'
         || (visit.userId && session?.user?.id !== visit.userId)) {
         visit.active = false;
         cancelPendingSave('basics');
-      } else if (session?.user) acceptAccount(session.user.id);
+      } else if (session?.user) {
+        acceptAccount(session.user.id);
+        setSaveError(previous => previous === 'session expired. signing you out…' ? null : previous);
+      }
     });
     return () => { visit.active = false; subscription.unsubscribe(); };
   }, []);
@@ -388,6 +393,7 @@ export default function OnboardingBasicsScreen() {
     setSaveError(null);
     setLoading(true);
     try {
+      const authRevision = authRevisionRef.current;
       const { user, resolved } = await getUserBounded();
       if (!isCurrent()) return;
       if (!user) {
@@ -397,9 +403,15 @@ export default function OnboardingBasicsScreen() {
           setSaveError("couldn't reach the server. try again.");
           return;
         }
+        // A renewed session invalidates an older missing-user read and its
+        // delayed sign-out, even when the member ID stays the same.
+        if (authRevisionRef.current !== authRevision) return;
         setSaveError('session expired. signing you out…');
         setTimeout(() => {
-          if (isCurrent()) { clearAllDrafts(); supabase.auth.signOut(); }
+          if (isCurrent() && authRevisionRef.current === authRevision) {
+            clearAllDrafts();
+            supabase.auth.signOut();
+          }
         }, 1500);
         return;
       }

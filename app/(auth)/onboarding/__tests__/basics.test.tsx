@@ -244,6 +244,56 @@ describe('basics.tsx onboarding-draft regressions', () => {
     }
   });
 
+  it.each(['SIGNED_IN', 'TOKEN_REFRESHED'])('does not sign out a renewed session after %s while expiry feedback is pending', async (event) => {
+    const tree = await mountAdultDraft('member@example.com');
+    (supabase.auth.signOut as jest.Mock).mockClear();
+    (supabase.auth.getUser as jest.Mock).mockResolvedValue({ data: { user: null }, error: null });
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    await act(async () => {
+      for (const [callback] of (supabase.auth.onAuthStateChange as jest.Mock).mock.calls) {
+        callback(event, { user: { id: 'user-a' } });
+      }
+      jest.advanceTimersByTime(1500);
+    });
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem('wu.onboardingDraft.user-a.basics.v1')).not.toBeNull();
+    expect(tree.root.findAllByType(require('react-native').Text).map(n => n.props.children))
+      .not.toContain('session expired. signing you out…');
+    await act(async () => tree.unmount());
+  });
+
+  it('ignores a missing-user response from before the session renewed', async () => {
+    const tree = await mountAdultDraft('member@example.com');
+    (supabase.auth.signOut as jest.Mock).mockClear();
+    let resolve!: (value: unknown) => void;
+    (supabase.auth.getUser as jest.Mock).mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = continueButton(tree).props.onPress(); });
+    await act(async () => {
+      for (const [callback] of (supabase.auth.onAuthStateChange as jest.Mock).mock.calls) {
+        callback('TOKEN_REFRESHED', { user: { id: 'user-a' } });
+      }
+      resolve({ data: { user: null }, error: null });
+      await pending;
+      jest.advanceTimersByTime(1500);
+    });
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+    expect(tree.root.findAllByType(require('react-native').Text).map(n => n.props.children))
+      .not.toContain('session expired. signing you out…');
+    await act(async () => tree.unmount());
+  });
+
+  it('still exits a confirmed missing session if no newer session arrives', async () => {
+    const tree = await mountAdultDraft('member@example.com');
+    (supabase.auth.signOut as jest.Mock).mockClear();
+    (supabase.auth.getUser as jest.Mock).mockResolvedValue({ data: { user: null }, error: null });
+    await act(async () => { await continueButton(tree).props.onPress(); });
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(1500); });
+    expect(supabase.auth.signOut).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
   it('never overwrites a real draft with blanks when getUser() times out', async () => {
     // A real draft already exists on disk before this screen ever mounts --
     // e.g. saved on a previous, still-unsubmitted attempt.

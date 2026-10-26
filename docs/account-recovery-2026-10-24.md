@@ -29,3 +29,22 @@ Evidence and repeatable harnesses: `/Users/liz/Desktop/Ops/Audits/2026-10-24-acc
 Source: `codex/plan-detail-refactor`, based on `e5a8abe`, including the earlier plan refactor and merged Scene cards. The six original account-recovery files were copied from `/Users/liz/Desktop/WashedUp_HQ/washedup-foundation-recovery-20261019` only after verifying their base files were unchanged. Original patch bytes are preserved in the audit folder and the source worktree remains untouched. Push-monitor/configuration/review-only SQL changes from that worktree are separate and are not included in this account-recovery commit.
 
 This is a verified local candidate. No remote push, production data/configuration change, SMS/email, native build or app publication occurred. Live provider behavior and current production schema parity remain release checks.
+
+## Isolated release preparation, October 25
+
+The account changes are now isolated from PR21 on
+`codex/account-recovery-isolated-20261026`, based on published main `1eee9bf`.
+This branch includes no plan refactor, push-monitor configuration or SQL.
+The earlier native/database evidence above remains historical; final isolated
+source and live provider behavior must be checked before release.
+
+The refreshed review found a further same-account session race: a delayed
+missing-session sign-out remained active after SIGNED_IN or TOKEN_REFRESHED.
+Two new regressions failed against the PR21 candidate. An auth revision now
+invalidates old missing-user responses and delayed sign-out when newer auth
+state arrives, preserving the draft and clearing outdated expiry feedback.
+Coverage also retains genuine missing-session exit without a newer session.
+The isolated four-suite check passes 86 tests and TypeScript passes.
+Evidence: `/Users/liz/Desktop/Ops/Audits/2026-10-25-salsa-freeze/account-renewal-red.log`
+and `account-recovery-isolated-green.log` in the same directory. This patch has
+not been published. PR31/34 ticket fixes remain a separate release batch.
