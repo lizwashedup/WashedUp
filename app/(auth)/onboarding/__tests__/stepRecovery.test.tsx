@@ -15,7 +15,7 @@ jest.mock('../../../../lib/onboardingDraft', () => ({
 }));
 jest.mock('../../../../lib/supabase', () => ({
   supabase: {
-    auth: { onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })), signOut: jest.fn() },
+    auth: { getUser: jest.fn(async () => ({data:{user:{id:'member-a'}}})), onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })), signOut: jest.fn() },
     from: jest.fn(),
   },
 }));
@@ -27,6 +27,7 @@ import ProgressHead from '../../../../components/onboarding/ProgressHead';
 import { BrandedAlert } from '../../../../components/BrandedAlert';
 import Location from '../la-check';
 import Referral from '../referral';
+import Waitlisted from '../waitlisted';
 
 function deferred() {
   let resolve!: (result: any) => void;
@@ -34,7 +35,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-describe.each(['resident', 'visitor', 'waitlist', 'referral'] as const)('%s signup recovery', (step) => {
+describe.each(['resident', 'visitor', 'waitlist', 'referral', 'waitlisted'] as const)('%s signup recovery', (step) => {
   let tree: ReturnType<typeof create>;
   let unmounted: boolean;
   let read: jest.Mock, write: jest.Mock, update: jest.Mock, filter: jest.Mock;
@@ -80,7 +81,7 @@ describe.each(['resident', 'visitor', 'waitlist', 'referral'] as const)('%s sign
       };
       return chain;
     });
-    await act(async () => { tree = create(step === 'referral' ? <Referral /> : <Location />); });
+    await act(async () => { tree = create(step === 'referral' ? <Referral /> : step === 'waitlisted' ? <Waitlisted /> : <Location />); });
     await act(async () => { auth('INITIAL_SESSION', 'member-a'); });
     if (step === 'waitlist') await act(async () => { button(/bring washedup|another city/).props.onPress(); });
   });
@@ -102,7 +103,7 @@ describe.each(['resident', 'visitor', 'waitlist', 'referral'] as const)('%s sign
     expect(clearDraft).toHaveBeenCalledWith(screen);
   });
 
-  it('retires the request immediately on Back before the screen unmounts', async () => {
+  if (step !== 'waitlisted') it('retires the request immediately on Back before the screen unmounts', async () => {
     const slow = deferred(); (getUserBounded as jest.Mock).mockReturnValueOnce(slow.promise);
     const { pending } = await start();
     await act(async () => { tree.root.findByType(ProgressHead).props.onBack(); });
@@ -112,7 +113,7 @@ describe.each(['resident', 'visitor', 'waitlist', 'referral'] as const)('%s sign
     expect(clearDraft).not.toHaveBeenCalled();
   });
 
-  it.each(['Back', 'unmount', 'account switch'])('ignores a late save receipt after %s', async (exit) => {
+  it.each(step === 'waitlisted' ? ['unmount', 'account switch'] : ['Back', 'unmount', 'account switch'])('ignores a late save receipt after %s', async (exit) => {
     const slow = deferred(); write.mockReturnValueOnce(slow.promise);
     const { pending } = await start();
     expect(update).toHaveBeenCalledTimes(1);

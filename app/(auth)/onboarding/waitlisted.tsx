@@ -9,24 +9,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
-import { getUserBounded } from '../../../lib/authGate';
 import { clearAllDrafts } from '../../../lib/onboardingDraft';
-import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
-import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
+import { useOnboardingStepSave } from '../../../hooks/useOnboardingStepSave';
+import { BrandedAlert } from '../../../components/BrandedAlert';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 
 export default function OnboardingWaitlistedScreen() {
   const [city, setCity] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{
-    title: string;
-    message: string;
-    buttons?: BrandedAlertButton[];
-  } | null>(null);
+  const { loading, saveError, clearSaveError, save } = useOnboardingStepSave('laCheck');
 
   useEffect(() => {
     (async () => {
@@ -41,43 +34,14 @@ export default function OnboardingWaitlistedScreen() {
     })();
   }, []);
 
-  const submit = useSubmitGuard();
-
   // Real gap found and fixed 2026-09-06: this screen used to be sign-out-only,
   // no way back for someone who mistakenly said "no" or is now actually in LA.
   // Every one of those became a manual support email + hand-edited profile row
   // (real incident: Kendall Ward-wells, 2026-09-06). Mirrors the exact update
   // la-check.tsx's "yes, i live here" path already does.
   const handleImInLA = async () => {
-    if (loading) return;
-    if (!submit.tryAcquire()) return;
     hapticLight();
-    setLoading(true);
-    try {
-      const { user, resolved } = await getUserBounded();
-      if (!user) {
-        if (!resolved) {
-          setAlertInfo({ title: 'something went wrong', message: "couldn't reach the server. try again." });
-          return;
-        }
-        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
-        await clearAllDrafts();
-        await supabase.auth.signOut();
-        return;
-      }
-      const { error } = await supabase
-        .from('profiles')
-        .update({ city: 'Los Angeles', is_visitor: false, onboarding_status: 'referral' })
-        .eq('id', user.id);
-      if (error) {
-        setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
-        return;
-      }
-      router.replace('/onboarding/referral');
-    } finally {
-      submit.release();
-      setLoading(false);
-    }
+    await save({ city: 'Los Angeles', is_visitor: false, onboarding_status: 'referral' }, '/onboarding/referral');
   };
 
   const handleSignOut = async () => {
@@ -134,11 +98,10 @@ export default function OnboardingWaitlistedScreen() {
         </TouchableOpacity>
       </View>
       <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
-        buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        visible={!!saveError}
+        title="something went wrong"
+        message={saveError ?? undefined}
+        onClose={clearSaveError}
       />
     </SafeAreaView>
   );
