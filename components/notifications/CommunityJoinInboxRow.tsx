@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useInboxNavigation, type InboxNavigate } from '../../hooks/useInboxNavigation';
 import { ScaledText as Text } from '../ScaledText';
 import { useObservedUser } from '../../hooks/useObservedUser';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
@@ -8,9 +8,9 @@ import Colors, { AfterglowColors as C } from '../../constants/Colors';
 import { AfterglowType as T } from '../../constants/Typography';
 import { communityJoinNoticeRoute, loadCommunityJoinNotice, markCommunityJoinNoticeRead, CommunityJoinNoticeIdentityError, type CommunityJoinNoticeType } from '../../lib/communityJoinNotification';
 
-type Props = { notice: { id: string; type: CommunityJoinNoticeType; title: string; body: string | null }; userId: string | null; visible: boolean; onClose(): void; onRead(): void };
-export function CommunityJoinInboxRow({ notice, userId, visible, onClose, onRead }: Props) {
-  const router = useRouter(), viewer = useObservedUser(), { fonts } = useAfterglowFonts();
+type Props = { notice: { id: string; type: CommunityJoinNoticeType; title: string; body: string | null }; userId: string | null; visible: boolean; onClose(): void; onNavigate?: InboxNavigate; onRead(): void };
+export function CommunityJoinInboxRow({ notice, userId, visible, onClose, onRead, onNavigate }: Props) {
+  const navigate = useInboxNavigation(onClose, onNavigate), viewer = useObservedUser(), { fonts } = useAfterglowFonts();
   const visit = useMemo(() => ({}), [notice.id, notice.type, userId, visible, viewer.epoch, viewer.isCurrent]);
   const committed = useRef<object | null>(null);
   useLayoutEffect(() => { committed.current = visit; return () => { if (committed.current === visit) committed.current = null; }; }, [visit]);
@@ -36,7 +36,7 @@ export function CommunityJoinInboxRow({ notice, userId, visible, onClose, onRead
       catch (error) { if (error instanceof CommunityJoinNoticeIdentityError || !route) throw error; }
       if (!scope.isCurrent()) return;
       if (read) onRead();
-      if (route) { onClose(); router.push(route as never); }
+      if (route) { navigate(route as never); }
     } catch (error) {
       if (scope.isCurrent()) setState({ visit, busy: false, error: error instanceof Error ? error.message : 'Couldn’t check this community update.' });
     } finally {

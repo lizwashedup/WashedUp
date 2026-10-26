@@ -106,6 +106,7 @@ export default function ProfileButton({ surface = 'light', compact = false }: { 
     afterDismiss.current = null;
     hasCheckedPrompt.current = false;
     setShowProfilePrompt(false);
+    if (!focused) setShowInbox(false);
     return () => { active.current = false; visit.current++; afterDismiss.current = null; };
   }, [focused, userId]);
 

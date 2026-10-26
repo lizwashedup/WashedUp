@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useInboxNavigation, type InboxNavigate } from '../../hooks/useInboxNavigation';
 import Colors, { AfterglowColors as C } from '../../constants/Colors';
 import { AfterglowType as T } from '../../constants/Typography';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../creator/CreatorActionFill';
 import { loadCommunityNoticeRoute, markCommunityNoticeRead } from '../../lib/communityNoticeDestination';
 
-type Props = { notice: { id: string; title: string; body: string | null }; userId: string | null; visible: boolean; enabled: boolean; onClose(): void; onRead(): void };
-export function CommunityNoticeInboxRow({ notice, userId, visible, enabled, onClose, onRead }: Props) {
-  const router = useRouter(), { fonts } = useAfterglowFonts();
+type Props = { notice: { id: string; title: string; body: string | null }; userId: string | null; visible: boolean; enabled: boolean; onClose(): void; onNavigate?: InboxNavigate; onRead(): void };
+export function CommunityNoticeInboxRow({ notice, userId, visible, enabled, onClose, onRead, onNavigate }: Props) {
+  const navigate = useInboxNavigation(onClose, onNavigate), { fonts } = useAfterglowFonts();
   const visit = useMemo(() => ({}), [notice.id, userId, visible, enabled]);
   const latest = useRef(visit); latest.current = visit;
   const mounted = useRef(false);
@@ -20,7 +20,7 @@ export function CommunityNoticeInboxRow({ notice, userId, visible, enabled, onCl
   const current = state?.visit === visit ? state : undefined;
   const act = (action: 'open' | 'dismiss') => {
     if (!scope.isCurrent() || operation.current === visit) return;
-    if (action === 'open' && !enabled) { onClose(); router.push('/(tabs)/chats'); return; }
+    if (action === 'open' && !enabled) { navigate('/(tabs)/chats'); return; }
     operation.current = visit; setState({ visit, busy: action });
     void (async () => {
       try {
@@ -38,7 +38,7 @@ export function CommunityNoticeInboxRow({ notice, userId, visible, enabled, onCl
             if (error instanceof Error && error.name === 'CommunityNoticeIdentityError') throw error;
           }
           if (!scope.isCurrent()) return;
-          onRead(); onClose(); router.push(route as never);
+          onRead(); navigate(route as never);
         }
       } catch (error) {
         if (scope.isCurrent()) setState({ visit, error: error instanceof Error ? error.message : 'Couldn’t open this conversation. Try again.' });

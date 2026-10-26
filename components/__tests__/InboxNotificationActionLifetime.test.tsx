@@ -15,7 +15,7 @@ const push=jest.fn(),close=jest.fn(),alert=jest.fn(),refresh=jest.fn(),invalidat
 let handler:(...args:any[])=>Promise<void>,tree:ReactTestRenderer;
 function Harness({id='alice',visible=true}:{id?:string;visible?:boolean}){
  const notificationScope=useInboxNotificationScope(id,visible);
- const context:any={notificationScope,useCallback:(f:any)=>f,hapticLight:()=>{},supabase,refetchNotifs:refresh,queryClient:{invalidateQueries:invalidate},INBOX_COUNT_KEY:['inbox'],WAITLIST_MANAGER_KEY:(id:string)=>['waitlist',id],YOURS_NOTIF_TYPES:new Set(['people_request','people_request_accepted','referral_joined']),YOURS_PAGE_ENABLED:true,COMMUNITIES_ENABLED:true,userId:id,router:{push},onClose:close,setAlertInfo:alert};
+ const context:any={notificationScope,useCallback:(f:any)=>f,hapticLight:()=>{},supabase,refetchNotifs:refresh,queryClient:{invalidateQueries:invalidate},INBOX_COUNT_KEY:['inbox'],WAITLIST_MANAGER_KEY:(id:string)=>['waitlist',id],YOURS_NOTIF_TYPES:new Set(['people_request','people_request_accepted','referral_joined']),YOURS_PAGE_ENABLED:true,COMMUNITIES_ENABLED:true,userId:id,closingRef:{current:false},notificationActions:{current:new Set()},navigateAfterDismiss:(route:string)=>{close();push(route);},router:{push},onClose:close,setAlertInfo:alert};
  vm.runInNewContext(code,context);handler=context.handler;return null;
 }
 const held=()=>{let resolve!:(v:any)=>void,reject!:(v:any)=>void;const promise=new Promise<any>((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};

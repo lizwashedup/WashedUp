@@ -3,6 +3,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { Modal, Platform, Pressable, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ProfileButton from '../ProfileButton';
+import InboxModal from '../InboxModal';
 const mockPush = jest.fn();
 let mockFocused = true;
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
@@ -69,4 +70,12 @@ it('opens edit on Android without waiting for an iOS dismissal event', async () 
   await act(async () => button('Profile').props.onPress());
   act(() => confirm().props.onPress());
   expect(mockPush).toHaveBeenCalledTimes(1);
+});
+
+it('closes the inbox when the header loses focus', () => {
+  act(() => button('Inbox').props.onPress());
+  expect(tree!.root.findByType(InboxModal).props.visible).toBe(true);
+  mockFocused = false;
+  act(() => tree!.update(<ProfileButton />));
+  expect(tree!.root.findByType(InboxModal).props.visible).toBe(false);
 });
