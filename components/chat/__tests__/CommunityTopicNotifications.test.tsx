@@ -13,6 +13,7 @@ const mockHaptic = jest.fn();
 // These cases exercise the legacy inline bell; compact menu wiring is covered in CommunityTopicHeader.
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: false, CREATOR_PAGES_ENABLED: false }));
 const mockViewer = { viewerId: 'alice', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() };
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ back: jest.fn(), push: jest.fn() }), useLocalSearchParams: () => ({ id: mockTopicId }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => mockViewer }));

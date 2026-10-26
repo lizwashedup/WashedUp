@@ -6,6 +6,7 @@ import { Text, TextInput, TouchableOpacity } from 'react-native';
 const mockCreate = jest.fn(), mockAccess = jest.fn(), mockFind = jest.fn(), mockSelect = jest.fn();
 const mockPush = jest.fn(), mockReplace = jest.fn(), mockDismissTo = jest.fn();
 const mockInvalidate = jest.fn();
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ router: { push: (...a: unknown[]) => mockPush(...a), replace: (...a: unknown[]) => mockReplace(...a), dismissTo: (...a: unknown[]) => mockDismissTo(...a), back: jest.fn() }, Stack: { Screen: () => null } }));
 jest.mock('@tanstack/react-query', () => ({ useQuery: () => ({ isFetchedAfterMount: true, data: { ledCommunities: [{ id: 'older-community' }] } }), useQueryClient: () => ({ invalidateQueries: (...a: unknown[]) => mockInvalidate(...a) }) }));
 jest.mock('../../../lib/creatorMode', () => ({ getCreatorAccess: (...a: unknown[]) => mockAccess(...a), isLeaderAccess: () => true, createCommunity: (...a: unknown[]) => mockCreate(...a), suggestHandle: () => 'new-community', findLedCommunityByHandle: (...a: unknown[]) => mockFind(...a), HANDLE_SHAPE: /^[a-z-]{3,40}$/ }));

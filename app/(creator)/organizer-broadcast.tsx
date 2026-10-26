@@ -6,7 +6,7 @@
  * same getFollowerCount RPC organizer-home.tsx already uses.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -18,12 +18,39 @@ import { EventAction, EventSpacing, EventSurface, EventType } from '../../consta
 import { FontSizes, LineHeights } from '../../constants/Typography';
 import { getFollowerCount } from '../../lib/organizerFollows';
 import { sendFollowerBroadcast, sendFollowerBroadcastTestToSelf } from '../../lib/followerBroadcasts';
-import { supabase } from '../../lib/supabase';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
 
 const MAX_LEN = 2000;
 
 export default function OrganizerBroadcastScreen() {
+  const { scope, account } = useCreatorPageScope('follower-update');
+  return <BroadcastComposer key={account.epoch} scope={scope} account={account} />;
+}
+
+function BroadcastComposer({ scope, account }: Pick<ReturnType<typeof useCreatorPageScope>, 'scope' | 'account'>) {
   const router = useRouter();
+  const mounted = useRef(false);
+  const leaving = useRef(false);
+  const busy = useRef(false);
+  const confirmed = useRef(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const testTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimers = () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    if (testTimer.current) clearTimeout(testTimer.current);
+  };
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearTimers(); };
+  }, []);
+  useEffect(() => () => { clearTimers(); }, [scope]);
+  const leave = () => {
+    if (leaving.current) return;
+    leaving.current = true;
+    clearTimers();
+    router.back();
+  };
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +58,7 @@ export default function OrganizerBroadcastScreen() {
   const [testSending, setTestSending] = useState(false);
   const [testSent, setTestSent] = useState(false);
 
-  const { data: userId = null } = useQuery({
-    queryKey: ['my-user-id'],
-    queryFn: async () => (await supabase.auth.getUser()).data.user?.id ?? null,
-    staleTime: Infinity,
-  });
+  const userId = account.viewerId;
 
   const { data: followerCount = null } = useQuery({
     queryKey: ['organizer-follower-count', userId],
@@ -45,36 +68,43 @@ export default function OrganizerBroadcastScreen() {
   });
 
   const trimmed = body.trim();
-  const canSend = trimmed.length > 0 && trimmed.length <= MAX_LEN && !sending;
-  const canSendTest = trimmed.length > 0 && trimmed.length <= MAX_LEN && !sending && !testSending;
+  const canSend = !!scope && !account.isLoading && !account.error && trimmed.length > 0 && trimmed.length <= MAX_LEN && !sending && !testSending && !sent;
+  const canSendTest = canSend;
 
-  const handleSend = async () => {
-    if (!canSend) return;
-    setSending(true);
+  const handleSend = async (test = false) => {
+    if (!canSend || !scope?.isCurrent() || busy.current || confirmed.current || leaving.current) return;
+    // A ref closes the same-frame gap before React renders disabled buttons.
+    busy.current = true;
+    const attempt: CreatorPageScope = {
+      userId: scope.userId,
+      isCurrent: () => mounted.current && !leaving.current && scope.isCurrent(),
+    };
+    if (testTimer.current) clearTimeout(testTimer.current);
+    setTestSent(false);
+    if (test) setTestSending(true); else setSending(true);
     setError(null);
     try {
-      await sendFollowerBroadcast({ kind: 'organizer' }, trimmed);
-      setSent(true);
-      setTimeout(() => router.back(), 900);
+      if (test) await sendFollowerBroadcastTestToSelf({ kind: 'organizer' }, trimmed, attempt);
+      else await sendFollowerBroadcast({ kind: 'organizer' }, trimmed, attempt);
+      // A committed send stays final even if the screen blurred while waiting.
+      if (!test) confirmed.current = true;
+      if (!mounted.current) return;
+      if (test) {
+        setTestSent(true);
+        testTimer.current = setTimeout(() => {
+          if (attempt.isCurrent()) setTestSent(false);
+        }, 2500);
+      } else {
+        setSent(true);
+        if (attempt.isCurrent()) exitTimer.current = setTimeout(() => {
+          if (attempt.isCurrent()) leave();
+        }, 900);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'could not send. try again.');
+      if (attempt.isCurrent()) setError(e instanceof Error ? e.message : 'could not send. try again.');
     } finally {
-      setSending(false);
-    }
-  };
-
-  const handleSendTest = async () => {
-    if (!canSendTest) return;
-    setTestSending(true);
-    setError(null);
-    try {
-      await sendFollowerBroadcastTestToSelf({ kind: 'organizer' }, trimmed);
-      setTestSent(true);
-      setTimeout(() => setTestSent(false), 2500);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'could not send test. try again.');
-    } finally {
-      setTestSending(false);
+      busy.current = false;
+      if (mounted.current) { setSending(false); setTestSending(false); }
     }
   };
 
@@ -82,7 +112,7 @@ export default function OrganizerBroadcastScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={leave}
           hitSlop={12}
           style={styles.backBtn}
           accessibilityRole="button"
@@ -120,19 +150,22 @@ export default function OrganizerBroadcastScreen() {
             placeholderTextColor={Colors.tertiary}
             multiline
             maxLength={MAX_LEN}
-            editable={!sending && !sent}
+            editable={!!scope && !account.isLoading && !account.error && !sending && !testSending && !sent}
             accessibilityLabel="Update for your followers"
           />
           <Text style={styles.counter} accessibilityLabel={`${trimmed.length} of ${MAX_LEN} characters used`}>
             {trimmed.length}/{MAX_LEN}
           </Text>
 
+          {account.error && <TouchableOpacity onPress={() => void account.retry()} accessibilityRole="button" accessibilityLabel="Retry account check">
+            <Text style={styles.errorText}>Couldn’t check your account. Tap to retry.</Text>
+          </TouchableOpacity>}
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           {MESSAGE_TEST_SEND_ENABLED && (
             <TouchableOpacity
               style={[styles.testBtn, !canSendTest && styles.testBtnDisabled]}
-              onPress={handleSendTest}
+              onPress={() => handleSend(true)}
               disabled={!canSendTest}
               activeOpacity={0.85}
               accessibilityRole="button"
@@ -149,7 +182,7 @@ export default function OrganizerBroadcastScreen() {
 
           <TouchableOpacity
             style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
-            onPress={handleSend}
+            onPress={() => handleSend()}
             disabled={!canSend}
             activeOpacity={0.85}
             accessibilityRole="button"

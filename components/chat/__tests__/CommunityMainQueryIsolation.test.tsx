@@ -15,6 +15,7 @@ let mockOnline = true;
 const mockAppListeners = new Set<(state: string) => void>();
 const mockReadIdentity = jest.fn(), mockReadCore = jest.fn(), mockMarkCore = jest.fn();
 const mockReadCards = jest.fn(), mockReadMessages = jest.fn(), mockReadMembership = jest.fn(), mockReadMarker = jest.fn().mockResolvedValue(undefined);
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const effect = { callback, cleanup: mockFocused ? callback() : undefined }; mockFocusEffects.add(effect); return () => { effect.cleanup?.(); mockFocusEffects.delete(effect); }; }, [callback]), useRouter: () => ({ push: jest.fn(), back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));

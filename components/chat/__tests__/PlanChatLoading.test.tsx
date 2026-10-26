@@ -15,6 +15,7 @@ jest.mock('../ChatThread', () => ({ __esModule: true, default: (props: any) => {
   mockThreadProps = props;
   return require('react').createElement(require('react-native').View, { testID: 'thread-open' }, props.renderHeaderBanner?.());
 } }));
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: 'plan-a' }), useRouter: () => ({ push: jest.fn(), back: jest.fn() }) }));
 jest.mock('../../../lib/supabase', () => ({ supabase: { from: (table: string) => {
   const result = () => table === 'events' ? mockEvent() : table === 'event_members' ? mockMembers() : mockProfiles();

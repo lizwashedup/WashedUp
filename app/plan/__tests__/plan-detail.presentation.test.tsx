@@ -68,6 +68,7 @@ jest.mock('@tanstack/react-query', () => ({
   },
 }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({top:0,bottom:0,left:0,right:0}) }));
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({
   Stack: { Screen: () => null }, useLocalSearchParams: () => ({ id: 'plan-1' }),
   useFocusEffect: (callback: any) => { require('react').useEffect(callback, [callback]); },
@@ -541,7 +542,13 @@ it('waits for the ticket step after a confirmed join before requesting notificat
   mockPlan.tickets_url = 'https://example.test/tickets'; await mount(); act(() => mockJoinOptions.onJoined({}));
   closeSharing();
   expect(mockNotificationRequest).not.toHaveBeenCalled();
-  act(() => button("I'll remember").props.onPress()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
+  const modal = tree.root.findAllByType(Modal).find(node => node.props.visible && node.findAllByType(Text).some(text => text.props.children === 'This plan is ticketed!'))!;
+  act(() => button("I'll remember").props.onPress());
+  if (Platform.OS === 'ios') {
+    expect(mockNotificationRequest).not.toHaveBeenCalled();
+    act(() => modal.props.onDismiss());
+  }
+  expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
 it('never requests notifications for an unconfirmed or failed join', async () => {
   mockUnconfirmed = true; await mount(); act(() => mockJoinOptions.onError('Check who is going.'));
@@ -835,4 +842,36 @@ it('opens the existing Circle conversation directly on Android when the plan has
   act(() => sharing().onOpenChat());
   expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/circle/circle-a');
   expect(mockPush).toHaveBeenCalledTimes(1);
+});
+
+
+it('waits for iOS ticket reminder dismissal before pushing chat once', async () => {
+  Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+  mockPlan.tickets_url = 'https://example.test/tickets';
+  mockYoursEnabled = false;
+  await mount();
+  act(() => mockJoinOptions.onJoined({}));
+  closeSharing();
+  const modal = tree.root.findAllByType(Modal).find(node => node.props.visible && node.findAllByType(Text).some(text => text.props.children === 'This plan is ticketed!'))!;
+  const close = button("I'll remember").props.onPress;
+  act(() => { close(); close(); });
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockNotificationRequest).not.toHaveBeenCalled();
+  act(() => modal.props.onDismiss());
+  act(() => modal.props.onDismiss());
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');
+});
+
+
+it.each(['ios', 'android'])('does not complete a retired ticket reminder on %s', async os => {
+  jest.replaceProperty(Platform, 'OS', os as any);
+  mockPlan.tickets_url = 'https://example.test/tickets'; mockYoursEnabled = false;
+  await mount(); act(() => mockJoinOptions.onJoined({})); closeSharing();
+  const modal = tree.root.findAllByType(Modal).find(node => node.props.visible && node.findAllByType(Text).some(text => text.props.children === 'This plan is ticketed!'))!;
+  if (os === 'ios') act(() => button("I'll remember").props.onPress());
+  mockCurrent.mockReturnValue(false);
+  act(() => { if (os === 'ios') modal.props.onDismiss(); else modal.props.onRequestClose(); });
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockNotificationRequest).not.toHaveBeenCalled();
 });
