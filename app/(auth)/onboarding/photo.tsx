@@ -250,6 +250,8 @@ export default function OnboardingPhotoScreen() {
             style={[styles.avatarCircle, imageUri && styles.avatarCircleFilled]}
             onPress={openPicker}
             disabled={loading || pickerBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Add photo"
             activeOpacity={0.85}
           >
             {imageUri ? (
@@ -265,6 +267,8 @@ export default function OnboardingPhotoScreen() {
               style={styles.changePill}
               onPress={openPicker}
               disabled={loading || pickerBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Change photo"
               hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Text style={styles.changePillText}>change</Text>
@@ -306,12 +310,14 @@ export default function OnboardingPhotoScreen() {
         onDismiss={() => finishPickerDismissal(pickerSelection)}
         statusBarTranslucent
       >
-        <Pressable style={styles.pickerOverlay} onPress={closePicker}>
-          <Pressable style={styles.pickerCard} onPress={(e) => e.stopPropagation()}>
+        <Pressable accessible={false} style={styles.pickerOverlay} onPress={closePicker}>
+          <Pressable accessible={false} accessibilityViewIsModal onAccessibilityEscape={closePicker} style={styles.pickerCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.pickerTitle}>add a profile photo</Text>
             <TouchableOpacity
               style={styles.pickerButton}
               onPress={() => choosePicker('camera')}
+              accessibilityRole="button"
+              accessibilityLabel="Take photo"
               activeOpacity={0.9}
             >
               <Text style={styles.pickerButtonText}>take photo</Text>
@@ -319,6 +325,8 @@ export default function OnboardingPhotoScreen() {
             <TouchableOpacity
               style={styles.pickerButton}
               onPress={() => choosePicker('library')}
+              accessibilityRole="button"
+              accessibilityLabel="Photo library"
               activeOpacity={0.9}
             >
               <Text style={styles.pickerButtonText}>choose from library</Text>
