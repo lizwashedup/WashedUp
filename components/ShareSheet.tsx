@@ -63,7 +63,7 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
   };
   const handleSendToFriend = () => {
     hapticLight();
-    closeThen(() => router.push('/(tabs)/friends' as any));
+    closeThen(() => router.push('/(tabs)/friends?tab=people' as any));
   };
   const handleCopyLink = () => {
     hapticLight();

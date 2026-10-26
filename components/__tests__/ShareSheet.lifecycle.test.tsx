@@ -27,6 +27,7 @@ it('waits for native dismissal before People navigation and only navigates once'
   expect(modal().props.visible).toBe(false);
   act(() => { modal().props.onDismiss(); modal().props.onDismiss(); });
   expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends?tab=people');
   expect(mockClose).toHaveBeenCalledTimes(1);
 });
 it('opens native sharing after dismissal rather than an arbitrary delay', async () => {
@@ -66,4 +67,5 @@ it('does not wait for an iOS-only event on Android', () => {
   Platform.OS = 'android';
   act(() => { void action(0)(); });
   expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends?tab=people');
 });
