@@ -15,9 +15,10 @@ import { getCreatorAccess, canManageEvents } from '../../lib/creatorMode';
  * FAQ editor - dormant until proposal 70's re-cut applies.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -153,6 +154,40 @@ function TicketSetupScreen({id,setup,scope,active,pageId}:{id:string;setup?:stri
   const [addonEditorVisible, setAddonEditorVisible] = useState(false);
   const [editingAddon, setEditingAddon] = useState<EventAddon | null>(null);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
+  const endTimeRecovery = useRef<{
+    scope: CreatorPageScope;
+    phase: 'editor' | 'alert' | 'route';
+    alert: NonNullable<typeof alertInfo>;
+  } | null>(null);
+  const recoveryOwner = useRef<CreatorPageScope | null>(null);
+  useLayoutEffect(() => {
+    recoveryOwner.current = active ? scope : null;
+    endTimeRecovery.current = null;
+    setAlertInfo(null);
+    return () => { recoveryOwner.current = null; endTimeRecovery.current = null; };
+  }, [scope, active]);
+
+  const finishTierDismissal = useCallback(() => {
+    const pending = endTimeRecovery.current;
+    if (!pending || pending.phase !== 'editor' || recoveryOwner.current !== pending.scope || !pending.scope.isCurrent()) return;
+    pending.phase = 'alert';
+    setAlertInfo(pending.alert);
+  }, []);
+  const finishRecoveryAlert = useCallback(() => {
+    const pending = endTimeRecovery.current;
+    if (!pending || pending.phase === 'editor' || recoveryOwner.current !== pending.scope || !pending.scope.isCurrent()) return;
+    endTimeRecovery.current = null;
+    if (pending.phase === 'route') {
+      resumeTierEditorRef.current = true;
+      router.push(`/creator/event-form?id=${id}&returnToTickets=1` as never);
+    } else {
+      setEditorVisible(true);
+    }
+  }, [id]);
+  const closeAlert = () => {
+    setAlertInfo(null);
+    if (Platform.OS !== 'ios') finishRecoveryAlert();
+  };
 
   useFocusEffect(useCallback(() => {
     if (resumeTierEditorRef.current) {
@@ -343,21 +378,30 @@ function TicketSetupScreen({id,setup,scope,active,pageId}:{id:string;setup?:stri
       hapticError();
       if (e?.code === 'event_end_time_required') {
         setPendingTierDraft(draft);
-        setAlertInfo({
-          title: 'add the event end time',
-          message: e?.message,
-          buttons: [
-            { text: 'not now', style: 'cancel' },
-            {
-              text: 'set end time',
-              onPress: () => {
-                resumeTierEditorRef.current = true;
-                setEditorVisible(false);
-                router.push(`/creator/event-form?id=${id}&returnToTickets=1` as never);
+        const recovery: NonNullable<typeof endTimeRecovery.current> = {
+          scope: input.scope,
+          phase: 'editor',
+          alert: {
+            title: 'add the event end time',
+            message: e?.message,
+            buttons: [
+              { text: 'not now', style: 'cancel' },
+              {
+                text: 'set end time',
+                onPress: () => {
+                  if (endTimeRecovery.current !== recovery || recovery.phase !== 'alert'
+                    || recoveryOwner.current !== recovery.scope || !recovery.scope.isCurrent()) return;
+                  recovery.phase = 'route';
+                },
               },
-            },
-          ],
-        });
+            ],
+          },
+        };
+        // Release the full-screen editor before showing its recovery alert;
+        // the alert must also finish closing before opening the event form.
+        endTimeRecovery.current = recovery;
+        setEditorVisible(false);
+        if (Platform.OS !== 'ios' || !editorVisible) finishTierDismissal();
         return;
       }
       // The editor keeps its draft and shows the save error inline.
@@ -970,6 +1014,7 @@ function TicketSetupScreen({id,setup,scope,active,pageId}:{id:string;setup?:stri
 
       <TierEditorSheet
         visible={active && editorVisible}
+        onDismiss={finishTierDismissal}
         tier={editingTier}
         commissionBps={payout?.commissionBps ?? 400}
         busy={saveTierMutation.isPending}
@@ -1017,7 +1062,8 @@ function TicketSetupScreen({id,setup,scope,active,pageId}:{id:string;setup?:stri
         title={alertInfo?.title ?? ''}
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        onClose={closeAlert}
+        onDismiss={finishRecoveryAlert}
       />
     </SafeAreaView>
   );
