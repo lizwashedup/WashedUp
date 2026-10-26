@@ -519,13 +519,11 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       <TouchableOpacity
                         style={s.letsGoBtn}
                         activeOpacity={0.85}
-                        onPress={async () => {
+                        onPress={() => {
+                          if (!notificationScope.isCurrent() || closingRef.current) return;
                           hapticLight();
-                          try {
-                            await supabase.from('plan_invites').update({ status: 'accepted' }).eq('id', inv.id);
-                            refetchInvites();
-                            queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-                          } catch {}
+                          // Viewing an invitation is not joining. Plan detail acknowledges
+                          // acceptance only after it confirms the recipient's membership.
                           navigateAfterDismiss(`/plan/${inv.event_id}`);
                         }}
                       >
