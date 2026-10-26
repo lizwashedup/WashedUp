@@ -8,8 +8,8 @@ jest.mock('expo-router', () => ({
   useFocusEffect: (effect: () => void) => require('react').useEffect(effect, [effect]),
 }));
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
-jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: jest.fn() }) }));
-jest.mock('../../../../hooks/useProfile', () => ({ invalidateAuthProfile: jest.fn() }));
+jest.mock('@tanstack/react-query', () => ({ ...jest.requireActual('@tanstack/react-query'), useQueryClient: () => ({ invalidateQueries: jest.fn() }) }));
+jest.mock('../../../../hooks/useProfile', () => ({ ...jest.requireActual('../../../../hooks/useProfile'), invalidateAuthProfile: jest.fn() }));
 jest.mock('../../../../lib/supabase', () => ({
   supabase: { auth: { onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })) } },
 }));
