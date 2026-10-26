@@ -4,11 +4,12 @@ import { Modal, Platform, Text, TouchableOpacity } from 'react-native';
 import InboxModal from '../InboxModal';
 const mockPush = jest.fn(), mockClose = jest.fn(), mockWrite = jest.fn();
 let mockCurrent = true;
+let mockInvites: any[] = [];
 const mockClient = { invalidateQueries: jest.fn() };
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 jest.mock('../../hooks/useInboxNotificationScope', () => ({ useInboxNotificationScope: () => ({ userId: 'fictional-viewer', isCurrent: () => mockCurrent }) }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient, useQuery: ({queryKey}: any) => ({
-  data: queryKey[0] === 'app-notifications' ? [{id:'fictional-notice',type:'member_joined',title:'Fictional reminder',event_id:'fictional-plan',created_at:new Date().toISOString()}] : [], refetch: jest.fn(), isLoading: false,
+  data: queryKey[0] === 'app-notifications' ? [{id:'fictional-notice',type:'member_joined',title:'Fictional reminder',event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: jest.fn(), isLoading: false,
 }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: () => ({update: () => { const chain: any = {eq: () => chain, then: (yes: any, no: any) => mockWrite().then(yes, no)}; return chain; }}) } }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn(async () => {}) }));
@@ -18,7 +19,7 @@ jest.mock('../BrandedAlert', () => ({ BrandedAlert: () => null }));
 jest.mock('../legal/ParticipationNotice', () => ({ ParticipationNotice: () => null }));
 let tree: ReactTestRenderer;
 const row = () => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === 'Fictional reminder'))!;
-beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
+beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockInvites = []; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
 afterEach(() => act(() => tree.unmount()));
 it('does not open a chat before its native inbox window dismisses', async () => {
   await act(async () => row().props.onPress());
@@ -98,4 +99,16 @@ it('offers a named close control that waits for native dismissal without navigat
   act(() => tree.root.findByType(Modal).props.onDismiss());
   expect(mockClose).toHaveBeenCalledTimes(1);
   expect(mockPush).not.toHaveBeenCalled();
+});
+
+it('opens an invitation without acknowledging acceptance before confirmed membership', async () => {
+  mockInvites = [{id:'fictional-invite',event_id:'fictional-plan',recipient_id:'fictional-viewer',status:'pending',events:{title:'Fictional invited plan'}}];
+  act(() => tree.update(renderInbox()));
+  const open = tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === "Let's Go →"))!;
+  await act(async () => { await open.props.onPress(); await open.props.onPress(); });
+  expect(mockWrite).not.toHaveBeenCalled();
+  expect(mockPush).not.toHaveBeenCalled();
+  act(() => tree.root.findByType(Modal).props.onDismiss());
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith('/plan/fictional-plan');
 });
