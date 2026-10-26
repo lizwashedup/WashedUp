@@ -1,5 +1,15 @@
 import { supabase } from './supabase';
 import { withTimeout } from './withTimeout';
+import { queryClient } from './queryClient';
+import { AUTH_PROFILE_KEY } from '../hooks/useProfile';
+
+/** Fresh completion evidence must supersede the routing cache before entering tabs.
+ * Refetch there so phone/referral requirements still use the full profile. */
+export function invalidateCompletedOnboardingGate(userId: string) {
+  void queryClient.invalidateQueries({
+    queryKey: AUTH_PROFILE_KEY(userId), exact: true, refetchType: 'none',
+  });
+}
 
 export type OnboardingBasicsUpdate = {
   birthday: string;
@@ -19,6 +29,9 @@ export async function readOnboardingStatus(userId: string) {
   );
   if (!result || result.error || !result.data) {
     throw new Error("couldn’t load your account. your details are still here. try again.");
+  }
+  if (result.data.onboarding_status === 'complete') {
+    invalidateCompletedOnboardingGate(userId);
   }
   return result.data.onboarding_status;
 }

@@ -21,7 +21,7 @@ import { hapticLight } from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import { withTimeout } from '../../../lib/withTimeout';
 import { getUserBounded } from '../../../lib/authGate';
-import { readOnboardingStatus, saveOnboardingBasics, type OnboardingBasicsUpdate } from '../../../lib/onboardingBasics';
+import { invalidateCompletedOnboardingGate, readOnboardingStatus, saveOnboardingBasics, type OnboardingBasicsUpdate } from '../../../lib/onboardingBasics';
 import { unauthedRoute } from '../../../lib/authRouting';
 import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
@@ -182,6 +182,7 @@ export default function OnboardingBasicsScreen() {
           );
           if (isCurrent() && !profileError) {
             if (profile?.onboarding_status === 'complete') {
+              invalidateCompletedOnboardingGate(user.id);
               router.replace('/(tabs)/plans');
               return;
             }
