@@ -19,10 +19,8 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
-import { supabase } from '../../../lib/supabase';
-import { getUserBounded } from '../../../lib/authGate';
-import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
-import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
+import { saveDraft, loadDraft, cancelPendingSave } from '../../../lib/onboardingDraft';
+import { useOnboardingStepSave } from '../../../hooks/useOnboardingStepSave';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -59,7 +57,7 @@ export default function OnboardingReferralScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [otherText, setOtherText] = useState('');
   const [draftLoaded, setDraftLoaded] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { loading, saveError, clearSaveError, save, retire } = useOnboardingStepSave('referral');
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
     message: string;
@@ -109,79 +107,22 @@ export default function OnboardingReferralScreen() {
     return () => cancelPendingSave('referral');
   }, [draftLoaded, selected, otherText]);
 
-  const submit = useSubmitGuard();
-
   const handleContinue = async () => {
     if (!canContinue || loading) return;
-    if (!submit.tryAcquire()) return;
-    hapticLight();
-    setLoading(true);
-    try {
-      const { user, resolved } = await getUserBounded();
-      if (!user) {
-        if (!resolved) {
-          // Transient (timeout/network): do NOT sign out a valid session.
-          setAlertInfo({
-            title: 'something went wrong',
-            message: "couldn't reach the server. try again.",
-          });
-          return;
-        }
-        setAlertInfo({
-          title: 'session expired',
-          message: 'please sign in again.',
-        });
-        await clearAllDrafts();
-        await supabase.auth.signOut();
+    let referralValue: string;
+    if (isOther) {
+      const trimmed = otherText.trim();
+      const filter = checkContent(trimmed);
+      if (!filter.ok) {
+        setAlertInfo({ title: 'content not allowed', message: filter.reason ?? 'please try different wording.' });
         return;
       }
-      let referralValue: string;
-      if (isOther) {
-        const trimmed = otherText.trim();
-        const filter = checkContent(trimmed);
-        if (!filter.ok) {
-          setAlertInfo({
-            title: 'content not allowed',
-            message: filter.reason ?? 'please try different wording.',
-          });
-          return;
-        }
-        referralValue = `other: ${trimmed}`;
-      } else {
-        referralValue = selected as string;
-      }
-      // Smart-advance preserves status if a mid-flow user was bounced
-      // back here from photo (older clients skipped referral).
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('onboarding_status')
-        .eq('id', user.id)
-        .single();
-      const currentStatus = existing?.onboarding_status ?? 'referral';
-      const nextStatus =
-        currentStatus === 'photo'
-          ? currentStatus
-          : 'photo';
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          referral_source: referralValue,
-          onboarding_status: nextStatus,
-        })
-        .eq('id', user.id);
-      if (error) {
-        setAlertInfo({
-          title: 'something went wrong',
-          message: 'could not save. please try again.',
-        });
-        return;
-      }
-      clearDraft('referral');
-      router.replace('/onboarding/photo');
-    } finally {
-      submit.release();
-      setLoading(false);
+      referralValue = `other: ${trimmed}`;
+    } else {
+      referralValue = selected as string;
     }
+    hapticLight();
+    await save({ referral_source: referralValue, onboarding_status: 'photo' }, '/onboarding/photo');
   };
 
   // Real bug, found and fixed 2026-09-01: this screen used to render and accept
@@ -214,7 +155,7 @@ export default function OnboardingReferralScreen() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.container}>
-          <ProgressHead step={3} totalSteps={5} onBack={() => router.replace('/onboarding/la-check')} />
+          <ProgressHead step={3} totalSteps={5} onBack={() => { retire(); router.replace('/onboarding/la-check'); }} />
 
           <ScrollView
             decelerationRate="normal"
@@ -285,11 +226,11 @@ export default function OnboardingReferralScreen() {
         </View>
       </KeyboardAvoidingView>
       <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
+        visible={!!alertInfo || !!saveError}
+        title={alertInfo?.title ?? 'something went wrong'}
+        message={alertInfo?.message ?? saveError ?? undefined}
         buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        onClose={() => { setAlertInfo(null); clearSaveError(); }}
       />
     </SafeAreaView>
   );
