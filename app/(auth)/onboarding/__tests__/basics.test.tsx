@@ -36,6 +36,7 @@ jest.mock('../../../../lib/supabase', () => {
     select: jest.fn(function (this: unknown) { return this; }),
     eq: jest.fn(function (this: unknown) { return this; }),
     or: jest.fn(function (this: unknown) { return this; }),
+    single: jest.fn(async () => ({ data: { onboarding_status: 'complete', referral_source: 'tiktok', phone_number: '+12025550100' }, error: null })),
     maybeSingle: jest.fn(() => new Promise(() => { /* hangs unless overridden per test */ })),
     update: jest.fn(function (this: unknown) { return this; }),
   };
@@ -55,6 +56,8 @@ jest.mock('../../../../lib/supabase', () => {
 import { supabase } from '../../../../lib/supabase';
 import { loadDraft } from '../../../../lib/onboardingDraft';
 import OnboardingBasicsScreen from '../basics';
+import { queryClient } from '../../../../lib/queryClient';
+import { seedAuthProfile, getAuthProfile } from '../../../../hooks/useProfile';
 
 /**
  * Seeds a draft directly on disk, bypassing saveDraft(): saveDraft() now
@@ -86,6 +89,7 @@ function profileChain() {
 describe('basics.tsx onboarding-draft regressions', () => {
   beforeEach(async () => {
     jest.useFakeTimers();
+    queryClient.clear();
     mockRouterReplace.mockClear();
     await AsyncStorage.clear();
     (supabase.auth.getUser as jest.Mock).mockImplementation(
@@ -99,6 +103,7 @@ describe('basics.tsx onboarding-draft regressions', () => {
   });
 
   afterEach(() => {
+    queryClient.clear();
     jest.useRealTimers();
   });
 
@@ -145,11 +150,13 @@ describe('basics.tsx onboarding-draft regressions', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  it('sends completed members back to Plans without a profile write', async () => {
+  it('sends completed members back to Plans without a profile write or cached signup bounce', async () => {
+    seedAuthProfile(queryClient, 'user-a', { onboarding_status: 'pending', referral_source: 'tiktok', phone_number: '+12025550100' });
     profileChain().maybeSingle.mockResolvedValue({ data: { onboarding_status: 'complete' }, error: null });
     const tree = await mountAdultDraft('member@example.com');
     expect(mockRouterReplace).toHaveBeenCalledWith('/(tabs)/plans');
     expect(profileChain().update).not.toHaveBeenCalled();
+    expect((await getAuthProfile(queryClient, 'user-a'))?.onboarding_status).toBe('complete');
     await act(async () => tree.unmount());
   });
 
