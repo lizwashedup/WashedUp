@@ -6,7 +6,7 @@ import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../
 import { COMMUNITIES_ENABLED, GROUPS_ENABLED } from '../../../constants/FeatureFlags';
 import { COPY } from '../state/constants';
 
-export type YoursTab = 'people' | 'myPlans' | 'circles' | 'communities' | 'albums';
+export type YoursTab = 'people' | 'myPlans' | 'circles' | 'communities';
 
 /** Full-width underline tabs (active: asphalt + terracotta underline). */
 export default function YoursTabs({
@@ -32,12 +32,9 @@ export default function YoursTabs({
     ...(GROUPS_ENABLED
       ? ([['circles', COPY.tabCircles]] as const)
       : []),
-    // Communities sits between Circles and Albums (Liz's walkthrough order);
-    // compile-time flag, so the shipped row is unchanged when off.
     ...(COMMUNITIES_ENABLED
       ? ([['communities', COPY.tabCommunities]] as const)
       : []),
-    ['albums', COPY.tabAlbums],
   ];
 
   const items = tabs.map(([key, label]) => {

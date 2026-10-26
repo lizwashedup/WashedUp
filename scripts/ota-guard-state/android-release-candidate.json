@@ -1,0 +1,32 @@
+{
+  "sourceType": "manual-store-bundle",
+  "version": "1.0.7",
+  "buildNumber": "18",
+  "packageIdentifier": "com.washedup.app",
+  "runtimeVersion": "a734432b73accdd0d22878b7e63990bfff2a5bb3",
+  "embeddedUpdateId": "667a2aab-8525-4675-8293-b192c9e73d54",
+  "reviewedNativeCommit": "88cf31f4b122e5021dfddb910c1d0f2a61f62dff",
+  "artifactPath": "/Users/liz/Desktop/WashedUp/Implementation/backend-recovery-2026-09-14/member-review-corrections/store-release-20260925/release50/android-preparation/WashedUp-1.0.7-18.aab",
+  "artifactSha256": "ffa0386fe36e6ea9e4b315860592f89a3598ff4be4e080f36132c681a3ab7320",
+  "sourcePackagePath": "/Users/liz/Desktop/WashedUp/Implementation/backend-recovery-2026-09-14/member-review-corrections/store-release-20260925/release50/production-source/package.json",
+  "sourcePackageSha256": "f57d34f673b207ad0e8d196bda8d8c7a279a25db8069af6e5772972b72777e0f",
+  "reviewedInputHashes": {
+    "app.json": "3d7d4f25587290735100564f53b3c4ed726977398cc075afa80f88ceae79cb30",
+    "app.config.js": "7159f0d59724cf62df35132f2912a414792b1880322d29be82be353fb1168e29",
+    "eas.json": "446c17836dac2e538a2009797cd826b9ffd2783154d014044c249ff7fc954baa",
+    "package-lock.json": "0e746690daf2ef83eb74e261b6d96b2ac42061884c7724d6d35f4ca9bd65ace6",
+    "plugins/withIosSceneLifecycle.js": "74f915b6b7e6540df169b264f5266f3dec4b21fb0c911ea6ae4b62756c2168b7",
+    "plugins/withIosModularHeaders.js": "edd93bbd41bb00c0f30054f20cd2832ad65d3ffe2adf600c65762ca8a2bc96f5",
+    "plugins/ios/WashedUpSceneDelegate.swift": "9cf503f8f25bd3735506faccbea57cdc3a1e2f93023d6e8a218bc671e551d7d9"
+  },
+  "productionEvidence": {
+    "observedAt": "2026-10-26",
+    "url": "https://play.google.com/console/u/0/developers/7372458301238104769/app/4973273967448419906/tracks/4698320032097703067/releases/6/details",
+    "versionCode": 18,
+    "status": "Available on Google Play; 100% rollout",
+    "localEvidence": "/Users/liz/Desktop/Ops/Audits/2026-10-25-album-usage/google-play-build18-current.txt"
+  },
+  "nativeCompatibilityReview": "Signed Android18 source and reviewedNativeCommit have identical package dependencies, lockfile, eas.json, and existing native plugin. app.json differs only in ios.buildNumber. app.config.js adds only withIosSceneLifecycle (withAppDelegate/withInfoPlist), with no Android native changes. Reviewed current hashes below intentionally include that iOS-only addition.",
+  "installedArtifactEvidence": "/Users/liz/Desktop/Ops/Audits/2026-10-25-album-usage/android-installed-artifact-parity.json",
+  "startupEvidence": "/Users/liz/Desktop/Ops/Audits/2026-10-25-album-usage/android-startup.png"
+}

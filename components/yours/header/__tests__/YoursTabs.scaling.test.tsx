@@ -34,7 +34,7 @@ it.each([undefined, { fonts: AfterglowFonts }])('remeasures all mounted tab labe
   const buttons = tabButtons();
   const labels = () => buttons.map(button => button.findByType(Text));
   const words = labels().map(label => label.props.children);
-  expect(words).toEqual(['Plans', 'People', 'Circles', 'Communities', 'Albums']);
+  expect(words).toEqual(['Plans', 'People', 'Circles', 'Communities']);
   expect(scroll.props.horizontal).toBe(true);
   expect(buttons[1].props.accessibilityState.selected).toBe(true);
   act(() => { input.props.onChangeText('Juniper saved search'); });
@@ -53,9 +53,9 @@ it.each([undefined, { fonts: AfterglowFonts }])('remeasures all mounted tab labe
     expect(changed).not.toHaveBeenCalled();
   }
   // The same measured tab controls still navigate after both size transitions.
-  act(() => { buttons[4].props.onLayout({ nativeEvent: { layout: { x: 780 } } }); buttons[4].props.onPress(); });
-  expect(changed).toHaveBeenCalledWith('albums');
-  expect(buttons[4].props.accessibilityState.selected).toBe(true);
+  act(() => { buttons[3].props.onLayout({ nativeEvent: { layout: { x: 780 } } }); buttons[3].props.onPress(); });
+  expect(changed).toHaveBeenCalledWith('communities');
+  expect(buttons[3].props.accessibilityState.selected).toBe(true);
   expect(tree.root.findByType(ScrollView)).toBe(scroll);
   expect(input.props.value).toBe('Juniper saved search');
   resize(2);
@@ -68,7 +68,6 @@ it.each([undefined, { fonts: AfterglowFonts }])('remeasures all mounted tab labe
   expect(StyleSheet.flatten(labels()[1].props.style).fontFamily).toBe(appearance?.fonts.semibold ?? Fonts.sansBold);
   expect(StyleSheet.flatten(labels()[2].props.style).fontFamily).toBe(appearance?.fonts.medium ?? Fonts.sansMedium);
   expect(labels()[3].props.children).toBe('Communities');
-  expect(labels()[4].props.children).toBe('Albums');
   expect(tree.root.findByType(ScrollView)).toBe(scroll);
   expect(input.props.value).toBe('Juniper saved search');
 });

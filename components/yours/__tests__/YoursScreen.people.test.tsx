@@ -5,7 +5,6 @@ import YoursScreen from '../YoursScreen';
 import MyPlansView from '../screens/MyPlansView';
 import CirclesDirectory from '../circles/CirclesDirectory';
 import { MyCommunitiesList } from '../communities/MyCommunitiesList';
-import { AlbumsGrid } from '../../albums/AlbumsGrid';
 import { CreatorSpaceEntry } from '../../creator/pages/CreatorSpaceEntry';
 import { PageAction } from '../../creator/pages/PageFrame';
 import PeopleScreen from '../people/PeopleScreen';
@@ -59,7 +58,6 @@ jest.mock('../../../lib/haptics', () => ({ hapticSelection: jest.fn() }));
 jest.mock('../../../lib/yours/requestsSeen', () => ({ markRequestsSeen: jest.fn(), REQUESTS_BADGE_KEY: ['requests'] }));
 jest.mock('../../../lib/yours/tabsIntroSeen', () => ({ resolveYoursIntroVariant: () => null, hasSeenYoursIntro: jest.fn(), markYoursIntroSeen: jest.fn() }));
 jest.mock('../../creator/pages/CreatorSpaceEntry', () => ({ CreatorSpaceEntry: () => null }));
-jest.mock('../../albums/AlbumsGrid', () => ({ AlbumsGrid: () => null }));
 jest.mock('../header/YoursHeader', () => () => null);
 jest.mock('../header/YoursTabs', () => () => null);
 jest.mock('../people/PeopleScreen', () => () => null);
@@ -236,7 +234,7 @@ it('keeps Plans and every other section reachable while People is still loading'
   expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
   expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(1);
   expect(tree!.root.findByType(CreatorSpaceEntry).props.userId).toBe('viewer');
-  for (const [section, component] of [['circles', CirclesDirectory], ['communities', MyCommunitiesList], ['albums', AlbumsGrid]] as const) {
+  for (const [section, component] of [['circles', CirclesDirectory], ['communities', MyCommunitiesList]] as const) {
     tab(section); expect(tree!.root.findAllByType(component)).toHaveLength(1);
   }
   tab('people'); expect(tree!.root.findAllByType(NewUserEmptyView)).toHaveLength(0);
@@ -247,8 +245,8 @@ it('keeps the full shell visible while account identity loads without starting p
   mockLoading = true; mount(false);
   expect(tree!.root.findAllByType(YoursTabs)).toHaveLength(1);
   expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(0);
-  tab('albums'); expect(tree!.root.findAllByType(AlbumsGrid)).toHaveLength(0);
-  mockLoading = false; update(); expect(tree!.root.findAllByType(AlbumsGrid)).toHaveLength(1);
+  tab('myPlans'); expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(0);
+  mockLoading = false; update(); expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(1);
 });
 it('never presents failed People or history reads as an empty/new-user state', () => {
   mockPeople = []; mockGridError = new Error('Offline'); mount();
@@ -283,9 +281,9 @@ it('locks duplicate parent recovery and bounds its wait without discarding accep
     expect(body().people).toHaveLength(2);
     await act(async () => { jest.advanceTimersByTime(12000); });
     expect(tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Try again')!.props.disabled).toBe(false);
-    tab('albums'); await act(async () => read.resolve({}));
-    expect(tree!.root.findByType(YoursTabs).props.active).toBe('albums');
-    expect(tree!.root.findAllByType(AlbumsGrid)).toHaveLength(1);
+    tab('myPlans'); await act(async () => read.resolve({}));
+    expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
+    expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(1);
   } finally { jest.useRealTimers(); }
 });
 it('clears timed-out People recovery only after both same-scope reads confirm success', async () => {
@@ -312,7 +310,7 @@ it('clears timed-out People recovery only after both same-scope reads confirm su
     expect(mockRefetchPeople).toHaveBeenCalledTimes(1); expect(mockRefetchBacklog).toHaveBeenCalledTimes(1);
   } finally { jest.useRealTimers(); }
 });
-it.each(['myPlans', 'circles', 'communities', 'albums'])('retains %s when a child opens and focus returns', section => {
+it.each(['myPlans', 'circles', 'communities'])('retains %s when a child opens and focus returns', section => {
   mount(false); tab(section); mockFocused = false; update(); mockFocused = true; update();
   expect(tree!.root.findByType(YoursTabs).props.active).toBe(section);
 });
@@ -337,10 +335,10 @@ it.each([undefined, { fonts: AfterglowFonts }])('selects every actual tab with o
   act(() => { tree = create(<TabsHarness />); });
   const tabButtons = () => tree!.root.findAll(node => node.props.accessibilityRole === 'tab' && typeof node.props.onPress === 'function', { deep: false });
   const buttons = tabButtons();
-  expect(buttons).toHaveLength(5);
+  expect(buttons).toHaveLength(4);
   buttons.forEach((button, index) => act(() => button.props.onLayout({ nativeEvent: { layout: { x: index * 110 } } })));
-  act(() => buttons[4].props.onPress()); expect(selected).toBe('albums');
-  expect(tabButtons()[4].props.accessibilityState.selected).toBe(true);
+  act(() => buttons[3].props.onPress()); expect(selected).toBe('communities');
+  expect(tabButtons()[3].props.accessibilityState.selected).toBe(true);
   act(() => tabButtons()[0].props.onPress()); expect(selected).toBe('myPlans');
 });
 
@@ -350,14 +348,14 @@ it('replaces a stalled identity spinner with bounded recovery and keeps the sele
   try {
     mockUseRealIdentity = true;
     mockGetUser.mockReturnValue(new Promise(() => {}));
-    mount(false); tab('albums');
+    mount(false); tab('myPlans');
     expect(JSON.stringify(tree!.toJSON())).toContain('Loading Yours');
-    expect(tree!.root.findAllByType(AlbumsGrid)).toHaveLength(0);
+    expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(0);
     await act(async () => { jest.advanceTimersByTime(12000); });
     expect(JSON.stringify(tree!.toJSON())).not.toContain('Loading Yours');
     expect(JSON.stringify(tree!.toJSON())).toContain('Yours couldn’t load. Try again.');
-    expect(tree!.root.findByType(YoursTabs).props.active).toBe('albums');
-    expect(tree!.root.findAllByType(AlbumsGrid)).toHaveLength(0);
+    expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
+    expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(0);
     expect(tree!.root.findAllByType(CreatorSpaceEntry)).toHaveLength(0);
     expect(tree!.root.findAllByType(PathsSheet)).toHaveLength(0);
     expect(tree!.root.findAllByType(PageAction).some(node => node.props.title === 'Try again')).toBe(true);
@@ -370,7 +368,7 @@ it('locks identity retry, reuses both existing subscriptions and ignores the ret
     mockUseRealIdentity = true;
     const initial = deferred(), retryRead = deferred();
     mockGetUser.mockReturnValueOnce(initial.promise).mockReturnValueOnce(retryRead.promise);
-    mount(false); tab('albums');
+    mount(false); tab('myPlans');
     await act(async () => { jest.advanceTimersByTime(12000); });
     const subscriptions = (supabase.auth.onAuthStateChange as jest.Mock).mock.calls.length;
     expect(mockListeners.size).toBe(2); // identity + the existing synchronous action-retirement listener
@@ -381,11 +379,11 @@ it('locks identity retry, reuses both existing subscriptions and ignores the ret
     expect(mockListeners.size).toBe(2);
     expect(JSON.stringify(tree!.toJSON())).toContain('Loading Yours');
     await act(async () => retryRead.resolve({ data: { user: { id: 'recovered' } }, error: null }));
-    expect(tree!.root.findByType(AlbumsGrid).props.userId).toBe('recovered');
-    expect(tree!.root.findByType(YoursTabs).props.active).toBe('albums');
+    expect(tree!.root.findByType(MyPlansView).props.userId).toBe('recovered');
+    expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
     expect(mockListeners.size).toBe(2);
     await act(async () => initial.resolve({ data: { user: { id: 'retired-account' } }, error: null }));
-    expect(tree!.root.findByType(AlbumsGrid).props.userId).toBe('recovered');
+    expect(tree!.root.findByType(MyPlansView).props.userId).toBe('recovered');
     expect(mockListeners.size).toBe(2);
     act(() => retry());
     expect(mockGetUser).toHaveBeenCalledTimes(2); // retired recovery callback cannot restart this account
@@ -487,7 +485,7 @@ it('retires same-account pre-auth callbacks but enables the committed returning 
 
 it.each(['people','circles'])('honors a later People notification after a consumed %s intent without resetting manual choices', first=>{
  mockParams={tab:first};mount(false);expect(tree!.root.findByType(YoursTabs).props.active).toBe(first);
- mockParams={};update();tab('albums');update();expect(tree!.root.findByType(YoursTabs).props.active).toBe('albums');
+ mockParams={};update();tab('myPlans');update();expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
  mockParams={tab:'people'};update();expect(tree!.root.findByType(YoursTabs).props.active).toBe('people');expect(mockSetParams).toHaveBeenLastCalledWith({tab:undefined});
  mockParams={};update();tab('myPlans');update();expect(tree!.root.findByType(YoursTabs).props.active).toBe('myPlans');
 });

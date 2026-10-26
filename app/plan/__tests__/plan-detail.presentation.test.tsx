@@ -22,6 +22,7 @@ let mockContextReady = true;
 let mockContextError = false;
 let mockMembersError = false;
 let mockPlanError = false;
+let mockPlanPhotos = false;
 let mockCanGoBack = false;
 let mockUnconfirmed = false;
 let mockViewer: any;
@@ -63,6 +64,7 @@ jest.mock('@tanstack/react-query', () => ({
     if (key.startsWith('events/detail/')) return { ...base, data: mockPlan, error: mockPlanError ? new Error('failed') : null, isError: mockPlanError, refetch: mockRetryPlan };
     if (key.startsWith('events/members/')) return { ...base, data: mockMembers, isError: mockMembersError, isSuccess: !mockMembersError, refetch: mockRetryMembers };
     if (key.startsWith('yours/grid/')) return { ...base, data: mockPeople, isError: mockPeopleError, isSuccess: !mockPeopleError };
+    if (key.startsWith('planAlbumExists/')) return { ...base, data: mockPlanPhotos };
     if (key.startsWith('plan-viewer/')) return { ...base, data: mockViewer };
     return { ...base, data: undefined };
   },
@@ -118,7 +120,8 @@ const allText = () => tree.root.findAllByType(Text).flatMap(n => [n.props.childr
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === label))!;
 async function mount() { await act(async () => { tree = create(<PlanDetailScreen />); }); }
 beforeEach(() => {
-  mockRealPlaces = false; mockMemberAppearance = true; mockCanGoBack = false;
+  mockRealPlaces = false; mockPlanPhotos = false;
+  mockMemberAppearance = true; mockCanGoBack = false;
   mockPeople=[];mockPeopleError=false;
   mockInterest={entry:null,ready:true,loading:false,busy:false,phase:null,error:null,send:mockInterestSend,retry:mockInterestRetry,refresh:jest.fn()};
   mockInvitePrepare.mockReturnValue(mockInviteComplete);mockInvitation={invitation:null,attempt:null,loading:false,busy:false,ready:true,error:null,decline:mockInviteDecline,refresh:mockInviteRefresh,retry:mockInviteRetry,prepareAcceptance:mockInvitePrepare,keepInvitation:jest.fn()};
@@ -874,4 +877,31 @@ it.each(['ios', 'android'])('does not complete a retired ticket reminder on %s',
   act(() => { if (os === 'ios') modal.props.onDismiss(); else modal.props.onRequestClose(); });
   expect(mockPush).not.toHaveBeenCalled();
   expect(mockNotificationRequest).not.toHaveBeenCalled();
+});
+
+// Existing media remains reachable after removing the standalone Albums section.
+it('opens existing photos from a completed plan without an upload prompt', async () => {
+  mockPlan.status = 'completed'; mockPlanPhotos = true;
+  mockMembers.push({ id: 'viewer', user_id: 'viewer', first_name_display: 'You' });
+  await mount();
+  expect(button('Add photos')).toBeUndefined();
+  act(() => button('View photos').props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/album/plan-1');
+  expect(button('Open Chat')).toBeDefined();
+});
+it.each([null, { id: 'album-1', first_upload_at: null }])('does not promote an empty or missing album (%p)', async data => {
+  mockPlan.status = 'completed';
+  mockMembers.push({ id: 'viewer', user_id: 'viewer', first_name_display: 'You' });
+  mockEditResponse = { data, error: null };
+  await mount();
+  const query = mockQueries.get('planAlbumExists/plan-1/viewer/1');
+  expect(await query.queryFn()).toBe(false);
+  expect(button('View photos')).toBeUndefined();
+  expect(button('Add photos')).toBeUndefined();
+});
+it('retains membership gating for the plan photo lookup', async () => {
+  mockPlan.status = 'completed'; mockPlanPhotos = true;
+  await mount();
+  expect(mockQueries.get('planAlbumExists/plan-1/viewer/1').enabled).toBe(false);
+  expect(button('View photos')).toBeUndefined();
 });
