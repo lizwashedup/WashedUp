@@ -14,22 +14,15 @@ import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router, useFocusEffect } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
 import ProgressHead from '../../../components/onboarding/ProgressHead';
-import { PROFILE_PHOTO_KEY } from '../../../constants/QueryKeys';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../../constants/PhotoUpload';
-import { uploadBase64ToStorage } from '../../../lib/uploadPhoto';
-import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
-import { invalidateAuthProfile } from '../../../hooks/useProfile';
 import { supabase } from '../../../lib/supabase';
-import { getUserBounded } from '../../../lib/authGate';
-import { clearAllDrafts } from '../../../lib/onboardingDraft';
-import { friendlyError } from '../../../lib/friendlyError';
+import { useOnboardingPhotoSave } from '../../../hooks/useOnboardingPhotoSave';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 
@@ -38,10 +31,9 @@ type PickerVisit = { active: boolean; userId: string | null };
 type PickerSelection = { visit: PickerVisit; kind: 'camera' | 'library' | null | undefined; started: boolean };
 
 export default function OnboardingPhotoScreen() {
-  const queryClient = useQueryClient();
+  const { loading, saveError, clearSaveError, save, retire } = useOnboardingPhotoSave();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [pickerSelection, setPickerSelection] = useState<PickerSelection | null>(null);
@@ -168,6 +160,7 @@ export default function OnboardingPhotoScreen() {
   }, [pickerOpen, pickerSelection]);
 
   const leavePhoto = () => {
+    retire();
     if (pickerVisit.current) pickerVisit.current.active = false;
     pendingPicker.current = null;
     setPickerOpen(false);
@@ -176,57 +169,10 @@ export default function OnboardingPhotoScreen() {
     router.replace('/onboarding/referral');
   };
 
-  const submit = useSubmitGuard();
-
   const handleContinue = async () => {
     if (!imageBase64 || loading || pendingPicker.current) return;
-    if (!submit.tryAcquire()) return;
     hapticLight();
-    setLoading(true);
-    try {
-      const { user, resolved } = await getUserBounded();
-      if (!user) {
-        if (!resolved) {
-          // Transient (timeout/network): do NOT sign out a valid session.
-          setAlertInfo({ title: 'something went wrong', message: "couldn't reach the server. try again." });
-          return;
-        }
-        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
-        clearAllDrafts();
-        supabase.auth.signOut();
-        return;
-      }
-      const path = `${user.id}/${Date.now()}.jpg`;
-      const avatarUrl = await uploadBase64ToStorage(
-        'profile-photos',
-        path,
-        imageBase64,
-        { upsert: true },
-      );
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ profile_photo_url: avatarUrl, onboarding_status: 'complete' })
-        .eq('id', user.id);
-      if (updateError) throw updateError;
-      queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
-      // Force the tabs onboarding guard to read fresh status on next mount,
-      // otherwise the cache seeded at login still says 'photo'/'la_check'
-      // and the guard bounces the user out of /(tabs)/plans.
-      invalidateAuthProfile(queryClient, user.id);
-      // Push permission is no longer cold-fired here. The root pre-permission
-      // primer (app/_layout.tsx) shows a context screen first, and covers
-      // existing users / reinstalls / new-device installs, not just this step.
-      // Completed signup opens Plans, the member’s primary discovery feed.
-      router.replace('/(tabs)/plans');
-    } catch (e: unknown) {
-      setAlertInfo({
-        title: 'upload failed',
-        message: friendlyError(e, 'could not upload photo. try again.'),
-      });
-    } finally {
-      submit.release();
-      setLoading(false);
-    }
+    await save(imageBase64);
   };
 
   return (
@@ -296,11 +242,11 @@ export default function OnboardingPhotoScreen() {
         </View>
       </View>
       <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
+        visible={!!alertInfo || !!saveError}
+        title={alertInfo?.title ?? (saveError ? 'upload failed' : '')}
+        message={alertInfo?.message ?? saveError ?? undefined}
         buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        onClose={() => { setAlertInfo(null); clearSaveError(); }}
       />
       <Modal
         visible={pickerOpen}
