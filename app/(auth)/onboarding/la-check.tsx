@@ -17,10 +17,8 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../components/keyboard/Keyboar
 import { router } from 'expo-router';
 import { hapticLight } from '../../../lib/haptics';
 import { BrandedAlert, type BrandedAlertButton } from '../../../components/BrandedAlert';
-import { supabase } from '../../../lib/supabase';
-import { getUserBounded } from '../../../lib/authGate';
-import { saveDraft, loadDraft, clearDraft, cancelPendingSave, clearAllDrafts } from '../../../lib/onboardingDraft';
-import { useSubmitGuard } from '../../../hooks/useSubmitGuard';
+import { saveDraft, loadDraft, cancelPendingSave } from '../../../lib/onboardingDraft';
+import { useOnboardingStepSave } from '../../../hooks/useOnboardingStepSave';
 import { checkContent } from '../../../lib/contentFilter';
 import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
@@ -32,7 +30,7 @@ export default function OnboardingLACheckScreen() {
   const [choseNo, setChoseNo] = useState(false);
   const [city, setCity] = useState('');
   const [draftLoaded, setDraftLoaded] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const { loading, saveError, clearSaveError, save, retire } = useOnboardingStepSave('laCheck');
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
     message: string;
@@ -58,44 +56,9 @@ export default function OnboardingLACheckScreen() {
     return () => cancelPendingSave('laCheck');
   }, [draftLoaded, choseNo, city]);
 
-  const submit = useSubmitGuard();
-
   const handleLA = async (isVisitor: boolean) => {
-    if (loading) return;
-    if (!submit.tryAcquire()) return;
     hapticLight();
-    setLoading(true);
-    try {
-      const { user, resolved } = await getUserBounded();
-      if (!user) {
-        if (!resolved) {
-          // Transient (timeout/network): do NOT sign out a valid session.
-          setAlertInfo({ title: 'something went wrong', message: "couldn't reach the server. try again." });
-          return;
-        }
-        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
-        await clearAllDrafts();
-        await supabase.auth.signOut();
-        return;
-      }
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          city: 'Los Angeles',
-          is_visitor: isVisitor,
-          onboarding_status: 'referral',
-        })
-        .eq('id', user.id);
-      if (error) {
-        setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
-        return;
-      }
-      clearDraft('laCheck');
-      router.replace('/onboarding/referral');
-    } finally {
-      submit.release();
-      setLoading(false);
-    }
+    await save({ city: 'Los Angeles', is_visitor: isVisitor, onboarding_status: 'referral' }, '/onboarding/referral');
   };
 
   const handleNo = () => {
@@ -105,45 +68,14 @@ export default function OnboardingLACheckScreen() {
 
   const handleContinueFromNo = async () => {
     if (loading) return;
-    if (!submit.tryAcquire()) return;
-    hapticLight();
-    setLoading(true);
-    try {
-      const { user, resolved } = await getUserBounded();
-      if (!user) {
-        if (!resolved) {
-          // Transient (timeout/network): do NOT sign out a valid session.
-          setAlertInfo({ title: 'something went wrong', message: "couldn't reach the server. try again." });
-          return;
-        }
-        setAlertInfo({ title: 'session expired', message: 'please sign in again.' });
-        await clearAllDrafts();
-        await supabase.auth.signOut();
-        return;
-      }
-      const trimmedCity = city.trim() || 'Other';
-      const cityFilter = checkContent(trimmedCity);
-      if (!cityFilter.ok) {
-        setAlertInfo({
-          title: 'content not allowed',
-          message: cityFilter.reason ?? 'please try a different city name.',
-        });
-        return;
-      }
-      const { error } = await supabase
-        .from('profiles')
-        .update({ city: trimmedCity, onboarding_status: 'waitlisted' })
-        .eq('id', user.id);
-      if (error) {
-        setAlertInfo({ title: 'something went wrong', message: 'could not save. try again.' });
-        return;
-      }
-      clearDraft('laCheck');
-      router.replace('/onboarding/waitlisted');
-    } finally {
-      submit.release();
-      setLoading(false);
+    const trimmedCity = city.trim() || 'Other';
+    const cityFilter = checkContent(trimmedCity);
+    if (!cityFilter.ok) {
+      setAlertInfo({ title: 'content not allowed', message: cityFilter.reason ?? 'please try a different city name.' });
+      return;
     }
+    hapticLight();
+    await save({ city: trimmedCity, onboarding_status: 'waitlisted' }, '/onboarding/waitlisted');
   };
 
   // Real bug, found and fixed 2026-09-01: this screen used to render and accept
@@ -179,6 +111,7 @@ export default function OnboardingLACheckScreen() {
               step={2}
               totalSteps={5}
               onBack={() => {
+                retire();
                 hapticLight();
                 router.replace('/onboarding/basics');
               }}
@@ -268,11 +201,11 @@ export default function OnboardingLACheckScreen() {
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
       <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
+        visible={!!alertInfo || !!saveError}
+        title={alertInfo?.title ?? 'something went wrong'}
+        message={alertInfo?.message ?? saveError ?? undefined}
         buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
+        onClose={() => { setAlertInfo(null); clearSaveError(); }}
       />
     </SafeAreaView>
   );
