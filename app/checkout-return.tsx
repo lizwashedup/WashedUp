@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -19,20 +19,32 @@ export default function CheckoutReturnScreen() {
   const rawOrder = Array.isArray(order) ? order[0] : order;
   const directOrderId = rawOrder && ORDER_ID.test(rawOrder) ? rawOrder : null;
   const cancelled = rawCheckout === 'cancelled';
-  const { scope, account } = usePublicPageScope(`checkout-return:${rawOrder ?? ''}:${cancelled}`);
+  const { scope, account } = usePublicPageScope(`checkout-return:${rawOrder === undefined ? 'missing' : `order:${rawOrder}`}:${cancelled}`);
+  const visit = useMemo(() => ({ left: false, signingIn: false }), [scope]);
+  const [signInVisit, setSignInVisit] = useState<typeof visit | null>(null);
+  useLayoutEffect(() => {
+    visit.left = false;
+    return () => { visit.left = true; };
+  }, [visit]);
+  // Retire this visit at the tap, before the router has committed its blur.
+  const replace = useCallback((destination: string) => {
+    if (visit.left) return;
+    visit.left = true;
+    router.replace(destination as never);
+  }, [visit]);
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ scope: typeof scope; value: ReturnState }>();
   const value: ReturnState = result?.scope === scope ? result.value : { kind: 'loading' };
 
   useEffect(() => {
-    if (!scope?.userId || !scope.isCurrent()) return;
+    if (!scope?.userId || !scope.isCurrent() || visit.left) return;
     let active = true;
-    const current = () => active && scope.isCurrent();
+    const current = () => active && !visit.left && scope.isCurrent();
     const show = (next: ReturnState) => { if (current()) setResult({ scope, value: next }); };
     show({ kind: 'loading' });
     void (async () => {
       // An invalid explicit ID must not open a different, previously saved order.
-      if (rawOrder && !directOrderId) { show({ kind: 'unavailable' }); return; }
+      if (rawOrder !== undefined && !directOrderId) { show({ kind: 'unavailable' }); return; }
       const orderId = directOrderId ?? await peekPendingCheckout(true);
       if (!current()) return;
       if (!orderId) { show({ kind: 'closed' }); return; }
@@ -45,10 +57,10 @@ export default function CheckoutReturnScreen() {
       }
       // The existing order screen owns settlement, tickets, refunds and their recovery.
       // Never clear the durable handoff merely because the URL says cancelled.
-      router.replace(`/tickets/order/${saved.id}` as never);
+      replace(`/tickets/order/${saved.id}`);
     })().catch(() => show({ kind: 'error' }));
     return () => { active = false; };
-  }, [scope, rawOrder, directOrderId, cancelled, attempt]);
+  }, [scope, visit, replace, rawOrder, directOrderId, cancelled, attempt]);
 
   const signedOut = !account.isLoading && !account.error && account.viewerId === null;
   const failed = !!account.error || value.kind === 'error';
@@ -63,16 +75,26 @@ export default function CheckoutReturnScreen() {
     : 'Open Your tickets to check your latest orders.';
   const retry = () => { if (account.error) void account.retry().catch(() => undefined); else setAttempt(old => old + 1); };
   const signIn = async () => {
-    if (!scope?.isCurrent()) return;
-    const destination = directOrderId ? `/checkout-return?order=${directOrderId}${cancelled ? '&checkout=cancelled' : ''}` : '/checkout-return';
-    await stashPendingDestination(destination);
-    if (scope.isCurrent()) router.replace('/(auth)/phone-entry' as never);
+    if (!scope?.isCurrent() || visit.left || visit.signingIn) return;
+    visit.signingIn = true;
+    setSignInVisit(visit);
+    // Preserve invalid explicit IDs too: losing one would permit a different
+    // saved order to open after login. Encode it only as a query value.
+    const query = [rawOrder !== undefined ? `order=${encodeURIComponent(rawOrder)}` : null,
+      cancelled ? 'checkout=cancelled' : null].filter(Boolean).join('&');
+    try {
+      await stashPendingDestination(`/checkout-return${query ? `?${query}` : ''}`);
+      if (!visit.left && scope.isCurrent()) replace('/(auth)/phone-entry');
+    } finally {
+      visit.signingIn = false;
+      if (!visit.left && scope.isCurrent()) setSignInVisit(null);
+    }
   };
   return <SafeAreaView style={styles.screen}>
     <Stack.Screen options={{ headerShown: false }} />
     <View style={styles.header}>
       <Pressable accessibilityRole="button" accessibilityLabel="Back to Scene" style={styles.back}
-        onPress={() => router.replace('/(tabs)/explore' as never)}><ChevronLeft size={22} color={Colors.asphalt} /></Pressable>
+        onPress={() => replace('/(tabs)/explore')}><ChevronLeft size={22} color={Colors.asphalt} /></Pressable>
       <Text style={styles.headerLabel}>Checkout</Text>
     </View>
     <ScrollView contentContainerStyle={styles.content}>
@@ -84,11 +106,13 @@ export default function CheckoutReturnScreen() {
         <Text accessibilityRole="header" style={styles.title}>{heading}</Text>
         <Text accessibilityRole={failed ? 'alert' : undefined} style={styles.body}>{body}</Text>
         <Pressable accessibilityRole="button" style={styles.primary}
+          disabled={signedOut && signInVisit === visit}
+          accessibilityState={{ disabled: signedOut && signInVisit === visit, busy: signedOut && signInVisit === visit }}
           onPress={signedOut ? () => void signIn() : failed ? retry : () => {
-            if (scope?.isCurrent()) router.replace((value.orderId ? `/tickets/order/${value.orderId}` : '/tickets') as never);
+            if (scope?.isCurrent()) replace(value.orderId ? `/tickets/order/${value.orderId}` : '/tickets');
           }}><Text numberOfLines={1} style={styles.primaryText}>{signedOut ? 'Sign in' : failed ? 'Try again' : value.orderId ? 'View order' : 'Your tickets'}</Text></Pressable>
         {value.eventId && <Pressable accessibilityRole="button" style={styles.secondary}
-          onPress={() => { if (scope?.isCurrent()) router.replace(`/event/${value.eventId}` as never); }}><Text style={styles.secondaryText}>Back to event</Text></Pressable>}
+          onPress={() => { if (scope?.isCurrent()) replace(`/event/${value.eventId}`); }}><Text style={styles.secondaryText}>Back to event</Text></Pressable>}
       </View>}
     </ScrollView>
   </SafeAreaView>;
