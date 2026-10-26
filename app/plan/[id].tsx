@@ -751,22 +751,19 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const isMember = members.some((m) => m.user_id === currentUserId);
   const isCreator = plan?.creator_user_id === currentUserId;
 
-  // Does this plan have a live (non-archived) album? Gates the past-plan
-  // "Add photos" entry so it appears only when there is actually an album to
-  // add to. It never resurrects an archived one, and never drops the user into
-  // an empty upload screen. An album row only exists for plans that have ended
-  // (the server creates it post-end), so this is inherently end-time-aware.
-  // RLS double-checks membership.
-  const { data: hasLiveAlbum = false } = useQuery({
+  // Keep existing photos reachable from their plan after retiring the Albums
+  // section. Auto-created empty albums must not become another upload prompt.
+  // RLS still controls access to the original album.
+  const { data: hasPlanPhotos = false } = useQuery({
     queryKey: ['planAlbumExists', id, currentUserId, identity.epoch],
     queryFn: async () => {
       const { data } = await supabase
         .from('plan_albums')
-        .select('id')
+        .select('id, first_upload_at')
         .eq('event_id', id as string)
         .is('archived_at', null)
         .maybeSingle();
-      return !!data;
+      return !!data?.first_upload_at;
     },
     enabled: !!id && !!plan && (isMember || isCreator),
     staleTime: 60_000,
@@ -1804,13 +1801,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           {circleQuery.isError || viewerQuery.isError || membersQuery.isError ? <TouchableOpacity style={styles.joinButton} onPress={() => { void circleQuery.refetch().catch(() => {}); void viewerQuery.refetch(); void membersQuery.refetch(); }}><Text style={styles.joinButtonText}>Try again</Text></TouchableOpacity> : <ActivityIndicator color={accent}/>}
         </View> : isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember ? <Text style={styles.ineligibleText}>This plan is for circle members.</Text> : isClosedPlan && (isMember || isCreator) && currentUserId ? (
           <View style={styles.memberActions}>
-            {hasLiveAlbum && terminalStatus !== 'cancelled' && (
+            {hasPlanPhotos && terminalStatus !== 'cancelled' && (
               <TouchableOpacity
                 style={styles.openChatButton}
-                onPress={() => router.push(`/album/upload/${plan!.id}` as any)}
+                accessibilityRole="button"
+                accessibilityLabel="View photos"
+                onPress={() => router.push(`/album/${plan!.id}` as any)}
               >
                 <Ionicons name="camera-outline" size={18} color={Colors.white} />
-                <Text style={styles.openChatText}>Add photos</Text>
+                <Text numberOfLines={1} style={styles.openChatText}>View photos</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity

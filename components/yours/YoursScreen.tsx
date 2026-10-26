@@ -27,7 +27,6 @@ import { usePlanHistoryBacklog } from '../../hooks/usePlanHistoryBacklog';
 import { useReferral } from '../../hooks/useReferral';
 import { openInviteComposer } from '../../lib/yours/invite';
 import { hapticSelection } from '../../lib/haptics';
-import { AlbumsGrid } from '../albums/AlbumsGrid';
 import YoursHeader from './header/YoursHeader';
 import { PageAction } from '../creator/pages/PageFrame';
 import { CreatorSpaceEntry } from '../creator/pages/CreatorSpaceEntry';
@@ -354,8 +353,8 @@ export default function YoursScreen() {
     setIntroVariant(null);
   };
 
-  // The "Your People" body for the active state. Albums tab and loading
-  // are handled outside this function so the tabs stay visible.
+  // The "Your People" body for the active state. Loading is handled outside
+  // this function so the tabs stay visible.
   const renderPeopleBody = () => {
     if (state === 'loading') return <View style={styles.center}><ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading your people" /></View>;
     if (state === 'unavailable') return <View style={styles.fill} />;
@@ -475,11 +474,6 @@ export default function YoursScreen() {
                 onOpen={(id) => { if (isCurrentSection(scope)) router.push(`/community/${id}` as never); }}
                 onBrowse={() => { if (isCurrentSection(scope)) router.push('/(tabs)/explore' as never); }}
               />
-            </View>
-          )}
-          {tab === 'albums' && (
-            <View style={styles.fill}>
-              <AlbumsGrid userId={uid} />
             </View>
           )}
         </>}
