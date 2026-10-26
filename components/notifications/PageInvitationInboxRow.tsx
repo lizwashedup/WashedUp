@@ -1,13 +1,13 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useInboxNavigation, type InboxNavigate } from '../../hooks/useInboxNavigation';
 import Colors, { AfterglowColors as C } from '../../constants/Colors';
 import { AfterglowType as T } from '../../constants/Typography';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { loadPageInvitationTarget, markPageInvitationRead, PageInvitationIdentityError, pageInvitationRoute } from '../../lib/pageInvitationNotification';
 import { CreatorActionFill } from '../creator/CreatorActionFill';
-export function PageInvitationInboxRow({notice,userId,visible,enabled,onClose,onRead}:{notice:{id:string;title:string;body:string|null};userId:string|null;visible:boolean;enabled:boolean;onClose:()=>void;onRead?:()=>void}) {
-  const router=useRouter(),{fonts}=useAfterglowFonts();
+export function PageInvitationInboxRow({notice,userId,visible,enabled,onClose,onRead,onNavigate}:{notice:{id:string;title:string;body:string|null};userId:string|null;visible:boolean;enabled:boolean;onClose:()=>void;onNavigate?:InboxNavigate;onRead?:()=>void}) {
+  const navigate=useInboxNavigation(onClose,onNavigate),{fonts}=useAfterglowFonts();
   const visit=useMemo(()=>({}),[notice.id,userId,visible,enabled]);const latest=useRef(visit);latest.current=visit;
   const mounted=useRef(false);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const scope=useMemo(()=>({userId,isCurrent:()=>mounted.current&&visible&&latest.current===visit}),[userId,visible,visit]);
@@ -15,7 +15,7 @@ export function PageInvitationInboxRow({notice,userId,visible,enabled,onClose,on
   const current=state?.visit===visit?state:undefined;
   const open=()=>{
     if (!scope.isCurrent() || operation.current===visit) return;
-    if (!enabled) {onClose();router.push('/(tabs)/friends');return;}
+    if (!enabled) {navigate('/(tabs)/friends');return;}
     operation.current=visit;setState({visit,busy:true});
     void (async()=>{
       try {
@@ -30,7 +30,7 @@ export function PageInvitationInboxRow({notice,userId,visible,enabled,onClose,on
         catch(error) {if(error instanceof PageInvitationIdentityError) throw error;}
         if (!scope.isCurrent()) return;
         if(read)onRead?.();
-        onClose();router.push(route as never);
+        navigate(route as never);
       } catch (error) {
         if (scope.isCurrent()) setState({visit,busy:false,error:error instanceof Error?error.message:'This invitation could not be checked.'});
       } finally {if(operation.current===visit)operation.current=null;if(scope.isCurrent())setState(old=>old?.visit===visit?{...old,busy:false}:old);}

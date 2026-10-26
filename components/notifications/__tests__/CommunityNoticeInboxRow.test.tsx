@@ -51,3 +51,12 @@ it('uses the existing Chats fallback when community entry is disabled', async ()
 it('never revives a previous visible visit when reopened', async () => {
   const pending = deferred<any>(); mockLoad.mockReturnValueOnce(pending.promise); await act(async () => { tree = create(render()); }); await act(async () => button().props.onPress()); await act(async () => tree.update(render({ visible: false }))); await act(async () => tree.update(render())); await act(async () => pending.resolve('/community-thread/old')); expect(mockPush).not.toHaveBeenCalled(); await act(async () => button().props.onPress()); expect(mockPush).toHaveBeenCalledTimes(1);
 });
+
+it('hands the destination to its enclosing inbox without closing or pushing directly', async () => {
+  const onNavigate = jest.fn();
+  await act(async () => { tree = create(render({onNavigate})); });
+  await act(async () => button().props.onPress());
+  expect(onNavigate).toHaveBeenCalledWith('/community-thread/community?reactionMessageId=message&reactionMessageSource=broadcast');
+  expect(mockClose).not.toHaveBeenCalled();
+  expect(mockPush).not.toHaveBeenCalled();
+});

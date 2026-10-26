@@ -10,9 +10,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight } from '../lib/haptics';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Bell, Clock, Send } from 'lucide-react-native';
+import { Bell, Clock, Send, X } from 'lucide-react-native';
 import * as Notifications from 'expo-notifications';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -62,6 +62,38 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const queryClient = useQueryClient();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const notificationActions = useRef(new Set<string>());
+  const visit = useMemo(() => ({}), [visible, userId]);
+  const activeVisit = useRef<object | null>(null);
+  const afterDismiss = useRef<{ visit: object; complete: () => void } | null>(null);
+  useLayoutEffect(() => {
+    activeVisit.current = visit;
+    closingRef.current = false;
+    afterDismiss.current = null;
+    notificationActions.current = new Set();
+    setClosing(false);
+    return () => { activeVisit.current = null; afterDismiss.current = null; };
+  }, [visit]);
+  const finishDismissal = useCallback(() => {
+    const pending = afterDismiss.current;
+    if (!pending || pending.visit !== visit || activeVisit.current !== visit) return;
+    afterDismiss.current = null;
+    pending.complete();
+  }, [visit]);
+  const requestClose = useCallback((route?: string) => {
+    if (!visible || activeVisit.current !== visit || closingRef.current) return;
+    if (route && !notificationScope.isCurrent()) return;
+    closingRef.current = true;
+    afterDismiss.current = { visit, complete: () => {
+      onClose();
+      if (route && notificationScope.isCurrent()) router.push(route as never);
+    } };
+    setClosing(true);
+    if (Platform.OS !== 'ios') finishDismissal();
+  }, [visible, visit, notificationScope, onClose, router, finishDismissal]);
+  const navigateAfterDismiss = useCallback((route: string) => requestClose(route), [requestClose]);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message: string; buttons?: BrandedAlertButton[] } | null>(null);
   // Guards against a rapid double-tap firing the exception accept/decline RPC
   // twice (the 2nd call would error not_on_waitlist / no_active_invite and
@@ -189,17 +221,20 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   }, [visible, loadingInvites, loadingNotifs, queryClient]);
 
   const handleNotifAction = useCallback(async (notifId: string, action: 'acted' | 'read', eventId?: string, notifType?: string, actorId?: string) => {
-    if (!notificationScope.isCurrent()) return;
+    if (!notificationScope.isCurrent() || closingRef.current) return;
+    const actions = notificationActions.current;
+    if (actions.has(notifId)) return;
+    actions.add(notifId);
     hapticLight();
     try {
       await supabase.from('app_notifications').update({ status: action }).eq('id', notifId).eq('user_id', userId);
-      if (!notificationScope.isCurrent()) return;
+      if (!notificationScope.isCurrent() || closingRef.current) return;
       // Don't delete waitlist row here — let cleanup_waitlist_on_join trigger handle it
       // when the user actually joins on the plan detail page
       refetchNotifs();
       queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
       if (action === 'acted' && notifType === 'operator_grant') {
-        onClose(); router.push('/creator/apply'); return;
+        navigateAfterDismiss('/creator/apply'); return;
       }
       if (action === 'acted' && notifType && YOURS_NOTIF_TYPES.has(notifType)) {
         // Single inbox: a people request / acceptance / referral-joined
@@ -207,7 +242,6 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         // A people_request is directly actionable, so carry a flag that
         // auto-opens the accept card stack instead of leaving the user to
         // hunt for the request banner (or find nothing if it's stale).
-        onClose();
         // Only the rebuilt Yours screen handles ?openRequests=1; with the flag
         // off the legacy screen can't, so route plain to avoid a dead-end.
         // Force the People tab (not last-used) and carry the requester id so the
@@ -216,9 +250,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           const target = actorId
             ? `/(tabs)/friends?openRequests=1&tab=people&requesterId=${actorId}`
             : '/(tabs)/friends?openRequests=1&tab=people';
-          router.push(target as any);
+          navigateAfterDismiss(target as any);
         } else {
-          router.push((notifType === 'people_request_accepted' || notifType === 'referral_joined' ? '/(tabs)/friends?tab=people' : '/(tabs)/friends') as any);
+          navigateAfterDismiss((notifType === 'people_request_accepted' || notifType === 'referral_joined' ? '/(tabs)/friends?tab=people' : '/(tabs)/friends') as any);
         }
         return;
       }
@@ -233,46 +267,45 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       // "by design" per its own comment there). Mirrors that here so the
       // in-app tap isn't a silent no-op while the push tap already works.
       if (action === 'acted' && notifType === 'community_join_request') {
-        onClose();
-        router.push('/(creator)/members' as any);
+        navigateAfterDismiss('/(creator)/members' as any);
         return;
       }
       if (action === 'acted' && notifType === 'community_event' && COMMUNITIES_ENABLED) {
-        onClose();
-        router.push('/(tabs)/explore' as any);
+        navigateAfterDismiss('/(tabs)/explore' as any);
         return;
       }
       if (action === 'acted' && eventId) {
-        onClose();
         if (notifType === 'member_joined' || notifType === 'invite_accepted' || notifType === 'event_reminder') {
-          router.push(`/(tabs)/chats/${eventId}` as any);
+          navigateAfterDismiss(`/(tabs)/chats/${eventId}` as any);
         } else if (notifType === 'waitlist_request' || notifType === 'exception_slot_refunded') {
           // The manager query has a 30s staleTime; force it fresh so the
           // creator doesn't land on a stale counter/list after tapping a
           // "someone wants in" / "slot opened back up" notification.
           queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
-          router.push(`/waitlist/${eventId}` as any);
+          navigateAfterDismiss(`/waitlist/${eventId}` as any);
         } else if (
           notifType === 'album_upload_prompt' ||
           notifType === 'album_upload_reminder' ||
           notifType === 'album_creator_no_uploads_nudge'
         ) {
-          router.push(`/album/upload/${eventId}` as any);
+          navigateAfterDismiss(`/album/upload/${eventId}` as any);
         } else if (
           notifType === 'album_ready' ||
           notifType === 'album_someone_uploaded' ||
           notifType === 'album_more_photos_added' ||
           notifType === 'album_hearts_batched'
         ) {
-          router.push(`/album/${eventId}` as any);
+          navigateAfterDismiss(`/album/${eventId}` as any);
         } else {
-          router.push(`/plan/${eventId}`);
+          navigateAfterDismiss(`/plan/${eventId}`);
         }
       }
     } catch {
-      if (notificationScope.isCurrent()) setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
+      if (notificationScope.isCurrent() && !closingRef.current) setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
+    } finally {
+      actions.delete(notifId);
     }
-  }, [refetchNotifs, router, queryClient, userId, onClose, notificationScope]);
+  }, [refetchNotifs, queryClient, userId, navigateAfterDismiss, notificationScope]);
 
   const handleClearAll = useCallback(async () => {
     if (!userId || appNotifications.length === 0) return;
@@ -311,8 +344,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(eventId) });
-      onClose();
-      router.push(`/(tabs)/chats/${eventId}` as any);
+      navigateAfterDismiss(`/(tabs)/chats/${eventId}` as any);
     } catch (e) {
       setAlertInfo({
         title: 'Hmm',
@@ -321,7 +353,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     } finally {
       exceptionInFlightRef.current.delete(notifId);
     }
-  }, [refetchNotifs, queryClient, router, onClose]);
+  }, [refetchNotifs, queryClient, navigateAfterDismiss]);
 
   // proposal 49 (Cowork ruling): the exception accept ends in plan
   // membership, so it owes the notice like any join; the accept proceeds
@@ -391,11 +423,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [refetchNotifs, queryClient]);
 
-  if (!visible) return null;
-
   return (
     <Modal
-      visible
+      visible={visible && !closing}
       transparent
       // fade (not slide): with a transparent modal, "slide" animates the dark
       // scrim up *with* the sheet, so until it settles the screen behind
@@ -405,10 +435,13 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       animationType="fade"
       presentationStyle="overFullScreen"
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={() => requestClose()}
+      onDismiss={finishDismissal}
     >
-      <Pressable style={s.overlay} onPress={onClose}>
+      <Pressable accessible={false} style={s.overlay} onPress={() => requestClose()}>
         <Pressable
+          accessible={false}
+          accessibilityViewIsModal
           style={[
             s.sheet,
             // Android edge-to-edge: Modal renders behind the nav/gesture bar;
@@ -420,10 +453,20 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         >
           <View style={s.handle} />
           <View style={s.headerRow}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close inbox"
+              onPress={() => requestClose()}
+              style={s.closeBtn}
+            >
+              <X size={22} color={Colors.asphalt} />
+            </TouchableOpacity>
             <Text style={s.title}>Notifications</Text>
             {appNotifications.length > 0 && (
               <TouchableOpacity
                 onPress={handleClearAll}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all notifications"
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={s.clearAllBtn}
               >
@@ -476,15 +519,12 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       <TouchableOpacity
                         style={s.letsGoBtn}
                         activeOpacity={0.85}
-                        onPress={async () => {
+                        onPress={() => {
+                          if (!notificationScope.isCurrent() || closingRef.current) return;
                           hapticLight();
-                          try {
-                            await supabase.from('plan_invites').update({ status: 'accepted' }).eq('id', inv.id);
-                            refetchInvites();
-                            queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-                          } catch {}
-                          onClose();
-                          router.push(`/plan/${inv.event_id}` as any);
+                          // Viewing an invitation is not joining. Plan detail acknowledges
+                          // acceptance only after it confirms the recipient's membership.
+                          navigateAfterDismiss(`/plan/${inv.event_id}`);
                         }}
                       >
                         <Text style={s.letsGoBtnText}>{`Let's Go \u2192`}</Text>
@@ -509,11 +549,11 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               })}
 
               {appNotifications.map((notif: any) => {
-                if (CREATOR_PAGES_ENABLED && isCommunityJoinNotice(notif.type)) return <CommunityJoinInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
-                if (notif.type === 'community_broadcast') return <CommunityNoticeInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={COMMUNITIES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
-                if (notif.scene_update) return <AttendeeMessageInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={COMMUNITIES_ENABLED} onClose={onClose} />;
-                if (notif.type === 'page_team_invitation') return <PageInvitationInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={CREATOR_PAGES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
-                if (notif.type === 'creator_page_update') return <PageUpdateInboxRow key={notif.id} notice={notif} userId={userId} visible={visible} enabled={CREATOR_PAGES_ENABLED} onClose={onClose} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (CREATOR_PAGES_ENABLED && isCommunityJoinNotice(notif.type)) return <CommunityJoinInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.type === 'community_broadcast') return <CommunityNoticeInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} enabled={COMMUNITIES_ENABLED} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.scene_update) return <AttendeeMessageInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} enabled={COMMUNITIES_ENABLED} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} />;
+                if (notif.type === 'page_team_invitation') return <PageInvitationInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} enabled={CREATOR_PAGES_ENABLED} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
+                if (notif.type === 'creator_page_update') return <PageUpdateInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} enabled={CREATOR_PAGES_ENABLED} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
                 const isWaitlist = notif.type === 'waitlist_spot';
                 const isExceptionInvite = notif.type === 'exception_invite';
                 const goesToYours = YOURS_NOTIF_TYPES.has(notif.type);
@@ -660,8 +700,9 @@ const s = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
   sheet: { backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 40, height: '70%' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D5CCC2', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
-  headerRow: { position: 'relative', justifyContent: 'center', marginBottom: 16, minHeight: 22 },
-  title: { fontSize: 17, fontWeight: '700' as const, color: '#2C1810', textAlign: 'center' },
+  headerRow: { position: 'relative', justifyContent: 'center', marginBottom: 16, minHeight: 44, paddingHorizontal: 64 },
+  closeBtn: { position: 'absolute', left: 0, top: 0, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  title: { fontSize: FontSizes.bodyLG, fontFamily: Fonts.sansBold, color: Colors.asphalt, textAlign: 'center' },
   clearAllBtn: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center' },
   clearAllText: { fontSize: 13, fontFamily: Fonts.sansMedium, color: Colors.textLight },
   list: { flex: 1 },
