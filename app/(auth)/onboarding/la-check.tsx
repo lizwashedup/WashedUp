@@ -105,7 +105,7 @@ export default function OnboardingLACheckScreen() {
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.container}>
             <ProgressHead
               step={2}
@@ -125,31 +125,34 @@ export default function OnboardingLACheckScreen() {
               {!choseNo ? (
                 <View style={styles.choices}>
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.primaryButton}
                     onPress={() => handleLA(false)}
                     activeOpacity={0.9}
                     disabled={loading}
                   >
-                    <Text style={styles.primaryButtonText}>yes, i live here</Text>
+                    <Text numberOfLines={1} style={styles.primaryButtonText}>i live here</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.secondaryButton}
                     onPress={() => handleLA(true)}
                     activeOpacity={0.85}
                     disabled={loading}
                   >
-                    <Text style={styles.secondaryButtonText}>i’m visiting LA</Text>
+                    <Text numberOfLines={1} style={styles.secondaryButtonText}>visiting LA</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    accessibilityRole="button"
                     style={styles.secondaryButton}
                     onPress={handleNo}
                     activeOpacity={0.85}
                     disabled={loading}
                   >
-                    <Text style={styles.secondaryButtonText}>
-                      no, bring washedup to my city
+                    <Text numberOfLines={1} style={styles.secondaryButtonText}>
+                      another city
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -164,6 +167,7 @@ export default function OnboardingLACheckScreen() {
                   </Text>
 
                   <TextInput
+                    accessibilityLabel="Your city"
                     style={styles.input}
                     placeholder="your city"
                     placeholderTextColor={Colors.text3}
@@ -177,6 +181,8 @@ export default function OnboardingLACheckScreen() {
                   />
 
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Join waitlist"
                     style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
                     onPress={handleContinueFromNo}
                     activeOpacity={0.9}
@@ -185,7 +191,7 @@ export default function OnboardingLACheckScreen() {
                     {loading ? (
                       <ActivityIndicator color={Colors.surface} />
                     ) : (
-                      <Text style={styles.primaryButtonText}>join waitlist</Text>
+                      <Text numberOfLines={1} style={styles.primaryButtonText}>join waitlist</Text>
                     )}
                   </TouchableOpacity>
                 </View>
