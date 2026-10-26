@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TextInput } from 'react-native';
+import { Text, TextInput, Modal } from 'react-native';
 import { act, create, ReactTestInstance } from 'react-test-renderer';
 import { TierEditorSheet } from '../TierEditorSheet';
 
@@ -222,4 +222,14 @@ it('keeps fields and dismissal locked while the actual save promise is pending',
  expect(tree.root.findAllByType(TextInput).every((n:any)=>n.props.editable===false)).toBe(true);
  act(()=>tree.root.findByProps({accessibilityLabel:'close ticket editor'}).props.onPress());expect(onClose).not.toHaveBeenCalled();
  await act(async()=>{finish(undefined);await pending;});expect(tree.root.findAllByType(TextInput).every((n:any)=>n.props.editable===true)).toBe(true);act(()=>tree.unmount());
+});
+
+it('reports native editor dismissal so its owner can sequence recovery', () => {
+  const dismissed = jest.fn();
+  let editor: ReturnType<typeof create>;
+  act(() => { editor = create(<TierEditorSheet visible tier={null} commissionBps={400} busy={false} onSave={jest.fn()} onClose={jest.fn()} onDismiss={dismissed} />); });
+  expect(dismissed).not.toHaveBeenCalled();
+  act(() => editor!.root.findByType(Modal).props.onDismiss());
+  expect(dismissed).toHaveBeenCalledTimes(1);
+  act(() => editor!.unmount());
 });
