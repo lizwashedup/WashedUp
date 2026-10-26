@@ -512,7 +512,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const noticeAgreeLock = useRef<object | null>(null);
   if (noticeAgreeLock.current && noticeAgreeLock.current !== noticePending) noticeAgreeLock.current = null;
   type DismissalTransition = {
-    source: 'join' | 'notice' | 'manage' | 'share'; isCurrent: () => boolean; run: () => void;
+    source: 'join' | 'notice' | 'manage' | 'share' | 'ticket'; isCurrent: () => boolean; run: () => void;
     resolve: () => void; cancel: () => void;
   };
   const [modalTransition, setModalTransition] = useState<DismissalTransition | null>(null);
@@ -540,6 +540,18 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const closeDuplicateSheet = () => {duplicateVisit.current=null;setShowDuplicateSheet(false);};
   useFocusEffect(useCallback(()=>()=>{duplicateVisit.current=null;setShowDuplicateSheet(false);},[]));
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
+  const ticketClosing = useRef(false);
+  const finishTicketReminder = (openTickets = false) => {
+    if (!ticketModalVisible || ticketClosing.current || !joinMutation.isCurrent() || modalTransitionRef.current) return;
+    ticketClosing.current = true;
+    void afterPlanModalDismiss('ticket', joinMutation.isCurrent, () => {
+      if (openTickets && plan?.tickets_url) openUrl(plan.tickets_url);
+      finishJoinNotifications();
+      router.push(planChatPath as any);
+    }).catch(() => {});
+    setTicketModalVisible(false);
+  };
+
   const [manageModalVisible, setManageModalVisible] = useState(false);
   const [departureVisit, setDepartureVisit] = useState<{ action: PlanDepartureAction; isCurrent: () => boolean } | null>(null);
   const departureVisitRef = useRef(departureVisit); departureVisitRef.current = departureVisit;
@@ -2113,6 +2125,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               // and fired the ticket modal 600ms later, which caused a
               // visible flash of "get your tickets" over the chat screen
               // transition on Android.
+              ticketClosing.current = false;
               setTicketModalVisible(true);
             } else {
               finishJoinNotifications(); router.push(planChatPath as any);
@@ -2150,9 +2163,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       )}
 
       {/* Ticket Prompt Modal — shown after joining a ticketed event */}
-      <Modal visible={ticketModalVisible} transparent animationType="fade" onRequestClose={() => { setTicketModalVisible(false); finishJoinNotifications(); router.push(planChatPath as any); }} statusBarTranslucent>
-        <Pressable style={joinStyles.overlay} onPress={() => { setTicketModalVisible(false); finishJoinNotifications(); router.push(planChatPath as any); }}>
-          <Pressable style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
+      <Modal visible={ticketModalVisible} transparent animationType="fade" onDismiss={() => finishPlanModalDismiss('ticket', modalTransition)} onRequestClose={() => finishTicketReminder()} statusBarTranslucent>
+        <Pressable accessible={false} style={joinStyles.overlay} onPress={() => finishTicketReminder()}>
+          <Pressable accessible={false} style={ticketStyles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={ticketStyles.iconCircle}>
               <Ticket size={28} color={accent} strokeWidth={2} />
             </View>
@@ -2163,11 +2176,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
             <TouchableOpacity
               style={ticketStyles.primaryBtn}
-              onPress={() => {
-                setTicketModalVisible(false);
-                if (plan?.tickets_url) openUrl(plan.tickets_url);
-                finishJoinNotifications(); router.push(planChatPath as any);
-              }}
+              accessibilityRole="button"
+              accessibilityLabel="Get Tickets Now"
+              onPress={() => finishTicketReminder(true)}
               activeOpacity={0.85}
             >
               <Text style={ticketStyles.primaryBtnText}>Get Tickets Now</Text>
@@ -2175,10 +2186,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
             <TouchableOpacity
               style={ticketStyles.secondaryBtn}
-              onPress={() => {
-                setTicketModalVisible(false);
-                finishJoinNotifications(); router.push(planChatPath as any);
-              }}
+              accessibilityRole="button"
+              accessibilityLabel="I'll remember"
+              onPress={() => finishTicketReminder()}
               activeOpacity={0.7}
             >
               <Text style={ticketStyles.secondaryBtnText}>I'll remember</Text>

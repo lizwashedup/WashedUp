@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, Text, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -16,30 +16,41 @@ export default function PingAfterPlanModal({ planId, onDone }: { planId: string 
 function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () => void }) {
   const viewer = useObservedUser();
   const people = useYoursGrid(viewer.error || viewer.isLoading ? undefined : viewer.viewerId);
-  const done = useRef(false);
-  const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
-  const finish = () => {
-    if (done.current || !mounted.current || !viewer.isCurrent()) return;
-    done.current = true;
-    onDoneRef.current();
-  };
   const list = people.data ?? [];
   const loaded = !!viewer.viewerId && !viewer.error && !viewer.isLoading && people.isSuccess;
   const empty = loaded && !people.isFetching && list.length === 0;
+  const initiallyEmpty = useRef(empty);
+  const [closing, setClosing] = useState(false);
+  const done = useRef(false);
+  const pending = useRef<null | (() => boolean)>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const latest = useRef({ viewer, onDone });
+  latest.current = { viewer, onDone };
+  const owner = `${viewer.viewerId}:${viewer.epoch}`;
+  const busy = useRef({ owner, value: false });
+  if (busy.current.owner !== owner) busy.current = { owner, value: false };
+  const complete = () => {
+    const isCurrent = pending.current;
+    if (!isCurrent || done.current || !mounted.current) return;
+    pending.current = null;
+    done.current = true;
+    if (isCurrent()) latest.current.onDone();
+  };
+  const finish = () => {
+    if (done.current || pending.current || busy.current.value || !mounted.current || !viewer.isCurrent()) return;
+    pending.current = () => viewer.isCurrent() && latest.current.viewer.viewerId === viewer.viewerId && latest.current.viewer.epoch === viewer.epoch;
+    setClosing(true);
+    // A cached empty result never presents a window. Otherwise iOS must finish
+    // dismissing this one before the parent opens a ticket sheet or chat.
+    if (Platform.OS !== 'ios' || initiallyEmpty.current) complete();
+  };
   useEffect(() => {
-    // Only a successful, current empty result may skip this optional step.
     if (empty && viewer.isCurrent()) finish();
-  // finish reads the latest navigation callback through a ref.
+  // Completion is scoped to the current account and invitation session.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empty, viewer.epoch]);
 
-  if (empty) return null;
-  if (loaded && list.length > 0) {
-    return <ReadyInvitation key={`${viewer.viewerId}:${viewer.epoch}`} planId={planId} userId={viewer.viewerId!} onDone={finish} />;
-  }
   const loading = viewer.isLoading || (!!viewer.viewerId && !viewer.error && (people.isLoading || (people.isFetching && list.length === 0)));
   const retry = async () => {
     if (loading) return;
@@ -47,11 +58,13 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
     else await people.refetch();
   };
   return (
-    <Modal visible animationType="fade" onRequestClose={finish}>
-      <SafeAreaView style={styles.container}>
+    <Modal visible={!closing && !initiallyEmpty.current} animationType="fade" onRequestClose={finish} onDismiss={complete}>
+      {loaded && list.length > 0 ? <ReadyInvitation key={owner} planId={planId} userId={viewer.viewerId!} onDone={finish} onBusyChange={value => {
+        if (busy.current.owner === owner && viewer.isCurrent()) busy.current.value = value;
+      }} /> : <SafeAreaView style={styles.container}>
         <View style={styles.state}>
-          <Text style={styles.title}>{loading ? 'Finding your people' : 'Your people couldn’t load'}</Text>
-          {loading ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading your people" /> : <>
+          <Text style={styles.title}>{empty ? 'You’re all set' : loading ? 'Finding your people' : 'Your people couldn’t load'}</Text>
+          {loading || empty ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading your people" /> : <>
             <Text style={styles.description}>You can try again or continue to your plan.</Text>
             <Pressable style={styles.retry} onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading your people">
               <Text style={styles.retryText}>Try again</Text>
@@ -61,26 +74,25 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
             <Text style={styles.skipText}>Not now</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </SafeAreaView>}
     </Modal>
   );
 }
 
-function ReadyInvitation({ planId, userId, onDone }: { planId: string; userId: string; onDone: () => void }) {
+function ReadyInvitation({ planId, userId, onDone, onBusyChange }: { planId: string; userId: string; onDone: () => void; onBusyChange: (busy: boolean) => void }) {
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const finish = () => { if (!busyRef.current) onDone(); };
   return (
-    <Modal visible animationType="fade" onRequestClose={finish}>
       <SafeAreaView style={styles.container} accessibilityState={{ busy }}>
         <View style={styles.center}>
           <PingInline userId={userId} planId={planId} onDone={finish} onBusyChange={value => {
             busyRef.current = value;
+            onBusyChange(value);
             setBusy(value);
           }} />
         </View>
       </SafeAreaView>
-    </Modal>
   );
 }
 
