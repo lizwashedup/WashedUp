@@ -61,6 +61,7 @@ interface TierEditorSheetProps {
   draftKey?: string;
   scope?: CreatorPageScope;
   onClose: () => void;
+  onDismiss?: () => void;
   onDiscard?: () => void;
   /** Pre-fills the name field when creating a new tier (tier === null). Ignored while editing an existing tier. */
   initialName?: string;
@@ -76,7 +77,7 @@ function parsePriceCents(text: string): number | null {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
-export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, onClose, initialName, initialDraft, draftKey, scope, onDiscard }: TierEditorSheetProps) {
+export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, onClose, onDismiss, initialName, initialDraft, draftKey, scope, onDiscard }: TierEditorSheetProps) {
   const {fonts}=useAfterglowFonts(true, 'creator');
   const styles=useMemo(()=>createStyles(fonts),[fonts]);
   const [saving, setSaving] = useState(false);
@@ -237,7 +238,7 @@ export function TierEditorSheet({ visible, tier, commissionBps, busy, onSave, on
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose} onDismiss={onDismiss}>
       {/* Native modals render outside the screen's safe-area tree. Giving
           this modal its own provider keeps reopened editors below the
           iPhone status bar and Dynamic Island. */}

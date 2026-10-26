@@ -1,7 +1,7 @@
 import React from 'react';
 import {act,create,type ReactTestRenderer} from 'react-test-renderer';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import {TouchableOpacity,TextInput} from 'react-native';
+import {TouchableOpacity,TextInput,Text,Platform} from 'react-native';
 const mockCreator=jest.fn(),mockEntry=jest.fn();
 const mockAccess=jest.fn(),mockTiers=jest.fn(),mockFaqs=jest.fn(),mockPayout=jest.fn(),mockPromos=jest.fn(),mockAddons=jest.fn(),mockQuestions=jest.fn(),mockNote=jest.fn(),mockReadiness=jest.fn();
 const mockSaveFaq=jest.fn();
@@ -24,6 +24,7 @@ jest.mock('../PromotionEditorSheet',()=>({PromotionEditorSheet:()=>null}));
 jest.mock('../AddonEditorSheet',()=>({AddonEditorSheet:()=>null}));
 jest.mock('../../../components/BrandedAlert',()=>({BrandedAlert:(props:any)=>require('react').createElement('TestAlert',props)}));
 import Screen from '../../../app/creator/tickets';
+import {router} from 'expo-router';
 let tree:ReactTestRenderer,client:QueryClient;const content=()=>JSON.stringify(tree.toJSON());const settle=()=>act(async()=>{await new Promise(r=>setTimeout(r,20));});
 async function render(){await act(async()=>tree.update(<QueryClientProvider client={client}><Screen/></QueryClientProvider>));await settle();await settle();}
 async function mount(){client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{gcTime:0}}});await act(async()=>{tree=create(<QueryClientProvider client={client}><Screen/></QueryClientProvider>);});await settle();await settle();}
@@ -34,7 +35,7 @@ it('does not present failed ticket or payout reads as empty setup',async()=>{moc
 it('retries a failed ticket section independently',async()=>{mockTiers.mockRejectedValueOnce(Error('offline'));await mount();await act(async()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Retry: Tickets couldn’t be refreshed.')!.props.onPress());await settle();expect(content()).toContain('Add your first ticket');expect(mockPayout).toHaveBeenCalledTimes(1);});
 it('preserves the pending ticket draft through the existing end-time round trip',async()=>{
  mockReadiness.mockResolvedValue({ok:false,reason:'missing_end_time',message:'Add an end time.'});mockTiers.mockResolvedValue([{id:'other-tier',name:'Other ticket',price_cents:1200,status:'draft',quantity_cap:null}]);await mount();const draft={name:'Sunset entry',price_cents:1200};
- await act(async()=>{await expect(tree.root.findByType('TierEditor' as any).props.onSave(draft)).rejects.toThrow('Add an end time.');});await settle();expect(tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Edit Other ticket')!.props.disabled).toBe(true);const alert=tree.root.findByType('TestAlert' as any);await act(async()=>alert.props.buttons.find((b:any)=>b.text==='set end time').onPress());
+ await act(async()=>{await expect(tree.root.findByType('TierEditor' as any).props.onSave(draft)).rejects.toThrow('Add an end time.');});await settle();expect(tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Edit Other ticket')!.props.disabled).toBe(true);const alert=tree.root.findByType('TestAlert' as any);await act(async()=>{alert.props.buttons.find((b:any)=>b.text==='set end time').onPress();alert.props.onClose();alert.props.onDismiss();});
  mockFocused=false;mockScope={userId:'creator',isCurrent:()=>false};await render();expect(tree.root.findByType('TierEditor' as any).props.visible).toBe(false);
  mockFocused=true;mockScope={userId:'creator',isCurrent:()=>true};await render();expect(tree.root.findByType('TierEditor' as any).props.initialDraft).toEqual(draft);expect(tree.root.findByType('TierEditor' as any).props.visible).toBe(true);
 });
@@ -52,4 +53,74 @@ it('retains FAQ values and the same save ID across failure and retry',async()=>{
  expect(mockSaveFaq).toHaveBeenCalledTimes(1);expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('Where do we meet?');expect(tree.root.findAllByType(TextInput)[0].props.editable).toBe(false);
  await act(async()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Retry FAQ save')!.props.onPress());await settle();
  expect(mockSaveFaq.mock.calls[1]).toEqual(mockSaveFaq.mock.calls[0]);expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('');
+});
+
+const priorPlatform = Platform.OS;
+afterEach(()=>{Platform.OS=priorPlatform;});
+const ticketEditor = () => tree.root.findByType('TierEditor' as any);
+const recoveryAlert = () => tree.root.findByType('TestAlert' as any);
+async function rejectMissingEndTime() {
+  mockReadiness.mockResolvedValue({ok:false,reason:'missing_end_time',message:'Add an end time.'});
+  Platform.OS='ios'; await mount();
+  await act(async()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children==='add a ticket'))!.props.onPress());
+  expect(ticketEditor().props.visible).toBe(true);
+  await act(async()=>{await expect(ticketEditor().props.onSave({name:'Sunset entry',price_cents:1200})).rejects.toThrow('Add an end time.');});
+  await settle();
+}
+it('dismisses the ticket editor before showing missing-end-time recovery', async()=>{
+  await rejectMissingEndTime();
+  expect(ticketEditor().props.visible).toBe(false);
+  expect(recoveryAlert().props.visible).toBe(false);
+  act(()=>ticketEditor().props.onDismiss());
+  expect(recoveryAlert().props.visible).toBe(true);
+});
+it('waits for recovery alert dismissal and navigates once', async()=>{
+  await rejectMissingEndTime();
+  if(ticketEditor().props.onDismiss)act(()=>ticketEditor().props.onDismiss());
+  const choose=recoveryAlert().props.buttons.find((b:any)=>b.text==='set end time').onPress;
+  act(()=>{choose();choose();recoveryAlert().props.onClose();});
+  expect(router.push).not.toHaveBeenCalled();
+  const finish=recoveryAlert().props.onDismiss;act(()=>{finish();finish();});
+  expect(router.push).toHaveBeenCalledTimes(1);
+  expect(router.push).toHaveBeenCalledWith('/creator/event-form?id=event&returnToTickets=1');
+});
+it('ignores a retained end-time recovery action after its scope expires', async()=>{
+  await rejectMissingEndTime();
+  if(ticketEditor().props.onDismiss)act(()=>ticketEditor().props.onDismiss());
+  const choose=recoveryAlert().props.buttons.find((b:any)=>b.text==='set end time').onPress;
+  mockFocused=false;
+  act(()=>choose());
+  expect(router.push).not.toHaveBeenCalled();
+});
+
+it('returns to the same unsaved ticket after cancelling the recovery alert', async()=>{
+  await rejectMissingEndTime();act(()=>ticketEditor().props.onDismiss());
+  act(()=>recoveryAlert().props.onClose());
+  expect(ticketEditor().props.visible).toBe(false);
+  act(()=>recoveryAlert().props.onDismiss());
+  expect(ticketEditor().props.visible).toBe(true);
+  expect(ticketEditor().props.initialDraft).toEqual({name:'Sunset entry',price_cents:1200});
+  expect(router.push).not.toHaveBeenCalled();
+});
+it.each(['blur','unmount'])('retires queued recovery navigation after %s', async change=>{
+  await rejectMissingEndTime();act(()=>ticketEditor().props.onDismiss());
+  act(()=>{recoveryAlert().props.buttons.find((b:any)=>b.text==='set end time').onPress();recoveryAlert().props.onClose();});
+  const finish=recoveryAlert().props.onDismiss;
+  if(change==='unmount')act(()=>tree.unmount());else {mockFocused=false;await render();}
+  act(()=>finish());expect(router.push).not.toHaveBeenCalled();
+});
+it('does not reopen recovery after losing the editor visit', async()=>{
+  await rejectMissingEndTime();const finish=ticketEditor().props.onDismiss;
+  mockFocused=false;await render();act(()=>finish());
+  expect(recoveryAlert().props.visible).toBe(false);
+  expect(router.push).not.toHaveBeenCalled();
+});
+it('completes Android recovery without either native dismissal event', async()=>{
+  mockReadiness.mockResolvedValue({ok:false,reason:'missing_end_time',message:'Add an end time.'});
+  Platform.OS='android';await mount();
+  act(()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children==='add a ticket'))!.props.onPress());
+  await act(async()=>{await expect(ticketEditor().props.onSave({name:'Entry',price_cents:1200})).rejects.toThrow();});await settle();
+  expect(recoveryAlert().props.visible).toBe(true);
+  act(()=>{recoveryAlert().props.buttons.find((b:any)=>b.text==='set end time').onPress();recoveryAlert().props.onClose();});
+  expect(router.push).toHaveBeenCalledTimes(1);
 });
