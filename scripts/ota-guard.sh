@@ -310,13 +310,17 @@ if [ "$platform" = "ios" ]; then
     fail "WASHEDUP_OTA_RUNTIME_VERSION does not match iOS build $target_build_number."
   fi
 else
-  PIN_FILE="scripts/ota-guard-state/last-confirmed-live-fingerprint.json"
-  pinned_fingerprint="$(node -p "require('./$PIN_FILE').fingerprint" 2>/dev/null || true)"
-  current_fingerprint="$(npx expo-updates fingerprint:generate --platform android 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).hash" 2>/dev/null || true)"
-  if [ -z "$pinned_fingerprint" ] || [ -z "$current_fingerprint" ] || [ "$current_fingerprint" != "$pinned_fingerprint" ]; then
-    fail "Android has no verified build-specific OTA target. Verify and pin one before publishing."
+  TARGET_FILE="scripts/ota-guard-state/android-release-candidate.json"
+  node scripts/verify-android-ota-target.cjs || fail "Android store artifact or native compatibility verification failed."
+  target_runtime="$(node -p "require('./$TARGET_FILE').runtimeVersion")"
+  target_commit="$(node -p "require('./$TARGET_FILE').reviewedNativeCommit")"
+  git merge-base --is-ancestor "$target_commit" HEAD || fail "Android reviewed native commit is not an ancestor."
+  if ! git diff --quiet "$target_commit"..HEAD -- app.json app.config.js eas.json package-lock.json yarn.lock pnpm-lock.yaml plugins ios android; then
+    fail "Native inputs changed after the Android compatibility review. Re-verify the store build before publishing."
   fi
-  target_runtime="$pinned_fingerprint"
+  if [ "${WASHEDUP_OTA_RUNTIME_VERSION:-}" != "$target_runtime" ]; then
+    fail "Android runtime override does not match the verified store artifact. Use scripts/publish-ota.sh android."
+  fi
 fi
 
 # Warn (don't block) on source-referenced EXPO_PUBLIC_ vars not set anywhere —
