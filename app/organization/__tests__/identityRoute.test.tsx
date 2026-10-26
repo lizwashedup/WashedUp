@@ -1,6 +1,7 @@
 import React from 'react';
 import {act,create,type ReactTestRenderer} from 'react-test-renderer';
 const mockQuery=jest.fn(),mockLegacyRead=jest.fn();let mockParams:any,mockFlag=true;
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router',()=>({useLocalSearchParams:()=>mockParams,router:{back:()=>{}},Stack:{Screen:()=>null},Redirect:()=>null}));
 jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){return mockFlag;},COMMUNITIES_ENABLED:true}));
 jest.mock('../../../components/creator/pages/PublicOrganizationPageScreen',()=>({__esModule:true,default:()=>null}));
