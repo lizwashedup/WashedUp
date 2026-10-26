@@ -1,14 +1,14 @@
 import React,{useMemo,useRef,useEffect,useState} from 'react';
 import {Pressable,StyleSheet,Text,View} from 'react-native';
-import {useRouter} from 'expo-router';
+import { useInboxNavigation, type InboxNavigate } from '../../hooks/useInboxNavigation';
 import Colors,{AfterglowColors as C} from '../../constants/Colors';
 import {AfterglowType as T} from '../../constants/Typography';
 import {useAfterglowFonts} from '../../hooks/useAfterglowFonts';
 import {attendeeMessageEventRoute,loadAttendeeNoticeLinks} from '../../lib/attendeeMessageNotification';
 import {scopedTicketRequest} from '../../lib/creatorTicketRead';
 import {supabase} from '../../lib/supabase';
-export function AttendeeMessageInboxRow({notice,userId,visible,enabled,onClose}:{notice:{id:string;title:string;body:string|null};userId:string|null;visible:boolean;enabled:boolean;onClose:()=>void}){
- const router=useRouter(),{fonts}=useAfterglowFonts();
+export function AttendeeMessageInboxRow({notice,userId,visible,enabled,onClose,onNavigate}:{notice:{id:string;title:string;body:string|null};userId:string|null;visible:boolean;enabled:boolean;onClose:()=>void;onNavigate?:InboxNavigate}){
+ const navigate=useInboxNavigation(onClose,onNavigate),{fonts}=useAfterglowFonts();
  const visit=useMemo(()=>({}),[notice.id,userId,visible]),latest=useRef(visit);latest.current=visit;
  const mounted=useRef(false);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  const scope=useMemo(()=>({userId:userId??'',isCurrent:()=>mounted.current&&visible&&latest.current===visit}),[userId,visible,visit]);
@@ -17,7 +17,7 @@ export function AttendeeMessageInboxRow({notice,userId,visible,enabled,onClose}:
  const current=state?.visit===visit?state:undefined;
  const open=()=>{
   if(!scope.isCurrent()||lock.current===visit)return;
-  if(!enabled){onClose();router.push('/(tabs)/explore');return;}
+  if(!enabled){navigate('/(tabs)/explore');return;}
   lock.current=visit;setState(old=>({...old,visit,busy:true,error:undefined}));
   void(async()=>{
    try{
@@ -26,7 +26,7 @@ export function AttendeeMessageInboxRow({notice,userId,visible,enabled,onClose}:
     const route=attendeeMessageEventRoute(eventId);
     // Read bookkeeping cannot redirect a confirmed event or discard the visible message.
     try{await scopedTicketRequest(scope,()=>supabase.from('app_notifications').update({status:'read'}).eq('id',notice.id).eq('user_id',scope.userId).select('id').maybeSingle());}catch{}
-    if(!scope.isCurrent())return;onClose();router.push(route as never);
+    if(!scope.isCurrent())return;navigate(route as never);
    }catch(error){if(scope.isCurrent())setState(old=>({...old,visit,busy:false,error:error instanceof Error?error.message:'This update could not be checked.'}));}
    finally{if(lock.current===visit)lock.current=null;if(scope.isCurrent())setState(old=>({...old,visit,busy:false}));}
   })();
