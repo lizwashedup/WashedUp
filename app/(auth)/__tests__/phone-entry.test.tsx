@@ -1,6 +1,8 @@
 import React from 'react';
+import { TouchableOpacity } from 'react-native';
 import { act, create } from 'react-test-renderer';
 
+let mockFocused = true;
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
 const mockGetSession = jest.fn();
@@ -8,7 +10,7 @@ const mockSignInWithOtp = jest.fn();
 const mockGetProfile = jest.fn();
 const mockNeedsPhone = jest.fn();
 
-jest.mock('expo-router', () => ({ router: { replace: (...args: unknown[]) => mockReplace(...args), push: (...args: unknown[]) => mockPush(...args) } }));
+jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => mockFocused ? callback() : undefined, [callback, mockFocused]), router: { replace: (...args: unknown[]) => mockReplace(...args), push: (...args: unknown[]) => mockPush(...args) } }));
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 jest.mock('../../../components/auth/PhoneInput', () => ({ __esModule: true, default: 'PhoneInput' }));
 jest.mock('../../../lib/supabase', () => ({ supabase: { auth: {
@@ -32,7 +34,7 @@ describe('returning phone member continuation', () => {
   let tree: ReturnType<typeof create>;
   beforeEach(async () => {
     jest.useFakeTimers();
-    jest.resetAllMocks();
+    jest.resetAllMocks(); mockFocused = true;
     mockGetSession.mockResolvedValue(session('member-a'));
     mockSignInWithOtp.mockResolvedValue({ error: null });
     mockGetProfile.mockResolvedValue(completeProfile);
@@ -121,4 +123,76 @@ describe('returning phone member continuation', () => {
     expect(mockSignInWithOtp).not.toHaveBeenCalled();
     expect(tree.root.findByType('PhoneInput' as any).props.error).toBe('something went wrong. try again.');
   });
+
+  it('does not request an OTP after leaving during the initial session read', async () => {
+    let finish!: (value: ReturnType<typeof session>) => void;
+    mockGetSession.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = tree.root.findByType('PhoneInput' as any).props.onSubmitEditing(); });
+    act(() => tree.unmount());
+    await act(async () => { finish(session(null)); await pending; });
+    expect(mockSignInWithOtp).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it.each(['unmount', 'blur', 'blur and return'])('does not open verification for an old OTP after %s', async change => {
+    mockGetSession.mockResolvedValue(session(null));
+    let finish!: (value: {error:null}) => void;
+    mockSignInWithOtp.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = tree.root.findByType('PhoneInput' as any).props.onSubmitEditing(); });
+    if (change === 'unmount') act(() => tree.unmount());
+    else {
+      mockFocused = false; act(() => tree.update(<PhoneEntryScreen />));
+      if (change === 'blur and return') { mockFocused = true; act(() => tree.update(<PhoneEntryScreen />)); }
+    }
+    await act(async () => { finish({error:null}); await pending; });
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+
+  it('retires the OTP callback immediately when alternate login is tapped', async () => {
+    mockGetSession.mockResolvedValue(session(null));
+    let finish!: (value: {error:null}) => void;
+    mockSignInWithOtp.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = tree.root.findByType('PhoneInput' as any).props.onSubmitEditing(); });
+    act(() => tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === 'signed up another way? log in')!.props.onPress());
+    await act(async () => { finish({error:null}); await pending; });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/login');
+  });
+
+  it('lets root routing handle an account signed in while the OTP request was pending', async () => {
+    mockGetSession.mockResolvedValueOnce(session(null)).mockResolvedValueOnce(session('member-b'));
+    await continueEntry();
+    expect(mockSignInWithOtp).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('does not show an old OTP failure after leaving and returning', async () => {
+    mockGetSession.mockResolvedValue(session(null));
+    let fail!: (error: Error) => void;
+    mockSignInWithOtp.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = tree.root.findByType('PhoneInput' as any).props.onSubmitEditing(); });
+    mockFocused = false; act(() => tree.update(<PhoneEntryScreen />));
+    mockFocused = true; act(() => tree.update(<PhoneEntryScreen />));
+    await act(async () => { fail(new Error('offline')); await pending; });
+    expect(tree.root.findByType('PhoneInput' as any).props.error).toBeUndefined();
+    expect(tree.root.findByType('PhoneInput' as any).props.editable).toBe(true);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+
+  it('does not treat an unreadable session as signed out and dispatch an OTP', async () => {
+    mockGetSession.mockResolvedValue({data:{session:null},error:new Error('Session unavailable')});
+    await continueEntry();
+    expect(mockSignInWithOtp).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(tree.root.findByType('PhoneInput' as any).props.error).toBe('something went wrong. try again.');
+  });
+
 });

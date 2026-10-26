@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Colors from '../../constants/Colors';
 import { Fonts } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
@@ -40,11 +40,18 @@ export default function PhoneEntryScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
-  const activeVisit = useRef(true);
+  const activeVisit = useRef(false);
+  const visitGeneration = useRef(0);
+  const mounted = useRef(false);
   useEffect(() => {
-    activeVisit.current = true;
-    return () => { activeVisit.current = false; };
+    mounted.current = true;
+    return () => { mounted.current = false; };
   }, []);
+  useFocusEffect(useCallback(() => {
+    activeVisit.current = true;
+    visitGeneration.current++;
+    return () => { activeVisit.current = false; visitGeneration.current++; };
+  }, []));
   // An account already signed in on this device. Present ONLY when a session
   // ended on its own; a deliberate log out clears the marker, so choosing to
   // leave still lands on the cold screen. Never a token, just the number.
@@ -87,8 +94,10 @@ export default function PhoneEntryScreen() {
   }, []);
 
   const handleContinue = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !activeVisit.current) return;
     if (!submit.tryAcquire()) return;
+    const generation = visitGeneration.current;
+    const isCurrent = () => mounted.current && activeVisit.current && visitGeneration.current === generation;
     setError(null);
     setSubmitting(true);
     try {
@@ -103,15 +112,19 @@ export default function PhoneEntryScreen() {
       // the root's server-backed routing so registered members return to
       // their account without the obsolete add-number detour. A definite
       // missing-phone result still preserves same-account verification.
-      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
+      if (!isCurrent()) return;
+      if (sessionError) throw sessionError;
       if (existingSession?.user?.id) {
         const userId = existingSession.user.id;
         const [profile, needsPhone] = await Promise.all([
           withTimeout(getAuthProfile(queryClient, userId), 4000, null),
           fetchNeedsPhoneMigration(),
         ]);
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        if (!activeVisit.current || currentSession?.user?.id !== userId) return;
+        const { data: { session: currentSession }, error: currentSessionError } = await supabase.auth.getSession();
+        if (!isCurrent()) return;
+        if (currentSessionError) throw currentSessionError;
+        if (currentSession?.user?.id !== userId) return;
         if (!profile) throw new Error('Unable to confirm account destination');
         router.replace(authedDest({
           onboarding_status: profile.onboarding_status,
@@ -130,12 +143,20 @@ export default function PhoneEntryScreen() {
         if (otpError) throw otpError;
         markOtpSent(e164);
       }
+      if (!isCurrent()) return;
+      // A different sign-in can complete while this OTP request is in flight.
+      // Let the root route the signed-in account instead of opening stale OTP UI.
+      const { data: { session: currentSession }, error: currentSessionError } = await supabase.auth.getSession();
+      if (!isCurrent()) return;
+      if (currentSessionError) throw currentSessionError;
+      if (currentSession?.user?.id) return;
       hapticLight();
       router.push({
         pathname: '/verify-code',
         params: { phone },
       });
     } catch (e: unknown) {
+      if (!isCurrent()) return;
       hapticError();
       const status = (e as { status?: number } | null)?.status;
       const message = (e as { message?: string } | null)?.message ?? '';
@@ -148,7 +169,7 @@ export default function PhoneEntryScreen() {
       }
     } finally {
       submit.release();
-      setSubmitting(false);
+      if (mounted.current) setSubmitting(false);
     }
   };
 
@@ -249,7 +270,11 @@ export default function PhoneEntryScreen() {
                 entering their phone above. Full-width secondary button so
                 it's easy to find but visually subordinate to "continue". */}
             <TouchableOpacity
-              onPress={() => router.push('/login')}
+              onPress={() => {
+                activeVisit.current = false;
+                visitGeneration.current++;
+                router.push('/login');
+              }}
               activeOpacity={0.85}
               style={styles.ctaSecondary}
               accessibilityRole="button"
