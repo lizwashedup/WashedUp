@@ -5,8 +5,8 @@
  * the person picks a real group instead of a hidden first-match or a skip-
  * straight-to-creation form. Same sheet chrome as PeoplePickerSheet.
  */
-import React from 'react';
-import { View, Text, Modal, Pressable, FlatList, StyleSheet } from 'react-native';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, Modal, Platform, Pressable, FlatList, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, ChevronRight } from 'lucide-react-native';
@@ -56,29 +56,62 @@ export default function PlanChooserSheet({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const visit = useMemo(() => ({}), [visible]);
+  const activeVisit = useRef<object | null>(null);
+  const pending = useRef<{ visit: object; action: () => void } | null>(null);
+  const closingRef = useRef(false);
+  const [closing, setClosing] = useState(false);
+
+  useLayoutEffect(() => {
+    activeVisit.current = visible ? visit : null;
+    pending.current = null;
+    closingRef.current = false;
+    setClosing(false);
+    return () => { activeVisit.current = null; pending.current = null; };
+  }, [visit, visible]);
+
+  const finishDismissal = useCallback(() => {
+    const next = pending.current;
+    if (activeVisit.current !== visit || next?.visit !== visit) return;
+    pending.current = null;
+    // Keep the lock until the parent closes this visit. A duplicate native
+    // callback or a tap during the last animation frame cannot open twice.
+    next.action();
+  }, [visit]);
+
+  const dismissThen = useCallback((action: () => void) => {
+    if (activeVisit.current !== visit || closingRef.current) return;
+    closingRef.current = true;
+    pending.current = { visit, action };
+    setClosing(true);
+    // iOS must release the native modal before the destination is presented.
+    if (Platform.OS !== 'ios') finishDismissal();
+  }, [visit, finishDismissal]);
+  const close = () => dismissThen(onClose);
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible && !closing} transparent animationType="slide" onRequestClose={close} onDismiss={finishDismissal} statusBarTranslucent>
       <View style={styles.backdrop}>
-        <Pressable style={styles.backdropTap} onPress={onClose} accessibilityLabel="close" />
+        <Pressable accessible={false} style={styles.backdropTap} onPress={close} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.headerRow}>
             {/* the lowercase law */}
             <Text style={styles.title}>join a group, or start your own</Text>
-            <Pressable onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="close">
+            <Pressable onPress={close} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close plan picker">
               <X size={22} color={Colors.secondary} />
             </Pressable>
           </View>
           <FlatList
             data={plans}
             keyExtractor={(p) => p.id}
-            renderItem={({ item }) => <PlanRow plan={item} onPress={() => onSelectPlan(item.id)} />}
+            renderItem={({ item }) => <PlanRow plan={item} onPress={() => dismissThen(() => onSelectPlan(item.id))} />}
             style={styles.list}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
           />
-          <Pressable onPress={onStartNew} style={styles.cta} accessibilityRole="button" accessibilityLabel="start a new plan">
+          <Pressable onPress={() => dismissThen(onStartNew)} style={styles.cta} accessibilityRole="button" accessibilityLabel="Start a plan">
             {/* copy to the taste gate */}
-            <Text style={styles.ctaLabel}>start a new plan</Text>
+            <Text style={styles.ctaLabel} numberOfLines={1}>start a plan</Text>
           </Pressable>
         </View>
       </View>
