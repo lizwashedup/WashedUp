@@ -28,14 +28,14 @@ if [ -z "$message" ]; then
   exit 2
 fi
 
-# The iOS update must carry the exact runtime recorded by the real EAS build
+# Each update must carry the exact runtime recorded by its verified store build
 # it is intended to patch. app.config.js refuses this override during native
 # builds, so it cannot accidentally stamp a future binary.
-if [ "$platform" = "ios" ]; then
-  target_file="scripts/ota-guard-state/ios-release-candidate.json"
+if [ "$platform" = "ios" ] || [ "$platform" = "android" ]; then
+  target_file="scripts/ota-guard-state/${platform}-release-candidate.json"
   WASHEDUP_OTA_RUNTIME_VERSION="$(node -p "require('./$target_file').runtimeVersion" 2>/dev/null || true)"
   if [ -z "$WASHEDUP_OTA_RUNTIME_VERSION" ]; then
-    echo "Could not read the iOS release-candidate runtime from $target_file." >&2
+    echo "Could not read the $platform release-candidate runtime from $target_file." >&2
     exit 1
   fi
   export WASHEDUP_OTA_RUNTIME_VERSION

@@ -80,7 +80,6 @@ export const COPY = {
   tabMyPlans: 'Plans',
   tabCircles: 'Circles',
   tabCommunities: 'Communities',
-  tabAlbums: 'Albums',
 
   // ── Yours tabs education pop-up (spec section 6, one-time, per account) ──
   // Two independent variants, gated in lib/yours/tabsIntroSeen.ts:

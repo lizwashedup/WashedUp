@@ -59,7 +59,6 @@ import {
   registerPushNotificationsWithResult,
 } from '../hooks/usePushNotifications';
 import { registerAlbumUploadResume, resumeAllPendingAlbumBatches } from '../lib/uploadAlbumMedia';
-import { AlbumUploadPromptModal } from '../components/albums/AlbumUploadPromptModal';
 import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
 import { ChatKeyboardProvider } from '../components/keyboard/ChatKeyboard';
 import { logError } from '../lib/logger';
@@ -437,7 +436,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // went on 2+ plans (the review-ask threshold), so multiple pending surveys
   // surfaced it. modalLocked holds every lower-precedence modal off for one
   // handoff window after a close, so the closing modal fully unmounts before
-  // the next mounts. Precedence (explicit): survey > review > album > mark >
+  // the next mounts. Precedence (explicit): survey > review > mark >
   // pushPrimer, enforced by the render gates below. One modal at a time, ever.
   const MODAL_HANDOFF_MS = 400;
   const [modalLocked, setModalLocked] = useState(false);
@@ -534,7 +533,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // survey Modal has fully dismissed (see lib/reviewAsk). While that sheet is
   // pending we hold the lower-precedence modals off, exactly like the old
   // review modal did. reviewCheckDone stays as the gate the push primer and the
-  // album/mark modals wait on; it now resolves as soon as the survey decision
+  // mark modals wait on; it now resolves as soon as the survey decision
   // is made (there is no separate review pre-check to await).
   // Called from the survey owner after a TOP-rating completion. Defers the push
   // primer to a later launch (the review sheet owns this beat) and fires the
@@ -1471,9 +1470,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
             if (topRated) fireReviewAfterSurvey();
           }}
         />
-      )}
-      {authedUserId && reviewCheckDone && !surveyPlan && !reviewSheetPending && !modalLocked && (
-        <AlbumUploadPromptModal userId={authedUserId} />
       )}
       <KeyboardDoneBar />
       {authedUserId && surveyCheckDone && reviewCheckDone && !surveyPlan && !reviewSheetPending && !modalLocked && (

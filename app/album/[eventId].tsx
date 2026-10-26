@@ -762,7 +762,7 @@ function AlbumVisit({ eventId, identity }: { eventId: string; identity: Observed
           />
           <SafeAreaView edges={['top']} style={styles.heroOverlay}>
             <View style={styles.heroBar}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Back to albums" onPress={() => { if (isCurrent()) router.back(); }} hitSlop={12} style={styles.backBtn}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => { if (isCurrent()) router.back(); }} hitSlop={12} style={styles.backBtn}>
                 <Ionicons name="chevron-back" size={26} color={Colors.white} />
               </Pressable>
               <Pressable accessibilityRole="button" accessibilityLabel="Album options" onPress={showHeaderMenu} hitSlop={12} style={styles.backBtn}>
