@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,7 +13,7 @@ import {
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,6 +34,8 @@ import Colors from '../../../constants/Colors';
 import { Fonts } from '../../../constants/Typography';
 
 const AVATAR_SIZE = 260;
+type PickerVisit = { active: boolean; userId: string | null };
+type PickerSelection = { visit: PickerVisit; kind: 'camera' | 'library' | null | undefined; started: boolean };
 
 export default function OnboardingPhotoScreen() {
   const queryClient = useQueryClient();
@@ -40,110 +43,143 @@ export default function OnboardingPhotoScreen() {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [pickerSelection, setPickerSelection] = useState<PickerSelection | null>(null);
+  const pickerVisit = useRef<PickerVisit | null>(null);
+  const pendingPicker = useRef<PickerSelection | null>(null);
   const [alertInfo, setAlertInfo] = useState<{
     title: string;
     message: string;
     buttons?: BrandedAlertButton[];
   } | null>(null);
 
-  const pickFromLibrary = async () => {
+  useFocusEffect(useCallback(() => {
+    const visit: PickerVisit = { active: true, userId: null };
+    pickerVisit.current = visit;
+    pendingPicker.current = null;
+    setPickerOpen(false);
+    setPickerBusy(false);
+    setPickerSelection(null);
+    setImageUri(null);
+    setImageBase64(null);
+    setAlertInfo(null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const userId = session?.user?.id ?? null;
+      if (event === 'SIGNED_OUT' || (visit.userId && userId && visit.userId !== userId)) {
+        visit.active = false;
+        pendingPicker.current = null;
+        setPickerOpen(false);
+        setPickerBusy(false);
+        setPickerSelection(null);
+        setImageUri(null);
+        setImageBase64(null);
+        setAlertInfo(null);
+      } else if (userId) visit.userId = userId;
+    });
+    return () => {
+      visit.active = false;
+      pendingPicker.current = null;
+      subscription.unsubscribe();
+    };
+  }, []));
+
+  const isCurrentPicker = (selection: PickerSelection) =>
+    selection.visit.active && pickerVisit.current === selection.visit && pendingPicker.current === selection;
+
+  const runPicker = async (selection: PickerSelection) => {
+    const camera = selection.kind === 'camera';
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
+      const permission = camera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!isCurrentPicker(selection)) return;
+      if (permission.status !== 'granted') {
         setAlertInfo({
           title: 'permission needed',
-          message: 'washedup needs access to your photos to set a profile picture.',
+          message: camera ? 'washedup needs camera access to take a profile photo.' : 'washedup needs access to your photos to set a profile picture.',
           buttons: [
-            { text: 'open settings', onPress: () => Linking.openSettings() },
+            { text: 'open settings', onPress: () => { if (selection.visit.active && pickerVisit.current === selection.visit) void Linking.openSettings(); } },
             { text: 'cancel', style: 'cancel' },
           ],
         });
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-      });
-      if (result.canceled || !result.assets?.[0]) return;
-      await processPicked(result.assets[0].uri);
-    } catch {
-      setAlertInfo({
-        title: 'something went wrong',
-        message: 'could not open photo library. try again.',
-      });
-    }
-  };
-
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        setAlertInfo({
-          title: 'permission needed',
-          message: 'washedup needs camera access to take a profile photo.',
-          buttons: [
-            { text: 'open settings', onPress: () => Linking.openSettings() },
-            { text: 'cancel', style: 'cancel' },
-          ],
-        });
-        return;
+      const options = { allowsEditing: true, aspect: [1, 1] as [number, number], quality: 1 };
+      const result = camera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync({ ...options, mediaTypes: ['images'] });
+      if (!isCurrentPicker(selection) || result.canceled || !result.assets?.[0]) return;
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 800, height: 800 } }],
+          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        );
+        if (!isCurrentPicker(selection)) return;
+        setImageUri(manipulated.uri);
+        setImageBase64(manipulated.base64 ?? null);
+      } catch {
+        if (isCurrentPicker(selection)) setAlertInfo({ title: 'invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
       }
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-      });
-      if (result.canceled || !result.assets?.[0]) return;
-      await processPicked(result.assets[0].uri);
     } catch {
-      setAlertInfo({
+      if (isCurrentPicker(selection)) setAlertInfo({
         title: 'something went wrong',
-        message: 'could not open camera. try again.',
+        message: camera ? 'could not open camera. try again.' : 'could not open photo library. try again.',
       });
-    }
-  };
-
-  const processPicked = async (uri: string) => {
-    try {
-      const manipulated = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 800, height: 800 } }],
-        {
-          compress: 0.85,
-          format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
-        },
-      );
-      setImageUri(manipulated.uri);
-      setImageBase64(manipulated.base64 ?? null);
-    } catch {
-      setAlertInfo({ title: 'invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
+    } finally {
+      if (isCurrentPicker(selection)) {
+        pendingPicker.current = null;
+        setPickerSelection(null);
+        setPickerBusy(false);
+      }
     }
   };
 
   const openPicker = () => {
+    const visit = pickerVisit.current;
+    if (!visit?.active || pendingPicker.current || loading) return;
     hapticLight();
+    const selection: PickerSelection = { visit, kind: undefined, started: false };
+    pendingPicker.current = selection;
+    setPickerSelection(selection);
+    setPickerBusy(true);
     setPickerOpen(true);
   };
 
-  const closePicker = () => setPickerOpen(false);
-
-  const handleTakePhoto = () => {
+  const choosePicker = (kind: PickerSelection['kind']) => {
+    const selection = pendingPicker.current;
+    if (!selection || !isCurrentPicker(selection) || selection.kind !== undefined) return;
+    selection.kind = kind;
     setPickerOpen(false);
-    takePhoto();
   };
+  const closePicker = () => choosePicker(null);
+  const finishPickerDismissal = (selection: PickerSelection | null) => {
+    if (!selection || !isCurrentPicker(selection) || selection.started || selection.kind === undefined) return;
+    selection.started = true;
+    if (selection.kind === null) {
+      pendingPicker.current = null;
+      setPickerSelection(null);
+      setPickerBusy(false);
+    } else void runPicker(selection);
+  };
+  useEffect(() => {
+    // Android does not emit Modal.onDismiss; wait for the hidden state to commit.
+    if (Platform.OS !== 'ios' && !pickerOpen) finishPickerDismissal(pickerSelection);
+  }, [pickerOpen, pickerSelection]);
 
-  const handleChooseLibrary = () => {
+  const leavePhoto = () => {
+    if (pickerVisit.current) pickerVisit.current.active = false;
+    pendingPicker.current = null;
     setPickerOpen(false);
-    pickFromLibrary();
+    setPickerSelection(null);
+    setPickerBusy(false);
+    router.replace('/onboarding/referral');
   };
 
   const submit = useSubmitGuard();
 
   const handleContinue = async () => {
-    if (!imageBase64 || loading) return;
+    if (!imageBase64 || loading || pendingPicker.current) return;
     if (!submit.tryAcquire()) return;
     hapticLight();
     setLoading(true);
@@ -197,7 +233,7 @@ export default function OnboardingPhotoScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <ProgressHead step={4} totalSteps={5} onBack={() => router.replace('/onboarding/referral')} />
+        <ProgressHead step={4} totalSteps={5} onBack={leavePhoto} />
 
         <View style={styles.gap20} />
         <Text style={styles.heading}>
@@ -213,6 +249,9 @@ export default function OnboardingPhotoScreen() {
           <TouchableOpacity
             style={[styles.avatarCircle, imageUri && styles.avatarCircleFilled]}
             onPress={openPicker}
+            disabled={loading || pickerBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Add photo"
             activeOpacity={0.85}
           >
             {imageUri ? (
@@ -227,6 +266,9 @@ export default function OnboardingPhotoScreen() {
             <TouchableOpacity
               style={styles.changePill}
               onPress={openPicker}
+              disabled={loading || pickerBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Change photo"
               hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Text style={styles.changePillText}>change</Text>
@@ -238,10 +280,10 @@ export default function OnboardingPhotoScreen() {
 
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.cta, (!imageBase64 || loading) && styles.ctaDisabled]}
+            style={[styles.cta, (!imageBase64 || loading || pickerBusy) && styles.ctaDisabled]}
             onPress={handleContinue}
             activeOpacity={0.9}
-            disabled={!imageBase64 || loading}
+            disabled={!imageBase64 || loading || pickerBusy}
           >
             {loading ? (
               <ActivityIndicator color={Colors.surface} />
@@ -265,21 +307,26 @@ export default function OnboardingPhotoScreen() {
         transparent
         animationType="fade"
         onRequestClose={closePicker}
+        onDismiss={() => finishPickerDismissal(pickerSelection)}
         statusBarTranslucent
       >
-        <Pressable style={styles.pickerOverlay} onPress={closePicker}>
-          <Pressable style={styles.pickerCard} onPress={(e) => e.stopPropagation()}>
+        <Pressable accessible={false} style={styles.pickerOverlay} onPress={closePicker}>
+          <Pressable accessible={false} accessibilityViewIsModal onAccessibilityEscape={closePicker} style={styles.pickerCard} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.pickerTitle}>add a profile photo</Text>
             <TouchableOpacity
               style={styles.pickerButton}
-              onPress={handleTakePhoto}
+              onPress={() => choosePicker('camera')}
+              accessibilityRole="button"
+              accessibilityLabel="Take photo"
               activeOpacity={0.9}
             >
               <Text style={styles.pickerButtonText}>take photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.pickerButton}
-              onPress={handleChooseLibrary}
+              onPress={() => choosePicker('library')}
+              accessibilityRole="button"
+              accessibilityLabel="Photo library"
               activeOpacity={0.9}
             >
               <Text style={styles.pickerButtonText}>choose from library</Text>
