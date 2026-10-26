@@ -87,3 +87,7 @@ it('repeated order and event actions consume only one navigation',async()=>{
  await mount();act(()=>{button('View order').props.onPress();button('Back to event').props.onPress();});
  expect(mockReplace.mock.calls).toEqual([['/tickets/order/'+id]]);
 });
+it('returns to the event associated with the verified pending order',async()=>{
+ await mount();act(()=>button('Back to event').props.onPress());
+ expect(mockReplace.mock.calls).toEqual([['/event/event-a']]);
+});

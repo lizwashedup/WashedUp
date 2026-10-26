@@ -81,7 +81,8 @@ test('native paid checkout keeps an order pointer until the ticket screen reads 
   assert.match(checkoutReturn, /cancelled && saved\.status === 'pending'/);
   assert.doesNotMatch(checkoutReturn, /clearPendingCheckout/);
   assert.match(checkoutReturn, /Checkout is still pending/);
-  assert.match(checkoutReturn, /router\.replace\(`\/event\/\$\{value\.eventId\}`/);
+  // The return screen may use its guarded replacement helper.
+  assert.match(checkoutReturn, /replace\(`\/event\/\$\{value\.eventId\}`/);
 });
 
 test('the ticket wallet links back to its event and keeps door-scannable QR data', () => {
