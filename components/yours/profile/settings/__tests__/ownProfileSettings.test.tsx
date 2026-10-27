@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Text, TextInput, TouchableOpacity, Share, Keyboard } from 'react-native';
+import { Text, TextInput, TouchableOpacity, Share, Keyboard, Platform } from 'react-native';
 import ProfileScreen from '../../../../../app/(tabs)/profile';
 import { BrandedAlert } from '../../../../BrandedAlert';
 import SettingsPortrait from '../SettingsPortrait';
@@ -73,6 +73,7 @@ const field = (label: string) => tree!.root.findAllByType(TextInput).find(node =
 const text = (value: string) => tree!.root.findAllByType(Text).some(node => node.props.children === value);
 const alert = () => tree!.root.findByType(BrandedAlert).props;
 const press = async (node: any) => { act(() => { node.props.onPress(); }); await flush(); };
+const dismissPhotoChooser = async () => { act(() => { alert().onDismiss?.(); }); await flush(); };
 const edit = async () => { await press(byLabel('Edit profile')); };
 const change = (label: string, value: string) => act(() => { field(label).props.onChangeText(value); });
 async function deleteStep2() { await press(byLabel('Delete account')); await press(byLabel('I understand, continue')); }
@@ -151,24 +152,24 @@ it('consumes openEdit once so cancel stays closed and a later read does not rese
 });
 it('retains image selection/crop/format and carries only prepared photo bytes into Save', async () => {
   await mount(); await edit(); await press(byLabel('Change photo'));
-  const info = alert(); act(() => { info.buttons.find((item: any) => item.text === 'Choose from Library').onPress(); info.onClose(); }); await flush();
+  const info = alert(); act(() => { info.buttons.find((item: any) => item.text === 'Photo library').onPress(); info.onClose(); }); await flush(); await dismissPhotoChooser();
   expect(mockLibrary).toHaveBeenCalledWith({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
   expect(mockManipulate).toHaveBeenCalledWith('selected.jpg', [{ resize: { width: 800, height: 800 } }], { compress: 0.85, format: 'jpeg', base64: true });
   await press(byLabel('Save changes')); expect(mockSave.mock.calls[0][0].photoBase64).toBe('jpeg');
 });
 it('does not launch a native picker when permission arrives after closing the edit', async () => {
   const pending = deferred<any>(); mockPermission.mockReturnValue(pending.promise); await mount(); await edit(); await press(byLabel('Change photo'));
-  act(() => alert().buttons[0].onPress()); await flush(); await press(byLabel('Back from profile editing')); pending.resolve({ status: 'granted' }); await flush(); expect(mockCamera).not.toHaveBeenCalled();
+  act(() => alert().buttons[0].onPress()); await flush(); await dismissPhotoChooser(); await press(byLabel('Back from profile editing')); pending.resolve({ status: 'granted' }); await flush(); expect(mockCamera).not.toHaveBeenCalled();
 });
 it('reports denied permission and invalid photo without replacing the existing image', async () => {
-  mockPermission.mockResolvedValueOnce({ status: 'denied' }); await mount(); await edit(); await press(byLabel('Change photo')); act(() => alert().buttons[0].onPress()); await flush(); expect(alert().title).toBe('Permission needed');
-  act(() => alert().onClose()); mockManipulate.mockRejectedValueOnce(new Error('bad image')); await press(byLabel('Change photo')); act(() => alert().buttons[1].onPress()); await flush(); expect(alert().title).toBe('Invalid image');
+  mockPermission.mockResolvedValueOnce({ status: 'denied' }); await mount(); await edit(); await press(byLabel('Change photo')); act(() => alert().buttons[0].onPress()); await flush(); await dismissPhotoChooser(); expect(alert().title).toBe('Permission needed');
+  act(() => alert().onClose()); mockManipulate.mockRejectedValueOnce(new Error('bad image')); await press(byLabel('Change photo')); act(() => alert().buttons[1].onPress()); await flush(); await dismissPhotoChooser(); expect(alert().title).toBe('Invalid image');
   expect(tree!.root.findByType(SettingsPortrait).props.uri).toBe('photo.jpg');
 });
 it('falls back to the real name initial for a broken portrait and isolates errors from an older photo', async () => {
   await mount(); const oldPhoto = tree!.root.findByType(Image).props;
   act(() => oldPhoto.onError()); expect(text('L')).toBe(true);
-  await edit(); await press(byLabel('Change photo')); const info = alert(); act(() => { info.buttons[1].onPress(); info.onClose(); }); await flush();
+  await edit(); await press(byLabel('Change photo')); const info = alert(); act(() => { info.buttons[1].onPress(); info.onClose(); }); await flush(); await dismissPhotoChooser();
   expect(tree!.root.findByType(Image).props.source.uri).toBe('edit.jpg'); act(() => oldPhoto.onError()); expect(tree!.root.findByType(Image).props.source.uri).toBe('edit.jpg');
 });
 it('uses the existing native handle share and ticket destination', async () => {
@@ -242,4 +243,46 @@ it('opens contextual Creator space from profile without replacing the personal n
   expect(mockPush).toHaveBeenCalledWith('/creator/pages');
   expect(mockReplace).not.toHaveBeenCalled();
   expect(mockSelected).not.toHaveBeenCalled();
+});
+
+it.each([0, 1])('waits for native chooser dismissal before permission and picker (%s)', async index => {
+  await mount(); await edit(); await press(byLabel('Change photo'));
+  const chooser = alert(); act(() => { chooser.buttons[index].onPress(); chooser.onClose(); }); await flush();
+  expect(mockPermission).not.toHaveBeenCalled(); expect(mockLibrary).not.toHaveBeenCalled(); expect(mockCamera).not.toHaveBeenCalled();
+  await dismissPhotoChooser(); expect(mockPermission).toHaveBeenCalledTimes(1);
+  expect(index === 0 ? mockCamera : mockLibrary).toHaveBeenCalledTimes(1);
+});
+it('locks repeated chooser taps and dispatches one selected destination after repeated dismissals', async () => {
+  await mount(); await edit(); const changePhoto = byLabel('Change photo');
+  act(() => { changePhoto.props.onPress(); changePhoto.props.onPress(); }); await flush();
+  const chooser = alert(); act(() => { chooser.buttons[1].onPress(); chooser.buttons[0].onPress(); chooser.onClose(); }); await flush();
+  const dismiss = alert().onDismiss; act(() => { dismiss(); dismiss(); }); await flush();
+  expect(mockLibrary).toHaveBeenCalledTimes(1); expect(mockCamera).not.toHaveBeenCalled();
+});
+it.each(['button','outside'])('cancels chooser without permission and unlocks after dismissal (%s)', async mode => {
+  await mount(); await edit(); await press(byLabel('Change photo'));
+  const chooser = alert(); act(() => { if(mode === 'button') chooser.buttons[2].onPress(); chooser.onClose(); }); await flush();
+  expect(byLabel('Change photo').props.disabled).toBe(true); await dismissPhotoChooser();
+  expect(byLabel('Change photo').props.disabled).toBe(false); expect(mockPermission).not.toHaveBeenCalled();
+  await press(byLabel('Change photo')); expect(alert().visible).toBe(true);
+});
+it.each(['back','blur','account','unmount'])('retires selected chooser before native dismissal (%s)', async mode => {
+  await mount(); await edit(); await press(byLabel('Change photo'));
+  act(() => alert().buttons[1].onPress()); await flush(); const dismiss = alert().onDismiss;
+  if(mode === 'back') await press(byLabel('Back from profile editing'));
+  if(mode === 'blur') {mockFocused=false; await update();}
+  if(mode === 'account') {mockViewer='account-b';mockEpoch++;await update();}
+  if(mode === 'unmount') {act(()=>tree!.unmount());tree=undefined;}
+  act(()=>dismiss()); await flush(); expect(mockPermission).not.toHaveBeenCalled(); expect(mockLibrary).not.toHaveBeenCalled();
+});
+it('ignores an old dismissal after cancelling and opening a new chooser', async () => {
+  await mount(); await edit(); await press(byLabel('Change photo')); const oldDismiss=alert().onDismiss;
+  act(()=>alert().onClose());await flush();await dismissPhotoChooser();await press(byLabel('Change photo'));
+  act(()=>alert().buttons[1].onPress());await flush();act(()=>oldDismiss());await flush();expect(mockLibrary).not.toHaveBeenCalled();
+  await dismissPhotoChooser();expect(mockLibrary).toHaveBeenCalledTimes(1);
+});
+it('runs the Android picker after hidden chooser state commits without onDismiss', async () => {
+  const os=Platform.OS; Object.defineProperty(Platform,'OS',{configurable:true,value:'android'});
+  try {await mount();await edit();await press(byLabel('Change photo'));act(()=>{alert().buttons[1].onPress();expect(mockPermission).not.toHaveBeenCalled();});await flush();expect(mockLibrary).toHaveBeenCalledTimes(1);}
+  finally {Object.defineProperty(Platform,'OS',{configurable:true,value:os});}
 });
