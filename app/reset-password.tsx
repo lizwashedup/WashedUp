@@ -128,9 +128,10 @@ export default function ResetPasswordScreen() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.container}>
             <Image source={require('../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
-            <Text style={styles.title}>Create a new password</Text>
-            <Text style={styles.subtitle}>Your new password must be at least 8 characters long.</Text>
+            <Text style={styles.title}>{saved ? 'Password updated' : 'Create a new password'}</Text>
+            <Text style={styles.subtitle}>{saved ? 'Sign in again with your new password.' : 'Your new password must be at least 8 characters long.'}</Text>
 
+            {!saved && <>
             <View style={styles.gap20} />
 
             <View style={styles.passwordWrap}>
@@ -198,6 +199,7 @@ export default function ResetPasswordScreen() {
               </TouchableOpacity>
             </View>
 
+            </>}
             <View style={styles.gap20} />
 
             <TouchableOpacity

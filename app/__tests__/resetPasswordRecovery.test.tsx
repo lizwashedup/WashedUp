@@ -54,7 +54,7 @@ it.each(['returned', 'thrown'])('retains a draft and retry after a %s failure', 
 });
 it('clears password values after confirmation and does not submit again', async () => {
   const oldSubmit = action().props.onPress; await submit();
-  expect(fields().every(f => f.props.value === '' && !f.props.editable)).toBe(true);
+  expect(fields()).toHaveLength(0); expect(text('Password updated')).toBe(true); expect(text('Sign in again with your new password.')).toBe(true); expect(JSON.stringify(tree!.toJSON())).not.toContain('fictional-test-only');
   await act(async () => { await oldSubmit(); }); expect(mockUpdate).toHaveBeenCalledTimes(1);
 });
 it('signs out only once after the iOS confirmation has dismissed', async () => {
