@@ -14,6 +14,7 @@ import {
   Modal,
   Pressable,
   Share,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,6 +66,7 @@ export default function ProfileScreen() {
 }
 
 type ProfileAppearance = { fonts: AfterglowFontFamilies };
+type PhotoSelection = { scope: ProfileOperationScope; kind: 'camera' | 'library' | null | undefined; started: boolean; alert: ProfileAlert | null };
 type ProfileAlert = { title: string; message?: string; buttons?: BrandedAlertButton[] };
 function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUser; appearance?: ProfileAppearance }) {
   const router = useRouter();
@@ -88,7 +90,12 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     const next = typeof value === 'function' ? value(alertRef.current) : value;
     alertRef.current = next; setAlertState(next);
   }, []);
-  const closeAlert = (info: ProfileAlert | null) => { if (alertRef.current === info) setAlertInfo(null); };
+  const closeAlert = (info: ProfileAlert | null) => {
+    if (alertRef.current !== info) return;
+    const selection = photoLock.current;
+    if (selection?.alert === info && selection.kind === undefined) selection.kind = null;
+    setAlertInfo(null);
+  };
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const identity = useRef(pushViewer); identity.current = pushViewer;
@@ -105,7 +112,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   useFocusEffect(useCallback(() => {
     const visit = {}; pushFocus.current = visit; retiredVisit.current = null; setScreenVisit(visit);
     pushAttempt.current = null; setEnablingPush(false);
-    photoLock.current = null; readAttempt.current = null; creatorsAttempt.current = null;
+    photoLock.current = null; setPhotoSelection(null); readAttempt.current = null; creatorsAttempt.current = null;
     setSaving(!!saveLock.current); setPhotoBusy(false); setDeleting(!!deleteLock.current);
     return () => {
       if (pushFocus.current !== visit) return;
@@ -136,7 +143,8 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   const [editPhotoBase64, setEditPhotoBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const saveLock = useRef<object | null>(null), photoLock = useRef<object | null>(null);
+  const saveLock = useRef<object | null>(null), photoLock = useRef<PhotoSelection | null>(null);
+  const [photoSelection, setPhotoSelection] = useState<PhotoSelection | null>(null);
   const [editNeighborhood, setEditNeighborhood] = useState('');
   const [editNeighborhoodOther, setEditNeighborhoodOther] = useState('');
   const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
@@ -151,7 +159,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   const closeEditFlow = () => {
     if (!editScope.isCurrent() || saveLock.current) return;
     editEntryRef.current = null; setEditEntry(null); setShowEditFlow(false); setShowNeighborhoodPicker(false);
-    saveLock.current = null; photoLock.current = null; setSaving(false); setPhotoBusy(false); setAlertInfo(null);
+    saveLock.current = null; photoLock.current = null; setPhotoSelection(null); setSaving(false); setPhotoBusy(false); setAlertInfo(null);
   };
   const readAttempt = useRef<object | null>(null), creatorsAttempt = useRef<object | null>(null);
   const lastProfileFocusFetchRef = useRef(0);
@@ -229,9 +237,8 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     const handle = profileRef.current.handle; hapticSelection();
     try { await Share.share({ message: `@${handle}` }); } catch (error) { if (pageScope.isCurrent()) logError(error, 'profile.shareHandle'); }
   };
-  const chooseEditPhoto = async (kind: 'camera' | 'library', scope: ProfileOperationScope) => {
-    if (!scope.isCurrent() || photoLock.current || saveLock.current) return;
-    const attempt = {}; photoLock.current = attempt; setPhotoBusy(true);
+  const chooseEditPhoto = async (attempt: PhotoSelection) => {
+    const { scope, kind } = attempt;
     const current = () => scope.isCurrent() && photoLock.current === attempt;
     try {
       const permission = kind === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -244,15 +251,35 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
       if (!manipulated.base64) throw new Error('No image data');
       setEditPhotoUri(manipulated.uri); setEditPhotoBase64(manipulated.base64);
     } catch { if (current()) setAlertInfo({ title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE }); }
-    finally { if (photoLock.current === attempt) { photoLock.current = null; if (scope.isCurrent()) setPhotoBusy(false); } }
+    finally { if (photoLock.current === attempt) { photoLock.current = null; setPhotoSelection(null); if (scope.isCurrent()) setPhotoBusy(false); } }
   };
+  const finishPhotoDismissal = (selection: PhotoSelection | null) => {
+    if (!selection || photoLock.current !== selection || !selection.scope.isCurrent()
+      || selection.started || selection.kind === undefined) return;
+    selection.started = true;
+    if (selection.kind === null) {
+      photoLock.current = null; setPhotoSelection(null); setPhotoBusy(false);
+    } else void chooseEditPhoto(selection);
+  };
+  useEffect(() => {
+    // Android has no Modal.onDismiss. Dispatch only after hidden state commits.
+    if (Platform.OS !== 'ios' && !alertInfo) finishPhotoDismissal(photoSelection);
+  }, [alertInfo, photoSelection]);
   const pickEditPhoto = () => {
     if (!editScope.isCurrent() || photoLock.current || saveLock.current) return; hapticLight();
-    setAlertInfo({ title: 'Change photo', message: 'Choose how to add your photo', buttons: [
-      { text: 'Take Photo', onPress: () => { void chooseEditPhoto('camera', editScope); } },
-      { text: 'Choose from Library', onPress: () => { void chooseEditPhoto('library', editScope); } },
-      { text: 'Cancel', style: 'cancel' },
-    ] });
+    const selection: PhotoSelection = { scope: editScope, kind: undefined, started: false, alert: null };
+    photoLock.current = selection; setPhotoSelection(selection); setPhotoBusy(true);
+    const choose = (kind: PhotoSelection['kind']) => {
+      if (photoLock.current !== selection || !selection.scope.isCurrent() || selection.kind !== undefined) return;
+      selection.kind = kind;
+      if (alertRef.current === selection.alert) setAlertInfo(null);
+    };
+    selection.alert = { title: 'Change photo', message: 'Choose how to add your photo', buttons: [
+      { text: 'Take Photo', onPress: () => choose('camera') },
+      { text: 'Photo library', onPress: () => choose('library') },
+      { text: 'Cancel', style: 'cancel', onPress: () => choose(null) },
+    ] };
+    setAlertInfo(selection.alert);
   };
   const handleSaveProfile = async () => {
     if (!editScope.isCurrent() || saveLock.current || photoLock.current) return;
@@ -428,6 +455,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
           message={alertInfo?.message}
           buttons={alertInfo?.buttons}
           onClose={() => closeAlert(alertInfo)}
+          onDismiss={() => finishPhotoDismissal(photoSelection)}
         />
       </>
     );
@@ -548,6 +576,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
           message={alertInfo?.message}
           buttons={alertInfo?.buttons}
           onClose={() => closeAlert(alertInfo)}
+          onDismiss={() => finishPhotoDismissal(photoSelection)}
         />
       </>
     );
@@ -756,6 +785,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
           message={alertInfo?.message}
           buttons={alertInfo?.buttons}
           onClose={() => closeAlert(alertInfo)}
+          onDismiss={() => finishPhotoDismissal(photoSelection)}
         />
         <Modal
           visible={showNeighborhoodPicker}
@@ -1092,6 +1122,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
         message={alertInfo?.message}
         buttons={alertInfo?.buttons}
         onClose={() => closeAlert(alertInfo)}
+          onDismiss={() => finishPhotoDismissal(photoSelection)}
       />
     </>
   );
