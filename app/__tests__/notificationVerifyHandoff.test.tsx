@@ -618,3 +618,14 @@ it('does not sync or route when migration has not committed the phone', async ()
   expect(mockPath).toBe('/verify-code'); expect(getVerificationDestination()?.destination).toBeNull();
   expect(tree!.root.findByProps({ testID: 'retry-account-load' })).toBeDefined();
 });
+
+
+it('leaves recovery mode after sign-out and routes the next completed sign-in', async () => {
+  await mount();
+  await emitAuth('PASSWORD_RECOVERY', { id: 'person-a', phone: '+12025550100' });
+  expect(mockPath).toBe('/reset-password');
+  await emitAuth('SIGNED_OUT', null);
+  await emitAuth('SIGNED_IN', { id: 'person-a', phone: '+12025550100' });
+  await tick(600);
+  expect(mockPath).toBe('/(tabs)/plans');
+});
