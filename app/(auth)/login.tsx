@@ -1,10 +1,10 @@
 import { hapticLight, hapticMedium, hapticHeavy, hapticSelection, hapticSuccess, hapticWarning, hapticError } from '../../lib/haptics';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     ImageBackground,
@@ -48,72 +48,111 @@ export default function LoginScreen() {
   const [resetError, setResetError] = useState<string | null>(null);
   const passwordInputRef = useRef<TextInput>(null);
 
+  const visit = useRef<object | null>(null);
+  const [renderVisit, setRenderVisit] = useState<object | null>(null);
+  const loginPending = useRef<object | null>(null);
+  const resetPending = useRef<object | null>(null);
+  const resetVisit = useRef<object | null>(null);
+  const [renderResetVisit, setRenderResetVisit] = useState<object | null>(null);
+  const resetClosing = useRef<object | null>(null);
+  const pendingConfirmation = useRef<(() => boolean) | null>(null);
+  const retireVisit = () => {
+    visit.current = null; resetVisit.current = null; pendingConfirmation.current = null;
+  };
+  useFocusEffect(useCallback(() => {
+    const active = {}; visit.current = active; setRenderVisit(active);
+    resetVisit.current = null; pendingConfirmation.current = null; resetClosing.current = null;
+    setResetModalVisible(false); setAlertInfo(null); setResetError(null); setError(null);
+    setPassword(''); setPasswordVisible(false); setResetEmail(''); setRenderResetVisit(null);
+    setLoading(!!loginPending.current); setResetLoading(!!resetPending.current);
+    return () => { if (visit.current === active) retireVisit(); };
+  }, []));
+  const isCurrent = () => !!renderVisit && visit.current === renderVisit;
+  const resetIsCurrent = () => isCurrent() && !!renderResetVisit && resetVisit.current === renderResetVisit;
+  const finishResetDismissal = () => {
+    if (!isCurrent() || resetClosing.current !== renderResetVisit) return;
+    resetClosing.current = null;
+    const confirm = pendingConfirmation.current; pendingConfirmation.current = null;
+    if (confirm?.()) {
+      resetVisit.current = null;
+      setResetEmail('');
+      setAlertInfo({ title: 'check your email', message: 'we sent you a password reset link.' });
+    }
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'ios' && !resetModalVisible) finishResetDismissal();
+  }, [resetModalVisible]);
+
   const handleLogin = async () => {
+    if (!isCurrent() || loginPending.current || resetVisit.current || resetClosing.current || alertInfo) return;
     setError(null);
     if (!email.trim() || !password) {
       setError('enter your email and password.');
       return;
     }
-    setLoading(true);
+    const attempt = {}; loginPending.current = attempt; setLoading(true);
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (signInError) {
-        setError('wrong email or password');
-        return;
-      }
-      postAuthTransitionRef.active = true;
-      // Root layout handles redirect via onAuthStateChange
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (!isCurrent()) return;
+      if (signInError) { setError('wrong email or password'); return; }
+      setPassword(''); postAuthTransitionRef.active = true;
+      // Root layout handles redirect via onAuthStateChange.
+    } catch {
+      if (isCurrent()) setError('could not sign in. please try again.');
     } finally {
-      setLoading(false);
+      if (loginPending.current === attempt) {
+        loginPending.current = null;
+        if (visit.current) setLoading(false);
+      }
     }
   };
 
   const handleForgotPassword = () => {
-    hapticLight();
-    setResetEmail('');
-    setResetError(null);
-    setResetModalVisible(true);
+    if (!isCurrent() || loginPending.current || resetVisit.current || resetClosing.current || alertInfo) return;
+    hapticLight(); Keyboard.dismiss();
+    const active = {}; resetVisit.current = active; setRenderResetVisit(active);
+    setResetEmail(''); setResetError(null); setResetLoading(!!resetPending.current); setResetModalVisible(true);
   };
 
   const handleSendResetLink = async () => {
+    if (!resetIsCurrent() || resetPending.current || resetClosing.current) return;
     setResetError(null);
     const emailTrimmed = resetEmail.trim();
-    if (!emailTrimmed) {
-      setResetError('enter your email address.');
-      return;
-    }
-    setResetLoading(true);
+    if (!emailTrimmed) { setResetError('enter your email address.'); return; }
+    const attempt = {}; resetPending.current = attempt; setResetLoading(true);
     try {
       const { error: err } = await supabase.auth.resetPasswordForEmail(emailTrimmed, {
         redirectTo: 'washedupapp://auth/callback',
       });
+      if (!resetIsCurrent()) return;
       if (err) {
         const msg = err.message?.toLowerCase() ?? '';
-        if (msg.includes('rate') || msg.includes('60 seconds')) {
-          setResetError('wait a minute before requesting another reset link.');
-        } else {
-          setResetError('something went wrong. check your email and try again.');
-        }
+        setResetError(msg.includes('rate') || msg.includes('60 seconds')
+          ? 'wait a minute before requesting another reset link.'
+          : 'something went wrong. check your email and try again.');
         return;
       }
-      setResetModalVisible(false);
-      setAlertInfo({ title: 'check your email', message: 'we sent you a password reset link.' });
+      Keyboard.dismiss(); pendingConfirmation.current = resetIsCurrent;
+      resetClosing.current = renderResetVisit; setResetModalVisible(false);
+    } catch {
+      if (resetIsCurrent()) setResetError('could not request a reset link. please try again.');
     } finally {
-      setResetLoading(false);
+      if (resetPending.current === attempt) {
+        resetPending.current = null;
+        if (visit.current) setResetLoading(false);
+      }
     }
   };
 
   const closeResetModal = () => {
-    setResetModalVisible(false);
-    setResetError(null);
+    if (!resetIsCurrent()) return;
+    resetVisit.current = null; pendingConfirmation.current = null; resetClosing.current = renderResetVisit;
+    Keyboard.dismiss(); setResetModalVisible(false); setResetError(null); setResetEmail('');
   };
 
   const handleSignUpPress = () => {
-    hapticLight();
-    router.replace('/signup');
+    if (!isCurrent()) return;
+    retireVisit(); hapticLight(); router.replace('/signup');
   };
 
   const triggerHaptic = () => hapticLight();
@@ -147,7 +186,8 @@ export default function LoginScreen() {
               <View style={styles.topNavRow}>
                 <TouchableOpacity
                   onPress={() => {
-                    hapticLight();
+                    if (!isCurrent()) return;
+                    retireVisit(); hapticLight();
                     if (router.canGoBack()) router.back();
                     else router.replace('/phone-entry');
                   }}
@@ -181,6 +221,7 @@ export default function LoginScreen() {
                   styles.input,
                   emailFocused && styles.inputFocused,
                 ]}
+                accessibilityLabel="Email address"
                 placeholder="email address"
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
@@ -205,6 +246,7 @@ export default function LoginScreen() {
                     styles.input,
                     passwordFocused && styles.inputFocused,
                   ]}
+                  accessibilityLabel="Password"
                   placeholder="password"
                   onFocus={() => setPasswordFocused(true)}
                   onBlur={() => setPasswordFocused(false)}
@@ -232,6 +274,8 @@ export default function LoginScreen() {
 
               <View style={styles.gap8} />
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Forgot password"
                 onPress={handleForgotPassword}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.forgotWrap}
@@ -242,6 +286,8 @@ export default function LoginScreen() {
 
               <TouchableOpacity
                 style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel="Log in"
                 onPress={handleLogin}
                 onPressIn={triggerHaptic}
                 activeOpacity={0.9}
@@ -293,6 +339,7 @@ export default function LoginScreen() {
         transparent
         animationType="fade"
         onRequestClose={closeResetModal}
+        onDismiss={finishResetDismissal}
         statusBarTranslucent
       >
         <Pressable style={modalStyles.overlay} onPress={closeResetModal}>
@@ -303,6 +350,7 @@ export default function LoginScreen() {
               style={[styles.input, modalStyles.input]}
               placeholder="email address"
               placeholderTextColor={Colors.textMedium}
+              accessibilityLabel="Password reset email"
               value={resetEmail}
               onChangeText={(t) => { setResetEmail(t); setResetError(null); }}
               keyboardType="email-address"
@@ -317,6 +365,8 @@ export default function LoginScreen() {
             {resetError ? <Text style={modalStyles.errorText}>{resetError}</Text> : null}
             <TouchableOpacity
               style={[styles.primaryButton, resetLoading && styles.primaryButtonDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Send reset link"
               onPress={handleSendResetLink}
               onPressIn={triggerHaptic}
               activeOpacity={0.9}
@@ -328,7 +378,7 @@ export default function LoginScreen() {
                 <Text style={styles.primaryButtonText}>send reset link</Text>
               )}
             </TouchableOpacity>
-            <TouchableOpacity onPress={closeResetModal} style={modalStyles.cancelButton}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel password reset" onPress={closeResetModal} style={modalStyles.cancelButton}>
               <Text style={modalStyles.cancelText}>cancel</Text>
             </TouchableOpacity>
           </Pressable>
@@ -339,7 +389,7 @@ export default function LoginScreen() {
           title={alertInfo?.title ?? ''}
           message={alertInfo?.message}
           buttons={alertInfo?.buttons}
-          onClose={() => setAlertInfo(null)}
+          onClose={() => { if (isCurrent()) setAlertInfo(current => current === alertInfo ? null : current); }}
         />
       </SafeAreaView>
     </ImageBackground>
