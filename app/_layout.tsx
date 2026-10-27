@@ -1192,7 +1192,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         router.replace('/reset-password');
         return;
       }
-      if (isRecoveryRef.current && event !== 'SIGNED_OUT') return;
+      const leavingRecovery = isRecoveryRef.current && event === 'SIGNED_OUT';
+      if (leavingRecovery) isRecoveryRef.current = false;
+      if (isRecoveryRef.current) return;
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT'
         && event !== 'TOKEN_REFRESHED' && event !== 'USER_UPDATED' && !verificationVisit) return;
       if (!session?.user) {
