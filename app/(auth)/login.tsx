@@ -342,8 +342,8 @@ export default function LoginScreen() {
         onDismiss={finishResetDismissal}
         statusBarTranslucent
       >
-        <Pressable style={modalStyles.overlay} onPress={closeResetModal}>
-          <Pressable style={modalStyles.content} onPress={(e) => e.stopPropagation()}>
+        <Pressable accessible={false} style={modalStyles.overlay} onPress={closeResetModal}>
+          <Pressable accessible={false} style={modalStyles.content} onPress={(e) => e.stopPropagation()}>
             <Text style={modalStyles.title}>reset password</Text>
             <Text style={modalStyles.subtitle}>enter your email to receive a reset link.</Text>
             <TextInput
