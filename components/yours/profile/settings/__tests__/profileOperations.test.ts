@@ -3,11 +3,12 @@ import { profileSaveFeedback } from '../profileSaveFeedback';
 
 const mockUser = jest.fn(), mockRefresh = jest.fn(), mockSingle = jest.fn(), mockUpdateResult = jest.fn(), mockUpload = jest.fn();
 const mockSelect = jest.fn(), mockUpdate = jest.fn(), mockEq = jest.fn();
+jest.mock('expo-crypto', () => ({ randomUUID: () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }));
 jest.mock('../../../../../lib/supabase', () => ({ supabase: {
   auth: { getUser: (...args: unknown[]) => mockUser(...args), refreshSession: (...args: unknown[]) => mockRefresh(...args) },
   from: (table: string) => ({
     select: (fields: string) => { mockSelect(table, fields); return { eq: (key: string, id: string) => { mockEq(key, id); return { single: mockSingle }; } }; },
-    update: (fields: unknown, options: unknown) => { mockUpdate(table, fields, options); return { eq: (key: string, id: string) => { mockEq(key, id); return mockUpdateResult(); } }; },
+    update: (fields: unknown, options: unknown) => { mockUpdate(table, fields, options); const api: any = { eq: (key: string, id: string) => { mockEq(key, id); return api; }, is: () => api, then: (yes: any, no: any) => Promise.resolve(mockUpdateResult()).then(yes,no) }; return api; },
   }),
 } }));
 jest.mock('../../../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: unknown[]) => mockUpload(...args) }));
@@ -19,13 +20,13 @@ beforeEach(() => {
   jest.clearAllMocks(); current = true;
   mockUser.mockReset().mockResolvedValue({ data: { user: { id: 'account-a' } }, error: null });
   mockRefresh.mockReset().mockResolvedValue({ data: { session: { user: { id: 'account-a' } } }, error: null });
-  mockSingle.mockReset().mockResolvedValue({ data: { id: 'account-a', first_name_display: 'Liz', gender: 'female' }, error: null });
+  mockSingle.mockReset().mockResolvedValue({ data: { id: 'account-a', first_name_display: 'Liz', profile_photo_url: 'old.jpg', handle: 'liz', neighborhood: null, is_visitor: false, fun_fact: null, gender: 'female' }, error: null });
   mockUpdateResult.mockReset().mockResolvedValue({ error: null, count: 1 });
   mockUpload.mockReset().mockResolvedValue('saved.jpg');
 });
 
 it('reads only the original own-profile fields and captured account', async () => {
-  expect(await readOwnProfile(scope)).toMatchObject({ id: 'account-a', first_name: 'Liz', gender: 'female', avatar_url: null, is_visitor: false });
+  expect(await readOwnProfile(scope)).toMatchObject({ id: 'account-a', first_name: 'Liz', gender: 'female', avatar_url: 'old.jpg', is_visitor: false });
   expect(mockSelect).toHaveBeenCalledWith('profiles', 'id, first_name_display, profile_photo_url, bio, city, gender, handle, neighborhood, is_visitor, fun_fact');
   expect(mockEq).toHaveBeenCalledWith('id', 'account-a');
 });
@@ -76,19 +77,19 @@ it('requires the original refreshed photo owner before uploading', async () => {
 });
 it('retains the JPEG bucket/path and upload options before saving the returned photo', async () => {
   const result = await saveOwnProfile({ ...original, photoBase64: 'jpeg' }, scope);
-  expect(mockUpload).toHaveBeenCalledWith('profile-photos', expect.stringMatching(/^account-a\/\d+\.jpg$/), 'jpeg', { upsert: true });
+  expect(mockUpload).toHaveBeenCalledWith('profile-photos', 'account-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg', 'jpeg', { upsert: false });
   expect(result.profile_photo_url).toBe('saved.jpg');
 });
 it('does not update the profile after a completed upload from a closed visit', async () => {
   const upload = deferred<string>(); mockUpload.mockReturnValue(upload.promise);
   const saving = saveOwnProfile({ ...original, photoBase64: 'jpeg' }, scope);
-  for (let index = 0; index < 8; index++) await Promise.resolve();
+  for (let index = 0; index < 30; index++) await Promise.resolve();
   expect(mockUpload).toHaveBeenCalledTimes(1); current = false; upload.resolve('late.jpg');
   await expect(saving).rejects.toThrow('no longer current'); expect(mockUpdate).not.toHaveBeenCalled();
 });
 it('retires an accepted update response after leaving without claiming it was undone', async () => {
   const update = deferred<any>(); mockUpdateResult.mockReturnValue(update.promise);
-  const saving = saveOwnProfile(original, scope); for (let index = 0; index < 8; index++) await Promise.resolve();
+  const saving = saveOwnProfile(original, scope); for (let index = 0; index < 30; index++) await Promise.resolve();
   expect(mockUpdate).toHaveBeenCalledTimes(1); current = false; update.resolve({ error: null, count: 1 });
   await expect(saving).rejects.toThrow('no longer current');
 });
