@@ -2,10 +2,11 @@ const mockNotificationRequest = jest.fn();
 jest.mock('../../../lib/planNotificationPrompt', () => ({ requestPlanNotificationPrompt: (...args: any[]) => mockNotificationRequest(...args) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import PlanDetailScreen from '../[id]';
 import { PlanDetailOverview } from '../../../components/plans/PlanDetailOverview';
 
+let mockRealPlaces = false;
 let mockMemberAppearance = true;
 let mockYoursEnabled = false;
 jest.mock('../../../constants/MemberAppearance', () => ({ get MEMBER_REDESIGN_APPEARANCE_ENABLED() { return mockMemberAppearance; } }));
@@ -95,7 +96,14 @@ jest.mock('../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: 
 jest.mock('expo-location', () => ({ geocodeAsync: async () => [] }));
 jest.mock('expo-image-picker', () => ({requestMediaLibraryPermissionsAsync:async()=>({status:'granted'}),launchImageLibraryAsync:async()=>({canceled:false,assets:[{uri:'file://sample'}]})}));
 jest.mock('expo-image-manipulator', () => ({SaveFormat:{JPEG:'jpeg'},manipulateAsync:async()=>({base64:'sample'})}));
-jest.mock('react-native-google-places-autocomplete', () => ({ GooglePlacesAutocomplete: (props:any) => {mockPlacesProps=props;return null;} }));
+jest.mock('react-native-google-places-autocomplete', () => ({ GooglePlacesAutocomplete: (props:any) => {
+  mockPlacesProps=props;
+  return mockRealPlaces ? require('react').createElement(jest.requireActual('react-native-google-places-autocomplete').GooglePlacesAutocomplete, {
+    ...props, minLength: 1000, query: { key: 'local-fixture-only' },
+    predefinedPlacesAlwaysVisible: true,
+    predefinedPlaces: [{ description: 'Fixture Cafe, Santa Monica', structured_formatting: { main_text: 'Fixture Cafe' }, geometry: { location: { lat: 34.01, lng: -118.49 } } }],
+  }) : null;
+} }));
 jest.mock('../../../components/MapView', () => ({ MapView: () => null, Marker: () => null }));
 jest.mock('../../../components/MiniProfileCard', () => () => null);
 jest.mock('../../../components/modals/ReportModal', () => ({ ReportModal: () => null }));
@@ -112,7 +120,7 @@ const allText = () => tree.root.findAllByType(Text).flatMap(n => [n.props.childr
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === label))!;
 async function mount() { await act(async () => { tree = create(<PlanDetailScreen />); }); }
 beforeEach(() => {
-  mockPlanPhotos = false;
+  mockRealPlaces = false; mockPlanPhotos = false;
   mockMemberAppearance = true; mockCanGoBack = false;
   mockPeople=[];mockPeopleError=false;
   mockInterest={entry:null,ready:true,loading:false,busy:false,phase:null,error:null,send:mockInterestSend,retry:mockInterestRetry,refresh:jest.fn()};
@@ -372,6 +380,68 @@ it('ignores departure confirmation after the initiating visit retires',async()=>
 const manageInput = (value:string) => tree.root.findAllByType(require('react-native').TextInput).find(n=>n.props.value===value)!;
 const manageModal = () => tree.root.findAllByType(require('react-native').Modal).find(n=>n.props.visible&&n.props.animationType==='slide')!;
 async function openEditor(){mockPlan.creator_user_id='viewer';await mount();act(()=>button('Manage Plan').props.onPress());}
+it('discards an unsaved draft and seeds the latest plan when the editor reopens', async () => {
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('Unsaved title'));
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+  mockPlan = { ...mockPlan, title: 'Updated elsewhere' };
+  await act(async () => tree.update(<PlanDetailScreen />));
+  act(() => button('Manage Plan').props.onPress());
+  expect(manageInput('Updated elsewhere')).toBeDefined();
+  expect(manageInput('Unsaved title')).toBeUndefined();
+  expect(mockUpdate).not.toHaveBeenCalled();
+});
+it('reopens an uncertain edit with its retained draft instead of reseeding from stale query data', async () => {
+  mockEditResponse = { data: null, error: null };
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('Unconfirmed title'));
+  await act(async () => button('Save changes').props.onPress());
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+  act(() => button('Manage Plan').props.onPress());
+  expect(manageInput('Unconfirmed title')).toBeDefined();
+  expect(button('Save changes')).toBeUndefined();
+  expect(button('Check changes')).toBeDefined();
+  mockEditResponse = undefined;
+  await act(async () => button('Check changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+});
+it('renders the editor without raw text children in native Views', async () => {
+  await openEditor();
+  const rawText = tree.root.findAllByType(View).flatMap(view => view.children.filter(child => typeof child === 'string'));
+  expect(rawText).toEqual([]);
+});
+it('blocks invalid direct minutes and saves an explicit non-quarter-hour selection', async () => {
+  await openEditor();
+  act(() => button('10:00 AM').props.onPress());
+  const minuteInput = () => tree.root.findAllByType(TextInput)
+    .find(node => node.props.accessibilityLabel === 'Minute, 0 through 59')!;
+  act(() => minuteInput().props.onChangeText('99'));
+  expect(button('Done').props.disabled).toBe(true);
+  expect(allText()).toContain('Enter an hour from 1–12 and minutes from 00–59.');
+  act(() => minuteInput().props.onChangeText('07'));
+  expect(button('Done').props.disabled).toBe(false);
+  act(() => button('Done').props.onPress());
+  expect(button('10:07 AM')).toBeDefined();
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+  expect(mockUpdate.mock.calls[0][0].start_time).toBe('2040-09-16T17:07:00.000Z');
+});
+it('keeps a rejected edit open without writing and saves only after the creator corrects it', async () => {
+  await openEditor();
+  act(() => manageInput(mockPlan.title).props.onChangeText('hookup'));
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).not.toHaveBeenCalled();
+  expect(manageModal().props.visible).toBe(true);
+  const alert = tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert)
+    .find(node => node.props.title === 'Content not allowed')!;
+  expect(alert.props).toMatchObject({ visible: true, title: 'Content not allowed' });
+  expect(manageInput('hookup')).toBeDefined();
+  act(() => alert.props.onClose());
+  act(() => manageInput('hookup').props.onChangeText('Coffee tomorrow'));
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(1);
+  expect(mockUpdate.mock.calls[0][0].title).toBe('Coffee tomorrow');
+});
 it('preserves custom ages and exact stored schedule on a title-only creator edit',async()=>{
   mockPlan.target_age_min=25;mockPlan.target_age_max=35;mockPlan.start_time='2040-11-04T09:30:17.123Z';mockPlan.end_time='2040-11-04T11:30:17.123Z';
   await openEditor();expect(allText()).toContain('Ages 25–35. Kept unless you choose a range.');
@@ -640,6 +710,61 @@ it('remeasures fallback management labels without remounting its modal or discar
  }finally{act(()=>Dimensions.set({window:previous}));}
 });
 
+
+describe('real location widget integration', () => {
+  const locationInput = () => tree.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === 'Location')!;
+  beforeEach(() => { mockRealPlaces = true; jest.useFakeTimers(); });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  it('shows the saved place immediately when the editor mounts', async () => {
+    await openEditor();
+    expect(locationInput().props.value).toBe('Ocean Park');
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('saves a selected place and clears coordinates after subsequent typing: %s', async (typeAfterSelection) => {
+    await openEditor();
+    let row = tree.root.findAllByType(Text).find(n => n.props.children === 'Fixture Cafe, Santa Monica')!;
+    while (row && !row.props.onPress) row = row.parent!;
+    expect(row).toBeDefined();
+    act(() => row.props.onPress());
+    expect(locationInput().props.value).toBe('Fixture Cafe');
+    if (typeAfterSelection) act(() => locationInput().props.onChangeText('Different meeting point'));
+    await act(async () => button('Save changes').props.onPress());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject(typeAfterSelection
+      ? { location_text: 'Different meeting point', location_lat: null, location_lng: null }
+      : { location_text: 'Fixture Cafe', location_lat: 34.01, location_lng: -118.49 });
+  });
+
+  it('discards typed location and displays the latest saved place on a fresh reopening', async () => {
+    await openEditor();
+    act(() => locationInput().props.onChangeText('Discard this place'));
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+    mockPlan = { ...mockPlan, location_text: 'Updated park', location_lat: 34.02, location_lng: -118.5 };
+    await act(async () => tree.update(<PlanDetailScreen />));
+    act(() => button('Manage Plan').props.onPress());
+    expect(locationInput().props.value).toBe('Updated park');
+    await act(async () => button('Save changes').props.onPress());
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ location_text: 'Updated park', location_lat: 34.02, location_lng: -118.5 });
+  });
+
+  it('shows the retained location after an uncertain save is closed and reopened', async () => {
+    mockEditResponse = { data: null, error: null };
+    await openEditor();
+    act(() => jest.advanceTimersByTime(100));
+    act(() => locationInput().props.onChangeText('Unconfirmed cafe'));
+    await act(async () => button('Save changes').props.onPress());
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Close editor' }).props.onPress());
+    act(() => button('Manage Plan').props.onPress());
+    expect(locationInput().props.value).toBe('Unconfirmed cafe');
+    expect(locationInput().props.editable).toBe(false);
+    mockEditResponse = undefined;
+    await act(async () => button('Check changes').props.onPress());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({ location_text: 'Unconfirmed cafe', location_lat: null, location_lng: null });
+  });
+});
 
 it.each([false, true])('waits for native share dismissal before advancing a confirmed iOS join (invitations %s)', async invitations => {
   jest.replaceProperty(Platform, 'OS', 'ios'); mockYoursEnabled = invitations;

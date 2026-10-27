@@ -37,6 +37,7 @@ import {
   fetchMyGrants,
   submitApplication,
 } from '../../lib/operatorApplications';
+import { useApplicationDraftExit } from '../../components/creator/useApplicationDraftExit';
 import { useApplicationFormGuidance } from '../../components/creator/useApplicationFormGuidance';
 import { buildEventApplication, missingEventApplicationFields } from '../../lib/operatorApplicationForms';
 
@@ -67,6 +68,7 @@ export default function ApplyEventsScreen() {
   const styles = React.useMemo(() => createStyles(fonts), [fonts]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const { edit, prefill } = useApplicationDraftExit(done, submitting);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const [applicantType, setApplicantType] = useState<string | null>(null);
@@ -84,17 +86,20 @@ export default function ApplyEventsScreen() {
 
   // prefill name from profile, and prior answers if resubmitting
   useEffect(() => {
+    let active = true;
     (async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!active || !user) return;
         const { data } = await supabase
           .from('profiles')
           .select('first_name_display')
           .eq('id', user.id)
           .single();
-        if (data?.first_name_display) setYourName((v) => v || data.first_name_display);
-        const grants = await fetchMyGrants();
+        if (!active) return;
+        if (data?.first_name_display) prefill(setYourName, (v) => v || data.first_name_display);
+        const grants = await fetchMyGrants(user.id);
+        if (!active) return;
         const prior = grants.find((g) => g.track === 'event_host');
         // Screen 47 "resumable applications" (delta matrix): a withdrawn
         // application is the applicant's own reversible choice, not a no --
@@ -102,23 +107,24 @@ export default function ApplyEventsScreen() {
         // what they already wrote, same as declined/needs_more_info.
         if (prior && ['declined', 'needs_more_info', 'withdrawn'].includes(prior.status)) {
           const a = prior.application as Record<string, any>;
-          if (a.applicant_type) setApplicantType(a.applicant_type);
-          if (a.applicant_type_other) setApplicantTypeOther(a.applicant_type_other);
-          if (a.your_name) setYourName(a.your_name);
-          if (a.public_name) setPublicName(a.public_name);
-          if (Array.isArray(a.event_categories)) setCategories(a.event_categories);
-          if (a.frequency) setFrequency(a.frequency);
-          if (Array.isArray(a.proof_links)) setProofLinks([...a.proof_links, '', '', ''].slice(0, 3));
-          if (a.venue_address) setVenueAddress(a.venue_address);
-          if (a.ticketing_today) setTicketing(a.ticketing_today);
-          if (a.ticketing_provider) setTicketingProvider(a.ticketing_provider);
-          if (a.about) setAbout(a.about);
+          if (a.applicant_type) prefill(setApplicantType, a.applicant_type);
+          if (a.applicant_type_other) prefill(setApplicantTypeOther, a.applicant_type_other);
+          if (a.your_name) prefill(setYourName, a.your_name);
+          if (a.public_name) prefill(setPublicName, a.public_name);
+          if (Array.isArray(a.event_categories)) prefill(setCategories, a.event_categories);
+          if (a.frequency) prefill(setFrequency, a.frequency);
+          if (Array.isArray(a.proof_links)) prefill(setProofLinks, [...a.proof_links, '', '', ''].slice(0, 3));
+          if (a.venue_address) prefill(setVenueAddress, a.venue_address);
+          if (a.ticketing_today) prefill(setTicketing, a.ticketing_today);
+          if (a.ticketing_provider) prefill(setTicketingProvider, a.ticketing_provider);
+          if (a.about) prefill(setAbout, a.about);
         }
       } catch {
         // prefill is best-effort
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [prefill]);
 
   const isJustMe = applicantType === 'just_me';
   const isVenue = applicantType === 'venue';
@@ -185,19 +191,19 @@ export default function ApplyEventsScreen() {
               label="Which best describes you?"
               options={APPLICANT_TYPE_LABELS}
               selected={applicantType}
-              onSelect={setApplicantType}
+              onSelect={edit(setApplicantType)}
             />
             {applicantType === 'other' && (
-              <Field guidance={guidance.field("tell us")} appearance={appearance} label="How would you describe your work?" value={applicantTypeOther} onChange={setApplicantTypeOther} maxLength={120} />
+              <Field guidance={guidance.field("tell us")} appearance={appearance} label="How would you describe your work?" value={applicantTypeOther} onChange={edit(setApplicantTypeOther)} maxLength={120} />
             )}
 
-            <Field guidance={guidance.field("your name")} appearance={appearance} label="Your name" value={yourName} onChange={setYourName} maxLength={80} />
+            <Field guidance={guidance.field("your name")} appearance={appearance} label="Your name" value={yourName} onChange={edit(setYourName)} maxLength={80} />
             {applicantType && !isJustMe && (
               <Field guidance={guidance.field("the name people know you by")} appearance={appearance}
                 label="Public name"
                 hint="The business, venue, or creator name people will see on your event listings."
                 value={publicName}
-                onChange={setPublicName}
+                onChange={edit(setPublicName)}
                 maxLength={80}
               />
             )}
@@ -207,43 +213,43 @@ export default function ApplyEventsScreen() {
               options={sentenceCaseOptions(EVENT_CATEGORIES)}
               selected={categories}
               onToggle={(key) =>
-                setCategories((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
+                edit(setCategories)((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
               }
             />
 
-            <ChoiceList guidance={guidance.field("how often?")} appearance={appearance} label="How often do you put on events?" options={sentenceCaseOptions(EVENT_FREQUENCIES)} selected={frequency} onSelect={setFrequency} />
+            <ChoiceList guidance={guidance.field("how often?")} appearance={appearance} label="How often do you put on events?" options={sentenceCaseOptions(EVENT_FREQUENCIES)} selected={frequency} onSelect={edit(setFrequency)} />
 
             <LinksInput guidance={guidance.field("show us proof (at least one link)")} appearance={appearance}
               label="Links to your work"
               hint="Add at least one link to your website, social profile, venue, or a past event."
               links={proofLinks}
-              onChange={setProofLinks}
+              onChange={edit(setProofLinks)}
             />
 
             {isVenue && (
-              <Field guidance={guidance.field("where's your spot?")} appearance={appearance} label="Venue address" hint="The address of your venue." value={venueAddress} onChange={setVenueAddress} maxLength={160} />
+              <Field guidance={guidance.field("where's your spot?")} appearance={appearance} label="Venue address" hint="The address of your venue." value={venueAddress} onChange={edit(setVenueAddress)} maxLength={160} />
             )}
 
             <ChoiceList guidance={guidance.field("how do people get tickets today?")} appearance={appearance}
               label="How do people get tickets today?"
               options={sentenceCaseOptions(TICKETING_OPTIONS)}
               selected={ticketing}
-              onSelect={setTicketing}
+              onSelect={edit(setTicketing)}
             />
             {needsProvider && (
-              <Field appearance={appearance} label="Ticketing provider (optional)" value={ticketingProvider} onChange={setTicketingProvider} placeholder="Eventbrite, DICE, or your own website" maxLength={80} autoCapitalize="none" />
+              <Field appearance={appearance} label="Ticketing provider (optional)" value={ticketingProvider} onChange={edit(setTicketingProvider)} placeholder="Eventbrite, DICE, or your own website" maxLength={80} autoCapitalize="none" />
             )}
 
             <Field guidance={guidance.field("tell us about what you run")} appearance={appearance}
               label="Tell us about your events"
               hint="In two or three sentences, describe what people can expect."
               value={about}
-              onChange={setAbout}
+              onChange={edit(setAbout)}
               multiline
               maxLength={400}
             />
 
-            <TermsCheck guidance={guidance.field("agree to the terms")} appearance={appearance} checked={terms} onToggle={() => setTerms((t) => !t)} />
+            <TermsCheck guidance={guidance.field("agree to the terms")} appearance={appearance} checked={terms} onToggle={() => edit(setTerms)((t) => !t)} />
             <SubmitButton appearance={appearance} label="Submit application" inactive={!valid} submitting={submitting} onPress={attemptSubmit} />
           </ScrollView>
         </KeyboardAvoidingView>

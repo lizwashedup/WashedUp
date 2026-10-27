@@ -24,8 +24,16 @@ reached chat, so the exact physical-device stall is not yet reproduced locally.
 The private diagnostic binary includes an experimental scheduler guard and is
 not equivalent to the production native binary.
 
-Physical-device verification and mandatory CI are required before release.
-No production publication is recorded by this document.
+Liz subsequently explicitly deferred physical-device verification and asked to
+continue the fix without her phone. Mandatory CI and guarded release checks
+remain required. The second full-root simulator journey also passes on iPhone
+17 Pro Max: first participation assent, a failed People lookup, and a ticketed
+plan reach chat directly; Get Tickets remains available inside chat.
+The authoritative publication record is kept in the local incident/release
+evidence below; this refactor integration does not itself publish an update.
+
+Carried into the separate PR #21 refactor with 251 focused tests passing across
+four suites and TypeScript passing; its broader release remains separate.
 
 Local evidence and the whole-app reliability work register:
 `/Users/liz/Desktop/Ops/Audits/2026-10-25-salsa-freeze/`.

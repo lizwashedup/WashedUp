@@ -12,3 +12,6 @@ verify_jwt = false
 
 [functions.claim-push-subscription]
 verify_jwt = true
+
+[functions.monitor-push-health]
+verify_jwt = false
