@@ -299,7 +299,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
       void queryClient.invalidateQueries({ queryKey: PROFILE_PHOTO_KEY });
       setProfile(prev => prev?.id === userId ? { ...prev, first_name: fields.first_name_display, avatar_url: fields.profile_photo_url, handle: fields.handle, neighborhood: fields.neighborhood, is_visitor: fields.is_visitor, fun_fact: fields.fun_fact } : prev);
       profileNeedsRefresh.current = false; saveLock.current = null; closeEditFlow();
-    } catch (error) { if (scope.isCurrent() && !isObsoleteProfileOperation(error)) setAlertInfo({ title: 'Could not save', message: appearance ? profileSaveFeedback(error) : friendlyError(error, 'Please try again.') }); }
+    } catch (error) { if (scope.isCurrent() && !isObsoleteProfileOperation(error)) setAlertInfo({ title: 'Could not save', message: profileSaveFeedback(error) }); }
     finally {
       if (saveLock.current === attempt) {
         if (accountCurrent() && !editScope.isCurrent()) {
