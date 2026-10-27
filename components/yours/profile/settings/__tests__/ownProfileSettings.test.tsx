@@ -13,6 +13,7 @@ const mockBack = jest.fn(), mockPush = jest.fn(), mockReplace = jest.fn(), mockI
 const mockPermission = jest.fn(), mockCamera = jest.fn(), mockLibrary = jest.fn(), mockManipulate = jest.fn();
 const mockDeleteAuthCallbacks = new Set<(event: string, session: any) => void>();
 let mockViewer = 'account-a', mockEpoch = 1, mockFocused = true, mockAccountError: Error | null = null, mockOpenEdit: string | undefined;
+let mockAppearance = true;
 let mockHandleStatus = 'unchanged', mockIsAdmin = false, mockPagesEnabled = false;
 const mockFocusContext = React.createContext(true);
 const mockPhoto = { uri: 'edit.jpg', base64: 'jpeg' };
@@ -38,7 +39,7 @@ jest.mock('@react-navigation/native', () => ({ useFocusEffect: (callback: any) =
 jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack, push: mockPush, replace: mockReplace }), useLocalSearchParams: () => ({ openEdit: mockOpenEdit }) }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate }) }));
 jest.mock('../../../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../../../constants/Typography').AfterglowFallbackFonts }) }));
-jest.mock('../../../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true, COMMUNITIES_ENABLED: true, get CREATOR_PAGES_ENABLED(){return mockPagesEnabled;} }));
+jest.mock('../../../../../constants/FeatureFlags', () => ({ get COMMUNITY_CHAT_GROUPING_ENABLED(){return mockAppearance;}, COMMUNITIES_ENABLED: true, get CREATOR_PAGES_ENABLED(){return mockPagesEnabled;} }));
 jest.mock('../../../../../constants/Admin', () => ({ isAdmin: () => mockIsAdmin }));
 jest.mock('../../../../../lib/creatorMode', () => ({ getCreatorAccess: (...args: any[]) => mockAccess(...args), hasCreatorAccess: (access: any) => !!access && (access.hasEventHostGrant || access.ledCommunities?.length > 0) }));
 jest.mock('../../../../../lib/operatorApplications', () => ({ fetchMyGrants: (...args: any[]) => mockGrants(...args) }));
@@ -78,7 +79,7 @@ const edit = async () => { await press(byLabel('Edit profile')); };
 const change = (label: string, value: string) => act(() => { field(label).props.onChangeText(value); });
 async function deleteStep2() { await press(byLabel('Delete account')); await press(byLabel('I understand, continue')); }
 beforeEach(() => {
-  mockPagesEnabled = false;
+  mockAppearance = true; mockPagesEnabled = false;
   jest.clearAllMocks(); mockDeleteAuthCallbacks.clear(); mockViewer = 'account-a'; mockEpoch = 1; mockFocused = true; mockAccountError = null; mockOpenEdit = undefined; mockHandleStatus = 'unchanged'; mockIsAdmin = false;
   mockRead.mockReset().mockImplementation(async () => ({ ...original, id: mockViewer })); mockSave.mockReset().mockResolvedValue(saved);
   mockUser.mockReset().mockImplementation(async () => ({ data: { user: { id: mockViewer } }, error: null }));
@@ -285,4 +286,15 @@ it('runs the Android picker after hidden chooser state commits without onDismiss
   const os=Platform.OS; Object.defineProperty(Platform,'OS',{configurable:true,value:'android'});
   try {await mount();await edit();await press(byLabel('Change photo'));act(()=>{alert().buttons[1].onPress();expect(mockPermission).not.toHaveBeenCalled();});await flush();expect(mockLibrary).toHaveBeenCalledTimes(1);}
   finally {Object.defineProperty(Platform,'OS',{configurable:true,value:os});}
+});
+
+it('retains edits and shows retry guidance for a timeout in the live appearance', async () => {
+  mockAppearance = false;
+  mockSave.mockRejectedValueOnce(new Error('Profile save timed out after 4000ms'));
+  await mount(); await edit(); change('Display name', 'Retained edit');
+  await press(byLabel('Save changes'));
+  expect(alert().title).toBe('Could not save');
+  expect(alert().message).toBe('Your changes are still here. Try saving again.');
+  expect(field('Display name').props.value).toBe('Retained edit');
+  expect(byLabel('Save changes').props.disabled).toBe(false);
 });

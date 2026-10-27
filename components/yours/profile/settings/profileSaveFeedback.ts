@@ -1,6 +1,6 @@
 const RETAINED_DRAFT = 'Your changes are still here. Try saving again.';
 
-/** Staged save feedback only. Never turn an arbitrary transport or database
+/** Profile save feedback. Never turn an arbitrary transport or database
  * message into UI copy; recognized conflicts get a useful next step. Local
  * required-name and content validation continue in the form before saving.
  */
