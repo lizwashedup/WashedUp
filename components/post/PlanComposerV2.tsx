@@ -56,6 +56,7 @@ import type { MyFace } from '../../hooks/useMyFace';
 import {
   buildOptimisticPlan,
   prependOptimisticPlan,
+  optimisticPlanCacheKeys,
   type OptimisticHandle,
 } from '../../lib/optimisticPlans';
 import { useInviteInterestSignals } from '../../hooks/useInviteInterestSignals';
@@ -288,7 +289,7 @@ export default function PlanComposerV2() {
     submittingRef.current = false;
     if (write?.optimistic) {
       const tempId = write.optimistic.tempId;
-      for (const key of [['events', 'feed', write.userId], ['my-plans', write.userId]]) {
+      for (const key of optimisticPlanCacheKeys(write.userId)) {
         queryClient.setQueryData<Array<{ id: string }>>(key, old => old?.filter(plan => plan.id !== tempId));
         // A dispatched write may have committed. Reconcile on the next read;
         // never launch compensating writes under a replacement account.

@@ -765,6 +765,7 @@ export default function PlansScreen() {
           id: e.id,
           title: e.title,
           host_message: e.host_message ?? null,
+          gender_rule: e.gender_rule ?? null,
           target_age_min: e.target_age_min,
           target_age_max: e.target_age_max,
           start_time: e.start_time,

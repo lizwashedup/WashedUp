@@ -31,6 +31,7 @@ interface FeaturedEventCardProps {
     status?: string;
     location_text: string | null;
     category: string | null;
+    gender_rule?: string | null;
     max_invites: number;
     member_count: number;
     slug?: string | null;
@@ -194,7 +195,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         !appearance && isSpecialEvent && { borderColor: Colors.specialEventMaroon },
         !appearance && isPrideFlagCard && { backgroundColor: 'transparent' },
       ]}
-      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event'}${ageLabel ? `, age range ${ageLabel}` : ''}${isClosed ? `, ${closedLabel.toLowerCase()}` : isMember ? ', going' : ''}`}
+      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event'}${plan.gender_rule === 'women_only' ? ', women only' : ''}${ageLabel ? `, age range ${ageLabel}` : ''}${isClosed ? `, ${closedLabel.toLowerCase()}` : isMember ? ', going' : ''}`}
       accessibilityRole="button"
     >
       {!appearance && isPrideFlagCard && (
@@ -228,6 +229,11 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
                 : isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
             </Text>
           </View>
+          {plan.gender_rule === 'women_only' && (
+            <View style={styles.womenOnlyPill}>
+              <Text style={styles.womenOnlyPillText}>Women Only</Text>
+            </View>
+          )}
           {ageLabel && (
             <View style={styles.agePill}>
               <Text style={styles.agePillText} accessibilityLabel={`Age range: ${ageLabel}`}>
@@ -403,6 +409,19 @@ const baseStyles = StyleSheet.create({
     gap: 6,
     marginRight: 8,
   },
+  womenOnlyPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.birthdayPinkTint15,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  womenOnlyPillText: {
+    fontFamily: Fonts.sansBold,
+    fontSize: 10,
+    color: Colors.birthdayPink,
+    letterSpacing: 0.2,
+  },
   agePill: {
     alignSelf: 'flex-start',
     maxWidth: '100%',
@@ -559,6 +578,7 @@ function featuredAppearance(fonts: AfterglowFontFamilies) { return StyleSheet.cr
   topRow: { ...baseStyles.topRow, gap: 8, marginTop: -6, marginRight: -6, marginBottom: 8 },
   topRowIcons: { ...baseStyles.topRowIcons, gap: 0, flexShrink: 0 },
   featuredPill: { ...baseStyles.featuredPill, flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, paddingHorizontal: 8, borderRadius: 4 },
+  womenOnlyPillText: { ...baseStyles.womenOnlyPillText, fontFamily: fonts.semibold },
   agePillText: { ...baseStyles.agePillText, fontFamily: fonts.medium, color: AfterglowColors.ink },
   featuredPillText: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.ink, flexShrink: 1 },
   title: { fontSize: FontSizes.displaySM, lineHeight: LineHeights.displaySM, fontFamily: fonts.semibold, color: AfterglowColors.ink, marginBottom: 8 },
