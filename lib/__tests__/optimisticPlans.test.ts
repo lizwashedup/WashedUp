@@ -29,6 +29,8 @@ it('removes a failed post from both existing and previously absent caches', () =
   expect(client.getQueryData(['events', 'feed', 'creator', 'all'])).toEqual([existing]);
   expect(client.getQueryData(['events', 'feed', 'creator'])).toEqual([]);
   expect(client.getQueryData(['my-plans', 'creator'])).toEqual([]);
+  expect(client.getQueryState(['events', 'feed', 'creator'])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(['my-plans', 'creator'])?.isInvalidated).toBe(true);
 });
 
 it('does not insert a plan into a Near me radius or another account', () => {

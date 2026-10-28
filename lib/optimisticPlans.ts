@@ -143,6 +143,11 @@ export function prependOptimisticPlan(
         // React Query ignores undefined writes. Explicitly remove the pending
         // card when this cache did not exist before the attempt.
         queryClient.setQueryData<Plan[]>(key, previous[index] ?? []);
+        if (previous[index] === undefined) {
+          // An empty rollback is not a successful empty feed read. Refetch if
+          // mounted, or on the next visit, instead of caching it for 60 seconds.
+          void queryClient.invalidateQueries({ queryKey: key, exact: true });
+        }
       });
     },
   };
