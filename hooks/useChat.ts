@@ -185,6 +185,8 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
   const messageChangesRef = useRef(new Map<string, object>());
   const messagesRef = useRef<ChatMessage[]>([]);
   const loadingOlderRef = useRef(false);
+  // Queued native list callbacks must see failures before React rerenders.
+  const olderLoadErrorRef = useRef(false);
   const hasOlderRef = useRef(false);
   const queryClient = useQueryClient();
 
@@ -242,7 +244,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     messageChangesRef.current = new Map();
     setMessages([]);
     setLoadError(false);
-    setOlderLoadError(false);
+    olderLoadErrorRef.current = false; setOlderLoadError(false);
     setAnchorUnavailable(false);
     setLoading(!!viewerId && !!conversationId);
     if (!conversationId || !viewerId) return () => {
@@ -643,13 +645,13 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     // Keep in-flight sends owned by this room while replacing only history.
     const pending = messagesRef.current.filter(message => message.id.startsWith('optimistic-'));
     messagesRef.current = pending; setMessages(pending);
-    setLoadError(false); setOlderLoadError(false); setAnchorUnavailable(false);
+    setLoadError(false); olderLoadErrorRef.current = false; setOlderLoadError(false); setAnchorUnavailable(false);
     void fetchMessages();
   }, [readWindow, isCurrentRoom, fetchMessages]);
 
   const loadOlder = useCallback(async (retry = false) => {
     if (!isCurrentRoom() || AppState.currentState === 'background' || AppState.currentState === 'inactive' ||
-        loadingOlderRef.current || !hasOlderRef.current || (olderLoadError && !retry)) return;
+        loadingOlderRef.current || !hasOlderRef.current || (olderLoadErrorRef.current && !retry)) return;
     const window = readWindowRef.current;
     const epoch = foregroundReadEpochRef.current;
     const isCurrent = () => isCurrentRoom() && foregroundReadEpochRef.current === epoch &&
@@ -661,7 +663,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     if (!cursor) return;
 
     loadingOlderRef.current = true;
-    setOlderLoadError(false);
+    olderLoadErrorRef.current = false; setOlderLoadError(false);
     try {
       const selectCols = `id, event_id, user_id, content, message_type, image_url, audio_url, duration_seconds, created_at, reply_to_message_id, ref_event_id, mention_data${kind === 'circle' ? ', circle_id' : ''}`;
       const { data, error } = await requestWithDeadline(supabase
@@ -717,12 +719,12 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
         });
       });
     } catch (error) {
-      if (isCurrent()) { logError(error, 'useChat.loadOlder'); setOlderLoadError(true); }
+      if (isCurrent()) { logError(error, 'useChat.loadOlder'); olderLoadErrorRef.current = true; setOlderLoadError(true); }
     } finally {
       // A retired read must not unlock a page request in the current room.
       if (isCurrent()) loadingOlderRef.current = false;
     }
-  }, [kind, parentCol, conversationId, olderLoadError, isCurrentRoom]);
+  }, [kind, parentCol, conversationId, isCurrentRoom]);
 
   const toggleReaction = useCallback(async function changeReaction(messageId: string, reaction = 'heart', entryScope?: ChatOperationScope, expectedIntent?: ChatReactionIntent): Promise<void> {
     const scope = captureOperation(entryScope);
