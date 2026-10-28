@@ -210,3 +210,64 @@ it.each([null, 'message-002'])('keeps message-array identity stable while the co
   fixture.navigate({kind:'event',id:'plan-a'}); await flush();
   expect(fixture.chat.messages).toBe(first);
 });
+
+
+it.each(['event', 'circle'] as const)('keeps a failed %s history page paused when a queued scroll callback fires', async kind => {
+  readMessages.mockResolvedValueOnce(result(...Array.from({ length: 60 }, (_, i) => message(i + 60))));
+  const fixture = mount({ kind, id: 'plan-a' }); await flush();
+  // Native list callbacks may already be queued when the read fails. They
+  // still hold the callback from before the error state rendered.
+  const queuedScroll = fixture.chat.loadOlder;
+  readMessages.mockResolvedValueOnce({ data: null, error: Error('offline') });
+  await act(async () => { await queuedScroll(); }); await flush();
+  expect(fixture.chat.olderLoadError).toBe(true);
+  const reads = readMessages.mock.calls.length;
+  readMessages.mockResolvedValue(result(message(59)));
+  await act(async () => { await queuedScroll(); }); await flush();
+  expect(readMessages).toHaveBeenCalledTimes(reads);
+  expect(fixture.chat.olderLoadError).toBe(true);
+  expect(fixture.chat.messages[0].id).toBe(message(60).id);
+
+  // The visible Retry action can still request that exact page once.
+  await act(async () => { await fixture.chat.loadOlder(true); }); await flush();
+  expect(readMessages).toHaveBeenCalledTimes(reads + 1);
+  expect(fixture.chat.olderLoadError).toBe(false);
+  expect(fixture.chat.messages[0].id).toBe(message(59).id);
+});
+
+
+it('clears the history failure when changing windows and keeps retry single-flight', async () => {
+  readAnchor.mockResolvedValue(anchorResult([message(60)], message(65), message(50)));
+  const fixture = mount(undefined, message(60).id); await flush();
+  readMessages.mockResolvedValueOnce({ data: null, error: Error('offline') });
+  await act(async () => { await fixture.chat.loadOlder(); }); await flush();
+  expect(fixture.chat.olderLoadError).toBe(true);
+  const retry = deferred<ReadResult>(); readMessages.mockReturnValueOnce(retry.promise);
+  let pending!: Promise<void>;
+  act(() => { pending = fixture.chat.loadOlder(true); void fixture.chat.loadOlder(true); });
+  expect(readMessages).toHaveBeenCalledTimes(2);
+  readMessages.mockResolvedValueOnce(result(...Array.from({ length: 60 }, (_, i) => message(i + 100))));
+  fixture.anchor(null); await flush();
+  await act(async () => { retry.resolve({ data: null, error: Error('retired retry') }); await pending; });
+  expect(fixture.chat.olderLoadError).toBe(false);
+  readMessages.mockResolvedValueOnce(result(message(99)));
+  await act(async () => { await fixture.chat.loadOlder(); }); await flush();
+  expect(fixture.chat.messages[0].id).toBe(message(99).id);
+});
+
+it('does not carry a history failure into a new conversation', async () => {
+  readMessages.mockResolvedValueOnce(result(...Array.from({ length: 60 }, (_, i) => message(i + 60))));
+  const fixture = mount(); await flush();
+  const oldScroll = fixture.chat.loadOlder;
+  readMessages.mockResolvedValueOnce({ data: null, error: Error('offline') });
+  await act(async () => { await oldScroll(); }); await flush();
+  readMessages.mockResolvedValueOnce(result(...Array.from({ length: 60 }, (_, i) => message(i + 160))));
+  fixture.navigate({ kind: 'circle', id: 'circle-b' }); await flush();
+  expect(fixture.chat.olderLoadError).toBe(false);
+  const reads = readMessages.mock.calls.length;
+  await act(async () => { await oldScroll(true); });
+  expect(readMessages).toHaveBeenCalledTimes(reads);
+  readMessages.mockResolvedValueOnce(result(message(159)));
+  await act(async () => { await fixture.chat.loadOlder(); }); await flush();
+  expect(fixture.chat.messages[0].id).toBe(message(159).id);
+});
