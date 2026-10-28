@@ -35,6 +35,12 @@ describe('staged plan card appearance preserves the established card', () => {
   const outer = (card: ReturnType<typeof create>) => card.root.findAllByType(TouchableOpacity).find(n=>n.props.onLongPress)!;
   afterEach(() => { act(() => mounted.splice(0).forEach(card=>card.unmount())); jest.clearAllMocks(); });
 
+  it.each([undefined, appearance])('keeps Women Only visible when a plan is featured (%p)', appearance => {
+    const card = mount({ appearance, plan: { ...plan, is_featured: true, gender_rule: 'women_only' } });
+    expect(renderedText(card.root)).toContain('Women Only');
+    expect(renderedText(card.root)).toContain('washedup event');
+  });
+
   it('uses the new fonts and restrained card corners only when opted in', () => {
     const legacy = mount(), staged = mount({ appearance });
     expect(titleStyle(legacy).fontFamily).toBe(Fonts.sansBold);

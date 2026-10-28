@@ -4,7 +4,7 @@ import type { Plan } from './fetchPlans';
 /**
  * Real React Query optimistic posting for the two plan composers.
  *
- * Both the feed (`['events','feed',userId]`) and "my plans"
+ * Both the feed (`['events','feed',userId,'all']`, plus the section screen) and "my plans"
  * (`['my-plans',userId]`) caches are typed `Plan[]` (see lib/fetchPlans.ts), so a
  * single builder feeds both. We prepend an optimistic `Plan` the instant a post is
  * submitted, swap its temporary id for the real one once the event + host member
@@ -52,6 +52,9 @@ export function buildOptimisticPlan(
     id: `${TEMP_PREFIX}${Date.now()}`,
     title: row.title ?? '',
     start_time: row.start_time,
+    end_time: row.end_time ?? null,
+    target_age_min: row.target_age_min,
+    target_age_max: row.target_age_max,
     location_text: row.location_text ?? null,
     location_lat: row.location_lat ?? null,
     location_lng: row.location_lng ?? null,
@@ -92,11 +95,13 @@ export interface OptimisticHandle {
   rollback: () => void;
 }
 
-function feedKey(userId: string) {
-  return ['events', 'feed', userId] as const;
-}
-function myPlansKey(userId: string) {
-  return ['my-plans', userId] as const;
+/** Unfiltered feeds only. Never insert a plan into an unrelated Near me radius. */
+export function optimisticPlanCacheKeys(userId: string) {
+  return [
+    ['events', 'feed', userId, 'all'],
+    ['events', 'feed', userId], // plans-section still uses this key
+    ['my-plans', userId],
+  ] as const;
 }
 
 /**
@@ -114,31 +119,36 @@ export function prependOptimisticPlan(
   userId: string,
   plan: Plan,
 ): OptimisticHandle {
-  const fKey = feedKey(userId);
-  const mKey = myPlansKey(userId);
-
-  queryClient.cancelQueries({ queryKey: fKey });
-  queryClient.cancelQueries({ queryKey: mKey });
-
-  const prevFeed = queryClient.getQueryData<Plan[]>(fKey);
-  const prevMine = queryClient.getQueryData<Plan[]>(mKey);
-
-  queryClient.setQueryData<Plan[]>(fKey, (old) => [plan, ...(old ?? [])]);
-  queryClient.setQueryData<Plan[]>(mKey, (old) => [plan, ...(old ?? [])]);
+  const keys = optimisticPlanCacheKeys(userId);
+  const previous = keys.map(key => {
+    queryClient.cancelQueries({ queryKey: key, exact: true });
+    return queryClient.getQueryData<Plan[]>(key);
+  });
+  keys.forEach(key => {
+    queryClient.setQueryData<Plan[]>(key, old => [plan, ...(old ?? [])]);
+  });
 
   const tempId = plan.id;
 
   return {
     tempId,
     commit: (realId: string) => {
-      const swap = (old: Plan[] | undefined) =>
-        (old ?? []).map((p) => (p.id === tempId ? { ...p, id: realId } : p));
-      queryClient.setQueryData<Plan[]>(fKey, swap);
-      queryClient.setQueryData<Plan[]>(mKey, swap);
+      keys.forEach(key => {
+        queryClient.setQueryData<Plan[]>(key, old =>
+          old?.map(p => p.id === tempId ? { ...p, id: realId } : p));
+      });
     },
     rollback: () => {
-      queryClient.setQueryData<Plan[]>(fKey, prevFeed);
-      queryClient.setQueryData<Plan[]>(mKey, prevMine);
+      keys.forEach((key, index) => {
+        // React Query ignores undefined writes. Explicitly remove the pending
+        // card when this cache did not exist before the attempt.
+        queryClient.setQueryData<Plan[]>(key, previous[index] ?? []);
+        if (previous[index] === undefined) {
+          // An empty rollback is not a successful empty feed read. Refetch if
+          // mounted, or on the next visit, instead of caching it for 60 seconds.
+          void queryClient.invalidateQueries({ queryKey: key, exact: true });
+        }
+      });
     },
   };
 }

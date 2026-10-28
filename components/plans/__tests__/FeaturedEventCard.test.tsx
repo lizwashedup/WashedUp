@@ -197,3 +197,16 @@ it('ends a Featured plan at its explicit cutoff while mounted', () => {
   act(() => jest.advanceTimersByTime(1000));
   expect(text(tree)).toEqual(expect.arrayContaining(['Ended', 'View plan →']));
 });
+
+// Featured identity must not replace participation requirements.
+it.each([undefined, appearance])('shows Women Only beside featured and age labels (%p)', appearance => {
+  const tree = mount({ appearance, plan: { ...plan, gender_rule: 'women_only', target_age_min: 25, target_age_max: 40 } });
+  expect(text(tree)).toContain('Women Only');
+  expect(text(tree).some(value => value.includes('25'))).toBe(true);
+  expect(outer(tree).props.accessibilityLabel).toContain('women only');
+});
+it.each(['mixed', null, undefined])('does not invent a women-only restriction for %p', gender_rule => {
+  const tree = mount({ plan: { ...plan, gender_rule } });
+  expect(text(tree)).not.toContain('Women Only');
+  expect(outer(tree).props.accessibilityLabel).not.toContain('women only');
+});

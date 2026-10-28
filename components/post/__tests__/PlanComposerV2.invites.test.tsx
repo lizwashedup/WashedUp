@@ -51,7 +51,7 @@ jest.mock('../../../lib/contentFilter', () => ({ checkContent: () => ({ ok: true
 jest.mock('../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: unknown[]) => mockUpload(...args) }));
 jest.mock('../../../lib/url', () => ({ extractFirstUrl: () => null }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITIES_ENABLED: true, get COMMUNITY_CHAT_GROUPING_ENABLED() { return mockAfterglow; } }));
-jest.mock('../../../lib/optimisticPlans', () => ({ buildOptimisticPlan: () => ({}), prependOptimisticPlan: () => ({ tempId: 'optimistic-test', rollback: mockRollback, commit: mockCommit }) }));
+jest.mock('../../../lib/optimisticPlans', () => ({ optimisticPlanCacheKeys: (id: string) => [['events', 'feed', id, 'all'], ['events', 'feed', id], ['my-plans', id]], buildOptimisticPlan: () => ({}), prependOptimisticPlan: () => ({ tempId: 'optimistic-test', rollback: mockRollback, commit: mockCommit }) }));
 jest.mock('../../../lib/supabase', () => ({ supabase: {
   auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null }), refreshSession: jest.fn().mockResolvedValue({ error: null }) },
   from: (table: string) => {

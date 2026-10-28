@@ -669,12 +669,12 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
                   </Text>
                 </View>
               )}
-              {plan.gender_rule === 'women_only' && (
-                <View style={styles.womenOnlyPill}>
-                  <Text style={styles.womenOnlyPillText}>Women Only</Text>
-                </View>
-              )}
             </>
+          )}
+          {plan.gender_rule === 'women_only' && (
+            <View style={styles.womenOnlyPill}>
+              <Text style={styles.womenOnlyPillText}>Women Only</Text>
+            </View>
           )}
           {ageLabel && (
             <View style={styles.agePill}>
