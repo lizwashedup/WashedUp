@@ -2645,7 +2645,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <Text numberOfLines={1} style={manageStyles.cancelBtnText}>Cancel plan</Text>
               </TouchableOpacity>
             </ScrollView>
-            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>              {edit.unknown && <View style={manageStyles.recovery}>
+            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              {edit.unknown && <View style={manageStyles.recovery}>
                 <Text style={manageStyles.label}>Check your changes</Text>
                 <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
               </View>}
