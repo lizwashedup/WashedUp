@@ -1,14 +1,12 @@
 /**
- * Creator mode: community. This slice is the broadcast composer plus the
- * broadcast history (both live against community_broadcasts through RLS).
- * The page block editor lands with the block-editor beat; the placeholder
- * says so honestly. Functionally minimal per decision 15a.
+ * Community settings keeps page editing and joining configuration first.
+ * Existing member, update, chat and account tools retain their destinations.
  */
 
 import React, { useMemo, useState } from 'react';
+import { ScaledText as Text } from '../../components/ScaledText';
 import {
   View,
-  Text,
   ScrollView,
   TextInput,
   TouchableOpacity,
@@ -73,12 +71,12 @@ export default function CreatorCommunityScreen() {
     if (!community || publishing) return;
     // LIZ COPY
     setAlertInfo({
-      title: 'open your page?',
-      message: 'right now only you see it. publishing makes it real: people can find it, read it, and join.',
+      title: 'Publish this page?',
+      message: 'Your page will be published with its current visibility and joining settings. Review those settings before continuing.',
       buttons: [
-        { text: 'not yet', style: 'cancel' },
+        { text: 'Not yet', style: 'cancel' },
         {
-          text: 'publish it',
+          text: 'Publish page',
           onPress: async () => {
             setPublishing(true);
             try {
@@ -160,11 +158,45 @@ export default function CreatorCommunityScreen() {
         >
           <Text style={styles.title}>Community settings</Text>
 
+          <Text style={styles.sectionLabel}>Page &amp; joining</Text>
+          <View style={styles.hubStack}>
+            <TouchableOpacity
+              style={styles.editPageCard}
+              onPress={() => router.push('/creator/edit-page')}
+              accessibilityRole="button"
+              accessibilityLabel="Edit community"
+              accessibilityHint="Change your name, cover photo, description and page sections."
+            >
+              <View style={styles.editPageTextWrap}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.editPageTitle}>Edit community</Text>
+                <Text style={styles.editPageHint}>
+                  Change your name, cover photo, description and page sections.
+                </Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.editPageCard}
+              onPress={() => router.push('/creator/join-gate')}
+              accessibilityRole="button"
+              accessibilityLabel="Joining settings"
+              accessibilityHint="Set joining options, welcome text, introduction questions and guidelines."
+            >
+              <View style={styles.editPageTextWrap}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.editPageTitle}>Joining settings</Text>
+                <Text style={styles.editPageHint}>
+                  Set joining options, welcome text, introduction questions and guidelines.
+                </Text>
+              </View>
+              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
 
           {/* Build 35 final navigation removes global Members and Menu tabs.
               Their real destinations live here so nothing becomes harder to
               reach when the Community shell contracts to three tabs. */}
-          <Text style={styles.sectionLabel}>your people</Text>
+          <Text style={styles.sectionLabel}>Members</Text>
           <View style={styles.hubStack}>
             <TouchableOpacity
               style={styles.hubRow}
@@ -174,8 +206,8 @@ export default function CreatorCommunityScreen() {
             >
               <Users size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>members and join requests</Text>
-                <Text style={styles.editPageHint}>see who is in, review requests, and manage access.</Text>
+                <Text style={styles.editPageTitle}>Members &amp; requests</Text>
+                <Text style={styles.editPageHint}>Review requests and manage membership.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
@@ -187,7 +219,7 @@ export default function CreatorCommunityScreen() {
             >
               <UserPlus size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>invite members</Text>
+                <Text style={styles.editPageTitle}>Invite members</Text>
                 <Text style={styles.editPageHint}>Bring your people into this community.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
@@ -197,9 +229,9 @@ export default function CreatorCommunityScreen() {
           {community?.status === 'draft' && (
             <View style={styles.draftBanner}>
               {/* LIZ COPY */}
-              <Text style={styles.draftBannerTitle}>your page is a draft</Text>
+              <Text style={styles.draftBannerTitle}>Draft community</Text>
               <Text style={styles.draftBannerBody}>
-                only you see it. shape it in your page below, then open the doors.
+                This page hasn’t been published. Review its details and joining settings before publishing.
               </Text>
               <TouchableOpacity
                 style={[styles.publishBtn, publishing && { opacity: 0.6 }]}
@@ -214,7 +246,7 @@ export default function CreatorCommunityScreen() {
                 {publishing ? (
                   <ActivityIndicator size="small" color={Colors.white} />
                 ) : (
-                  <Text style={styles.publishBtnText}>publish your page</Text>
+                  <Text style={styles.publishBtnText} numberOfLines={1}>Publish page</Text>
                 )}
                 </View>
               </TouchableOpacity>
@@ -229,10 +261,10 @@ export default function CreatorCommunityScreen() {
           {community?.status === 'active' && (
             <View style={styles.liveBanner}>
               {/* LIZ COPY */}
-              <Text style={styles.liveBannerTitle}>your page is live</Text>
+              <Text style={styles.liveBannerTitle}>Published community</Text>
               <Text style={styles.liveBannerBody}>
-                {buildCommunityPublicLink(community.handle).replace('https://', '')}. anyone with the
-                link can open it.
+                {buildCommunityPublicLink(community.handle).replace('https://', '')}.{' '}
+                Your visibility and joining settings still apply.
               </Text>
               <TouchableOpacity
                 style={styles.inlineAction}
@@ -247,21 +279,20 @@ export default function CreatorCommunityScreen() {
             </View>
           )}
 
-          <Text style={styles.sectionLabel}>broadcast</Text>
+          <Text style={styles.sectionLabel}>Send update</Text>
           <Text style={styles.hint}>
-            lands pinned at the top of every member&apos;s chats. about one a week
-            is the sweet spot.
+            Post an update in your community chat. Members receive notifications according to their settings.
           </Text>
           <View style={styles.composer}>
             <View style={styles.audienceRow}>
               <Users size={14} color={Colors.terracotta} strokeWidth={2} />
               {/* LIZ COPY: honest preview, Screen 19's audience count + channel display requirement */}
               <Text style={styles.audienceText}>
-                {audienceQuery.isError ? 'Audience unavailable. Retry to check who will receive this.' : audienceCount == null
-                  ? 'checking your community…'
+                {audienceQuery.isError ? 'Audience unavailable. Retry to check update notifications.' : audienceCount == null
+                  ? 'Checking update notifications…'
                   : audienceCount === 0
-                    ? 'No active members yet.'
-                    : `To ${audienceCount} active ${audienceCount === 1 ? 'member' : 'members'}`}
+                    ? 'No other members currently receive update notifications.'
+                    : `Update notifications: ${audienceCount} ${audienceCount === 1 ? 'member' : 'members'}`}
               </Text>
             </View>
             {audienceQuery.isError && <TouchableOpacity style={styles.inlineAction} accessibilityRole="button" accessibilityLabel="Retry audience" disabled={audienceQuery.isFetching} onPress={() => void audienceQuery.refetch()}>
@@ -271,19 +302,19 @@ export default function CreatorCommunityScreen() {
               style={styles.composerInput}
               value={draft}
               onChangeText={setDraft}
-              placeholder="what should your people know?"
+              placeholder="What would you like members to know?"
               placeholderTextColor={Colors.inkSoft}
               multiline
               maxLength={4000}
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              accessibilityLabel="Broadcast message to your members"
+              accessibilityLabel="Community update"
             />
             <TouchableOpacity
               style={[styles.sendBtn, (!draft.trim() || sending) && { opacity: 0.4 }]}
               onPress={handleSend}
               disabled={!draft.trim() || sending}
               accessibilityRole="button"
-              accessibilityLabel="Send to members"
+              accessibilityLabel="Send update"
               accessibilityState={{ disabled: !draft.trim() || sending, busy: sending }}
             >
               <CreatorActionFill />
@@ -291,7 +322,7 @@ export default function CreatorCommunityScreen() {
               {sending ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.sendBtnText}>send to members</Text>
+                <Text style={styles.sendBtnText} numberOfLines={1}>Send update</Text>
               )}
               </View>
             </TouchableOpacity>
@@ -300,7 +331,7 @@ export default function CreatorCommunityScreen() {
           {(broadcastsQuery.isLoading || broadcastsQuery.isError) && <CommunityReadState label="Sent updates" query={broadcastsQuery} />}
           {broadcasts.length > 0 && (
             <>
-              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>sent</Text>
+              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Sent updates</Text>
               {broadcasts.map((b) => (
                 <View key={b.id} style={styles.broadcastCard}>
                   <Text style={styles.broadcastBody}>{b.body}</Text>
@@ -309,40 +340,6 @@ export default function CreatorCommunityScreen() {
               ))}
             </>
           )}
-
-          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your page</Text>
-          <TouchableOpacity
-            style={styles.editPageCard}
-            onPress={() => router.push('/creator/edit-page')}
-            accessibilityRole="button"
-            accessibilityLabel="Edit your page"
-            accessibilityHint="Your cover, your about, your blocks. What members and visitors see."
-          >
-            <View style={styles.editPageTextWrap}>
-              <Text style={styles.editPageTitle}>edit your page</Text>
-              <Text style={styles.editPageHint}>
-                your cover, your about, your blocks. what members and visitors see.
-              </Text>
-            </View>
-            <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-          </TouchableOpacity>
-
-          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>your join gate</Text>
-          <TouchableOpacity
-            style={styles.editPageCard}
-            onPress={() => router.push('/creator/join-gate')}
-            accessibilityRole="button"
-            accessibilityLabel="Set up the door"
-            accessibilityHint="Your welcome message, your intro question, your guidelines link."
-          >
-            <View style={styles.editPageTextWrap}>
-              <Text style={styles.editPageTitle}>set up the door</Text>
-              <Text style={styles.editPageHint}>
-                your welcome message, your intro question, your guidelines link.
-              </Text>
-            </View>
-            <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-          </TouchableOpacity>
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>chat spaces</Text>
           <Text style={styles.hint}>

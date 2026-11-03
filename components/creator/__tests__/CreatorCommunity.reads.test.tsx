@@ -28,16 +28,16 @@ const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return visi
 it.each([['creator-broadcasts','Sent updates'],['creator-rooms','Chat spaces']])('distinguishes failed %s from empty and retries without dropping a draft',async(key,label)=>{
  mockQueries[key]={...result(undefined),isError:true};
  const text=await render();expect(text).toContain(`${label} unavailable`);if(key==='creator-rooms')expect(text).not.toContain('No chat spaces yet.');
- const input=tree.root.findAll(n=>n.props.accessibilityLabel==='Broadcast message to your members'&&typeof n.props.onChangeText==='function')[0];
+ const input=tree.root.findAll(n=>n.props.accessibilityLabel==='Community update'&&typeof n.props.onChangeText==='function')[0];
  await act(async()=>input.props.onChangeText('Keep this unsent update'));
  const retry=tree.root.findAll(n=>n.props.accessibilityLabel===`Retry ${label.toLowerCase()}`&&typeof n.props.onPress==='function')[0];
  await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
  mockQueries[key]=result([]);await act(async()=>tree.update(<Screen/>));
  expect(visibleText(tree.toJSON())).not.toContain(`${label} unavailable`);
- expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Broadcast message to your members'&&typeof n.props.onChangeText==='function')[0].props.value).toBe('Keep this unsent update');
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Community update'&&typeof n.props.onChangeText==='function')[0].props.value).toBe('Keep this unsent update');
 });
 it('does not leave a failed audience read looking pending',async()=>{
- mockQueries['creator-broadcast-audience']={...result(undefined),isError:true};const text=await render();expect(text).toContain('Audience unavailable');expect(text).not.toContain('checking your community');expect(text).not.toContain('No active members');
+ mockQueries['creator-broadcast-audience']={...result(undefined),isError:true};const text=await render();expect(text).toContain('Audience unavailable');expect(text).not.toContain('Checking update notifications');expect(text).not.toContain('No active members');
  const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry audience'&&typeof n.props.onPress==='function')[0];await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
 });
 it('keeps loading distinct from confirmed empty',async()=>{
@@ -49,5 +49,5 @@ it('retains cached content during a background refresh failure',async()=>{
  const text=await render();expect(text).toContain('Sent updates unavailable');expect(text).toContain('Bring a picnic');
 });
 it('shows confirmed zero audience and empty rooms honestly',async()=>{
- mockQueries['creator-broadcast-audience']=result(0);const text=await render();expect(text).toContain('No active members yet.');expect(text).toContain('No chat spaces yet.');expect(text).not.toContain('unavailable');
+ mockQueries['creator-broadcast-audience']=result(0);const text=await render();expect(text).toContain('No other members currently receive update notifications.');expect(text).toContain('No chat spaces yet.');expect(text).not.toContain('unavailable');
 });

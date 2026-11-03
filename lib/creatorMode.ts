@@ -917,16 +917,19 @@ export async function getBroadcasts(communityId: string): Promise<BroadcastRow[]
  * getCommunityMemberCounts above.
  */
 export async function getBroadcastAudienceCount(communityId: string): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
-  let query = supabase
+  const { data: { user }, error: accountError } = await supabase.auth.getUser();
+  if (accountError) throw accountError;
+  if (!user) throw new Error('Sign in to check update notifications.');
+  const { count, error } = await supabase
     .from('community_members')
     .select('id', { count: 'exact', head: true })
     .eq('community_id', communityId)
     .eq('status', 'active')
-    .eq('broadcasts_muted', false);
-  if (user) query = query.neq('user_id', user.id);
-  const { count } = await query;
-  return count ?? 0;
+    .eq('broadcasts_muted', false)
+    .neq('user_id', user.id);
+  if (error) throw error;
+  if (count == null) throw new Error('Could not check update notifications.');
+  return count;
 }
 
 export async function sendBroadcast(communityId: string, body: string): Promise<void> {

@@ -267,7 +267,7 @@ function JoinGateEditor({ community, scope }: {
       }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: settingsKey });
-      setAlertInfo({ title: 'saved', message: 'your join gate is set. every joiner sees it.' });
+      setAlertInfo({ title: 'Saved', message: 'Your joining settings have been updated.' });
     } catch (e) {
       if (!current()) return;
       setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
@@ -300,14 +300,13 @@ function JoinGateEditor({ community, scope }: {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>your join gate</Text>
+            <Text style={styles.title}>How people join</Text>
             <Text style={styles.hint}>
-              what people see when they join {community.name}. all three make
-              the door feel like yours.
+              Set the joining process and the welcome people see for {community.name}.
             </Text>
 
-            <Text style={styles.fieldLabel}>your welcome message</Text>
-            <Text style={styles.fieldHint}>shows at the top of the join popup, in your voice.</Text>
+            <Text style={styles.fieldLabel}>Welcome message</Text>
+            <Text style={styles.fieldHint}>Shown at the start of the joining form.</Text>
             <TextInput
               style={[styles.input, styles.inputMultiline]}
               accessibilityLabel="Welcome message"
@@ -328,9 +327,9 @@ function JoinGateEditor({ community, scope }: {
                 anyone joins instantly, and approval is the opt-in. */}
             {JOIN_GATE_ENABLED && joinPolicy !== null && (
               <>
-                <Text style={styles.fieldLabel}>who gets in</Text>
+                <Text style={styles.fieldLabel}>Joining method</Text>
                 <Text style={styles.fieldHint}>
-                  open lets anyone join instantly. approval means you review each request.
+                  Open skips manual approval. Review requests lets you approve each person. This choice doesn’t change your community’s eligibility restrictions.
                 </Text>
                 {counts && (
                   <Text style={styles.policyPreview}>
@@ -347,7 +346,7 @@ function JoinGateEditor({ community, scope }: {
                   >
                     {/* copy to the taste gate */}
                     <Text style={[styles.policyText, joinPolicy === 'open' && styles.policyTextOn]}>
-                      anyone can join
+                      Open
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -358,7 +357,7 @@ function JoinGateEditor({ community, scope }: {
                   >
                     {/* copy to the taste gate */}
                     <Text style={[styles.policyText, joinPolicy === 'approval_required' && styles.policyTextOn]}>
-                      you approve them
+                      Review requests
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -378,21 +377,20 @@ function JoinGateEditor({ community, scope }: {
                 >
                   {/* copy to the taste gate */}
                   <Text style={[styles.policyText, joinPolicy === 'invite_only' && styles.policyTextOn]}>
-                    invite only
+                    Invite only
                   </Text>
                 </TouchableOpacity>
                 {joinPolicy === 'invite_only' && (
                   <Text style={styles.policyNote}>
-                    invite codes aren't built yet. for now, invite only works like "you approve them": you review every request.
+                    Invite only currently sends requests to you for review. Invitation codes aren’t available.
                   </Text>
                 )}
               </>
             )}
 
-            <Text style={styles.fieldLabel}>your intro question</Text>
+            <Text style={styles.fieldLabel}>Introduction question</Text>
             <Text style={styles.fieldHint}>
-              their answer becomes their introduction, posted into the community chat
-              when you approve them.
+              Their answer is shared as an introduction in the community chat when they join.
             </Text>
             <TextInput
               style={styles.input}
@@ -468,10 +466,9 @@ function JoinGateEditor({ community, scope }: {
               </>
             )}
 
-            <Text style={styles.fieldLabel}>guidelines link</Text>
+            <Text style={styles.fieldLabel}>Guidelines link</Text>
             <Text style={styles.fieldHint}>
-              joiners accept these before they can ask. leave empty to use the
-              washedup guidelines.
+              People accept these guidelines when joining. Leave this empty to use the WashedUp guidelines.
             </Text>
             <TextInput
               style={styles.input}
