@@ -81,21 +81,24 @@ export default function OnboardingPhotoScreen() {
   const runPicker = async (selection: PickerSelection) => {
     const camera = selection.kind === 'camera';
     try {
-      const permission = camera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!isCurrentPicker(selection)) return;
-      if (permission.status !== 'granted') {
-        setAlertInfo({
-          title: 'permission needed',
-          message: camera ? 'washedup needs camera access to take a profile photo.' : 'washedup needs access to your photos to set a profile picture.',
-          buttons: [
-            { text: 'open settings', onPress: () => { if (selection.visit.active && pickerVisit.current === selection.visit) void Linking.openSettings(); } },
-            { text: 'cancel', style: 'cancel' },
-          ],
-        });
-        return;
+      // Choosing a single photo uses the system picker; broad library access
+      // is not required. Gating it can strand people in Settings unnecessarily.
+      if (camera) {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!isCurrentPicker(selection)) return;
+        if (permission.status !== 'granted') {
+          setAlertInfo({
+            title: 'permission needed',
+            message: 'washedup needs camera access to take a profile photo.',
+            buttons: [
+              { text: 'open settings', onPress: () => { if (selection.visit.active && pickerVisit.current === selection.visit) void Linking.openSettings(); } },
+              { text: 'cancel', style: 'cancel' },
+            ],
+          });
+          return;
+        }
       }
+      if (!isCurrentPicker(selection)) return;
       const options = { allowsEditing: true, aspect: [1, 1] as [number, number], quality: 1 };
       const result = camera
         ? await ImagePicker.launchCameraAsync(options)
