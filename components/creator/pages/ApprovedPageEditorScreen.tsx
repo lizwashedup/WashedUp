@@ -30,13 +30,13 @@ import { AfterglowType as T } from '../../../constants/Typography';
 
 type Loaded = { scope: CreatorPageScope; state: CreatorPageContentState; draft: CreatorPageContentDraft };
 type Work = { scope: CreatorPageScope; kind: 'save' | 'publish' | 'photo' | 'check' | 'load'; settled: boolean; active: boolean; picker: (open: boolean) => void };
-export default function ApprovedPageEditorScreen({ pageId, returnToTeam = false }: { pageId: string; returnToTeam?: boolean }) {
-  const returnPath = `/creator/${returnToTeam ? 'page-team' : 'page'}?id=${pageId}`;
+export default function ApprovedPageEditorScreen({ pageId, returnToTeam = false, returnToCommunity = false }: { pageId: string; returnToTeam?: boolean; returnToCommunity?: boolean }) {
+  const returnPath = returnToCommunity ? `/community/${pageId}` : `/creator/${returnToTeam ? 'page-team' : 'page'}?id=${pageId}`;
   const { scope, account, focused } = useCreatorPageScope(`approved-edit:${pageId}`);
   const { fonts } = useAfterglowFonts(true, 'creator');
   const mounted = useRef(true), latest = useRef(scope), work = useRef<Work | null>(null), sequence = useRef(0);
   useLayoutEffect(() => { latest.current = scope; }, [scope]);
-  const backVisit = useMemo(() => ({}), [pageId, returnToTeam, scope, focused, account.epoch, account.error, account.isLoading]);
+  const backVisit = useMemo(() => ({}), [pageId, returnToTeam, returnToCommunity, scope, focused, account.epoch, account.error, account.isLoading]);
   const committedBackVisit = useRef(backVisit);
   useLayoutEffect(() => { committedBackVisit.current = backVisit; }, [backVisit]);
   const current = (owned: CreatorPageScope | null = scope) => !!owned && mounted.current && latest.current === owned && owned.isCurrent();

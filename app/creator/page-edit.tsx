@@ -6,5 +6,5 @@ import CreatorPageEditorScreen from '../../components/creator/pages/CreatorPageE
 export default function PageEditorRoute() {
   const { id, mode, from } = useLocalSearchParams<{ id?: string; mode?: string; from?: string }>();
   return CREATOR_PAGES_ENABLED && typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)
-    ? mode === 'approved' ? <ApprovedPageEditorScreen key={id} pageId={id} returnToTeam={from === 'team'} /> : <CreatorPageEditorScreen key={id} pageId={id} /> : <Redirect href="/(tabs)/friends" />;
+    ? mode === 'approved' ? <ApprovedPageEditorScreen key={id} pageId={id} returnToTeam={from === 'team'} returnToCommunity={from === 'community'} /> : <CreatorPageEditorScreen key={id} pageId={id} /> : <Redirect href="/(tabs)/friends" />;
 }

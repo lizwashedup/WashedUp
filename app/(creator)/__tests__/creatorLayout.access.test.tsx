@@ -1,11 +1,12 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-const mockRead=jest.fn(),mockRedirect=jest.fn();
+const mockRead=jest.fn(),mockRedirect=jest.fn(),mockDismiss=jest.fn();
+let mockReturnId:string|undefined;
 let mockAccount='cedar',mockEpoch=1,mockAccountError:Error|null=null,mockScreen='today',mockFocused=true;
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{const id=mockAccount,epoch=mockEpoch;return{viewerId:id,epoch,isLoading:false,error:mockAccountError,retry:async()=>{},isCurrent:()=>id===mockAccount&&epoch===mockEpoch};}}));
-jest.mock('expo-router',()=>{const element=require('react')['createElement'];const Stack=({children}:any)=>element('ManagementStack',null,children);Stack.Screen=()=>null;return{Stack,useSegments:()=>['(tabs)','friends','manage','(tools)',mockScreen],Redirect:({href}:any)=>{mockRedirect(href);return null;},router:{replace:jest.fn()}};});
+jest.mock('expo-router',()=>{const element=require('react')['createElement'];const Stack=({children}:any)=>element('ManagementStack',null,children);Stack.Screen=()=>null;return{Stack,useGlobalSearchParams:()=>({fromCommunityId:mockReturnId}),useSegments:()=>['(tabs)','friends','manage','(tools)',mockScreen],Redirect:({href}:any)=>{mockRedirect(href);return null;},router:{replace:jest.fn(),navigate:jest.fn(),dismissTo:(...args:unknown[])=>mockDismiss(...args)}};});
 jest.mock('../../../lib/creatorMode',()=>({...jest.requireActual('../../../lib/creatorMode'),getCreatorAccess:(...args:any[])=>mockRead(...args)}));
 jest.mock('../../../lib/supabase',()=>({supabase:{}}));
 jest.mock('../../../lib/viewAs',()=>({useViewAsEventHost:()=>false,setViewAsEventHost:jest.fn(),isViewingAsEventHost:()=>false}));
@@ -14,11 +15,12 @@ jest.mock('../../../lib/workspaceContext',()=>({hydrateWorkspace:async()=>{},use
 jest.mock('../../../constants/FeatureFlags',()=>({COMMUNITIES_ENABLED:true,CREATOR_PAGES_ENABLED:true}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
 jest.mock('../../../components/creator/CreatorScreenHeader',()=>({CreatorScreenHeader:()=>null}));
+import {CreatorScreenHeader} from '../../../components/creator/CreatorScreenHeader';
 import CreatorLayout from '../../../components/creator/ManagementLayout';
 const denied={ledCommunities:[],hasLeaderGrant:false,hasEventHostGrant:false,isRevoked:false};
 let tree:ReactTestRenderer,client:QueryClient;
 async function flush(){await act(async()=>{await new Promise(r=>setTimeout(r,5));});}
-beforeEach(()=>{jest.clearAllMocks();mockAccount='cedar';mockEpoch=1;mockAccountError=null;mockScreen='today';mockFocused=true;client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});});
+beforeEach(()=>{jest.clearAllMocks();mockReturnId=undefined;mockAccount='cedar';mockEpoch=1;mockAccountError=null;mockScreen='today';mockFocused=true;client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});});
 afterEach(()=>{act(()=>tree?.unmount());client.clear();});
 it('rechecks a pre-approval cached denial before redirecting the approved community creator back to the chooser',async()=>{
  client.setQueryData(['creator-access'],denied);
@@ -94,4 +96,16 @@ it('keeps management mounted without redirecting when someone leaves for a main 
   mockFocused=false;mockScreen=destination;act(()=>tree.update(render()));await flush();
   expect(mockRedirect).not.toHaveBeenCalled();expect(tree.root.findAllByType('ManagementStack' as any)).toHaveLength(1);
  }
+});
+
+it('returns a contextual setup shortcut directly to its community',async()=>{
+ mockReturnId='sunset';mockScreen='community';mockRead.mockResolvedValue({...denied,ledCommunities:[{id:'sunset',name:'Sunset',role:'leader',status:'draft'}]});
+ act(()=>{tree=create(<QueryClientProvider client={client}><CreatorLayout/></QueryClientProvider>);});await flush();
+ const header=tree.root.findByType(CreatorScreenHeader);expect(header.props.backLabel).toBe('Back to Sunset');
+ act(()=>header.props.onBack());expect(mockDismiss).toHaveBeenCalledWith('/community/sunset');
+});
+it('a community shortcut cannot silently render another selected community after access changes',async()=>{
+ mockReturnId='sunset';mockRead.mockResolvedValue({...denied,ledCommunities:[{id:'other',name:'Other',role:'leader',status:'active'}]});
+ act(()=>{tree=create(<QueryClientProvider client={client}><CreatorLayout/></QueryClientProvider>);});await flush();
+ expect(tree.root.findAllByType('ManagementStack' as any)).toHaveLength(0);expect(mockRedirect).toHaveBeenCalledWith('/(tabs)/friends/manage');
 });

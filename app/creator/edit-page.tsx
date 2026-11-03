@@ -36,17 +36,20 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronRight, Plus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
+import ProfileButton from '../../components/ProfileButton';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { BlockEditorCard } from '../../components/creator/BlockEditorCard';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
-import { getCreatorAccess } from '../../lib/creatorMode';
+import { isAdminTierRole, type LedCommunity } from '../../lib/creatorMode';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { PageAction, PageFrame } from '../../components/creator/pages/PageFrame';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
   addBlock,
@@ -75,9 +78,9 @@ const SECTION_TYPES: Record<SectionKey, CommunityBlockType[]> = {
 
 // LIZ COPY (proposed)
 const SECTION_META: Record<SectionKey, { label: string; hint: string }> = {
-  identity: { label: 'identity', hint: 'covers, your logo, your name, and the words that introduce you.' },
-  sections: { label: 'sections', hint: 'what shows up in the body of your page, below your identity.' },
-  gallery: { label: 'gallery & links', hint: 'photos from the vibe, plus anywhere else people can find you.' },
+  identity: { label: 'Basics', hint: 'Your community’s name, cover photo and introduction.' },
+  sections: { label: 'What members see', hint: 'Choose the events, member information and notes shown on your page.' },
+  gallery: { label: 'Photos & links', hint: 'Show past meetups and add your website or social links.' },
 };
 
 // LIZ COPY (proposed)
@@ -95,18 +98,28 @@ function hasImages(block: CommunityBlock | undefined): boolean {
 }
 
 export default function EditPageScreen() {
+  const { communityId } = useLocalSearchParams<{ communityId?: string }>();
+  const access = useCreatorAccessRead();
+  const selected = useLedCommunity(access.data);
+  // An explicit community never falls back to another identity after access changes.
+  const requested = communityId === undefined ? selected : access.data?.ledCommunities.find(item => item.id === communityId);
+  const community = requested && isAdminTierRole(requested.role) ? requested : null;
+  if (access.isLoading || access.isError || !community) return <PageFrame title="Edit community">
+    {access.isLoading ? <ActivityIndicator accessibilityLabel="Checking community access" color={Colors.terracotta} /> : <>
+      <Text style={styles.hint}>{access.isError ? 'Couldn’t check your community access.' : 'You don’t have editing access to this community.'}</Text>
+      {access.isError && <PageAction title="Try again" onPress={() => void access.refetch()} />}
+    </>}
+  </PageFrame>;
+  return <CommunityPageEditor key={community.id} community={community} />;
+}
+
+function CommunityPageEditor({ community }: { community: LedCommunity }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<SectionKey | null>(null);
   const [adding, setAdding] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
-
-  const { data: access, isLoading: accessLoading } = useQuery({
-    queryKey: ['creator-access'],
-    queryFn: getCreatorAccess,
-  });
-  const community = useLedCommunity(access);
 
   const blocksKey = ['community-blocks', community?.id];
   const { data: blocks = [], isLoading, refetch, isRefetching } = useQuery({
@@ -115,43 +128,8 @@ export default function EditPageScreen() {
     enabled: !!community,
   });
 
-  // the founder block is ON BY DEFAULT (the people-first pack): the first
-  // time a leader opens the editor and no founder block exists, one is
-  // seeded automatically (visible, appended; reorder is theirs). A page
-  // never invents a block, because a leader may have hidden a real one —
-  // the editor is the only place that knows hidden from absent. Pre-apply
-  // (enum value not live yet) the insert fails quietly and retries on the
-  // next visit; one attempt per mount.
-  const founderSeedTried = React.useRef(false);
-  React.useEffect(() => {
-    if (isLoading || !community || founderSeedTried.current) return;
-    if (blocks.some((b) => b.block_type === 'founder')) return;
-    founderSeedTried.current = true;
-    const nextPosition = blocks.length > 0 ? Math.max(...blocks.map((b) => b.position)) + 1 : 0;
-    addBlock(community.id, 'founder', nextPosition)
-      .then(() => invalidate())
-      .catch(() => {
-        /* proposal 41 not applied yet; the add sheet still offers it */
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, community?.id, blocks]);
-
-  // the cadence block is ON BY DEFAULT too (C-05: the fixed intro spine),
-  // same seed-once pattern as founder above -- pre-apply (enum value not
-  // live yet) the insert fails quietly and retries on the next visit.
-  const cadenceSeedTried = React.useRef(false);
-  React.useEffect(() => {
-    if (isLoading || !community || cadenceSeedTried.current) return;
-    if (blocks.some((b) => b.block_type === 'cadence')) return;
-    cadenceSeedTried.current = true;
-    const nextPosition = blocks.length > 0 ? Math.max(...blocks.map((b) => b.position)) + 1 : 0;
-    addBlock(community.id, 'cadence', nextPosition)
-      .then(() => invalidate())
-      .catch(() => {
-        /* enum value not applied yet; the add sheet still offers it */
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, community?.id, blocks]);
+  // Opening the editor is read-only. New sections are added explicitly below;
+  // never seed missing sections just because a creator visits their page.
 
   // identity (screen 34): name + promise live on communities, not a block
   const identityKey = ['community-identity', community?.id];
@@ -195,12 +173,12 @@ export default function EditPageScreen() {
     const purpose = purposeDraft.trim();
     if (name.length < IDENTITY_NAME_MIN || name.length > IDENTITY_NAME_MAX) {
       // LIZ COPY (proposed)
-      showError('needs a real name', `between ${IDENTITY_NAME_MIN} and ${IDENTITY_NAME_MAX} characters.`);
+      showError('Check the name', `between ${IDENTITY_NAME_MIN} and ${IDENTITY_NAME_MAX} characters.`);
       return;
     }
     if (purpose.length < IDENTITY_PURPOSE_MIN || purpose.length > IDENTITY_PURPOSE_MAX) {
       // LIZ COPY (proposed)
-      showError('needs a real pitch', `between ${IDENTITY_PURPOSE_MIN} and ${IDENTITY_PURPOSE_MAX} characters.`);
+      showError('Check the description', `between ${IDENTITY_PURPOSE_MIN} and ${IDENTITY_PURPOSE_MAX} characters.`);
       return;
     }
     setIdentitySaving(true);
@@ -337,24 +315,24 @@ export default function EditPageScreen() {
         accessibilityLabel="community name"
       />
       {/* LIZ COPY (proposed) */}
-      <Text style={styles.fieldLabel}>your promise</Text>
+      <Text style={styles.fieldLabel}>short description</Text>
       <TextInput
         style={[styles.input, styles.inputMultiline]}
         value={purposeDraft}
         onChangeText={setPurposeDraft}
         maxLength={IDENTITY_PURPOSE_MAX}
         multiline
-        placeholder="one real sentence on why someone should join" /* LIZ COPY */
+        placeholder="What do you do together?" /* LIZ COPY */
         placeholderTextColor={Colors.inkSoft}
         inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-        accessibilityLabel="your promise, one sentence on why someone should join"
+        accessibilityLabel="Short community description"
       />
       <TouchableOpacity
         style={[styles.saveBtn, identitySaving && styles.saveBtnDisabled]}
         onPress={handleSaveIdentity}
         disabled={identitySaving}
         accessibilityRole="button"
-        accessibilityLabel="save name and promise"
+        accessibilityLabel="Save name and description"
       >
         {identitySaving ? (
           <ActivityIndicator size="small" color={Colors.white} />
@@ -368,21 +346,20 @@ export default function EditPageScreen() {
   const renderOverview = () => (
     <>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>your page</Text>
+        <Text style={styles.title}>Edit community</Text>
         {/* inventory C-05: the draft/published state is real (see
             community.tsx's own banner) but was only ever shown one screen
             away -- visible right here while actually editing, not
             duplicated, just not hidden from this screen either. */}
         <View style={[styles.statusPill, community!.status === 'active' && styles.statusPillLive]}>
           <Text style={[styles.statusPillText, community!.status === 'active' && styles.statusPillTextLive]}>
-            {community!.status === 'active' ? 'published' : 'draft'}
+            {community!.status === 'active' ? 'Published' : community!.status === 'archived' ? 'Archived' : 'Draft'}
           </Text>
         </View>
       </View>
       {/* LIZ COPY (proposed) */}
       <Text style={styles.hint}>
-        the three pieces that make up {community!.name}. tap one to fill it in — this is what
-        members and visitors see, in this order.
+        Update {community!.name}. Choose what you want to change below.
       </Text>
 
       {/* preview (doc 37 §2): see the page as others do, before and
@@ -524,15 +501,16 @@ export default function EditPageScreen() {
           >
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
+          <View style={styles.flex} /><ProfileButton compact />
         </View>
 
-        {accessLoading || (community && isLoading) ? (
+        {isLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
         ) : !community ? (
           <View style={styles.centered}>
-            <Text style={styles.hint}>no community on this account yet.</Text>
+            <Text style={styles.hint}>This community is unavailable.</Text>
           </View>
         ) : (
           <ScrollView
@@ -560,11 +538,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 },
   headerBtn: { padding: 4 },
   content: { padding: 20, paddingBottom: 60 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  titleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 8 },
   title: {
+    flexShrink: 1, maxWidth: '100%',
     fontFamily: Fonts.display,
     fontSize: FontSizes.displayLG,
     lineHeight: LineHeights.displayLG,
@@ -592,7 +571,7 @@ const styles = StyleSheet.create({
     lineHeight: LineHeights.bodySM,
     marginBottom: 16,
   },
-  previewRow: { flexDirection: 'row', gap: 20, marginBottom: 20 },
+  previewRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 20, marginBottom: 20 },
   previewLink: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
   backRowText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
@@ -609,7 +588,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionRowText: { flex: 1, gap: 3 },
-  sectionRowTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, textTransform: 'capitalize' },
+  sectionRowTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, textTransform: 'none' },
   sectionRowSummary: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM },
   identityCard: {
     backgroundColor: Colors.cardBg,

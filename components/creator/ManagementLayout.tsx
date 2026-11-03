@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Redirect, Stack, router, useSegments } from 'expo-router';
+import { Redirect, Stack, router, useSegments, useGlobalSearchParams } from 'expo-router';
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -23,6 +23,7 @@ export default function ManagementLayout() {
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
   const segments = useSegments();
+  const { fromCommunityId } = useGlobalSearchParams<{ fromCommunityId?: string }>();
   const screen = segments[segments.length - 1] as ManagementScreen;
   useEffect(() => { void hydrateSelectedCommunity(); void hydrateWorkspace(); }, []);
 
@@ -30,6 +31,9 @@ export default function ManagementLayout() {
   if (isError) return <CreatorAccessErrorScreen retry={() => void refetch()} retrying={isFetching} />;
   if (!hasCreatorAccess(access) && access?.isRevoked) return <RevokedScreen />;
   if (!hasCreatorAccess(access)) return focused ? <Redirect href={MANAGEMENT_HOME} /> : null;
+  // A shortcut from a specific community must never silently select another.
+  if (focused && fromCommunityId && (workspace !== 'community' || community?.id !== fromCommunityId)) return <Redirect href={MANAGEMENT_HOME} />;
+  const returnToCommunity = typeof fromCommunityId === 'string' && community?.id === fromCommunityId;
   const permitted = managementAccess(access!, workspace, community);
   // The main tabs keep this stack mounted. A global route change to Plans or
   // a focused editor must never pull the person back into management.
@@ -39,8 +43,8 @@ export default function ManagementLayout() {
   const homeTitle = workspace === 'organization' ? 'Manage organization' : community ? `Manage ${community.name}` : 'Manage community';
   return <SafeAreaView style={styles.shell} edges={['top']}>
     {screen !== 'organizer-broadcast' && <CreatorScreenHeader title={home ? homeTitle : identity}
-      backLabel={home ? 'Back to everything you manage' : 'Back to managing ' + identity}
-      onBack={() => router.navigate((home ? MANAGEMENT_HOME : permitted.home) as never)} />}
+      backLabel={returnToCommunity ? 'Back to ' + identity : home ? 'Back to everything you manage' : 'Back to managing ' + identity}
+      onBack={() => returnToCommunity ? router.dismissTo(`/community/${fromCommunityId}` as never) : router.navigate((home ? MANAGEMENT_HOME : permitted.home) as never)} />}
     <Stack screenOptions={{ headerShown: false, freezeOnBlur: false }} />
     {viewingAsEventHost && <View style={styles.viewAs}>
       <Text style={styles.viewAsText}>Previewing event creator tools</Text>

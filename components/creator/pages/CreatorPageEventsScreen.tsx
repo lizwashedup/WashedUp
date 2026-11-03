@@ -24,7 +24,7 @@ import {useCreatorTemplateDeletion} from '../../../hooks/useCreatorTemplateDelet
 import {BrandedAlert} from '../../BrandedAlert';
 import {takeSavedCreatorEvent} from '../../../lib/creatorEventReturn';
 /** Published-page event entry; no owner application or review reads. */
-export default function CreatorPageEventsScreen({pageId}:{pageId:string}) {
+export default function CreatorPageEventsScreen({pageId,startCreating=false}:{pageId:string;startCreating?:boolean}) {
   const {scope,account}=useCreatorPageScope(`events:${pageId}`),{fonts}=useAfterglowFonts(true, 'creator');
   const read=useCallback(async(owned:CreatorPageScope)=>({page:await loadCreatorPageTeamWorkspace(pageId,owned),attempt:await readCreatorPageEventAttempt(pageId,owned)}),[pageId]);
   const {data,error,loading,refresh}=useCreatorPageRead(scope,read);
@@ -39,11 +39,19 @@ export default function CreatorPageEventsScreen({pageId}:{pageId:string}) {
   const deletion=useCreatorTemplateDeletion(scope,templates.refresh);
   const [preparing,setPreparing]=useState(false),[title,setTitle]=useState(''),[categories,setCategories]=useState<string[]>([]);
   const lock=useRef<CreatorPageScope|null>(null);
+  const entryConsumed=useRef(false);
   useEffect(()=>{setPreparing(false);setTitle('');setCategories([]);},[scope]);
   // A focus change retires operations, but must not hide the draft just saved.
   useEffect(()=>{setSection('Live');},[pageId,account.epoch]);
   const active=activity?.scope===scope?activity:undefined,busy=!!active?.busy;
   const ready=!!scope?.isCurrent()&&!!data?.page&&!error&&!loading&&!busy&&!active?.uncertain;
+  // Enter the existing first step once, after authorization. Never create a
+  // draft on navigation or conceal an unresolved saved creation attempt.
+  useEffect(()=>{
+    if(!ready||entryConsumed.current)return;
+    entryConsumed.current=true;
+    if(startCreating&&!data?.attempt)setPreparing(true);
+  },[ready,startCreating,data?.attempt]);
   useEffect(()=>{
     if(ready&&scope){
       const savedId=takeSavedCreatorEvent(pageId,scope);
