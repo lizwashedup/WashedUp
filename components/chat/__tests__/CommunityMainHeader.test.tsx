@@ -2,9 +2,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChatOptionsButton } from '../ChatOptionsButton';
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Modal, Text, TextInput, TouchableOpacity } from 'react-native';
+import { FlatList, Modal, Text, TextInput, TouchableOpacity } from 'react-native';
 import CommunityThreadScreen from '../../../app/community-thread/[id]';
 import { ChatContextHeader } from '../ChatContextHeader';
+import { formatChatDay, formatChatTime } from '../../../lib/communityChatUi';
+
+let mockFontScale = 1;
+let mockMessages: any[] = [];
+const mockFontListeners = new Set<(value: number) => void>();
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => {
+  const React = require('react'); const [fontScale, setScale] = React.useState(mockFontScale);
+  React.useEffect(() => { mockFontListeners.add(setScale); return () => { mockFontListeners.delete(setScale); }; }, []);
+  return { width: 390, height: 844, scale: 3, fontScale };
+} }));
 
 let mockParentNotifications: any;
 jest.mock('../../../hooks/useCommunityChatPreference', () => ({ useCommunityChatPreference: () => mockParentNotifications }));
@@ -27,7 +37,7 @@ jest.mock('../../../hooks/useNetworkStatus', () => ({ useNetworkStatus: () => ({
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => mockQueryClient,
-  useInfiniteQuery: () => ({ data: { pages: [{ messages: [] }] }, isLoading: false, isError: false, refetch: jest.fn() }),
+  useInfiniteQuery: () => ({ data: { pages: [{ messages: mockMessages }] }, isLoading: false, isError: false, refetch: jest.fn() }),
   useQuery: ({ queryKey }: any) => ({ isSuccess: true, data: queryKey[0] === 'community-chat-cards'
     ? { cards: [{ community_id: '11111111-1111-4111-8111-111111111111', name: 'Sunset Club LA', main_chat_name: 'After Glow' }] }
     : queryKey[0] === 'community-my-membership' ? { status: mockRemoved ? 'removed' : 'active' }
@@ -49,6 +59,7 @@ let tree: ReactTestRenderer;
 async function mount() { await act(async () => { tree = create(<CommunityThreadScreen />); }); }
 function button(label: string) { return tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!; }
 beforeEach(async () => {
+  mockFontScale = 1; mockMessages = [];
   await AsyncStorage.clear();
   jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED = false;
   mockParentNotifications = { data: { muted: true, version: 1 }, ready: true, busy: false, loading: false, fetching: false, pending: null, error: null, notice: null, change: jest.fn(), check: jest.fn(), refresh: jest.fn() };
@@ -129,4 +140,28 @@ it('shows the effective parent mute and unmute-all action while retaining the in
   expect(button('Unmute all community chats')).toBeDefined();await act(async()=>{await button('Unmute all community chats').props.onPress();});
   await act(async()=>tree.root.findByType(ChatOptionsButton).findByType(Modal).props.onDismiss());
   expect(mockParentNotifications.change).toHaveBeenCalledWith(false);expect(mockToggle).not.toHaveBeenCalled();
+});
+
+it('remeasures Main sender, day and timestamp text without replacing history or an unsent draft', async () => {
+  const flags = jest.requireMock('../../../constants/FeatureFlags');
+  flags.COMMUNITY_CHAT_GROUPING_ENABLED = false;
+  const created = '2026-09-19T23:00:00Z';
+  mockMessages = [{ id: 'message-one', kind: 'message', sender_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    sender_name: 'Juniper', body: 'Meet by the courts', created_at: created, reactions: [], reply_count: 0, metadata_pending: true }];
+  try {
+    await mount();
+    const field = tree.root.findByType(TextInput), list = tree.root.findByType(FlatList);
+    act(() => field.props.onChangeText('Keep my unsent words'));
+    const values = ['Juniper', formatChatDay(created), formatChatTime(created)];
+    const labels = () => values.map(value => tree.root.findAllByType(Text).find(node => node.props.children === value)!);
+    let previous = labels(); previous.forEach(node => expect(node).toBeDefined());
+    for (const scale of [2, 1]) {
+      act(() => { mockFontScale = scale; mockFontListeners.forEach(update => update(scale)); });
+      labels().forEach((node, index) => expect(node).not.toBe(previous[index]));
+      previous = labels();
+      expect(tree.root.findByType(FlatList)).toBe(list);
+      expect(tree.root.findByType(TextInput)).toBe(field);
+      expect(field.props.value).toBe('Keep my unsent words');
+    }
+  } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
 });

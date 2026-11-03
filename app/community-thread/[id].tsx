@@ -1,4 +1,5 @@
 import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
+import { ChatSizedText as Text } from '../../components/chat/ChatSizedText';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useCommunityLocalDelivery, type CommunityDeliveryRow } from '../../hooks/useCommunityLocalDelivery';
 import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../../lib/chatSendReceipt';
@@ -38,7 +39,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   View,
-  Text,
   FlatList,
   TextInput,
   TouchableOpacity,
