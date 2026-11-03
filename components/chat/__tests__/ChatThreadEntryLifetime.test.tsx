@@ -112,6 +112,7 @@ function gif() { const select = attach(); act(() => select('gif')); return tree!
 beforeEach(async () => {
   await AsyncStorage.clear();
   mockVerifyDraftTarget.mockReset().mockResolvedValue(undefined); mockCheckOriginal.mockReset().mockResolvedValue(true);
+  mockRead.mockReset().mockResolvedValue(undefined);
   jest.useFakeTimers(); jest.clearAllMocks();
   nativeMenus = []; mockReportMembers.mockReset(); mockBlock.mockReset();
   mockReportMembers.mockResolvedValue([{ id: 'member-one', name: 'Jamie' }]);
@@ -177,6 +178,48 @@ it('keeps an unconfirmed original separate from newer typing and locks duplicate
   expect(input().props.value).toBe('Newer draft');
   expect(action('Check original message')).toBeDefined();
   expect(tree!.root.findAllByType(Text).some(node => node.props.children === 'First draft')).toBe(true);
+});
+
+it.each(['ios', 'android'] as const)('refreshes a previously delivered original on %s without resending or blocking newer typing', async platform => {
+  const refresh = deferred<void>(); mockRead.mockReturnValueOnce(refresh.promise);
+  mockSend.mockResolvedValueOnce(false);
+  jest.replaceProperty(Platform, 'OS', platform);
+  await mount(); type('Delivered but unseen'); act(() => sendTap()({}, true)); await flush();
+  type('Next draft');
+  const retry = action('Retry original message').props.onPress;
+  act(() => { retry(); retry(); }); await flush();
+  expect(mockCheckOriginal).toHaveBeenCalledTimes(1);
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockRead).toHaveBeenCalledTimes(1); expect(mockRead).toHaveBeenCalledWith(true);
+  expect(action('Check original message')).toBeUndefined(); expect(input().props.value).toBe('Next draft');
+  // History is still pending, but delivery is confirmed and the next send works.
+  act(() => sendTap()({}, true)); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(2); expect(mockSend.mock.calls[1][0]).toBe('Next draft');
+  await act(async () => refresh.resolve());
+});
+
+it('does not resurrect a confirmed original when its recovery refresh fails', async () => {
+  mockSend.mockResolvedValueOnce(false);
+  await mount(); type('Delivered original'); act(() => sendTap()({}, true)); await flush();
+  type('Keep these newer words');
+  const alert = tree!.root.findByType(BrandedAlert); act(() => alert.props.onClose());
+  mockRead.mockRejectedValueOnce(Error('History unavailable'));
+  act(() => action('Retry original message').props.onPress()); await flush();
+  expect(mockRead).toHaveBeenCalledWith(true); expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(action('Retry original message')).toBeUndefined(); expect(input().props.value).toBe('Keep these newer words');
+  expect(tree!.root.findByType(BrandedAlert).props.visible).toBe(false);
+});
+
+it.each(['room', 'account'] as const)('does not refresh or clear the new %s after a late original confirmation', async change => {
+  mockSend.mockResolvedValueOnce(false);
+  await mount(); type('Old original'); act(() => sendTap()({}, true)); await flush();
+  const checking = deferred<boolean>(); mockCheckOriginal.mockReturnValueOnce(checking.promise);
+  act(() => action('Retry original message').props.onPress()); await flush();
+  if (change === 'room') mockRoomId = 'plan-two'; else { mockViewerId = 'account-b'; mockEpoch++; }
+  await update(); type('New entry draft');
+  await act(async () => checking.resolve(true)); await flush();
+  expect(mockRead).not.toHaveBeenCalled(); expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(input().props.value).toBe('New entry draft');
 });
 
 it.each(['room', 'account'] as const)('clears entry text and photo preview when the %s changes', async change => {
