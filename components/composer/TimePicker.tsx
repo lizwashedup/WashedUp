@@ -4,7 +4,7 @@
  * and a visible AM/PM choice. The same control serves Plan and event creation.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CreatorActionFill } from '../creator/CreatorActionFill';
@@ -32,6 +32,9 @@ interface TimePickerProps {
 export default function TimePicker({ hour, minute, period, selected, onChange, appearance }: TimePickerProps) {
   const styles = useMemo(() => timeStyles(appearance), [appearance]);
   const insets = useSafeAreaInsets();
+  const { fontScale } = useWindowDimensions();
+  // Reflow rather than squeezing scaled digits and AM/PM into one narrow row.
+  const expandedText = fontScale > 1.5;
   const [open, setOpen] = useState(false);
   const [tempHour, setTempHour] = useState(String(hour));
   const [tempMinute, setTempMinute] = useState(minute);
@@ -85,60 +88,64 @@ export default function TimePicker({ hour, minute, period, selected, onChange, a
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={cancel} statusBarTranslucent>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.overlay} onPress={cancel} accessible={false}>
+        <Pressable style={[styles.overlay, { paddingTop: insets.top + 8 }]} onPress={cancel} accessible={false}>
           <Pressable style={[styles.sheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()} accessible={false} accessibilityViewIsModal onAccessibilityEscape={cancel}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle} accessibilityRole="header">{appearance ? 'What time?' : 'what time?'}</Text>
+            <View style={[styles.sheetHeader, expandedText && styles.expandedHeader]}>
+              <Text style={[styles.sheetTitle, expandedText && styles.expandedTitle]} numberOfLines={1} adjustsFontSizeToFit accessibilityRole="header">{appearance ? 'What time?' : 'what time?'}</Text>
               <TouchableOpacity style={styles.cancel} onPress={cancel} accessibilityRole="button" accessibilityLabel="Cancel time changes" activeOpacity={0.7}>
                 <Text style={styles.cancelText} numberOfLines={1}>Cancel</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.timeRow}>
-              <TextInput
-                style={styles.timeInput}
-                value={tempHour}
-                onChangeText={(value) => {
-                  const digits = value.replace(/\D/g, '').slice(0, 2);
-                  setTempHour(digits);
-                  if (digits.length === 2) minuteInput.current?.focus();
-                }}
-                keyboardType="number-pad"
-                maxLength={2}
-                selectTextOnFocus
-                accessibilityLabel="Hour, 1 through 12"
-              />
-              <Text style={styles.separator}>:</Text>
-              <TextInput
-                ref={minuteInput}
-                style={styles.timeInput}
-                value={tempMinute}
-                onChangeText={(value) => setTempMinute(value.replace(/\D/g, '').slice(0, 2))}
-                keyboardType="number-pad"
-                maxLength={2}
-                selectTextOnFocus
-                accessibilityLabel="Minute, 0 through 59"
-              />
-              <View style={styles.periodGroup}>
-                {PERIODS.map((p) => (
-                  <TouchableOpacity key={p} style={[styles.periodOption, tempPeriod === p && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempPeriod(p); }} accessibilityRole="button" accessibilityState={{ selected: tempPeriod === p }} accessibilityLabel={p}>
-                    <Text style={[styles.optionText, tempPeriod === p && styles.selectedText]}>{p}</Text>
+            <ScrollView style={styles.body} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+              <View style={[styles.timeRow, expandedText && styles.expandedTimeRow]}>
+                <View style={styles.numericTime}>
+                <TextInput
+                  style={[styles.timeInput, expandedText && styles.expandedTimeInput]}
+                  value={tempHour}
+                  onChangeText={(value) => {
+                    const digits = value.replace(/\D/g, '').slice(0, 2);
+                    setTempHour(digits);
+                    if (digits.length === 2) minuteInput.current?.focus();
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  selectTextOnFocus
+                  accessibilityLabel="Hour, 1 through 12"
+                />
+                <Text style={styles.separator}>:</Text>
+                <TextInput
+                  ref={minuteInput}
+                  style={[styles.timeInput, expandedText && styles.expandedTimeInput]}
+                  value={tempMinute}
+                  onChangeText={(value) => setTempMinute(value.replace(/\D/g, '').slice(0, 2))}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  selectTextOnFocus
+                  accessibilityLabel="Minute, 0 through 59"
+                />
+                </View>
+                <View style={[styles.periodGroup, expandedText && styles.expandedPeriodGroup]}>
+                  {PERIODS.map((p) => (
+                    <TouchableOpacity key={p} style={[styles.periodOption, tempPeriod === p && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempPeriod(p); }} accessibilityRole="button" accessibilityState={{ selected: tempPeriod === p }} accessibilityLabel={p}>
+                      <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.optionText, tempPeriod === p && styles.selectedText]}>{p}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              <View style={[styles.minuteChoices, expandedText && styles.expandedMinuteChoices]}>
+                {MINUTE_OPTIONS.map((m) => (
+                  <TouchableOpacity key={m} style={[styles.minuteChoice, expandedText && styles.expandedMinuteChoice, tempMinute === m && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempMinute(m); }} accessibilityRole="button" accessibilityLabel={`${m} minutes`} accessibilityState={{ selected: tempMinute === m }}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.optionText, tempMinute === m && styles.selectedText]}>:{m}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
-            <View style={styles.minuteChoices}>
-              {MINUTE_OPTIONS.map((m) => (
-                <TouchableOpacity key={m} style={[styles.minuteChoice, tempMinute === m && styles.selectedOption]} onPress={() => { Keyboard.dismiss(); setTempMinute(m); }} accessibilityRole="button" accessibilityLabel={`${m} minutes`} accessibilityState={{ selected: tempMinute === m }}>
-                  <Text style={[styles.optionText, tempMinute === m && styles.selectedText]}>:{m}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.timezoneNote}>Los Angeles time · adjusts for daylight saving</Text>
-            {!validTime && <Text style={styles.errorText}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
-            <TouchableOpacity style={[styles.confirm, appearance?.sunset && creatorConfirm, !validTime && styles.confirmDisabled]} onPress={confirm} disabled={!validTime} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: !validTime }}>
-              {appearance?.sunset && <CreatorActionFill />}
-              <Text style={styles.confirmText}>{appearance ? 'Set time' : 'set time'}</Text>
-            </TouchableOpacity>
+              <Text style={styles.timezoneNote}>Los Angeles time · adjusts for daylight saving</Text>
+              {!validTime && <Text style={styles.errorText}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
+              <TouchableOpacity style={[styles.confirm, appearance?.sunset && creatorConfirm, !validTime && styles.confirmDisabled]} onPress={confirm} disabled={!validTime} activeOpacity={0.85} accessibilityRole="button" accessibilityState={{ disabled: !validTime }}>
+                {appearance?.sunset && <CreatorActionFill />}
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.confirmText}>{appearance ? 'Set time' : 'set time'}</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </Pressable>
         </Pressable>
         </KeyboardAvoidingView>
@@ -160,11 +167,20 @@ const legacyStyles = StyleSheet.create({
   change: { fontFamily: Fonts.sansMedium, fontSize: 13, color: Colors.secondary, marginLeft: 'auto' },
 
   overlay: { flex: 1, backgroundColor: Colors.overlayDark40, justifyContent: 'flex-end' },
-  sheet: { backgroundColor: Colors.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18 },
+  sheet: { flexShrink: 1, backgroundColor: Colors.cream, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 18 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   sheetTitle: { flex: 1, fontFamily: Fonts.display, fontSize: 22, color: Colors.darkWarm },
   cancel: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   cancelText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.secondary },
+  expandedHeader: { flexDirection: 'column', alignItems: 'stretch', gap: 0 },
+  expandedTitle: { flex: 0 },
+  body: { flexShrink: 1 },
+  numericTime: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  expandedTimeRow: { flexDirection: 'column', alignItems: 'stretch' },
+  expandedTimeInput: { flex: 1, width: undefined, minWidth: 0 },
+  expandedPeriodGroup: { flex: 0, marginLeft: 0 },
+  expandedMinuteChoices: { flexWrap: 'wrap' },
+  expandedMinuteChoice: { flex: 0, flexBasis: '47%', flexGrow: 1 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   timeInput: { width: 60, minHeight: 52, textAlign: 'center', backgroundColor: Colors.white, borderRadius: 6, borderWidth: 1, borderColor: Colors.border, fontFamily: Fonts.sansBold, fontSize: 22, color: Colors.darkWarm },
   separator: { fontFamily: Fonts.sansBold, fontSize: 22, color: Colors.darkWarm },
@@ -194,7 +210,7 @@ function timeStyles(appearance?: { fonts: AfterglowFontFamilies; sunset?: boolea
     pill: { flex: 1, minWidth: 0 },
     pillText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.ink },
     change: { ...AfterglowType.caption, fontFamily: fonts.medium, color: AfterglowColors.clay },
-    sheet: { backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 10, borderTopRightRadius: 10, paddingHorizontal: 20, paddingTop: 18 },
+    sheet: { flexShrink: 1, backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 10, borderTopRightRadius: 10, paddingHorizontal: 20, paddingTop: 18 },
     sheetTitle: { flex: 1, ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink },
     cancelText: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.ink },
     timeInput: { width: 56, minHeight: 56, textAlign: 'center', backgroundColor: AfterglowColors.white,

@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Keyboard, Modal, StyleSheet, Text, TextInput } from 'react-native';
+import { Dimensions, Keyboard, Modal, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import TimePicker from '../TimePicker';
 import { hapticLight } from '../../../lib/haptics';
 import { AfterglowFonts } from '../../../constants/Typography';
@@ -205,4 +205,42 @@ it('keeps invalid staged input visible and prevents duplicate confirmation', asy
  act(()=>field('Minute').props.onChangeText('8'));
  const submit=confirm().props.onPress;act(()=>{submit();submit();});
  expect(props.onChange).toHaveBeenCalledTimes(1);expect(props.onChange).toHaveBeenCalledWith(7,'08','PM');
+});
+
+
+it.each([false, true])('preserves edits and cancellation when text size changes (staged: %s)', async staged => {
+  const originalWindow = Dimensions.get('window');
+  if (staged) props.appearance = { fonts: AfterglowFonts };
+  await mount();
+  open();
+  act(() => {
+    field('Hour').props.onChangeText('11');
+    field('Minute').props.onChangeText('37');
+    byLabel('AM').props.onPress();
+  });
+  try {
+    act(() => Dimensions.set({ window: { ...originalWindow, width: 375, height: 667, fontScale: 3.1 } }));
+    expect(field('Hour').props.value).toBe('11');
+    expect(field('Minute').props.value).toBe('37');
+    expect(byLabel('AM').props.accessibilityState.selected).toBe(true);
+    const body = tree.root.findByType(ScrollView);
+    expect(body.findAllByType(TextInput)).toHaveLength(2);
+    expect(body.props.keyboardShouldPersistTaps).toBe('handled');
+    expect(StyleSheet.flatten(field('Hour').props.style)).toMatchObject({ flex: 1, minWidth: 0 });
+    expect(StyleSheet.flatten(tree.root.findAll(node => node.props.accessibilityViewIsModal)[0].props.style).flexShrink).toBe(1);
+    const cancel = byLabel('Cancel time changes').props.onPress;
+    act(() => cancel());
+    expect(props.onChange).not.toHaveBeenCalled();
+    open();
+    expect(field('Hour').props.value).toBe('7');
+    expect(field('Minute').props.value).toBe('00');
+    act(() => cancel());
+    expect(modal().visible).toBe(true);
+    const submit = confirm().props.onPress;
+    act(() => { submit(); submit(); });
+    expect(props.onChange).toHaveBeenCalledTimes(1);
+    expect(props.onChange).toHaveBeenCalledWith(7, '00', 'PM');
+  } finally {
+    act(() => Dimensions.set({ window: originalWindow }));
+  }
 });
