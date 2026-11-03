@@ -71,9 +71,8 @@ export function usePlanEdit(options: Options) {
     pending.current = 'photo'; setOperation('photo'); setError(null);
     let stage: 'choose' | 'prepare' | 'upload' = 'choose';
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!isCurrent()) return;
-      if (permission.status !== 'granted') { setError('Allow photo access in Settings to choose a photo.'); return; }
+      // The system picker grants access to the selected photo without requiring
+      // broad library permission, including when that permission was denied.
       const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1 });
       if (!isCurrent() || selection.canceled || !selection.assets?.[0]) return;
       stage = 'prepare';
