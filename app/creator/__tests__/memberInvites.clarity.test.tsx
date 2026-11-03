@@ -1,6 +1,15 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Share } from 'react-native';
+import { Platform, Share, StyleSheet, TextInput } from 'react-native';
+import { FontSizes, LineHeights } from '../../../constants/Typography';
+let mockFontScale = 1;
+const mockFontListeners = new Set<(value: number) => void>();
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => {
+ const React = require('react'); const [fontScale, setScale] = React.useState(mockFontScale);
+ React.useEffect(() => { mockFontListeners.add(setScale); return () => { mockFontListeners.delete(setScale); }; }, []);
+ return { width: 390, height: 844, scale: 3, fontScale };
+} }));
+function resizeFont(scale: number) { act(() => { mockFontScale = scale; mockFontListeners.forEach(update => update(scale)); }); }
 const mockCreate = jest.fn(), mockRevoke = jest.fn(), mockList = jest.fn(), mockInvalidate = jest.fn();
 let mockScope: any, mockCommunity: any, mockAccess: any, mockSearch: any, mockAccount: any, mockFocused: boolean;
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate }) }));
@@ -35,7 +44,7 @@ const receipt = { rawToken: 'private-token', inviteId: 'invite-1', expiresAt: ro
 const mount = () => act(async () => { tree = create(<Screen />); });
 const choose = async () => { await press('Invite someone'); await press('Select Sage'); };
 beforeEach(() => {
- jest.clearAllMocks(); mockScope = { userId: 'one', isCurrent: () => true }; mockAccount = { epoch: 1, isLoading: false, error: null };
+ mockFontScale = 1; jest.clearAllMocks(); mockScope = { userId: 'one', isCurrent: () => true }; mockAccount = { epoch: 1, isLoading: false, error: null };
  mockCommunity = { id: 'sunset', name: 'Sunset', role: 'leader', status: 'active' }; mockAccess = { data: {}, isLoading: false, isError: false }; mockFocused = true;
  mockSearch = { results: [recipient], loading: false, error: false, retry: jest.fn() };
  mockList.mockResolvedValue([]); mockCreate.mockResolvedValue(receipt); mockRevoke.mockResolvedValue(undefined);
@@ -86,4 +95,29 @@ it('requires confirmation for cancellation and prevents repeated same-frame canc
  mockList.mockResolvedValue([row]); await mount(); await press('Cancel invitation for Sage'); expect(mockRevoke).not.toHaveBeenCalled();
  const response = pending(); mockRevoke.mockReturnValueOnce(response.promise); const action = confirm(); act(() => { action(); action(); }); expect(mockRevoke).toHaveBeenCalledTimes(1);
  await act(async () => response.resolve(undefined)); expect(mockRevoke).toHaveBeenCalledWith('invite-1', mockScope); expect(text()).toContain('Invitation canceled');
+});
+
+it('resizes iOS search and note fields both ways without losing their values or remounting', async () => {
+ jest.replaceProperty(Platform, 'OS', 'ios'); await mount(); await press('Invite someone');
+ const search = tree.root.findByType(TextInput); act(() => search.props.onChangeText('sage'));
+ for (const scale of [2, 1]) {
+  resizeFont(scale); expect(tree.root.findByType(TextInput)).toBe(search); expect(search.props.value).toBe('sage');
+  expect(StyleSheet.flatten(search.props.style)).toMatchObject({ fontSize: FontSizes.bodyMD * scale, lineHeight: LineHeights.bodyMD * scale });
+  expect(search.props.allowFontScaling).toBe(false);
+ }
+ await press('Select Sage'); const note = tree.root.findByType(TextInput); act(() => note.props.onChangeText('Keep this\nsecond line'));
+ for (const scale of [2, 1]) {
+  resizeFont(scale); expect(tree.root.findByType(TextInput)).toBe(note); expect(note.props.value).toBe('Keep this\nsecond line');
+  expect(StyleSheet.flatten(note.props.style)).toMatchObject({ fontSize: FontSizes.bodyMD * scale, lineHeight: LineHeights.bodyMD * scale });
+ }
+ expect(mockCreate).not.toHaveBeenCalled();
+});
+it.each(['android', 'web'] as const)('leaves %s input scaling with the platform', async platform => {
+ jest.replaceProperty(Platform, 'OS', platform); await mount(); await press('Invite someone'); const field = tree.root.findByType(TextInput);
+ resizeFont(2); expect(tree.root.findByType(TextInput)).toBe(field); expect(field.props.allowFontScaling).toBeUndefined();
+ expect(StyleSheet.flatten(field.props.style).fontSize).toBe(FontSizes.bodyMD);
+});
+
+it('opens Profile above the invitation route so Back can return to the same community', async () => {
+ await mount(); expect(tree.root.find(n => n.type === ('frame' as any)).props.stackedProfile).toBe(true);
 });

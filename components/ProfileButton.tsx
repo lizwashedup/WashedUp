@@ -59,7 +59,7 @@ async function fetchInboxCount(): Promise<number> {
   return activeInviteCount + (notifs.count ?? 0);
 }
 
-export default function ProfileButton({ surface = 'light', compact = false }: { surface?: 'light' | 'scene'; compact?: boolean }) {
+export default function ProfileButton({ surface = 'light', compact = false, stacked = false }: { surface?: 'light' | 'scene'; compact?: boolean; stacked?: boolean }) {
   const { fonts: promptFonts } = useAfterglowFonts(true, 'creator');
   const [showInbox, setShowInbox] = useState(false);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -115,7 +115,8 @@ export default function ProfileButton({ surface = 'light', compact = false }: { 
     profileBusy.current = true;
     const started = visit.current;
     const isCurrent = () => active.current && visit.current === started;
-    if (compact) { router.push('/(tabs)/profile'); return; }
+    // A form outside the tab navigator needs a stack entry so Back returns to it.
+    if (compact) { router.push(stacked ? '/account' : '/(tabs)/profile'); return; }
     if (!hasCheckedPrompt.current) {
       const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
       if (!isCurrent()) return;

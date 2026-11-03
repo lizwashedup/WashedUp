@@ -25,7 +25,7 @@ export function PageAction({ title, onPress, disabled, primary = false, quiet = 
     {disclosure && <ChevronRight size={17} color={C.muted} />}
   </Pressable>;
 }
-export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef, inTabs = false }: {
+export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef, inTabs = false, stackedProfile = false }: {
   children: React.ReactNode; title?: string; footer?: React.ReactNode; busy?: boolean; onBack?: () => void; contentKey?: string; onRefresh?: () => void; refreshing?: boolean;
   scrollRef?: React.Ref<ScrollView>;
   innerViewRef?: React.ComponentProps<typeof ScrollView>['innerViewRef'];
@@ -33,6 +33,7 @@ export function PageFrame({ children, title = 'Your page', footer, busy, onBack,
   onViewportLayout?: React.ComponentProps<typeof ScrollView>['onLayout'];
   onScrollBeginDrag?: React.ComponentProps<typeof ScrollView>['onScrollBeginDrag'];
   inTabs?: boolean;
+  stackedProfile?: boolean;
 }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   return <SafeAreaView style={s.root} edges={inTabs ? ['top'] : ['top', 'bottom']}>
@@ -45,7 +46,7 @@ export function PageFrame({ children, title = 'Your page', footer, busy, onBack,
       </Pressable>
       <ScaledText numberOfLines={2} style={{ ...T.body, fontFamily: fonts.medium, color: C.ink, flex: 1, minWidth: 0 }}>{title}</ScaledText>
       {busy && <ActivityIndicator accessibilityLabel="Saving" color={C.clay} />}
-      <ProfileButton compact/>
+      <ProfileButton compact stacked={stackedProfile}/>
     </View>
     <ScrollView innerViewRef={innerViewRef} ref={scrollRef} onScrollBeginDrag={onScrollBeginDrag} onContentSizeChange={onContentSizeChange} onLayout={onViewportLayout} key={contentKey} refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.terracotta} /> : undefined} contentContainerStyle={[s.body, !!footer && s.bodyWithFooter]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       {children}

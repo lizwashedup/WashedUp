@@ -1,6 +1,6 @@
 /** Existing-profile invitation links. Creating a link does not send a message. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Redirect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -34,7 +34,7 @@ export default function MemberInvitesScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const s = useMemo(() => styles(fonts), [fonts]);
   if (!MEMBER_INVITES_ENABLED) return focused ? <Redirect href="/(tabs)/friends/manage/(tools)/members" /> : null;
-  return <PageFrame title={community?.name ?? 'Invite members'}>
+  return <PageFrame title={community?.name ?? 'Invite members'} stackedProfile>
     {account.isLoading || access.isLoading ? <ActivityIndicator accessibilityLabel="Loading invitation access" color={Colors.terracotta} />
       : account.error || access.isError ? <View style={s.section}>
         <Text accessibilityRole="alert" style={s.body}>Couldn’t check your community access.</Text>
@@ -48,6 +48,12 @@ export default function MemberInvitesScreen() {
 function MemberInvites({ community, scope }: { community: LedCommunity; scope: CreatorPageScope }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const s = useMemo(() => styles(fonts), [fonts]);
+  const { fontScale } = useWindowDimensions();
+  // Fabric can retain the previous native input font after Dynamic Type changes.
+  // Match the chat fix: scale iOS metrics explicitly without remounting the field.
+  const inputType = Platform.OS === 'ios' ? {
+    fontSize: FontSizes.bodyMD * fontScale, lineHeight: LineHeights.bodyMD * fontScale,
+  } : undefined;
   const queryClient = useQueryClient();
   // Match the deployed create_member_invite/is_community_leader boundary for THIS community.
   const canInvite = ['leader', 'co_leader'].includes(community.role) && community.status !== 'archived';
@@ -150,7 +156,8 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
       {!selected ? <>
         <Text style={s.label}>Who would you like to invite?</Text>
         <TextInput value={query} onChangeText={setQuery} editable={!busy} placeholder="Enter their handle" accessibilityLabel="Search by handle"
-          autoCapitalize="none" autoCorrect={false} style={s.input} placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+          autoCapitalize="none" autoCorrect={false} style={[s.input, inputType]} allowFontScaling={Platform.OS === 'ios' ? false : undefined}
+          placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
         <Text style={s.meta}>Use a handle they’ve shared with you.</Text>
         {search.loading && <ActivityIndicator accessibilityLabel="Searching profiles" color={Colors.terracotta} />}
         {search.error && <><Text accessibilityRole="alert" style={s.meta}>Couldn’t search right now.</Text><PageAction quiet compact title="Try again" onPress={search.retry} /></>}
@@ -161,7 +168,7 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
         {query.trim().length >= 2 && !search.loading && !search.error && !search.results.length && <Text style={s.meta}>No match. Check their handle and try again.</Text>}
       </> : <>
         <View style={s.person}><Avatar name={selected.name} photo={selected.photo} /><Text style={[s.label, s.personText]}>{selected.name}</Text></View>
-        <TextInput value={message} onChangeText={setMessage} editable={!busy} multiline maxLength={300} style={[s.input, s.note]} placeholder="Add a note (optional)"
+        <TextInput value={message} onChangeText={setMessage} editable={!busy} multiline maxLength={300} style={[s.input, s.note, inputType]} allowFontScaling={Platform.OS === 'ios' ? false : undefined} placeholder="Add a note (optional)"
           placeholderTextColor={Colors.inkSoft} accessibilityLabel="Invitation note" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
         <PageAction primary singleLine title={busy ? 'Creating…' : 'Create link'} disabled={!ready} onPress={() => { if (latest.current.selected) confirmLink(latest.current.selected, latest.current.message); }} />
         <PageAction quiet compact title="Change person" disabled={busy} onPress={() => setSelected(null)} />

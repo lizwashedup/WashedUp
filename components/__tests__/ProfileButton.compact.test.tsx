@@ -27,3 +27,12 @@ it('retains the existing inbox entry on main app headers',()=>{
  expect(tree.root.findAllByType(TouchableOpacity).find(b=>b.props.accessibilityLabel==='Inbox')).toBeDefined();
  expect((useQuery as jest.Mock).mock.calls.find(([o])=>o.queryKey[0]==='inbox-count')![0].enabled).toBe(true);
 });
+
+it('uses the same own-profile screen in the root stack when a form must retain its return path', async () => {
+ act(() => { tree = create(<ProfileButton compact stacked />); });
+ const press = tree.root.findAllByType(TouchableOpacity).find(b => b.props.accessibilityLabel === 'Profile')!.props.onPress;
+ await act(async () => { press(); press(); });
+ expect(router.push).toHaveBeenCalledTimes(1);
+ expect(router.push).toHaveBeenCalledWith('/account');
+ expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+});
