@@ -1,474 +1,207 @@
-/**
- * Build 35 Screen 56: member invites. Any active leader or co_leader of the
- * community finds an existing profile and invites them to join as a plain
- * member -- a DIFFERENT feature from co-creators.tsx (co_leader/admin access
- * grants), reached from its own "invite members" entry on members.tsx, never
- * the co-creators button or its wiring (scope doc's explicit warning).
- *
- * Behind MEMBER_INVITES_ENABLED (constants/FeatureFlags.ts), off by default.
- * V1 scope: existing-profile invites only, via the same searchProfilesForInvite()
- * lib/coCreatorInvites.ts already exports -- reused directly, not duplicated.
- * Phone-contact invites are an explicit open product decision, not built here.
- * Styled on the same 2026-08-17 locked brand implementation template tokens
- * co-creators.tsx uses, since these two screens are near-identical shapes.
- */
-
-import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Share,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+/** Existing-profile invitation links. Creating a link does not send a message. */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter, Stack, Redirect } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Search, X } from 'lucide-react-native';
-import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { MEMBER_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { Redirect } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { ScaledText as Text } from '../../components/ScaledText';
+import { PageAction, PageFrame } from '../../components/creator/pages/PageFrame';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
-import { friendlyError } from '../../lib/friendlyError';
-import { hapticSuccess, hapticLight } from '../../lib/haptics';
-import { getCreatorAccess, isLeaderAccess, canManageMembers } from '../../lib/creatorMode';
+import Colors from '../../constants/Colors';
+import { FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
+import { MEMBER_INVITES_ENABLED } from '../../constants/FeatureFlags';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
+import { useMemberInviteSearch } from '../../hooks/useMemberInviteSearch';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { supabase } from '../../lib/supabase';
-import { searchProfilesForInvite, type ProfileSearchResult } from '../../lib/coCreatorInvites';
-import {
-  createMemberInvite,
-  listCommunityMemberInvites,
-  revokeMemberInvite,
-  buildMemberInviteLink,
-  memberInviteBucket,
-  type MemberInviteRow,
-} from '../../lib/memberInvites';
-
-function initial(name: string): string {
-  return (name.trim()[0] ?? '?').toUpperCase();
-}
-
-function Avatar({ name, photo, size }: { name: string; photo: string | null; size: number }) {
-  if (photo) {
-    return <Image source={{ uri: photo }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" />;
-  }
-  return (
-    <View style={[styles.avatarFallback, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarInitial, { fontSize: size * 0.4 }]}>{initial(name)}</Text>
-    </View>
-  );
-}
-
-function statusLabel(status: MemberInviteRow['status']): string {
-  switch (status) {
-    case 'pending': return 'Waiting to accept';
-    case 'viewed': return 'Opened, not accepted yet';
-    case 'accepted': return 'Joined';
-    case 'revoked': return 'Canceled';
-    case 'expired': return 'Expired';
-    default: return status;
-  }
-}
-
-/** "3 days left" / "2 hours left" / "Expires soon" -- countdown for the 72h window. */
-function expiryLabel(expiresAt: string): string {
-  const msLeft = new Date(expiresAt).getTime() - Date.now();
-  if (msLeft <= 0) return 'Expires soon';
-  const hoursLeft = Math.round(msLeft / (60 * 60 * 1000));
-  if (hoursLeft < 1) return 'Expires soon';
-  if (hoursLeft < 24) return `${hoursLeft} hour${hoursLeft === 1 ? '' : 's'} left`;
-  const daysLeft = Math.round(hoursLeft / 24);
-  return `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
-}
-
-function inviteTargetLabel(row: MemberInviteRow): string {
-  return row.targetName ?? 'Someone';
-}
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
+import type { LedCommunity } from '../../lib/creatorMode';
+import type { ProfileSearchResult } from '../../lib/coCreatorInvites';
+import { friendlyError } from '../../lib/friendlyError';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { hapticSuccess } from '../../lib/haptics';
+import { createMemberInvite, listCommunityMemberInvites, revokeMemberInvite, buildMemberInviteLink,
+  memberInviteBucket, MemberInviteOutcomeUnknown, type MemberInviteRow } from '../../lib/memberInvites';
+import { effectiveMemberInviteStatus, memberInviteExpiryLabel } from '../../lib/memberInvitePresentation';
 
 export default function MemberInvitesScreen() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
-  const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
-
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = useLedCommunity(access);
-  const canInvite = !!access && (isLeaderAccess(access) || canManageMembers(access));
-
-  const [userId, setUserId] = useState<string | null>(null);
-  useMemo(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
-  }, []);
-
-  const invitesKey = ['member-invites', community?.id];
-  const { data: invites = [], isLoading } = useQuery({
-    queryKey: invitesKey,
-    queryFn: () => listCommunityMemberInvites(community!.id),
-    enabled: !!community && MEMBER_INVITES_ENABLED,
-  });
-  const invitedInvites = invites.filter((i) => memberInviteBucket(i.status) === 'invited');
-  const pastInvites = invites.filter((i) => memberInviteBucket(i.status) !== 'invited');
-
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<ProfileSearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [message, setMessage] = useState('');
-  const [inviting, setInviting] = useState<string | null>(null);
-  const [resending, setResending] = useState<string | null>(null);
-
-  const closeComposer = () => {
-    setComposerOpen(false);
-    setSearchQuery('');
-    setSearchResults([]);
-    setMessage('');
-  };
-
-  const runSearch = async (q: string) => {
-    setSearchQuery(q);
-    if (!userId || q.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      setSearchResults(await searchProfilesForInvite(q, userId));
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const afterInviteCreated = (link: string) => {
-    hapticSuccess();
-    closeComposer();
-    queryClient.invalidateQueries({ queryKey: invitesKey });
-    setAlertInfo({
-      title: 'Invite ready',
-      message: 'Share this link with them. It only works for the person it was sent to.',
-      buttons: [
-        { text: 'Done', style: 'cancel' },
-        { text: 'Share link', onPress: () => { Share.share({ message: link }).catch(() => {}); } },
-      ],
-    });
-  };
-
-  const inviteProfile = async (profile: ProfileSearchResult) => {
-    if (!community || inviting) return;
-    setInviting(profile.id);
-    try {
-      const result = await createMemberInvite(community.id, profile.id, message);
-      afterInviteCreated(buildMemberInviteLink(result.rawToken));
-    } catch (e) {
-      setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
-    } finally {
-      setInviting(null);
-    }
-  };
-
-  const handleResend = async (row: MemberInviteRow) => {
-    if (!community || resending) return;
-    setResending(row.id);
-    try {
-      const result = await createMemberInvite(community.id, row.targetUserId, row.inviteMessage ?? undefined);
-      afterInviteCreated(buildMemberInviteLink(result.rawToken));
-    } catch (e) {
-      setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
-    } finally {
-      setResending(null);
-    }
-  };
-
-  const confirmRevoke = (row: MemberInviteRow) => {
-    hapticLight();
-    setAlertInfo({
-      title: 'Cancel this invite?',
-      message: `${inviteTargetLabel(row)} will no longer be able to accept it.`,
-      buttons: [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Cancel invite',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await revokeMemberInvite(row.id);
-              hapticSuccess();
-              queryClient.invalidateQueries({ queryKey: invitesKey });
-            } catch (e) {
-              setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
-            }
-          },
-        },
-      ],
-    });
-  };
-
-  if (!MEMBER_INVITES_ENABLED) return <Redirect href="/(tabs)/friends/manage/(tools)/members" />;
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} hitSlop={12}>
-            <ArrowLeft size={22} color={Colors.text1} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-
-        {!community ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
-          </View>
-        ) : (
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>Invite members</Text>
-            <Text style={styles.hint}>Invite someone to join {community.name} as a member.</Text>
-
-            {!canInvite ? (
-              <View style={styles.notice}>
-                <Text style={styles.noticeText}>
-                  Only a leader or co-leader of this community can invite members.
-                </Text>
-              </View>
-            ) : !composerOpen ? (
-              <TouchableOpacity style={styles.inviteBtn} onPress={() => setComposerOpen(true)} activeOpacity={0.85}>
-                <Text style={styles.inviteBtnText}>+ Invite a member</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.composer}>
-                <View style={styles.composerHeaderRow}>
-                  <Text style={styles.composerTitle}>Find a profile</Text>
-                  <TouchableOpacity onPress={closeComposer} hitSlop={10} style={styles.closeComposerBtn}>
-                    <X size={18} color={Colors.text3} strokeWidth={2.5} />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.searchRow}>
-                  <Search size={16} color={Colors.text3} strokeWidth={2.25} />
-                  <TextInput
-                    style={styles.searchInput}
-                    value={searchQuery}
-                    onChangeText={runSearch}
-                    placeholder="Search by @handle"
-                    placeholderTextColor={Colors.text3}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                  />
-                  {searching && <ActivityIndicator size="small" color={Colors.terracotta} />}
-                </View>
-
-                <TextInput
-                  style={styles.messageInput}
-                  value={message}
-                  onChangeText={setMessage}
-                  placeholder="Add a note (optional)"
-                  placeholderTextColor={Colors.text3}
-                  multiline
-                  maxLength={300}
-                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                />
-
-                {searchResults.map((r) => (
-                  <TouchableOpacity
-                    key={r.id}
-                    style={styles.resultRow}
-                    onPress={() => inviteProfile(r)}
-                    disabled={inviting === r.id}
-                    activeOpacity={0.8}
-                  >
-                    <Avatar name={r.name} photo={r.photo} size={36} />
-                    <Text style={styles.resultName}>{r.name}</Text>
-                    {inviting === r.id ? (
-                      <ActivityIndicator size="small" color={Colors.terracotta} />
-                    ) : (
-                      <Text style={styles.resultInvite}>Invite</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-                {searchQuery.trim().length >= 2 && !searching && searchResults.length === 0 && (
-                  <Text style={styles.noResults}>No one found. Try their exact handle.</Text>
-                )}
-              </View>
-            )}
-
-            {isLoading ? (
-              <ActivityIndicator size="small" color={Colors.terracotta} style={{ marginTop: 24 }} />
-            ) : (
-              <>
-                {invitedInvites.length > 0 && (
-                  <>
-                    <Text style={styles.sectionLabel}>Invited</Text>
-                    {invitedInvites.map((row) => (
-                      <View key={row.id} style={styles.inviteCard}>
-                        <Avatar name={inviteTargetLabel(row)} photo={row.targetPhoto} size={40} />
-                        <View style={styles.inviteCardText}>
-                          <Text style={styles.inviteCardName}>{inviteTargetLabel(row)}</Text>
-                          <Text style={styles.inviteCardStatus}>
-                            {statusLabel(row.status)} · {expiryLabel(row.expiresAt)}
-                          </Text>
-                        </View>
-                        {canInvite && (
-                          <View style={styles.inviteCardActions}>
-                            <TouchableOpacity
-                              onPress={() => handleResend(row)}
-                              disabled={resending === row.id}
-                              hitSlop={10}
-                              style={styles.resendBtn}
-                            >
-                              {resending === row.id ? (
-                                <ActivityIndicator size="small" color={Colors.terracotta} />
-                              ) : (
-                                <Text style={styles.resendBtnText}>Resend</Text>
-                              )}
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => confirmRevoke(row)} hitSlop={10} style={styles.revokeBtn}>
-                              <Text style={styles.revokeBtnText}>Cancel</Text>
-                            </TouchableOpacity>
-                          </View>
-                        )}
-                      </View>
-                    ))}
-                  </>
-                )}
-
-                {pastInvites.length > 0 && (
-                  <>
-                    <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Joined / past</Text>
-                    {pastInvites.map((row) => (
-                      <View key={row.id} style={[styles.inviteCard, styles.inviteCardPast]}>
-                        <Avatar name={inviteTargetLabel(row)} photo={row.targetPhoto} size={40} />
-                        <View style={styles.inviteCardText}>
-                          <Text style={styles.inviteCardName}>{inviteTargetLabel(row)}</Text>
-                          <Text style={styles.inviteCardStatus}>{statusLabel(row.status)}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </>
-                )}
-
-                {invites.length === 0 && (
-                  <Text style={styles.hint}>No member invites yet.</Text>
-                )}
-              </>
-            )}
-          </ScrollView>
-        )}
-      </KeyboardAvoidingView>
-
-      <BrandedAlert
-        visible={!!alertInfo}
-        title={alertInfo?.title ?? ''}
-        message={alertInfo?.message}
-        buttons={alertInfo?.buttons}
-        onClose={() => setAlertInfo(null)}
-      />
-    </SafeAreaView>
-  );
+  const access = useCreatorAccessRead();
+  const community = useLedCommunity(access.data);
+  const { scope, account, focused } = useCreatorPageScope(`member-invites:${community?.id ?? ''}`);
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const s = useMemo(() => styles(fonts), [fonts]);
+  if (!MEMBER_INVITES_ENABLED) return focused ? <Redirect href="/(tabs)/friends/manage/(tools)/members" /> : null;
+  return <PageFrame title={community?.name ?? 'Invite members'}>
+    {account.isLoading || access.isLoading ? <ActivityIndicator accessibilityLabel="Loading invitation access" color={Colors.terracotta} />
+      : account.error || access.isError ? <View style={s.section}>
+        <Text accessibilityRole="alert" style={s.body}>Couldn’t check your community access.</Text>
+        <PageAction quiet title="Try again" onPress={() => void (account.error ? account.retry() : access.refetch())} />
+      </View>
+      : !scope || !community ? <Text style={s.body}>Choose a community you manage to view its invitations.</Text>
+      : focused ? <MemberInvites key={`${account.epoch}:${community.id}`} community={community} scope={scope} /> : null}
+  </PageFrame>;
 }
 
-// Tokens per the 2026-08-17 locked brand implementation template, same as
-// co-creators.tsx: radius 10 for buttons, 12 for cards, spacing scale
-// {4,8,12,16,20,24,32,40,48,64}.
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: { flex: 1, backgroundColor: Colors.cream },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 },
-  headerBtn: { padding: 4 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 20, paddingBottom: 48 },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    lineHeight: LineHeights.displayLG,
-    color: Colors.text1,
-    marginBottom: 8,
-  },
-  hint: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text2, lineHeight: LineHeights.bodySM, marginBottom: 20 },
-  notice: { backgroundColor: Colors.brandSoft, borderRadius: 12, padding: 16 },
-  noticeText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.brandDeep, lineHeight: LineHeights.bodySM },
-  inviteBtn: {
-    backgroundColor: Colors.brand,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    shadowColor: Colors.brand,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  inviteBtnText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  composer: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.borderWarm,
-    padding: 16,
-    gap: 12,
-  },
-  composerHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  composerTitle: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.text1 },
-  closeComposerBtn: { padding: 4 },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.inputBg,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  searchInput: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.text1 },
-  messageInput: {
-    backgroundColor: Colors.inputBg,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.text1,
-    minHeight: 44,
-    textAlignVertical: 'top',
-  },
-  resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  resultName: { flex: 1, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.text1 },
-  resultInvite: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.brand },
-  noResults: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.text3, paddingVertical: 8 },
-  sectionLabel: {
-    fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.caption,
-    color: Colors.brand,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    marginTop: 24,
-  },
-  inviteCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.borderWarm,
-    padding: 14,
-    marginBottom: 8,
-  },
-  inviteCardPast: { opacity: 0.6 },
-  inviteCardText: { flex: 1 },
-  inviteCardName: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.text1 },
-  inviteCardStatus: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.text3, marginTop: 2 },
-  inviteCardActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  resendBtn: { paddingHorizontal: 10, paddingVertical: 6 },
-  resendBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  revokeBtn: { paddingHorizontal: 10, paddingVertical: 6 },
-  revokeBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
-  avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },
-  avatarInitial: { fontFamily: Fonts.sansBold, color: Colors.brand },
+function MemberInvites({ community, scope }: { community: LedCommunity; scope: CreatorPageScope }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const s = useMemo(() => styles(fonts), [fonts]);
+  const queryClient = useQueryClient();
+  // Match the deployed create_member_invite/is_community_leader boundary for THIS community.
+  const canInvite = ['leader', 'co_leader'].includes(community.role) && community.status !== 'archived';
+  const readHistory = useCallback(() => requestWithDeadline(listCommunityMemberInvites(community.id), 12_000), [community.id]);
+  const history = useCreatorPageRead(scope, readHistory);
+  const [query, setQuery] = useState('');
+  const [composer, setComposer] = useState(false);
+  const [selected, setSelected] = useState<ProfileSearchResult | null>(null);
+  const [message, setMessage] = useState('');
+  const search = useMemberInviteSearch(query, scope, composer && !selected && canInvite);
+  const [readyLink, setReadyLink] = useState<{ profile: ProfileSearchResult; link: string; expiresAt: string } | null>(null);
+  const [notice, setNotice] = useState<string>();
+  const [uncertain, setUncertain] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const [alert, setAlert] = useState<{ title: string; message: string; buttons: BrandedAlertButton[] } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
+  const rows = history.data?.map(row => ({ ...row, status: effectiveMemberInviteStatus(row.status, row.expiresAt, now) }));
+  const pending = rows?.filter(row => memberInviteBucket(row.status) === 'invited') ?? [];
+  const past = rows?.filter(row => memberInviteBucket(row.status) !== 'invited') ?? [];
+  const ready = canInvite && !busy && !uncertain && !!history.data && !history.error && !history.loading && scope.isCurrent();
+  const latest = useRef({ ready, selected, message });
+  latest.current = { ready, selected, message };
+  const refresh = async () => {
+    if (!scope.isCurrent()) return;
+    try { const result = await history.refresh(); if (result && scope.isCurrent()) { setUncertain(false); setNow(Date.now()); } } catch { /* The read hook displays the failure. */ }
+  };
+  const clearComposer = () => { setComposer(false); setQuery(''); setSelected(null); setMessage(''); };
+  const createLink = async (profile: ProfileSearchResult, note: string) => {
+    if (!latest.current.ready || !scope.isCurrent() || lock.current) return;
+    lock.current = true; setBusy(true); setNotice(undefined); setReadyLink(null);
+    try {
+      const result = await createMemberInvite(community.id, profile.id, note, scope);
+      if (!scope.isCurrent()) return;
+      setReadyLink({ profile, link: buildMemberInviteLink(result.rawToken), expiresAt: result.expiresAt });
+      clearComposer(); hapticSuccess();
+      void queryClient.invalidateQueries({ queryKey: ['member-invites'] });
+      void history.refresh().catch(() => undefined);
+    } catch (error) {
+      if (!scope.isCurrent()) return;
+      if (error instanceof MemberInviteOutcomeUnknown) setUncertain(true);
+      setNotice(error instanceof MemberInviteOutcomeUnknown ? error.message : friendlyError(error, 'Couldn’t create the invitation link. Try again.'));
+    } finally { lock.current = false; if (scope.isCurrent()) setBusy(false); }
+  };
+  const confirmLink = (profile: ProfileSearchResult, note: string) => {
+    if (!latest.current.ready || !scope.isCurrent() || lock.current) return;
+    setAlert({ title: 'Create invite link?', message: `This link is for ${profile.name} only. You’ll need to share it with them. Any earlier invitation link for them will stop working.`,
+      buttons: [{ text: 'Not now', style: 'cancel' }, { text: 'Create link', onPress: () => void createLink(profile, note) }] });
+  };
+  const confirmCancel = (row: MemberInviteRow) => {
+    if (!latest.current.ready || !scope.isCurrent() || lock.current) return;
+    setAlert({ title: 'Cancel this invite?', message: `${row.targetName ?? 'This person'} will no longer be able to accept it.`,
+      buttons: [{ text: 'Keep invite', style: 'cancel' }, { text: 'Cancel invite', style: 'destructive', onPress: async () => {
+        if (!latest.current.ready || !scope.isCurrent() || lock.current) return;
+        lock.current = true; setBusy(true); setNotice(undefined);
+        try {
+          await revokeMemberInvite(row.id, scope);
+          if (!scope.isCurrent()) return;
+          if (readyLink?.profile.id === row.targetUserId) setReadyLink(null);
+          setNotice('Invitation canceled.');
+          void queryClient.invalidateQueries({ queryKey: ['member-invites'] });
+          void history.refresh().catch(() => undefined);
+        } catch { if (scope.isCurrent()) { setUncertain(true); setNotice('Couldn’t confirm the cancellation. Refresh invite history to check its status.'); } }
+        finally { lock.current = false; if (scope.isCurrent()) setBusy(false); }
+      } }] });
+  };
+  const shareLink = async () => {
+    if (!readyLink || !scope.isCurrent() || lock.current) return;
+    lock.current = true; setBusy(true); setNotice(undefined);
+    try { await Share.share({ message: readyLink.link }); }
+    catch { if (scope.isCurrent()) setNotice('Couldn’t open sharing. Your link is still here—try again.'); }
+    finally { lock.current = false; if (scope.isCurrent()) setBusy(false); }
+  };
+  const renderRow = (row: MemberInviteRow) => <View key={row.id} style={s.historyRow}>
+    <View style={s.person}><Avatar name={row.targetName ?? 'Someone'} photo={row.targetPhoto} />
+      <View style={s.personText}><Text style={s.label}>{row.targetName ?? 'Someone'}</Text>
+        <Text style={s.meta}>{statusLabel(row.status)}{memberInviteBucket(row.status) === 'invited' ? ` · ${memberInviteExpiryLabel(row.expiresAt, now)}` : ''}</Text>
+      </View>
+    </View>
+    {canInvite && memberInviteBucket(row.status) === 'invited' && <View style={s.actions}>
+      <PageAction quiet compact singleLine title="New link" disabled={!ready} accessibilityLabel={`Create a new link for ${row.targetName ?? 'this person'}`}
+        onPress={() => confirmLink({ id: row.targetUserId, name: row.targetName ?? 'Someone', photo: row.targetPhoto }, row.inviteMessage ?? '')} />
+      <PageAction quiet compact singleLine title="Cancel invite" disabled={!ready} accessibilityLabel={`Cancel invitation for ${row.targetName ?? 'this person'}`} onPress={() => confirmCancel(row)} />
+    </View>}
+  </View>;
+  return <View style={s.section}>
+    <Text accessibilityRole="header" style={s.title}>Invite members</Text>
+    <Text style={s.body}>Find someone already on WashedUp, then create a personal link to share with them.</Text>
+    {!canInvite && <Text style={s.meta}>{community.status === 'archived' ? 'This community is archived and closed to new members.' : 'Only this community’s leader or co-leader can create invitation links.'}</Text>}
+    {notice && <Text accessibilityRole="alert" style={s.body}>{notice}</Text>}
+    {readyLink && <View style={s.panel}>
+      <Text accessibilityRole="header" style={s.label}>Link ready for {readyLink.profile.name}</Text>
+      <Text style={s.meta}>Share it with them to complete the invitation. Creating a link doesn’t send a message.</Text>
+      <Text style={s.meta}>{memberInviteExpiryLabel(readyLink.expiresAt, now)}. It opens in the WashedUp app.</Text>
+      <PageAction primary singleLine title="Share link" disabled={busy || Date.parse(readyLink.expiresAt) <= now} onPress={() => void shareLink()} />
+      <PageAction quiet compact title="Done" disabled={busy} onPress={() => setReadyLink(null)} />
+    </View>}
+    {canInvite && !readyLink && (!composer ? <PageAction primary singleLine title="Invite someone" disabled={!ready} onPress={() => { if (ready) setComposer(true); }} /> : <View style={s.panel}>
+      {!selected ? <>
+        <Text style={s.label}>Who would you like to invite?</Text>
+        <TextInput value={query} onChangeText={setQuery} editable={!busy} placeholder="Enter their handle" accessibilityLabel="Search by handle"
+          autoCapitalize="none" autoCorrect={false} style={s.input} placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+        <Text style={s.meta}>Use a handle they’ve shared with you.</Text>
+        {search.loading && <ActivityIndicator accessibilityLabel="Searching profiles" color={Colors.terracotta} />}
+        {search.error && <><Text accessibilityRole="alert" style={s.meta}>Couldn’t search right now.</Text><PageAction quiet compact title="Try again" onPress={search.retry} /></>}
+        {search.results.map(profile => <Pressable key={profile.id} accessibilityRole="button" accessibilityLabel={`Select ${profile.name}`} style={s.person}
+          onPress={() => { if (scope.isCurrent() && !lock.current) setSelected(profile); }}>
+          <Avatar name={profile.name} photo={profile.photo} /><Text style={[s.label, s.personText]}>{profile.name}</Text><Text style={s.link}>Select</Text>
+        </Pressable>)}
+        {query.trim().length >= 2 && !search.loading && !search.error && !search.results.length && <Text style={s.meta}>No match. Check their handle and try again.</Text>}
+      </> : <>
+        <View style={s.person}><Avatar name={selected.name} photo={selected.photo} /><Text style={[s.label, s.personText]}>{selected.name}</Text></View>
+        <TextInput value={message} onChangeText={setMessage} editable={!busy} multiline maxLength={300} style={[s.input, s.note]} placeholder="Add a note (optional)"
+          placeholderTextColor={Colors.inkSoft} accessibilityLabel="Invitation note" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+        <PageAction primary singleLine title={busy ? 'Creating…' : 'Create link'} disabled={!ready} onPress={() => { if (latest.current.selected) confirmLink(latest.current.selected, latest.current.message); }} />
+        <PageAction quiet compact title="Change person" disabled={busy} onPress={() => setSelected(null)} />
+      </>}
+      <PageAction quiet compact title="Cancel" disabled={busy} onPress={clearComposer} />
+    </View>)}
+    <View style={s.historyHeader}><Text accessibilityRole="header" style={s.label}>Invite history</Text><PageAction quiet compact title="Refresh" accessibilityLabel="Refresh invite history" disabled={busy || history.loading} onPress={() => void refresh()} /></View>
+    {history.loading && !history.data && <ActivityIndicator accessibilityLabel="Loading invitations" color={Colors.terracotta} />}
+    {history.error && <Text accessibilityRole="alert" style={s.body}>Couldn’t load the latest invitations. Refresh to try again.</Text>}
+    {!history.error && rows?.length === 0 && <Text style={s.meta}>Your invitation links and their status will appear here.</Text>}
+    {!!pending.length && <><Text style={s.meta}>Waiting to join</Text>{pending.map(renderRow)}</>}
+    {!!past.length && <><Text style={s.meta}>Joined & past</Text>{past.map(renderRow)}</>}
+    <BrandedAlert visible={!!alert} title={alert?.title ?? ''} message={alert?.message} buttons={alert?.buttons}
+      scrollMessage appearance={{ fonts, variant: 'creator' }} onClose={() => setAlert(null)} />
+  </View>;
+}
+
+function statusLabel(status: MemberInviteRow['status']) {
+  return ({ pending: 'Link created', viewed: 'Link opened', accepted: 'Joined', revoked: 'Canceled', expired: 'Expired' })[status];
+}
+function Avatar({ name, photo }: { name: string; photo: string | null }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const s = useMemo(() => styles(fonts), [fonts]);
+  return photo ? <Image source={{ uri: photo }} style={s.avatar} contentFit="cover" /> : <View style={[s.avatar, s.fallback]}><Text style={s.label}>{name.trim()[0]?.toUpperCase() ?? '?'}</Text></View>;
+}
+const styles = (fonts: AfterglowFontFamilies) => StyleSheet.create({
+  section: { gap: 16 },
+  title: { fontFamily: fonts.display, fontSize: FontSizes.displayLG, lineHeight: LineHeights.displayLG, color: Colors.darkWarm },
+  body: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
+  meta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
+  label: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
+  link: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  panel: { backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.border, borderRadius: 16, padding: 16, gap: 12 },
+  input: { backgroundColor: Colors.inputBg, borderRadius: 8, minHeight: 48, padding: 12, fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
+  note: { minHeight: 80, textAlignVertical: 'top' },
+  person: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
+  personText: { flex: 1, minWidth: 0 },
+  avatar: { width: 36, height: 36, borderRadius: 18 },
+  fallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandSoft },
+  historyHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8 },
+  historyRow: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border, paddingBottom: 12, gap: 4 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingLeft: 48 },
 });
