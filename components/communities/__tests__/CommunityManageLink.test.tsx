@@ -13,7 +13,7 @@ import {CommunityManageLink} from '../CommunityManageLink';
 let tree:ReactTestRenderer;
 const page={kind:'page',route:'/creator/page?id=exact-page'};
 const button=(name='Manage community')=>tree.root.findAll(n=>n.props.accessibilityLabel===name&&typeof n.props.onPress==='function')[0];
-async function mount(){await act(async()=>{tree=create(<CommunityManageLink communityId="exact-page"/>);});}
+async function mount(iconOnly=false){await act(async()=>{tree=create(<CommunityManageLink communityId="exact-page" iconOnly={iconOnly}/>);});}
 async function press(name='Manage community'){await act(async()=>{button(name)!.props.onPress();});}
 beforeEach(()=>{jest.resetAllMocks();mockLive=true;mockScope={userId:'creator',isCurrent:()=>mockLive};mockResolve.mockResolvedValue(page);});
 afterEach(async()=>{if(tree)await act(async()=>tree.unmount());});
@@ -24,6 +24,23 @@ it('late results from a retired account cannot select or navigate',async()=>{awa
 it('same-frame repeated taps share one fresh access check',async()=>{await mount();let finish:(v:any)=>void=()=>{};mockResolve.mockImplementation(()=>new Promise(r=>{finish=r;}));const click=button()!.props.onPress;await act(async()=>{click();click();});expect(mockResolve).toHaveBeenCalledTimes(2);await act(async()=>finish(page));expect(mockPush).toHaveBeenCalledTimes(1);});
 it('read failures expose retry without reusing an old creator action',async()=>{mockResolve.mockRejectedValue(Error('Offline'));await mount();expect(button()).toBeUndefined();expect(button('Retry creator tools')).toBeDefined();mockResolve.mockResolvedValue(page);await press('Retry creator tools');expect(button()).toBeDefined();expect(mockPush).not.toHaveBeenCalled();});
 it('ordinary community members have no creator action',async()=>{mockResolve.mockResolvedValue(null);await mount();expect(tree.toJSON()).toBeNull();});
+
+it('the header gear retains exact-community authorization and exposes pending access checks',async()=>{
+ await mount(true);let finish!:(v:any)=>void;mockResolve.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ await press();expect(button().props.accessibilityState).toEqual({disabled:true,busy:true});
+ expect(mockPush).not.toHaveBeenCalled();expect(mockResolve).toHaveBeenLastCalledWith('exact-page',mockScope,true);
+ await act(async()=>finish({kind:'legacy',communityId:'exact-page',route:'/(tabs)/friends/manage/(tools)/today'}));
+ expect(mockSelected).toHaveBeenCalledWith('exact-page');expect(mockWorkspace).toHaveBeenCalledWith('community');
+ expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/today');
+});
+it('the header gear does not appear for an ordinary member',async()=>{
+ mockResolve.mockResolvedValue(null);await mount(true);expect(tree.toJSON()).toBeNull();
+});
+it('the header gear retires on revoked access without exposing a management route',async()=>{
+ await mount(true);mockResolve.mockResolvedValue(null);await press();
+ expect(button()).toBeUndefined();expect(mockPush).not.toHaveBeenCalled();expect(mockSelected).not.toHaveBeenCalled();
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Your creator access has changed.').length).toBeGreaterThan(0);
+});
 
 it('remeasures Manage and pending Checking without replacing the access control or its operation',async()=>{
  const previous=Dimensions.get('window');act(()=>Dimensions.set({window:{...previous,width:390,fontScale:1}}));

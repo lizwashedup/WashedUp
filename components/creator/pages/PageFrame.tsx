@@ -16,7 +16,7 @@ export function PageAction({ title, onPress, disabled, primary = false, quiet = 
 }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   return <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} accessibilityState={{ disabled: !!disabled }}
-    disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, primary && s.primary, compact && s.compact, quiet && s.quiet, disclosure && s.disclosure, sunset && primary && s.sunset, sunset && primary && !!leadingIcon && s.sunsetWithIcon, pressed && sunset && s.sunsetPressed, disabled && s.disabled]}>
+    disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, primary && s.primary, compact && s.compact, quiet && s.quiet, disclosure && s.disclosure, sunset && primary && s.sunset, sunset && primary && !!leadingIcon && s.sunsetWithIcon, pressed && s.pressed, pressed && sunset && s.sunsetPressed, disabled && s.disabled]}>
     {sunset && primary && <CreatorActionFill />}
     <View style={[s.actionContent, disclosure && s.disclosureContent]}>
       {leadingIcon && <View style={s.leadingIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{leadingIcon}</View>}
@@ -87,4 +87,5 @@ const s = StyleSheet.create({
   disclosure: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, gap: 12 },
   disclosureText: { flexShrink: 1, textAlign: 'left' },
   disabled: { opacity: 0.5 },
+  pressed: { opacity: 0.75 },
 });

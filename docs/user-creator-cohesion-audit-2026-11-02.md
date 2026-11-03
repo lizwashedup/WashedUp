@@ -54,6 +54,20 @@ These checks are proposed and have not been conducted. Do not use internal appro
 
 ## Original pre-implementation audit
 
+### Subsequent interaction review: community access and perceived responsiveness
+
+The immediate community-entry correction is now local: the existing permission-checked Manage action is a gear in the community header. It was verified on the signed-in Sunset LA Club page. This changes access to the tools, not the shape of the current management destination. The details and remaining device coverage are in the implementation record.
+
+The next design pass must address these three layers together:
+
+- **Clear emphasis and visible activity:** the existing management home repeats event/chat access and presents setup, Broadcast, Invite and multiple cards at similar priority. Lead with the next relevant action and real upcoming activity. Use actual member faces and existing content when authorized; never invent activity, online indicators or urgency to make a page look busy. Preserve the accepted WashedUp palette and imagery while varying visual weight.
+- **Immediate touch response:** the source review found static community action rows and no pressed appearance on non-sunset `PageAction` controls; both now have local visual feedback. Further motion should follow the action—brief press response, sheet movement, and confirmed state changes. Use haptics selectively for meaningful selections/success, with failure-safe handling and physical-phone validation. Do not vibrate every navigation tap or turn background content into decoration.
+- **Continuity:** keep the current named community visible through loading, retain appropriate current-account data during refresh, avoid displaying false zeros while identity loads, and preserve scroll/draft state when returning. The native walkthrough showed a transient generic community name/empty-looking state before current values appeared. The current management header returns to the Yours directory; a contextual return to the community needs explicit design and route-state coverage. Do not weaken permission checks to hide their latency.
+
+Apple's guidance supports brief, purposeful motion that explains actions and remains usable with reduced motion; it does not support adding animation everywhere. Its haptics guidance treats tactile feedback as a complement to other feedback. These principles guide the proposal, but no frame-rate profiling or physical-phone comparison has yet established the cause of every perceived fluidity difference. [Apple motion guidance](https://developer.apple.com/design/human-interface-guidelines/motion), [Apple haptics guidance](https://developer.apple.com/design/human-interface-guidelines/playing-haptics).
+
+Acceptance journey for the next coherent design slice: **open your community → gear → choose a specific management task → complete/cancel → return to the same community and position**. Review it at normal and large text, with slow/offline reads and changed permissions, before applying its interaction patterns more broadly. The gear and pressed states alone do not complete this journey.
+
 **Date:** November 2, 2026  
 **Status:** Source-based audit and proposed implementation sequence. No app changes or release performed by this audit.  
 **Checkout:** `/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102`  

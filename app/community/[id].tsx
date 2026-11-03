@@ -519,6 +519,7 @@ export default function CommunityPageScreen() {
           onPress={() => router.push(`/community-thread/${id}` as never)}>
           <MessagesSquare size={20} color={Scene.text} />
         </TouchableOpacity>}
+        {!previewMode && <CommunityManageLink communityId={id} iconOnly />}
         <ProfileButton compact surface="scene"/>
       </View>
       <ScrollView
@@ -536,7 +537,6 @@ export default function CommunityPageScreen() {
             accessibilityState={{ disabled: sharing === id }} disabled={sharing === id} style={styles.shareButton} onPress={() => { void sharePage(); }}>
             <Share2 size={16} color={Scene.text} /><Text numberOfLines={1} style={styles.shareText}>{sharing === id ? 'Opening…' : 'Share'}</Text>
           </TouchableOpacity>}
-          {!previewMode && <CommunityManageLink communityId={id}/>}
           </View>
         </View>
         <View style={[styles.heroContainer, { height: heroHeight }]}>

@@ -47,9 +47,9 @@ export function CommunityDailyActions({ communityId }: { communityId: string }) 
     }
   };
   return <View style={s.wrap}>
-    {actions.map(action => <Pressable key={action.key} accessibilityRole="button" accessibilityLabel={action.title}
+    {actions.map(action => <Pressable cssInterop={false} key={action.key} accessibilityRole="button" accessibilityLabel={action.title}
       accessibilityHint={action.hint} accessibilityState={{ disabled: !!busy }} disabled={!!busy}
-      onPress={() => { void open(action.key); }} style={s.row}>
+      onPress={() => { void open(action.key); }} style={({ pressed }) => [s.row, pressed && s.pressed]}>
       <View style={s.copy}><Text numberOfLines={1} adjustsFontSizeToFit style={[s.title, { fontFamily: fonts.medium }]}>{action.title}</Text>
         <Text style={[s.hint, { fontFamily: fonts.regular }]}>{action.hint}</Text></View>
       <ChevronRight size={18} color={Colors.textMedium} />
@@ -61,5 +61,6 @@ export function CommunityDailyActions({ communityId }: { communityId: string }) 
 const s = StyleSheet.create({
   wrap: { marginBottom: 20, gap: 8 }, row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, minHeight: 64, borderWidth: 1, borderColor: Colors.border, borderRadius: 16, backgroundColor: Colors.cardBg },
   copy: { flex: 1, minWidth: 0, gap: 4 }, title: { fontSize: FontSizes.bodyMD, color: Colors.asphalt },
+  pressed: { opacity: 0.75 },
   hint: { fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.textMedium },
 });
