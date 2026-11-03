@@ -9,8 +9,8 @@ import { useReduceMotion } from '../yours/a11y/useReduceMotion';
 export type CreationKind = 'plan' | 'event' | 'community';
 
 const choices = [
-  { kind: 'plan', title: 'Make a plan', description: 'Find company for something you want to do.', Icon: MessageCircle },
-  { kind: 'event', title: 'Create an event', description: 'Organize a gathering with RSVPs or tickets.', Icon: CalendarDays },
+  { kind: 'plan', title: 'Make a plan', description: 'Find people to go with for something you want to do.', Icon: MessageCircle },
+  { kind: 'event', title: 'Create an event', description: 'Organize an event as yourself or an organization, with RSVPs or tickets.', Icon: CalendarDays },
   { kind: 'community', title: 'Start a community', description: 'Bring people together around a shared interest and keep meeting up.', Icon: UsersRound },
 ] as const;
 
@@ -53,7 +53,7 @@ export default function CreateMenuSheet({ visible, onClose, onSelect }: {
     onRequestClose={close} onAccessibilityEscape={close} onDismiss={finish}>
     <View style={[styles.backdrop, { paddingTop: insets.top + 12 }]}>
       <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={close} />
-      <View accessibilityViewIsModal style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View accessibilityViewIsModal style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
         <View style={styles.heading}>
           <Text accessibilityRole="header" style={styles.title}>What do you want to create?</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Close create menu" onPress={close} style={styles.close}>
@@ -61,7 +61,7 @@ export default function CreateMenuSheet({ visible, onClose, onSelect }: {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.choices} showsVerticalScrollIndicator={false} bounces={false}>
-          {choices.map(({ kind, title, description, Icon }) => <Pressable key={kind} accessibilityRole="button"
+          {choices.map(({ kind, title, description, Icon }) => <Pressable cssInterop={false} key={kind} accessibilityRole="button"
             accessibilityLabel={title} accessibilityHint={description} accessibilityState={{ disabled: closing }} disabled={closing}
             style={({ pressed }) => [styles.choice, pressed && styles.pressed]} onPress={() => dismissThen(() => onSelect(kind))}>
             <View style={styles.choiceHeading}>
@@ -84,7 +84,9 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontFamily: Fonts.displayBold, fontSize: FontSizes.displayLG, lineHeight: LineHeights.displayLG, color: Colors.darkWarm },
   close: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   choices: { paddingHorizontal: 20, paddingBottom: 8, gap: 12 },
-  choice: { padding: 16, borderRadius: 16, backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.border, gap: 8 },
+  // Keep the plain rows approved in the connected native preview. Explicit
+  // RN styling avoids a different card layout where NativeWind applies callbacks.
+  choice: { minHeight: 44 },
   choiceHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   choiceTitle: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, lineHeight: LineHeights.bodyLG, color: Colors.darkWarm },
   description: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary },

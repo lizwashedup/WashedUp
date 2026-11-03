@@ -1,6 +1,58 @@
 # WashedUp member and creator cohesion audit
 
-Historical pre-implementation audit. The findings below describe the audited revision; see the [implementation and verification record](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-implementation-2026-11-02.md) for what has since changed locally and what remains open.
+The original audit below is historical. The evening reassessment immediately below describes the current creator simplification work; see the [implementation and verification record](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-implementation-2026-11-02.md) for implemented changes and verification limits.
+
+## Evening reassessment: the creator experience still needs simplification
+
+**Reviewed:** local `689792e` plus the local create-menu copy and spacing adjustment. The navigation work makes existing tools reachable. It does not make the tools themselves coherent or constitute a completed redesign. Liz's feedback is that even she gets lost in this process. The next increment must simplify an entire task, not add another directory.
+
+### Creation wording now in the local preview
+
+- **Make a plan:** Find people to go with for something you want to do.
+- **Create an event:** Organize an event as yourself or an organization, with RSVPs or tickets.
+- **Start a community:** Bring people together around a shared interest and keep meeting up.
+
+Liz rejected “company” and “gathering.” Do not reuse those terms in new explanatory product copy. She reconsidered an eight-person threshold; none was added. Audience size and capacity are separate from the purpose of a creation choice. This copy does not alter capacity, approval, gender, age or visibility rules.
+
+An organization identifies who is organizing an event; it is not a fourth competing creation task. Existing code permits applications under a public personal name, though the current screen still says “Organization application.” The menu does not imply that the approval requirement has been removed.
+
+### Research and its practical limits
+
+Nielsen Norman Group recommends labels that let people predict the destination, and describes how vague or overly conversational navigation labels obscure choices. Applied here: “Members,” “Events,” and “Joining settings” should lead to those jobs; decorative terms should not replace their meaning. This is an application of general UX guidance, not evidence that these exact WashedUp labels have been tested. [Primary source](https://www.nngroup.com/articles/3-ia-mistakes/).
+
+Microsoft's writing/research teams found that consistent, descriptive language and explanations near the relevant control help users interpret admin interfaces; their study also warns that internal terms do not necessarily match users' understanding. Applied here: retain the same name for an event, community and creator throughout creation and management, and describe effects where the action happens. Their study concerned IT administration, so it supports a design hypothesis rather than proving a consumer-social outcome. [Primary source](https://www.microsoft.com/en-us/research/articles/stop-making-assumptions-about-language-how-user-research-can-support-better-language/).
+
+Partiful's documented sequence starts with the event itself and keeps further options in event settings. Luma documents guest work from a specific event's Guests tab. The relevant pattern for WashedUp is to keep the person inside the thing they are creating or managing. These product documents establish their workflows, not comparative conversion rates. [Partiful event creation](https://help.partiful.com/en-us/articles/15525299-creating-your-first-partiful-event), [Partiful settings](https://help.partiful.com/en-us/articles/15525301-what-features-are-available-to-change-in-my-event-settings), [Luma guest details](https://help.luma.com/p/updating-guest-information).
+
+### Concrete changes to design next — not yet implemented
+
+| Current source evidence | Proposed user experience | Engineering boundary |
+| --- | --- | --- |
+| `lib/creationEntry.ts` uses “Your organization” even though its description permits a personal public name; `app/creator/apply-events.tsx` says “Organization application.” | Show the saved public name under **Created by**. Use **Event creator application** when approval is required. Explain that an individual, community or organization can be the creator. | Reuse the existing organizer profile and approved role. A missing optional name must not remove access. Do not invent a new organization requirement or grant access through wording. |
+| `app/creator/start.tsx` exposes “public creator identity,” approval, community setup and alternate creator selection in separate cards. | Preserve the chosen task. Show the selected name and the specific next requirement; returning from setup should resume this event. | Keep current draft IDs, role checks and review status. Do not skip a required approval or silently publish a community. |
+| `app/(creator)/community.tsx` combines members, invitations, publishing, sending updates, page editing, joining configuration, chats and other settings. `CommunityDailyActions.tsx` makes some of these reachable but leaves the combined destination intact. | One named community home: unfinished setup leads with the next required step; an active community leads with its upcoming event, actionable join requests and Main chat. Keep **Members** and **Events** directly reachable. Put less frequent configuration in **Settings**. | Reuse existing selected-community context and destinations. Membership and conversation histories stay attached to the same community. No new persistent community model. |
+| Community settings use “set up the door,” “your join gate,” “your blocks” and “broadcast.” | **Joining settings** with an explanation of requests, welcome text and questions; **Edit page** with cover/about/sections; **Send update** with recipient count and actual delivery location. | Copy must describe what each screen really controls. Do not imply join-gate settings also implement every age/gender restriction. Preserve send confirmations and actual audience scope. |
+| Draft/public-page copy says “only you see it” and “anyone with the link can open it.” | State draft/published status without unverified universal privacy claims; explain exactly who can view and join where that is known. | Check collaborator and eligible/ineligible account behavior before final wording. A published status must never be presented as proof that a restricted community is publicly discoverable. |
+| `app/(creator)/events.tsx` has six segments: Needs attention, Next event, Drafts, Other events, Past, Templates. | **Upcoming / Drafts / Past** with issues attached to the affected event. Keep reusable templates as a secondary creation action. | Preserve draft, cancelled, completed and archived distinctions; do not discard stored templates or bury actions that require attention. |
+| Event operations are spread across forms, event overview, RSVPs/attendees, ticketing, check-in and finance. | One event management page with **Edit**, **Guests**, and **Share**. Show ticket and payment tools when relevant, and updates only where supported. | Existing free and ticketed attendance models can remain internally separate. Do not claim all event chats or unified registration are already implemented. |
+| `app/creator/edit-page.tsx` seeds missing founder/cadence blocks on mount. | Make the distinction between inspecting, editing and saving clear and predictable. | Opening this editor can write data. Test in a disposable environment; retain the intended default-block behavior until an explicit replacement is designed. |
+
+### Implementation order
+
+1. Finish the approved + menu copy and spacing. Keep its accepted visual design.
+2. Make **Create event → choose the actual creator → event details → preview/save → manage that same event** one coherent journey. Include existing-community drafts and approval-required states in the design; do not show a generic admin hub in the middle.
+3. Simplify the named community's home and separate daily work from settings. Use the same terminology as the event journey.
+4. Reconcile the organization path and the new/legacy page adapters under the same visible experience, then remove only proven duplicate presentation/navigation code.
+
+Unknown dates, a new Idea type, the separate Manage Plan reliability work, and a broad chat rewrite remain outside this increment. The current evidence does not justify a wholesale database rewrite. Refactor presentation and intent/state handling in bounded steps; assess any schema change against a specific unsupported user task.
+
+### What would demonstrate improved understanding
+
+Use short, uncoached tasks with new users and existing creators: find people to attend an existing concert; organize a ticketed workshop under a business name; create a free event under a personal name; start a recurring running group; resume an unfinished community; and return to an existing event's guest list. Ask what they expect before tapping, then observe the first choice, backtracking and whether they can finish. A small private dinner is an intentionally ambiguous case: it helps reveal whether RSVP tools versus finding companions is understood without a headcount rule.
+
+These checks are proposed and have not been conducted. Do not use internal approval of wording, a screenshot, or a unit-test pass as proof of user comprehension or improved posting rates. Once the journey is implemented, measure menu selection, start, save/publish, return-to-manage and abandonment with appropriate privacy controls. Preserve age/gender eligibility, visibility, requests, role permissions and Ghost Protocol in dedicated eligible/ineligible-account checks.
+
+## Original pre-implementation audit
 
 **Date:** November 2, 2026  
 **Status:** Source-based audit and proposed implementation sequence. No app changes or release performed by this audit.  
@@ -38,8 +90,8 @@ Use the same labels in discovery, creation, confirmation, management and notific
 
 | Thing | Plain explanation | Main member action |
 | --- | --- | --- |
-| **Plan** | Find company for something you want to do. | Join using the Plan's existing admission rules. |
-| **Event** | An organized gathering with RSVPs or tickets. | RSVP or get tickets, then see confirmed attendance. |
+| **Plan** | Find people to go with for something you want to do. | Join using the Plan's existing admission rules. |
+| **Event** | Organize an event as yourself or an organization, with RSVPs or tickets. | RSVP or get tickets, then see confirmed attendance. |
 | **Community** | A group that keeps meeting around a shared interest. | Join, or request to join when required. |
 | **Organization** | The public identity behind events and updates. | Follow. |
 

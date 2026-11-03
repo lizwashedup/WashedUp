@@ -44,7 +44,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
 
   return <PageFrame title={heading}>
     <Text accessibilityRole="header" style={[styles.title, { fontFamily: fonts.display }]}>{heading}</Text>
-    {copy(kind === 'event' ? 'Organize a gathering with RSVPs or tickets.' : 'Bring people together around a shared interest and keep meeting up.')}
+    {copy(kind === 'event' ? 'Organize an event as yourself or an organization, with RSVPs or tickets.' : 'Bring people together around a shared interest and keep meeting up.')}
     {(account.isLoading || loading) && <ActivityIndicator accessibilityLabel="Checking creation access" color={Colors.terracotta} />}
     {problem && <View style={styles.card}>
       <Text accessibilityRole="alert" style={[styles.body, { fontFamily: fonts.regular }]}>Couldn’t load your creator access. Try again to continue.</Text>
