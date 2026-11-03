@@ -18,6 +18,7 @@ import { supabase } from '../../../lib/supabase';
 import EditorialTitleField from '../../composer/EditorialTitleField';
 import InvitePeopleSection from '../InvitePeopleSection';
 import { BrandedAlert } from '../../BrandedAlert';
+import { buildSimilarPlanParams } from '../../../lib/interestedPlanActions';
 
 const mockInvite = jest.fn(), mockInsert = jest.fn(), mockMember = jest.fn();
 const mockProfile = jest.fn();
@@ -277,6 +278,38 @@ beforeEach(() => { jest.clearAllMocks(); mockAfterglow = false; mockFocused = tr
   mockUpload.mockReset().mockResolvedValue('https://test.invalid/creator-photo.jpg');
   jest.mocked(supabase.auth.refreshSession).mockReset().mockResolvedValue({ error: null } as any); mockViewerId = 'creator'; mockViewerEpoch = 1; mockViewerLoading = false; mockViewerError = null; jest.mocked(supabase.auth.getUser).mockReset().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null } as any); mockProfile.mockReset().mockResolvedValue({ data: { gender: 'woman' }, error: null }); mockInsert.mockReset().mockResolvedValue({ data: { id: 'saved-plan' }, error: null }); mockMember.mockReset().mockResolvedValue({ error: null }); mockInvite.mockReset().mockResolvedValue(1); });
 afterEach(() => { cleanup.splice(0).forEach(close => close()); jest.useRealTimers(); });
+
+it('starts a similar plan with fresh dates, people and associations in an already mounted composer', async () => {
+ const fixture=await mount(true,{draftId:'old-draft',prefillTicketsUrl:'https://old.invalid/ticket',prefillExploreEventId:'old-event',duplicatedFromEventId:'old-plan',prefillEndTime:'2040-09-15T05:00:00Z'});
+ mockParams={...mockParams,...buildSimilarPlanParams({title:'Another walk',description:'A walk next time.',primary_vibe:'outdoors',allow_duplicate:true},'similar-one')};
+ act(()=>fixture.tree.update(<PlanComposerV2/>));await flush();
+ expect(fixture.title()).toBe('Another walk');expect(fixture.tree.root.findByType(InvitePeopleSection).props.invited).toEqual([]);
+ expect(fixture.tree.root.findByType(CollapsibleCalendar).props.selected).toBeFalsy();
+ expect(mockParams).toMatchObject({draftId:'',duplicatedFromEventId:'',prefillStartTime:'',prefillEndTime:'',prefillTicketsUrl:'',prefillExploreEventId:''});
+ expect(mockInsert).not.toHaveBeenCalled();expect(mockMember).not.toHaveBeenCalled();expect(mockInvite).not.toHaveBeenCalled();
+ await act(async()=>{await fixture.saveDraft();});expect(mockInsert).not.toHaveBeenCalled();expect(JSON.stringify(fixture.tree.toJSON())).toContain('Choose a day and a start time.');
+});
+
+it('cancelling a similar-plan review clears its draft state without posting or inviting', async () => {
+ const fixture=await mount(false,buildSimilarPlanParams({title:'Next time',description:'New review.'},'similar-cancel'));
+ act(()=>pressByLabel(fixture.tree,'Cancel'));await flush();
+ expect(mockInsert).not.toHaveBeenCalled();expect(mockMember).not.toHaveBeenCalled();expect(mockInvite).not.toHaveBeenCalled();
+ expect(mockParams.similarPlanRequest).toBeUndefined();expect(mockParams.prefillTitle).toBeUndefined();expect(fixture.title()).toBe('');
+});
+
+it('only explicit posting of the reviewed similar plan inserts an independent plan without invitations',async()=>{
+ const fixture=await mount(false,buildSimilarPlanParams({title:'Next time',description:'A new afternoon walk.',primary_vibe:'outdoors',allow_duplicate:true,start_time:'2025-01-01T20:00:00Z',tickets_url:'https://old.invalid/ticket',explore_event_id:'old-event'},'similar-post'));
+ expect(mockInsert).not.toHaveBeenCalled();
+ // These values represent the new date and time explicitly chosen in review.
+ act(()=>{
+  fixture.tree.root.findByType(CollapsibleCalendar).props.onSelect({year:2040,month:8,day:20});
+  fixture.tree.root.findAllByType(TimePicker)[0].props.onChange(5,'30','PM');
+ });
+ await act(async()=>{await fixture.post();});
+ expect(mockInsert).toHaveBeenCalledTimes(1);
+ expect(mockInsert.mock.calls[0][0]).toMatchObject({skip_explore_auto_link:true,explore_event_id:null,duplicated_from_event_id:null,tickets_url:null});
+ expect(mockInvite).not.toHaveBeenCalled();
+});
 
 it('blocks confirmation exits while an actual zero-recipient plan insert is pending', async () => {
   let resolve!: (value: unknown) => void;

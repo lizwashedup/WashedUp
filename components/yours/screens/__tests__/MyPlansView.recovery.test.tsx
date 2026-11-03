@@ -5,6 +5,9 @@ import MyPlansView from '../MyPlansView';
 import { PageAction } from '../../../creator/pages/PageFrame';
 import { SkeletonFeed } from '../../../SkeletonCard';
 import { PlanCard } from '../../../plans/PlanCard';
+const mockInterestAction = jest.fn();
+let mockInterestFeedback: Record<string, any> = {};
+jest.mock('../../../../hooks/useInterestedPlanActions', () => ({ useInterestedPlanActions: () => ({ feedback: mockInterestFeedback, run: mockInterestAction }) }));
 const mockPush = jest.fn(), mockWishlistRead = jest.fn();
 let mockWishlistOptions: any;
 let mockCommunitiesEnabled = true;
@@ -39,6 +42,7 @@ function action(title = 'Try again') { return tree.root.findAllByType(PageAction
 function deferred<T>() { let resolve!: (value:T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 async function flush() { await act(async () => { for (let i=0;i<8;i++) await Promise.resolve(); }); }
 beforeEach(() => {
+ mockInterestFeedback = {};
  jest.useFakeTimers(); jest.setSystemTime(Date.parse('2030-09-14T19:00:00Z')); jest.clearAllMocks(); userId='alice'; alive=false; mockCommunitiesEnabled=true; mockWishlistRead.mockReset().mockResolvedValue({data:[],error:null});
  mockQueries = Object.fromEntries(['plans','drafts','waitlist','interested','saved','wishlist'].map(key => [key, {data:[], isLoading:false, isError:false, refetch:jest.fn().mockResolvedValue({data:[], error:null})}]));
 });
@@ -101,4 +105,28 @@ it('bounds the bookmark read and ignores a late empty result', async () => {
 
 it('does not show empty while an initial collection is pending without an active fetch', () => {
  mockQueries.saved.data=undefined;mockQueries.saved.isPending=true;mount();expect(tree.root.findAllByType(SkeletonFeed)).toHaveLength(1);expect(words()).not.toContain("haven't joined");
+});
+
+it('collapses and reopens Interested without removing its items', () => {
+ mockQueries.interested.data=[{...plan,status:'completed',allow_duplicate:true,circle_id:null}]; mount();
+ const section=()=>tree.root.findByType(SectionList).props.sections.find((s:any)=>s.title==='Interested');
+ const header=()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Interested, 1 plan' && typeof n.props.onPress==='function')[0];
+ expect(section().data).toHaveLength(1);expect(header().props.accessibilityState.expanded).toBe(true);
+ act(()=>header().props.onPress());expect(section().data).toHaveLength(0);expect(header().props.accessibilityState.expanded).toBe(false);
+ expect(mockInterestAction).not.toHaveBeenCalled();act(()=>header().props.onPress());expect(section().data).toHaveLength(1);
+});
+
+it('keeps remove and similar actions separate and failed removal visible with retry', () => {
+ const item={...plan,status:'completed',allow_duplicate:true,circle_id:null};mockQueries.interested.data=[item];
+ mockInterestFeedback.p1={pending:null,error:'Couldn’t remove this interest. Try again.',retry:'remove'};mount();
+ const press=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label && typeof n.props.onPress==='function')[0].props.onPress();
+ act(()=>press('Remove Sunday walk from Interested'));expect(mockInterestAction).toHaveBeenLastCalledWith(item,'remove');
+ act(()=>press('Make a similar plan to Sunday walk'));expect(mockInterestAction).toHaveBeenLastCalledWith(item,'similar');
+ expect(words()).toContain('Couldn’t remove this interest');act(()=>press('Retry for Sunday walk'));expect(mockInterestAction).toHaveBeenLastCalledWith(item,'remove');
+ expect(tree.root.findAllByType(PlanCard)).toHaveLength(1);
+});
+
+it('keeps removal available when the source cannot be duplicated', () => {
+ mockQueries.interested.data=[{...plan,allow_duplicate:false}];mount();
+ expect(words()).toContain('Remove from Interested');expect(words()).not.toContain('Make a similar plan');
 });
