@@ -1,246 +1,142 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Dimensions, Keyboard, Modal, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { Dimensions, FlatList, Keyboard, Modal, StyleSheet, TextInput } from 'react-native';
 import TimePicker from '../TimePicker';
-import { hapticLight } from '../../../lib/haptics';
+import TimePickerSheet, { timeChoices, type PickerTime } from '../TimePickerSheet';
 import { AfterglowFonts } from '../../../constants/Typography';
-import { AfterglowColors } from '../../../constants/Colors';
 
-jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 20, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn() }));
-
 let tree: ReactTestRenderer;
 let props: React.ComponentProps<typeof TimePicker>;
-
 const modal = () => tree.root.findByType(Modal).props;
-const byLabel = (label: string) => tree.root.findAll(
-  node => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function',
-)[0];
-const field = (label: string) => tree.root.findAllByType(TextInput).find(
-  node => node.props.accessibilityLabel.startsWith(label),
-)!;
-const trigger = () => tree.root.findAll(
-  node => typeof node.props.onPress === 'function' &&
-    node.findAllByType(Text).some(text => String(text.props.children).toLowerCase() === 'change'),
-)[0];
-const confirm = () => tree.root.findAll(
-  node => typeof node.props.onPress === 'function' &&
-    node.findAllByType(Text).some(text => String(text.props.children).toLowerCase() === 'set time'),
-).pop()!;
-
-function open() {
-  act(() => trigger().props.onPress());
-}
-
-async function mount() {
-  await act(async () => { tree = create(<TimePicker {...props} />); });
-}
-
+const button = (label: string) => tree.root.findAll(node => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function')[0];
+const field = (label: string) => tree.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel.startsWith(label))!;
+const trigger = () => tree.root.findAll(node => typeof node.props.accessibilityLabel === 'string' && node.props.accessibilityLabel.startsWith('Time,') && typeof node.props.onPress === 'function')[0];
+const done = () => button('Done, confirm time');
+const exact = () => act(() => button('Enter exact time').props.onPress());
+const open = () => act(() => trigger().props.onPress());
+const row = (time: PickerTime) => tree.root.findByType(FlatList).props.renderItem({ item: time });
+async function mount() { await act(async () => { tree = create(<TimePicker {...props} />); }); }
 beforeEach(() => {
-  jest.clearAllMocks();
   props = { hour: 7, minute: '00', period: 'PM', selected: true, onChange: jest.fn() };
   jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
 });
+afterEach(() => { act(() => tree?.unmount()); jest.restoreAllMocks(); });
 
-afterEach(() => {
-  act(() => tree?.unmount());
-  jest.restoreAllMocks();
-});
-
-it('announces the selected time and expanded state, or a time that is not set', async () => {
-  await mount();
-  expect(trigger().props).toMatchObject({
-    accessibilityRole: 'button',
-    accessibilityLabel: 'Time, 7:00 PM',
-    accessibilityState: { expanded: false },
-  });
-  open();
+it('opens a keyboard-free list at the selected time and announces expanded state', async () => {
+  await mount(); open();
   expect(trigger().props.accessibilityState.expanded).toBe(true);
-
-  act(() => modal().onRequestClose());
-  props.selected = false;
-  act(() => tree.update(<TimePicker {...props} />));
-  expect(trigger().props.accessibilityLabel).toBe('Time, not set');
-});
-
-it('offers an explicit Cancel with a 44-point target and never commits invalid edits', async () => {
-  await mount();
-  open();
-  act(() => {
-    field('Hour').props.onChangeText('99');
-    field('Minute').props.onChangeText('88');
-  });
-  expect(confirm().props.disabled).toBe(true);
-
-  const cancel = byLabel('Cancel time changes');
-  expect(cancel).toBeDefined();
-  expect(StyleSheet.flatten(cancel.props.style)).toMatchObject({ minHeight: 44, minWidth: 44 });
-  act(() => cancel.props.onPress());
-  expect(modal().visible).toBe(false);
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  const list = tree.root.findByType(FlatList).props;
+  expect(list.data).toHaveLength(96);
+  expect(list.data[list.initialScrollIndex]).toEqual({ hour: 7, minute: '00', period: 'PM' });
+  expect(row({ hour: 7, minute: '00', period: 'PM' }).props.accessibilityState.selected).toBe(true);
   expect(props.onChange).not.toHaveBeenCalled();
-  expect(Keyboard.dismiss).toHaveBeenCalled();
-
-  open();
-  expect(field('Hour').props.value).toBe('7');
-  expect(field('Minute').props.value).toBe('00');
-  expect(byLabel('PM').props.accessibilityState.selected).toBe(true);
 });
 
-it.each(['back', 'backdrop', 'accessibility-escape'] as const)(
-  'discards a valid unconfirmed time through %s',
-  async route => {
-    await mount();
-    open();
-    act(() => {
-      field('Hour').props.onChangeText('10');
-      byLabel('AM').props.onPress();
-    });
-
-    if (route === 'back') act(() => modal().onRequestClose());
-    if (route === 'backdrop') {
-      const backdrop = tree.root.findAll(
-        node => typeof node.props.onPress === 'function' &&
-          StyleSheet.flatten(node.props.style)?.justifyContent === 'flex-end',
-      )[0];
-      act(() => backdrop.props.onPress());
-    }
-    if (route === 'accessibility-escape') {
-      const sheet = tree.root.findAll(
-        node => typeof node.props.onAccessibilityEscape === 'function',
-      )[0];
-      act(() => sheet.props.onAccessibilityEscape());
-    }
-
-    expect(modal().visible).toBe(false);
-    expect(props.onChange).not.toHaveBeenCalled();
-    open();
-    expect(field('Hour').props.value).toBe('7');
-    expect(byLabel('PM').props.accessibilityState.selected).toBe(true);
-  },
-);
-
-it('keeps direct entry normalization, AM/PM and quarter-hour shortcuts unchanged', async () => {
-  await mount();
-  open();
-  act(() => {
-    field('Hour').props.onChangeText('2');
-    field('Minute').props.onChangeText('5');
-    byLabel('AM').props.onPress();
-  });
-  act(() => confirm().props.onPress());
-  expect(props.onChange).toHaveBeenCalledWith(2, '05', 'AM');
-  expect(hapticLight).toHaveBeenCalledTimes(1);
-
-  open();
-  act(() => byLabel('45 minutes').props.onPress());
-  act(() => confirm().props.onPress());
-  expect(props.onChange).toHaveBeenLastCalledWith(7, '45', 'PM');
-});
-
-it('leaves validation intact and rejects invalid confirmation callbacks', async () => {
-  await mount();
-  open();
-  act(() => {
-    field('Hour').props.onChangeText('0');
-    field('Minute').props.onChangeText('99');
-  });
-  act(() => confirm().props.onPress());
+it('selects a complete time but commits only on Done, once', async () => {
+  await mount(); open();
+  act(() => row({ hour: 8, minute: '15', period: 'PM' }).props.onPress());
+  expect(row({ hour: 8, minute: '15', period: 'PM' }).props.accessibilityState.selected).toBe(true);
   expect(props.onChange).not.toHaveBeenCalled();
-  expect(modal().visible).toBe(true);
-});
-
-it('keeps form controls individually accessible inside the modal', async () => {
-  await mount();
-  open();
-  const sheet = tree.root.findAll(node => node.props.accessibilityViewIsModal === true)[0];
-  expect(sheet.props.accessible).toBe(false);
-  expect(typeof sheet.props.onAccessibilityEscape).toBe('function');
-  expect(field('Hour').props.accessibilityLabel).toBe('Hour, 1 through 12');
-  expect(field('Minute').props.accessibilityLabel).toBe('Minute, 0 through 59');
-});
-
-it('does not commit a confirmation retained before cancel, or let an old cancel close a reopened visit', async () => {
-  await mount();
-  open();
-  const oldConfirm = confirm().props.onPress;
-  const oldCancel = byLabel('Cancel time changes').props.onPress;
-  act(() => oldCancel());
-  act(() => oldConfirm());
-  expect(props.onChange).not.toHaveBeenCalled();
-
-  open();
-  act(() => oldCancel());
-  expect(modal().visible).toBe(true);
-  act(() => confirm().props.onPress());
+  const submit = done().props.onPress;
+  act(() => { submit(); submit(); });
   expect(props.onChange).toHaveBeenCalledTimes(1);
+  expect(props.onChange).toHaveBeenCalledWith(8, '15', 'PM');
+  expect(modal().visible).toBe(false);
 });
 
-
-it('styles the existing staged time controls with the reviewed fonts and full touch targets', async()=>{
- props.appearance={fonts:AfterglowFonts};await mount();open();
- expect(StyleSheet.flatten(trigger().props.style)).toMatchObject({minHeight:52,borderRadius:6,backgroundColor:AfterglowColors.white});
- expect(StyleSheet.flatten(field('Hour').props.style)).toMatchObject({minHeight:56,fontFamily:AfterglowFonts.semibold});
- for(const label of ['AM','PM','00 minutes','15 minutes','30 minutes','45 minutes']) {
-  expect(StyleSheet.flatten(byLabel(label).props.style).minHeight).toBeGreaterThanOrEqual(44);
- }
- expect(StyleSheet.flatten(confirm().props.style)).toMatchObject({minHeight:48,backgroundColor:AfterglowColors.clay});
- expect(tree.root.findAllByType(Text).some(n=>n.props.children==='Los Angeles time · adjusts for daylight saving')).toBe(true);
-});
-
-it('preserves staged arbitrary-minute entry, normalization and cancel without committing', async()=>{
- props.appearance={fonts:AfterglowFonts};await mount();open();
- act(()=>{field('Hour').props.onChangeText('11');field('Minute').props.onChangeText('37');byLabel('AM').props.onPress();});
- act(()=>confirm().props.onPress());expect(props.onChange).toHaveBeenLastCalledWith(11,'37','AM');
- open();act(()=>{field('Hour').props.onChangeText('9');byLabel('Cancel time changes').props.onPress();});
- expect(props.onChange).toHaveBeenCalledTimes(1);expect(modal().visible).toBe(false);
-});
-
-it('keeps invalid staged input visible and prevents duplicate confirmation', async()=>{
- props.appearance={fonts:AfterglowFonts};await mount();open();
- act(()=>field('Minute').props.onChangeText('99'));
- act(()=>confirm().props.onPress());expect(props.onChange).not.toHaveBeenCalled();
- expect(tree.root.findAllByType(Text).some(n=>n.props.children==='Enter an hour from 1–12 and minutes from 00–59.')).toBe(true);
- act(()=>field('Minute').props.onChangeText('8'));
- const submit=confirm().props.onPress;act(()=>{submit();submit();});
- expect(props.onChange).toHaveBeenCalledTimes(1);expect(props.onChange).toHaveBeenCalledWith(7,'08','PM');
-});
-
-
-it.each([false, true])('preserves edits and cancellation when text size changes (staged: %s)', async staged => {
-  const originalWindow = Dimensions.get('window');
-  if (staged) props.appearance = { fonts: AfterglowFonts };
-  await mount();
+it.each(['button', 'back', 'backdrop', 'escape'])('discards a list selection through %s and resets on reopening', async route => {
+  await mount(); open();
+  act(() => row({ hour: 10, minute: '30', period: 'AM' }).props.onPress());
+  if (route === 'button') act(() => button('Cancel time changes').props.onPress());
+  if (route === 'back') act(() => modal().onRequestClose());
+  if (route === 'backdrop') act(() => tree.root.findAll(node => typeof node.props.onPress === 'function' && StyleSheet.flatten(node.props.style)?.justifyContent === 'flex-end')[0].props.onPress());
+  if (route === 'escape') act(() => tree.root.findAll(node => typeof node.props.onAccessibilityEscape === 'function')[0].props.onAccessibilityEscape());
+  expect(props.onChange).not.toHaveBeenCalled();
+  expect(modal().visible).toBe(false);
   open();
-  act(() => {
-    field('Hour').props.onChangeText('11');
-    field('Minute').props.onChangeText('37');
-    byLabel('AM').props.onPress();
-  });
+  expect(row({ hour: 7, minute: '00', period: 'PM' }).props.accessibilityState.selected).toBe(true);
+});
+
+it('keeps arbitrary stored minutes as a selected list option and on no-op confirmation', async () => {
+  props.minute = '37'; await mount(); open();
+  expect(tree.root.findByType(FlatList).props.data).toHaveLength(97);
+  expect(row({ hour: 7, minute: '37', period: 'PM' }).props.accessibilityState.selected).toBe(true);
+  act(() => done().props.onPress());
+  expect(props.onChange).toHaveBeenCalledWith(7, '37', 'PM');
+});
+
+it.each([false, true])('supports precise entry and normalization (staged: %s)', async staged => {
+  if (staged) props.appearance = { fonts: AfterglowFonts };
+  await mount(); open(); exact();
+  act(() => { field('Hour').props.onChangeText('2'); field('Minute').props.onChangeText('5'); button('AM').props.onPress(); });
+  act(() => done().props.onPress());
+  expect(props.onChange).toHaveBeenCalledWith(2, '05', 'AM');
+});
+
+it.each([['0', '00'], ['13', '00'], ['8', '60'], ['8', ''], ['', '00']])('rejects invalid exact time %s:%s', async (hour, minute) => {
+  await mount(); open(); exact();
+  act(() => { field('Hour').props.onChangeText(hour); field('Minute').props.onChangeText(minute); });
+  expect(done().props.disabled).toBe(true);
+  act(() => done().props.onPress());
+  expect(props.onChange).not.toHaveBeenCalled();
+  expect(modal().visible).toBe(true);
+});
+
+it('discards exact entry on cancel and ignores callbacks from the retired visit', async () => {
+  await mount(); open(); exact();
+  act(() => field('Minute').props.onChangeText('37'));
+  const oldDone = done().props.onPress;
+  const oldCancel = button('Cancel time changes').props.onPress;
+  act(() => oldCancel()); open();
+  act(() => { oldDone(); oldCancel(); });
+  expect(props.onChange).not.toHaveBeenCalled();
+  expect(modal().visible).toBe(true);
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+});
+
+it('preserves exact edits while changing text size and keeps fixed actions outside the scrolling body', async () => {
+  const original = Dimensions.get('window');
+  await mount(); open(); exact();
+  act(() => field('Minute').props.onChangeText('37'));
   try {
-    act(() => Dimensions.set({ window: { ...originalWindow, width: 375, height: 667, fontScale: 3.1 } }));
-    expect(field('Hour').props.value).toBe('11');
+    act(() => Dimensions.set({ window: { ...original, width: 375, height: 667, fontScale: 3.1 } }));
     expect(field('Minute').props.value).toBe('37');
-    expect(byLabel('AM').props.accessibilityState.selected).toBe(true);
-    const body = tree.root.findByType(ScrollView);
-    expect(body.findAllByType(TextInput)).toHaveLength(2);
-    expect(body.props.keyboardShouldPersistTaps).toBe('handled');
-    expect(StyleSheet.flatten(field('Hour').props.style)).toMatchObject({ flex: 1, minWidth: 0 });
-    expect(StyleSheet.flatten(tree.root.findAll(node => node.props.accessibilityViewIsModal)[0].props.style).flexShrink).toBe(1);
-    const cancel = byLabel('Cancel time changes').props.onPress;
-    act(() => cancel());
-    expect(props.onChange).not.toHaveBeenCalled();
-    open();
-    expect(field('Hour').props.value).toBe('7');
-    expect(field('Minute').props.value).toBe('00');
-    act(() => cancel());
-    expect(modal().visible).toBe(true);
-    const submit = confirm().props.onPress;
-    act(() => { submit(); submit(); });
-    expect(props.onChange).toHaveBeenCalledTimes(1);
-    expect(props.onChange).toHaveBeenCalledWith(7, '00', 'PM');
-  } finally {
-    act(() => Dimensions.set({ window: originalWindow }));
-  }
+    expect(StyleSheet.flatten(button('Cancel time changes').props.style).minHeight).toBeGreaterThanOrEqual(44);
+    act(() => done().props.onPress());
+    expect(props.onChange).toHaveBeenCalledWith(7, '37', 'PM');
+  } finally { act(() => Dimensions.set({ window: original })); }
+});
+
+it('does not commit after the sheet is unmounted by its containing editor', async () => {
+  const confirm = jest.fn(), cancel = jest.fn();
+  await act(async () => { tree = create(<TimePickerSheet embedded initial={{ hour: 7, minute: '37', period: 'PM' }} onCancel={cancel} onConfirm={confirm} />); });
+  expect(tree.root.findAllByType(Modal)).toHaveLength(0);
+  const lateDone = done().props.onPress, lateCancel = button('Cancel time changes').props.onPress;
+  act(() => tree.unmount());
+  act(() => { lateDone(); lateCancel(); });
+  expect(confirm).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
+});
+
+it('orders midnight, noon and the end of the day correctly without duplicating quarter hours', () => {
+  const choices = timeChoices({ hour: 12, minute: '00', period: 'AM' });
+  expect(choices).toHaveLength(96);
+  expect(choices[0]).toEqual({ hour: 12, minute: '00', period: 'AM' });
+  expect(choices[48]).toEqual({ hour: 12, minute: '00', period: 'PM' });
+  expect(choices[95]).toEqual({ hour: 11, minute: '45', period: 'PM' });
+});
+
+
+it('shows a custom edit as a selected option when returning to the list', async () => {
+  await mount(); open(); exact();
+  act(() => field('Minute').props.onChangeText('37'));
+  const back = tree.root.findAll(node => typeof node.props.onPress === 'function' && node.findAllByType(require('react-native').Text).some(text => text.props.children === 'Choose from list')).pop()!;
+  act(() => back.props.onPress());
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  expect(tree.root.findByType(FlatList).props.data).toContainEqual({hour:7,minute:'37',period:'PM'});
+  expect(row({hour:7,minute:'37',period:'PM'}).props.accessibilityState.selected).toBe(true);
+  act(() => done().props.onPress());
+  expect(props.onChange).toHaveBeenCalledWith(7,'37','PM');
 });
