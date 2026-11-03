@@ -50,6 +50,8 @@ async function open() {
 }
 beforeEach(async () => {
   jest.clearAllMocks();
+  for (const mock of Object.values(Picker)) if (jest.isMockFunction(mock)) mock.mockReset();
+  (Manipulator.manipulateAsync as jest.Mock).mockReset();
   (Platform as any).OS = 'ios';
   unmounted = false;
   (Manipulator.manipulateAsync as jest.Mock).mockResolvedValue({ uri: 'file:///processed.jpg', base64: 'cGhvdG8=' });
@@ -78,17 +80,18 @@ it('dispatches one picker after repeated same-tick taps', async () => {
   await act(async () => { modal().props.onDismiss?.(); modal().props.onDismiss?.(); });
   expect(Picker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
 });
-it.each(['Back', 'unmount'])('ignores late permission after %s', async exit => {
+it.each(['Back', 'unmount'])('ignores late camera permission after %s', async exit => {
   const permission = deferred();
-  (Picker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReturnValue(permission.promise);
-  await chooseLibrary();
-  expect(Picker.requestMediaLibraryPermissionsAsync).toHaveBeenCalledTimes(1);
+  (Picker.requestCameraPermissionsAsync as jest.Mock).mockReturnValue(permission.promise);
+  await act(async () => { button('take photo').props.onPress(); });
+  await act(async () => { modal().props.onDismiss?.(); });
+  expect(Picker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
   await act(async () => {
     if (exit === 'Back') tree.root.findByType(ProgressHead).props.onBack();
     else { tree.unmount(); unmounted = true; }
   });
   await act(async () => { permission.resolve({ status: 'granted' }); });
-  expect(Picker.launchImageLibraryAsync).not.toHaveBeenCalled();
+  expect(Picker.launchCameraAsync).not.toHaveBeenCalled();
 });
 
 async function chooseLibrary() {
@@ -123,22 +126,56 @@ it('Android opens the picker after the hidden state commits without waiting for 
   expect(modal().props.visible).toBe(false);
   expect(Picker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
 });
-it('denied permission is recoverable and never launches the picker', async () => {
-  (Picker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValueOnce({status:'denied'});
+it.each(['ios', 'android'])('opens the %s library without requiring broad photo access', async os => {
+  (Platform as any).OS = os;
+  (Picker.requestMediaLibraryPermissionsAsync as jest.Mock).mockResolvedValue({ status: 'denied', canAskAgain: false });
+  (Picker.launchImageLibraryAsync as jest.Mock).mockResolvedValueOnce({ canceled: false, assets: [{ uri: 'file:///selected.jpg' }] });
   await chooseLibrary();
-  expect(Picker.launchImageLibraryAsync).not.toHaveBeenCalled();
-  expect(tree.root.findByType(BrandedAlert).props.title).toBe('permission needed');
+  expect(Picker.requestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+  expect(Picker.launchImageLibraryAsync).toHaveBeenCalledWith(expect.objectContaining({ mediaTypes: ['images'], allowsEditing: true }));
+  expect(button('continue').props.disabled).toBe(false);
+});
+it('library cancellation and launch failure both allow another attempt without Settings', async () => {
+  await chooseLibrary();
+  expect(button('continue').props.disabled).toBe(true);
+  await open();
+  (Picker.launchImageLibraryAsync as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
+  await chooseLibrary();
+  expect(tree.root.findByType(BrandedAlert).props.message).toBe('could not open photo library. try again.');
+  expect(tree.root.findByType(BrandedAlert).props.buttons).toBeUndefined();
   await act(async () => { tree.root.findByType(BrandedAlert).props.onClose(); });
   await open(); await chooseLibrary();
-  expect(Picker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+  expect(Picker.launchImageLibraryAsync).toHaveBeenCalledTimes(3);
+  expect(Picker.requestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
 });
-it('account switch retires an outstanding permission result', async () => {
+it('denied camera permission is recoverable and never launches the camera', async () => {
+  (Picker.requestCameraPermissionsAsync as jest.Mock).mockResolvedValueOnce({status:'denied'});
+  await act(async () => { button('take photo').props.onPress(); });
+  await act(async () => { modal().props.onDismiss?.(); });
+  expect(Picker.launchCameraAsync).not.toHaveBeenCalled();
+  expect(tree.root.findByType(BrandedAlert).props.title).toBe('permission needed');
+  await act(async () => { tree.root.findByType(BrandedAlert).props.onClose(); });
+  await open();
+  await act(async () => { button('take photo').props.onPress(); });
+  await act(async () => { modal().props.onDismiss?.(); });
+  expect(Picker.launchCameraAsync).toHaveBeenCalledTimes(1);
+});
+it('account switch retires an outstanding camera permission result', async () => {
   const permission = deferred();
-  (Picker.requestMediaLibraryPermissionsAsync as jest.Mock).mockReturnValueOnce(permission.promise);
+  (Picker.requestCameraPermissionsAsync as jest.Mock).mockReturnValueOnce(permission.promise);
+  await act(async () => { emitAccount('INITIAL_SESSION','member-a'); });
+  await act(async () => { button('take photo').props.onPress(); });
+  await act(async () => { modal().props.onDismiss?.(); });
+  await act(async () => { emitAccount('SIGNED_IN','member-b'); permission.resolve({status:'granted'}); });
+  expect(Picker.launchCameraAsync).not.toHaveBeenCalled();
+});
+it('account switch retires an outstanding library selection', async () => {
+  const selection = deferred();
+  (Picker.launchImageLibraryAsync as jest.Mock).mockReturnValueOnce(selection.promise);
   await act(async () => { emitAccount('INITIAL_SESSION','member-a'); });
   await chooseLibrary();
-  await act(async () => { emitAccount('SIGNED_IN','member-b'); permission.resolve({status:'granted'}); });
-  expect(Picker.launchImageLibraryAsync).not.toHaveBeenCalled();
+  await act(async () => { emitAccount('SIGNED_IN','member-b'); selection.resolve({canceled:false,assets:[{uri:'file:///old-account.jpg'}]}); });
+  expect(Manipulator.manipulateAsync).not.toHaveBeenCalled();
 });
 it('late library selection after Back cannot start image processing', async () => {
   const selection = deferred();
