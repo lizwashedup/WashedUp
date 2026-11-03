@@ -82,7 +82,7 @@ export async function fetchFeaturedPlans(userId: string): Promise<FeaturedPlan[]
       member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
       slug: e.slug ?? null,
       is_featured: true,
-      featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
+      featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null) ?? null,
       creator: {
         id: e.creator_user_id,
         first_name_display: hp?.first_name_display ?? 'Creator',

@@ -36,7 +36,7 @@ interface FeaturedEventCardProps {
     member_count: number;
     slug?: string | null;
     is_featured?: boolean;
-    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
+    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null;
     creator: {
       first_name_display: string;
       profile_photo_url: string | null;
@@ -161,6 +161,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
   const attendees = plan.attendees ?? [];
   const isBirthdayParty = plan.featured_type === 'birthday_party';
   const isSpecialEvent = plan.featured_type === 'special_event';
+  const isPlanInMaking = plan.featured_type === 'plan_in_making';
   const isPrideFlagCard = plan.slug === 'washedup-weho-pride-2026';
   const creatorRow = (
     <View style={styles.creatorRow}>
@@ -195,7 +196,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
         !appearance && isSpecialEvent && { borderColor: Colors.specialEventMaroon },
         !appearance && isPrideFlagCard && { backgroundColor: 'transparent' },
       ]}
-      accessibilityLabel={`${plan.title} ${isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event'}${plan.gender_rule === 'women_only' ? ', women only' : ''}${ageLabel ? `, age range ${ageLabel}` : ''}${isClosed ? `, ${closedLabel.toLowerCase()}` : isMember ? ', going' : ''}`}
+      accessibilityLabel={`${plan.title} ${isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event'}${plan.gender_rule === 'women_only' ? ', women only' : ''}${ageLabel ? `, age range ${ageLabel}` : ''}${isClosed ? `, ${closedLabel.toLowerCase()}` : isMember ? ', going' : ''}`}
       accessibilityRole="button"
     >
       {!appearance && isPrideFlagCard && (
@@ -214,6 +215,7 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
               styles.featuredPill,
               isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
               isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
+              isPlanInMaking && { backgroundColor: Colors.planInMakingPurple },
             ]}
           >
             {appearance && isPrideFlagCard && <Image source={require('../../assets/images/pride-flag.png')} style={styles.prideAccent} contentFit="cover" pointerEvents="none" />}
@@ -222,11 +224,12 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
                 styles.featuredPillText,
                 isBirthdayParty && { color: appearance ? AfterglowColors.ink : Colors.birthdayPink },
                 isSpecialEvent && { color: Colors.specialEventCream },
+                isPlanInMaking && { color: Colors.white },
               ]}
             >
               {appearance
-                ? isBirthdayParty ? 'Birthday party' : isSpecialEvent ? 'Special event' : 'WashedUp event'
-                : isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
+                ? isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'Birthday party' : isSpecialEvent ? 'Special event' : 'WashedUp event'
+                : isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
             </Text>
           </View>
           {plan.gender_rule === 'women_only' && (

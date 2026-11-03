@@ -5,7 +5,7 @@ import { PlanCard } from '../PlanCard';
 import { toPlanCardPlan } from '../../../lib/creatorMarks';
 import type { Plan } from '../../../lib/fetchPlans';
 import { AfterglowFonts, Fonts } from '../../../constants/Typography';
-import { AfterglowColors } from '../../../constants/Colors';
+import Colors, { AfterglowColors } from '../../../constants/Colors';
 
 const mockPush = jest.fn();
 beforeEach(() => jest.useFakeTimers());
@@ -39,6 +39,17 @@ describe('staged plan card appearance preserves the established card', () => {
     const card = mount({ appearance, plan: { ...plan, is_featured: true, gender_rule: 'women_only' } });
     expect(renderedText(card.root)).toContain('Women Only');
     expect(renderedText(card.root)).toContain('washedup event');
+  });
+
+  it.each([undefined, appearance])('retains the planning pill on standard cards (%p)', appearance => {
+    const card = mount({ appearance, plan: { ...plan, is_featured: true, featured_type: 'plan_in_making', max_invites: 49, member_count: 12 } });
+    const label = card.root.findAllByType(Text).find(n => n.props.children === 'Plan in the making')!;
+    expect(label).toBeDefined();
+    expect(StyleSheet.flatten(label.props.style).color).toBe(Colors.white);
+    expect(StyleSheet.flatten(label.parent!.props.style).backgroundColor).toBe(Colors.planInMakingPurple);
+    expect(renderedText(card.root)).not.toContain('washedup event');
+    act(() => outer(card).props.onPress());
+    expect(mockPush).toHaveBeenCalledWith('/plan/plan-1');
   });
 
   it('uses the new fonts and restrained card corners only when opted in', () => {
