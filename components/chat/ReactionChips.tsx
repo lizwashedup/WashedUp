@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ChatSizedText as Text } from './ChatSizedText';
 import { SmilePlus } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';

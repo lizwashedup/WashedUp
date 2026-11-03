@@ -1,4 +1,5 @@
 import { CommunityReplyComposer } from './CommunityReplyComposer';
+import { ChatSizedText as Text } from '../chat/ChatSizedText';
 import { createChatMessageAppearance } from '../chat/chatMessageAppearance';
 import { messageActionAccess, messageActionWeb } from '../chat/messageActionAccess';
 import { formatChatTime } from '../../lib/communityChatUi';
@@ -14,7 +15,6 @@ import React from 'react';
 import { Image } from 'expo-image';
 import {
   View,
-  Text,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,

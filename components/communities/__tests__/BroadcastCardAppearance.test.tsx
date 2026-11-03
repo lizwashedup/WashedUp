@@ -1,17 +1,24 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { BroadcastCard } from '../BroadcastCard';
 import { AfterglowFallbackFonts, Fonts } from '../../../constants/Typography';
 import { AfterglowColors } from '../../../constants/Colors';
 const mockInteractions = jest.fn(), mockReplies = jest.fn(), mockReact = jest.fn(), mockOpenUrl = jest.fn();
+let mockFontScale = 1;
+const mockFontListeners = new Set<(value: number) => void>();
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => {
+  const React = require('react'); const [fontScale, setScale] = React.useState(mockFontScale);
+  React.useEffect(() => { mockFontListeners.add(setScale); return () => { mockFontListeners.delete(setScale); }; }, []);
+  return { width: 390, height: 844, scale: 3, fontScale };
+} }));
 jest.mock('../../../lib/url', () => ({ ...jest.requireActual('../../../lib/url'), openUrl: (...args: any[]) => mockOpenUrl(...args) }));
 jest.mock('../CommunityMessageActions', () => ({ useCommunityMessageInteractions: (...args: any[]) => mockInteractions(...args) }));
 jest.mock('../../chat/ReactionEmojiPicker', () => () => null);
 let tree: ReactTestRenderer;
 const broadcast: any = { id: 'original-broadcast', kind: 'intro', body: 'Hello LA', created_at: '2026-09-15T12:00:00Z', reactions: [], reply_count: 2, payload: { format: 'member_intro_v1', first_name: 'Cedar', answer: 'Hello LA' } };
 const scope = { userId: 'member', isCurrent: () => true };
-beforeEach(() => { jest.clearAllMocks(); mockInteractions.mockReturnValue({ showReplies: false, draft: '', sending: false, replies: [], repliesLoading: false, repliesError: false, showReactionPicker: false, toggleReplies: mockReplies, openReactionPicker: mockReact }); });
+beforeEach(() => { mockFontScale = 1; jest.clearAllMocks(); mockInteractions.mockReset().mockReturnValue({ showReplies: false, draft: '', sending: false, replies: [], repliesLoading: false, repliesError: false, showReactionPicker: false, toggleReplies: mockReplies, openReactionPicker: mockReact }); });
 afterEach(() => act(() => tree?.unmount()));
 it('uses selected typography while retaining the original introduction and reply control', () => {
   act(() => { tree = create(<BroadcastCard broadcast={broadcast} communityName="Community" scope={scope} onError={jest.fn()} appearance={{ fonts: AfterglowFallbackFonts }} />); });
@@ -50,4 +57,25 @@ it('keeps a link-only announcement tappable alongside the long-press reaction ac
   act(() => surface.props.onPress());
   expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com/event');
   expect(mockReact).not.toHaveBeenCalled();
+});
+
+it('refreshes Reply text without closing its thread or losing an unsent reply', () => {
+  mockInteractions.mockImplementation(() => {
+    const [draft, changeDraft] = React.useState('');
+    const [showReplies, setShowReplies] = React.useState(true);
+    return { draft, changeDraft, showReplies, sending: false, replies: [], repliesLoading: false, repliesError: false,
+      showReactionPicker: false, toggleReplies: () => setShowReplies(value => !value), openReactionPicker: mockReact };
+  });
+  act(() => { tree = create(<BroadcastCard inConversation broadcast={broadcast} communityName="Community" scope={scope} onError={jest.fn()} />); });
+  const field = tree.root.findByType(TextInput);
+  act(() => field.props.onChangeText('Keep this reply'));
+  const reply = tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === 'Reply to this message')!;
+  let label = reply.findByType(Text);
+  for (const scale of [2, 1]) {
+    act(() => { mockFontScale = scale; mockFontListeners.forEach(update => update(scale)); });
+    expect(reply.findByType(Text)).not.toBe(label); label = reply.findByType(Text);
+    expect(tree.root.findByType(TextInput)).toBe(field);
+    expect(field.props.value).toBe('Keep this reply');
+    expect(tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === 'Reply to this message')).toBe(reply);
+  }
 });

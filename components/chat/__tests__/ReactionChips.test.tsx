@@ -8,6 +8,15 @@ import { AfterglowColors } from '../../../constants/Colors';
 
 jest.mock('lucide-react-native', () => ({ Check: () => null, SmilePlus: () => null }));
 
+let mockFontScale = 1;
+const mockFontListeners = new Set<(value: number) => void>();
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => {
+  const React = require('react'); const [fontScale, setScale] = React.useState(mockFontScale);
+  React.useEffect(() => { mockFontListeners.add(setScale); return () => { mockFontListeners.delete(setScale); }; }, []);
+  return { width: 390, height: 844, scale: 3, fontScale };
+} }));
+beforeEach(() => { mockFontScale = 1; });
+
 describe('ReactionChips', () => {
   it('announces count and selection and sends the original legacy key when pressed', () => {
     const onReact = jest.fn(), onAddReaction = jest.fn();
@@ -123,4 +132,21 @@ it('keeps attached reactions overlapping the bubble despite caller row spacing',
  const style=StyleSheet.flatten(view!.root.findAllByType(View)[0].props.style);
  expect(style.marginTop).toBeLessThan(-10);expect(style.justifyContent).toBe('flex-end');
  act(()=>view!.unmount());
+});
+
+it('refreshes emoji and counts in place without replacing targets or changing reactions', () => {
+  const onReact = jest.fn(); let view: ReturnType<typeof create>;
+  act(() => { view = create(<ReactionChips attached reactions={[{ emoji: 'heart', count: 2, mine: true }]} onReact={onReact} />); });
+  const target = view!.root.findByType(TouchableOpacity);
+  const text = (value: string | number) => view!.root.findAllByType(Text).find(node => node.props.children === value)!;
+  let emoji = text('❤️'), count = text(2);
+  for (const scale of [2, 1]) {
+    act(() => { mockFontScale = scale; mockFontListeners.forEach(update => update(scale)); });
+    expect(text('❤️')).not.toBe(emoji); expect(text(2)).not.toBe(count);
+    emoji = text('❤️'); count = text(2);
+    expect(view!.root.findByType(TouchableOpacity)).toBe(target);
+    expect(target.props.accessibilityState.selected).toBe(true);
+  }
+  expect(onReact).not.toHaveBeenCalled();
+  act(() => view!.unmount());
 });

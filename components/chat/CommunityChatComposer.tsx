@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, type TextInputProps } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions, type TextInputProps } from 'react-native';
+import { ChatSizedText as Text } from './ChatSizedText';
 import { ArrowUp, Camera, Image, MapPin, Plus, X } from 'lucide-react-native';
 import { useChatInputHeight } from '../../hooks/useChatInputHeight';
 import { CreatorActionFill } from '../creator/CreatorActionFill';
@@ -32,6 +33,17 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
   const live = appearance === 'live';
   const localInputRef = useRef<TextInput>(null);
   const inputRef = composerInputRef ?? localInputRef;
+  const { fontScale } = useWindowDimensions();
+  const inputScale = inputProps.allowFontScaling === false ? 1
+    : inputProps.maxFontSizeMultiplier && inputProps.maxFontSizeMultiplier >= 1
+      ? Math.min(fontScale, inputProps.maxFontSizeMultiplier) : fontScale;
+  // Fabric can retain the previous native input font after Dynamic Type changes.
+  // Apply the system scale explicitly on iOS so style updates reach the same
+  // input; remounting it would lose focus, selection and in-progress composition.
+  const iosInputType = Platform.OS === 'ios' ? {
+    fontSize: AfterglowType.message.fontSize * inputScale,
+    lineHeight: AfterglowType.message.lineHeight * inputScale,
+  } : undefined;
   const { inputHeight, measureWebInput, onContentSizeChange } = useChatInputHeight(inputRef, inputProps.value, fonts.regular, 120);
   // iOS Fabric may stop content-size events with a fixed height. Its native
   // multiline layout grows and shrinks within the existing min/max bounds.
@@ -63,10 +75,11 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
         : <Plus size={25} strokeWidth={1.8} color={canAttach?Colors.clay:Colors.muted}/>}
     </TouchableOpacity>}
     <TextInput ref={inputRef} accessibilityLabel="Message" placeholderTextColor={Colors.muted} numberOfLines={Platform.OS === 'web' ? 1 : undefined} {...inputProps}
+      allowFontScaling={Platform.OS === 'ios' ? false : inputProps.allowFontScaling}
       onFocus={event => { setAttachmentsOpen(false); inputProps.onFocus?.(event); }}
       onContentSizeChange={event => { onContentSizeChange(event); inputProps.onContentSizeChange?.(event); }}
       onLayout={event => { measureWebInput(); inputProps.onLayout?.(event); }}
-      style={[styles.input, live && styles.liveInput, { fontFamily: fonts.regular, height: Platform.OS === 'ios' ? undefined : inputHeight }]} />
+      style={[styles.input, live && styles.liveInput, iosInputType, { fontFamily: fonts.regular, height: Platform.OS === 'ios' ? undefined : inputHeight }]} />
     <TouchableOpacity style={[styles.send, actionBounds, sendDisabled && styles.sendDisabled]} onPress={onSend} disabled={sendDisabled}
       accessibilityRole="button" accessibilityLabel={sendLabel ?? (sending ? editing ? 'Saving changes' : 'Sending message' : editing ? 'Save changes' : 'Send message')}
       accessibilityState={{ disabled: sendDisabled, busy: sending }} aria-disabled={sendDisabled} aria-busy={sending}>

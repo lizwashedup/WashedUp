@@ -3,7 +3,18 @@ import { Platform, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { CommunityChatComposer } from '../CommunityChatComposer';
 import { createChatComposerAppearance } from '../chatComposerAppearance';
-import { AfterglowFonts } from '../../../constants/Typography';
+import { AfterglowFonts, AfterglowType } from '../../../constants/Typography';
+
+let mockFontScale = 1;
+const mockFontListeners = new Set<(value: number) => void>();
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => {
+  const React = require('react');
+  const [fontScale, setScale] = React.useState(mockFontScale);
+  React.useEffect(() => { mockFontListeners.add(setScale); return () => { mockFontListeners.delete(setScale); }; }, []);
+  return { width: 390, height: 844, scale: 3, fontScale };
+} }));
+function resizeFont(scale: number) { act(() => { mockFontScale = scale; mockFontListeners.forEach(update => update(scale)); }); }
+beforeEach(() => { mockFontScale = 1; });
 
 let tree: ReactTestRenderer;
 afterEach(() => { act(() => tree?.unmount()); jest.restoreAllMocks(); });
@@ -137,4 +148,57 @@ it.each(['android', 'ios', 'web'] as const)('gives %s composer actions platform-
   expect(StyleSheet.flatten(shared.input).minHeight).toBe(44);
   act(() => button('Send message').props.onPress());
   expect(props.onSend).toHaveBeenCalledTimes(1);
+});
+
+it('resizes the existing iOS input both ways without losing draft, selection or attachment state', () => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  const props = defaults(), onFocus = jest.fn(), onBlur = jest.fn();
+  const selection = { start: 4, end: 9 };
+  function Draft() {
+    const [value, setValue] = React.useState('');
+    return <CommunityChatComposer {...props} inputProps={{ ...props.inputProps, value, onChangeText: setValue, selection, onFocus, onBlur }} />;
+  }
+  act(() => { tree = create(<Draft />); });
+  const field = tree.root.findByType(TextInput);
+  act(() => field.props.onChangeText('Keep this\nsecond line'));
+  act(() => button('Add attachment').props.onPress());
+  for (const scale of [2, 1]) {
+    resizeFont(scale);
+    expect(tree.root.findByType(TextInput)).toBe(field);
+    expect(field.props.value).toBe('Keep this\nsecond line');
+    expect(field.props.selection).toBe(selection);
+    expect(field.props.onSelectionChange).toBe(props.inputProps.onSelectionChange);
+    expect(StyleSheet.flatten(field.props.style)).toMatchObject({
+      fontSize: AfterglowType.message.fontSize * scale,
+      lineHeight: AfterglowType.message.lineHeight * scale,
+    });
+    expect(field.props.allowFontScaling).toBe(false); // already scaled once in style
+    expect(button('Add photo')).toBeDefined();
+  }
+  expect(onFocus).not.toHaveBeenCalled(); expect(onBlur).not.toHaveBeenCalled();
+  expect(props.onSend).not.toHaveBeenCalled();
+});
+
+it.each([
+  [{ allowFontScaling: false }, 1],
+  [{ maxFontSizeMultiplier: 1.5 }, 1.5],
+  [{ maxFontSizeMultiplier: 0 }, 2],
+] as const)('respects caller scaling preferences %j on iOS', (settings, multiplier) => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  const props = defaults();
+  act(() => { tree = create(<CommunityChatComposer {...props} inputProps={{ ...props.inputProps, ...settings }} />); });
+  resizeFont(2);
+  expect(StyleSheet.flatten(tree.root.findByType(TextInput).props.style).fontSize).toBe(AfterglowType.message.fontSize * multiplier);
+});
+
+it.each(['android', 'web'] as const)('leaves %s input scaling with the native platform', platform => {
+  jest.replaceProperty(Platform, 'OS', platform);
+  const props = defaults();
+  act(() => { tree = create(<CommunityChatComposer {...props} inputProps={{ ...props.inputProps, maxFontSizeMultiplier: 1.5 }} />); });
+  const field = tree.root.findByType(TextInput);
+  resizeFont(2);
+  expect(tree.root.findByType(TextInput)).toBe(field);
+  expect(field.props.allowFontScaling).toBeUndefined();
+  expect(field.props.maxFontSizeMultiplier).toBe(1.5);
+  expect(StyleSheet.flatten(field.props.style).fontSize).toBe(AfterglowType.message.fontSize);
 });
