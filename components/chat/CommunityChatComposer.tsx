@@ -3,7 +3,7 @@ import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, TouchableOpac
 import { ArrowUp, Camera, Image, MapPin, Plus, X } from 'lucide-react-native';
 import { useChatInputHeight } from '../../hooks/useChatInputHeight';
 import { CreatorActionFill } from '../creator/CreatorActionFill';
-import { AfterglowColors as Colors } from '../../constants/Colors';
+import LiveColors, { AfterglowColors as Colors } from '../../constants/Colors';
 import { AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 
 interface Action {
@@ -12,6 +12,7 @@ interface Action {
 }
 interface Props {
   fonts: AfterglowFontFamilies;
+  appearance?: 'live' | 'staged';
   composerInputRef?: React.RefObject<TextInput | null>;
   inputProps: Omit<TextInputProps, 'style'>;
   photo: Action & { busy: boolean };
@@ -27,7 +28,8 @@ interface Props {
 
 /** Presentation only. Each room retains its own draft, mention selection,
  * send receipt, photo/location actions and admission/expiry gates. */
-export function CommunityChatComposer({ fonts, composerInputRef, inputProps, photo, location, camera, onSend, sendDisabled, sending, editing, attachmentsVisible = true, sendLabel }: Props) {
+export function CommunityChatComposer({ fonts, composerInputRef, inputProps, photo, location, camera, onSend, sendDisabled, sending, editing, attachmentsVisible = true, sendLabel, appearance = 'staged' }: Props) {
+  const live = appearance === 'live';
   const localInputRef = useRef<TextInput>(null);
   const inputRef = composerInputRef ?? localInputRef;
   const { inputHeight, measureWebInput, onContentSizeChange } = useChatInputHeight(inputRef, inputProps.value, fonts.regular, 120);
@@ -38,7 +40,7 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
   const actionBounds = Platform.OS === 'android' ? styles.androidAction : undefined;
   const canAttach = attachmentsVisible && !editing && (!photo.disabled || !location.disabled || !!camera && !camera.disabled);
   return <View>
-    {attachmentsOpen && canAttach && <View style={styles.attachments}>
+    {attachmentsOpen && canAttach && <View style={[styles.attachments, live && styles.liveSurface]}>
       {!!camera && <TouchableOpacity style={styles.attachment} disabled={camera.disabled} accessibilityRole="button" accessibilityLabel="Take photo"
         accessibilityState={{disabled:camera.disabled}} onPress={()=>{setAttachmentsOpen(false);if(!camera.disabled)camera.onPress();}}>
         <Camera size={22} color={Colors.clay}/><Text style={[styles.attachmentLabel,{fontFamily:fonts.medium}]}>Camera</Text>
@@ -52,7 +54,7 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
         <MapPin size={21} color={Colors.clay}/><Text style={[styles.attachmentLabel,{fontFamily:fonts.medium}]}>Location</Text>
       </TouchableOpacity>
     </View>}
-    <View style={styles.bar}>
+    <View style={[styles.bar, live && styles.liveSurface]}>
     {attachmentsVisible && !editing && <TouchableOpacity style={[styles.utility, actionBounds]} onPress={()=>setAttachmentsOpen(open=>!open)} disabled={!canAttach}
       accessibilityRole="button" accessibilityLabel={photo.busy ? 'Uploading photo' : attachmentsOpen ? 'Close attachments' : 'Add attachment'}
       accessibilityState={{disabled:!canAttach,busy:photo.busy,expanded:attachmentsOpen && canAttach}}>
@@ -64,11 +66,11 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
       onFocus={event => { setAttachmentsOpen(false); inputProps.onFocus?.(event); }}
       onContentSizeChange={event => { onContentSizeChange(event); inputProps.onContentSizeChange?.(event); }}
       onLayout={event => { measureWebInput(); inputProps.onLayout?.(event); }}
-      style={[styles.input, { fontFamily: fonts.regular, height: Platform.OS === 'ios' ? undefined : inputHeight }]} />
+      style={[styles.input, live && styles.liveInput, { fontFamily: fonts.regular, height: Platform.OS === 'ios' ? undefined : inputHeight }]} />
     <TouchableOpacity style={[styles.send, actionBounds, sendDisabled && styles.sendDisabled]} onPress={onSend} disabled={sendDisabled}
       accessibilityRole="button" accessibilityLabel={sendLabel ?? (sending ? editing ? 'Saving changes' : 'Sending message' : editing ? 'Save changes' : 'Send message')}
       accessibilityState={{ disabled: sendDisabled, busy: sending }} aria-disabled={sendDisabled} aria-busy={sending}>
-      <CreatorActionFill />
+      {!live && <CreatorActionFill />}
       <View pointerEvents="none" style={styles.sendContent}>
         {sending ? <ActivityIndicator size="small" color={Colors.white} /> : <ArrowUp size={23} strokeWidth={2.2} color={Colors.white} />}
       </View>
@@ -77,6 +79,8 @@ export function CommunityChatComposer({ fonts, composerInputRef, inputProps, pho
 }
 
 const styles = StyleSheet.create({
+  liveSurface: { backgroundColor: LiveColors.cardBg, borderTopColor: LiveColors.inputBg },
+  liveInput: { backgroundColor: LiveColors.inputBg, borderColor: LiveColors.inputBg, color: LiveColors.darkWarm },
   bar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.subtleLine, backgroundColor: Colors.paper },
   attachments: {flexDirection:'row',gap:10,paddingHorizontal:14,paddingVertical:10,backgroundColor:Colors.paper},
   attachment: {flex:1,minHeight:68,flexDirection:'column',alignItems:'center',justifyContent:'center',gap:9,borderRadius:16,backgroundColor:Colors.white,borderWidth:StyleSheet.hairlineWidth,borderColor:Colors.subtleLine},

@@ -10,9 +10,9 @@ afterEach(() => { act(() => tree?.unmount()); jest.restoreAllMocks(); });
 const defaults = () => ({ fonts: AfterglowFonts, inputProps: { value: '', multiline: true, maxLength: 4000, onChangeText: jest.fn(), onSelectionChange: jest.fn(), inputAccessoryViewID: 'existing-done-bar' }, photo: { onPress: jest.fn(), disabled: false, busy: false }, location: { onPress: jest.fn(), disabled: false }, onSend: jest.fn(), sendDisabled: false, sending: false, editing: false });
 function button(label: string) { return tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!; }
 
-it('passes draft, caret and keyboard configuration through and invokes the original actions', () => {
+it.each(['live', 'staged'] as const)('passes draft, caret and original actions through the %s composer', appearance => {
   const props = defaults();
-  act(() => { tree = create(<CommunityChatComposer {...props} />); });
+  act(() => { tree = create(<CommunityChatComposer {...props} appearance={appearance} />); });
   const input = tree.root.findByType(TextInput);
   const selection = { nativeEvent: { selection: { start: 2, end: 2 } } };
   expect(input.props.inputAccessoryViewID).toBe('existing-done-bar');

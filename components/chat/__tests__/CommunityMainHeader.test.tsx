@@ -96,14 +96,16 @@ it('keeps the removed-member gate and excludes composer actions', async () => {
   expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('you were removed from this community.');
 });
 
-it('retains the original header and pinned event when the development redesign is off', async () => {
+it('keeps the shared header, composer and original destinations with grouping off', async () => {
   const flags = jest.requireMock('../../../constants/FeatureFlags');
   flags.COMMUNITY_CHAT_GROUPING_ENABLED = false;
   try {
     await mount();
-    expect(tree.root.findAllByType(ChatContextHeader)).toHaveLength(0);
-    expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('everyone in Sunset Club LA');
-    expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('up next');
+    expect(tree.root.findByType(ChatContextHeader).props.subtitle).toBe('Sunset Club LA');
+    expect(button('Add attachment')).toBeDefined();
+    expect(tree.root.findByType(ChatOptionsButton).props.notificationLabel).toBe('Mute chat');
+    await act(async () => { await tree.root.findByType(ChatOptionsButton).props.onNotifications(); });
+    expect(mockToggle).toHaveBeenCalledTimes(1);
     expect(button('Back').props.accessibilityRole).toBe('button');
     act(() => button('Back').props.onPress());
     expect(mockBack).toHaveBeenCalledTimes(1);
