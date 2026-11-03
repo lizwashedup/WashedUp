@@ -295,3 +295,64 @@ The previous local implementation is documented in [Creation clarity: first impl
 
 This audit added this report only. It did not alter app code, publish an OTA, change flags, migrate data, send messages, or perform payment operations. The next implementation should be the bounded Release 1 journey above.
 
+
+
+## November 2: researched community-management design proposal
+
+Status: interactive design proposal with fictional content; not a completed native redesign or released feature. The purpose is to make the next implementation concrete enough to evaluate. Prototype source is `/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/community-journey.html`. Its companion `community-journey-review.html` is a local inspection wrapper. Neither uses WashedUp APIs or changes real community data.
+
+### Recommended experience
+
+Start with the community itself: its identity, people, next event and Main chat. For an authorized creator, put the management gear in the header and a direct Edit page action beside the ownership explanation. The gear opens a named community management page. Daily jobs are Members, Events, Edit community and Send update; Joining settings and Your team are a separate, plainly labeled section. Each job opens a focused page and returns to the same community context.
+
+Keep the approved + chooser short. It is appropriate for choosing an intent. Sustained editing and member review need room for their content, keyboard, validation and explicit completion. Do not put the entire creator system inside a sheet, and do not turn every edit into a mandatory wizard. Keep related event date/time/place fields together; separate registration/payment/publication only where the task and backend contract justify it.
+
+Keep organizations as the identity behind an event, with clear permission-aware identity selection. A community is the continuing group; its events are things it does. The sample walkthrough deliberately concentrates on one returning community creator. It does not resolve organization onboarding, application approval, every event registration type or new-community setup. Those require adapting the same structure to their real lifecycles.
+
+### Research translated into decisions
+
+| Source | Decision for WashedUp | Evidence limit |
+| --- | --- | --- |
+| [NN/g: Progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/) | Put frequent jobs first, explain secondary destinations clearly and avoid unnecessary navigation layers. Use steps for separable stages, not tightly related fields. | General interaction guidance, not a measured WashedUp conversion improvement. |
+| [Apple: Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets) | Use the + sheet for a brief contextual choice; use full pages for prolonged management/editing. Preserve Cancel and unsaved changes. | Platform guidance; the exact flow must still be tested. |
+| [Apple: Motion](https://developer.apple.com/design/human-interface-guidelines/motion) and [Haptics](https://developer.apple.com/design/human-interface-guidelines/playing-haptics) | Immediate press feedback, short transitions that preserve spatial context, optional motion and restrained meaningful haptics. | Browser animation is not native performance or physical haptic validation. |
+| [Apple: Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility) and [W3C: Contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) | Target comfortable 44-point iOS controls, legible contrast, larger-text reflow, visible focus, named actions and reduced motion. | The prototype checks a subset; it is not an accessibility conformance claim. |
+| [Airbnb: 2025 summer release](https://news.airbnb.com/product-releases/airbnb-2025-summer-release) | Inference from its documented app structure: distinct things to discover can share predictable navigation, trips/activity and messaging. Give WashedUp communities recognizable identity and actual upcoming activity. | Public product documentation, not a timed competitive benchmark or permission to copy its visual identity. |
+| [Strava: Club messages](https://support.strava.com/en-us/articles/15401541-club-messages) | Make a community conversation reachable both from that community and global Chats. | Reuse WashedUp access rules, not Strava membership policies. |
+| [Partiful: First event](https://help.partiful.com/en-us/articles/15525299-creating-your-first-partiful-event) and [Event settings](https://help.partiful.com/en-us/articles/15525301-what-features-are-available-to-change-in-my-event-settings) | Keep event essentials understandable, with specialized choices under explicit settings. | Does not prove identical features or copying the full UI will suit WashedUp. |
+| [Luma: Guest information](https://help.luma.com/p/updating-guest-information) and [Calendar management](https://help.luma.com/p/managing-events-with-calendars) | Keep management attached to the relevant event/community identity and put guests where the creator expects them. | Luma calendars and WashedUp organizations/communities are not identical models. |
+| [Microsoft: Researching interface language](https://www.microsoft.com/en-us/research/articles/stop-making-assumptions-about-language-how-user-research-can-support-better-language/) and [NN/g: IA mistakes](https://www.nngroup.com/articles/3-ia-mistakes/) | Use consistent ordinary nouns and explicit action labels; test what creators think a choice will do. | Microsoft research concerns admin products, so it informs the method rather than proving consumer-social wording. |
+
+### Visual and interaction direction
+
+Use the existing scoped creator Newsreader/Inter pairing, cream, terracotta and restrained sunset/gold accents. Make the community recognizable through its image and identity, with a full-width next-event card, people and an obvious chat entry. This is not a new app-wide brand decision. The sample uses an existing repository LA image and fictional initials, membership counts, messages and events.
+
+The feeling of a live app should come from useful activity and continuity: a real upcoming event, a real pending request, immediate feedback, stable content while refreshing and a return to the place the person started. Do not fabricate activity in production, replace unknown data with zero, or animate every surface. Keep success distinct from pending writes and unknown-result recovery.
+
+### What was verified in the proposal
+
+- Community → gear → management → edit; Cancel/Keep editing preserved entered text, and saving updated the community name across views.
+- A member approval removed the intended request and incremented the sample count; the remaining request retained its own introduction. Undo restored the request and count.
+- Creating an event draft did not overwrite the existing upcoming event. Saving exposed the draft and reopening restored its fields. Draft storage supports separate records; the multiple-draft case was not exhaustively exercised.
+- Leaving a changed joining checkbox prompted for unsaved changes; Keep editing retained the unchecked state. Discard returned without changing the saved rule. The sample age/gender display was never made editable.
+- Narrow viewport inspection showed no horizontal overflow on the community page: root clientWidth and scrollWidth were both 273 CSS pixels inside the 320-pixel inspection wrapper. Management and event forms were also inspected at narrow width. Form action rows now wrap when necessary.
+- Main text-color pairs were calculated against the specified surfaces: secondary text/cream 4.87:1; secondary text/card 5.20:1; terracotta/cream 4.59:1; light button label/terracotta 4.91:1. These spot checks do not cover every composited state or certify accessibility.
+- JavaScript syntax checked; the prototype includes native semantic controls, named icon buttons, local state and reduced-motion CSS. State snapshots are bounded. Keyboard/VoiceOver and native larger-text behavior remain to be verified in implementation.
+
+The sample approval Undo is proposed interaction behavior. Production must only expose it if the actual membership/access lifecycle can reverse safely. The event form uses browser date/time controls for this walkthrough; it does not supersede the separately owned shared native picker work. Start a community and Make a plan are outside the walkthrough's functional scope. Chat/update actions only change local sample content, not delivery systems.
+
+### Next implementation slice
+
+1. Replace the overloaded returning-community management composition with the named daily-task view through existing legacy/current-page adapters. Keep the current authorization checks and source identity. Preserve context on Back.
+2. Connect Edit community, Members and Events to existing functions; make pending/empty/error states truthful and preserve loaded identity while refreshing. Address the observed transient generic name/zero-count state.
+3. Refactor presentation and form responsibilities incrementally. Before reusing the newer editor, check its entry-time draft creation/seed behavior so opening a screen cannot silently create a replacement community. Preserve applications, publication gates, unknown-result handling and role checks.
+4. Verify a complete disposable draft save/reopen flow with authorized test fixtures, then existing Sunset Club, ordinary members, team roles, revoked access and account switches. Keep the exact IDs, memberships, chats, history and Ghost Protocol contracts. Community and Plan eligibility support must not be assumed identical.
+5. Extend the proven layout to organization identity and event-specific tools, including guests, registration and cancellation. Universal event chat remains a separate lifecycle task.
+
+No fresh database design, schema migration, permissions rewrite, blanket new sheet system or native build is required to evaluate this direction. App changes should use central Colors/Typography constants and existing navigation/components.
+
+### Where Liz's help becomes valuable
+
+No phone connection or additional account setup is needed for this design review. Ask Liz to try finding management, editing the description, reviewing requests and returning to the community. Record hesitation before explaining the route. Then run short uncoached sessions with existing community and organization creators plus people unfamiliar with WashedUp. Include the three-way creation choice and ask participants to predict where their item will appear. Research supports hypotheses; successful independent use is the acceptance evidence still missing.
+
+This increment changes the proposal and documentation only. It does not add app features, release an OTA, mutate production data or claim that the creator system is complete.

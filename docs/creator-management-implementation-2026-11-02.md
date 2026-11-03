@@ -190,3 +190,8 @@ Validation: **50 tests across 5 suites passed**, covering the management entry, 
 The control still opens the existing management destination. Its overloaded contents and the management home's Back destination (currently everything managed in Yours) are not yet the proposed simple, contextual experience. Preserve the initiating community and return position when redesigning that journey. On returning from Settings during the walkthrough, the home also briefly displayed generic/empty-looking information before the community and member data settled. This is an observed loading-state issue; no duration or frame-rate claim is established. Haptic feel requires a physical phone; narrow-width, large-text and Android header verification remain open.
 
 Changed files: `app/community/[id].tsx`, `components/communities/CommunityManageLink.tsx`, its existing test file, `components/creator/CommunityDailyActions.tsx`, `components/creator/pages/PageFrame.tsx`, this record and the cohesion audit.
+
+
+## Researched design walkthrough: next slice, not a release
+
+A focused, interactive returning-community proposal now demonstrates public community → gear → daily management jobs → editing/member review/event draft → contextual return. Its source is `/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/community-journey.html`. The existing cohesion audit now records source-backed design decisions, the prototype interaction/contrast/narrow-width checks, limits and the next implementation slice. Prototype data is fictional and stays local. Native app code, backend contracts and deployment state were not changed in this research increment. The temporary connected-review package entry remains separate from committed product source.
