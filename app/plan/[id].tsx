@@ -46,6 +46,7 @@ import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-nat
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
 import WashedUpCalendar from '../../components/calendar/WashedUpCalendar';
+import TimePickerSheet, { type PickerTime } from '../../components/composer/TimePickerSheet';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
 import MiniProfileCard from '../../components/MiniProfileCard';
@@ -172,8 +173,6 @@ const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
-const MINUTE_OPTIONS = ['00', '15', '30', '45'];
-const PERIODS: ('AM' | 'PM')[] = ['AM', 'PM'];
 
 function buildDatetime(
   month: number, day: number, year: number,
@@ -579,11 +578,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [tempEditMonth, setTempEditMonth] = useState(0);
   const [tempEditDay, setTempEditDay] = useState(1);
   const [tempEditYear, setTempEditYear] = useState(new Date().getFullYear());
-  const [tempEditHour, setTempEditHour] = useState(7);
-  const [tempEditMinute, setTempEditMinute] = useState<string>('00');
-  const [tempEditPeriod, setTempEditPeriod] = useState<'AM' | 'PM'>('PM');
-  const validTempEditTime = tempEditHour >= 1 && tempEditHour <= 12 &&
-    /^\d{1,2}$/.test(tempEditMinute) && Number(tempEditMinute) <= 59;
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [editGenderRule, setEditGenderRule] = useState('mixed');
@@ -1198,18 +1192,16 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   // Time picker open / confirm
   const openEditTimePicker = () => {
     if (!edit.canChange()) return;
-    setTempEditHour(editTimeHour);
-    setTempEditMinute(editTimeMinute);
-    setTempEditPeriod(editTimePeriod);
+    Keyboard.dismiss();
     setShowEditTimePicker(true);
   };
-  const confirmEditTime = () => {
-    if (!edit.canChange() || !validTempEditTime) return;
+  const confirmEditTime = (time: PickerTime) => {
+    if (!edit.canChange()) return;
     Keyboard.dismiss();
     setEditTimeChanged(true);
-    setEditTimeHour(tempEditHour);
-    setEditTimeMinute(tempEditMinute.padStart(2, '0'));
-    setEditTimePeriod(tempEditPeriod);
+    setEditTimeHour(time.hour);
+    setEditTimeMinute(time.minute);
+    setEditTimePeriod(time.period);
     setShowEditTimePicker(false);
     hapticLight();
   };
@@ -2203,7 +2195,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
         <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={manageStyles.sheet}>
+          <View style={manageStyles.sheet} accessibilityElementsHidden={showEditTimePicker} importantForAccessibility={showEditTimePicker ? "no-hide-descendants" : "auto"}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title}>Manage Plan</Text>
               <TouchableOpacity style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -2274,6 +2266,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <TouchableOpacity accessibilityRole="button"
                   disabled={edit.isBusy || edit.unknown}
                 style={[manageStyles.input, manageStyles.dateTimeBtn]}
+                  accessibilityLabel="Edit plan date"
                   onPress={() => { hapticLight(); openEditDatePicker(); }}
                   activeOpacity={0.85}
                 >
@@ -2284,6 +2277,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <TouchableOpacity accessibilityRole="button"
                   disabled={edit.isBusy || edit.unknown}
                 style={[manageStyles.input, manageStyles.dateTimeBtn, { marginLeft: 8 }]}
+                  accessibilityLabel="Edit plan time"
                   onPress={() => { hapticLight(); openEditTimePicker(); }}
                   activeOpacity={0.85}
                 >
@@ -2706,38 +2700,14 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             </Pressable>
           )}
 
-          {/* Time picker overlay */}
-          {showEditTimePicker && (
-            <Pressable
-              style={manageStyles.pickerOverlay}
-              onPress={() => setShowEditTimePicker(false)}
-            >
-              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
-                <Text style={manageStyles.pickerTitle}>Select time</Text>
-                <View style={manageStyles.pickerRow}>
-                  <TextInput style={manageStyles.directTimeInput} value={tempEditHour ? String(tempEditHour) : ''} onChangeText={(value) => setTempEditHour(Number(value.replace(/\D/g, '').slice(0, 2)))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Hour, 1 through 12" />
-                  <Text style={manageStyles.pickerItemText}>:</Text>
-                  <TextInput style={manageStyles.directTimeInput} value={tempEditMinute} onChangeText={(value) => setTempEditMinute(value.replace(/\D/g, '').slice(0, 2))} keyboardType="number-pad" maxLength={2} selectTextOnFocus accessibilityLabel="Minute, 0 through 59" />
-                  {PERIODS.map((p) => (
-                    <Pressable key={p} style={[manageStyles.directPeriod, tempEditPeriod === p && manageStyles.pickerItemSelected]} onPress={() => setTempEditPeriod(p)} accessibilityRole="button" accessibilityState={{ selected: tempEditPeriod === p }}>
-                      <Text style={[manageStyles.pickerItemText, tempEditPeriod === p && manageStyles.pickerItemTextSel]}>{p}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={manageStyles.directMinutes}>
-                  {MINUTE_OPTIONS.map((m) => (
-                    <Pressable key={m} style={[manageStyles.directPeriod, tempEditMinute === m && manageStyles.pickerItemSelected]} onPress={() => setTempEditMinute(m)} accessibilityRole="button" accessibilityLabel={`${m} minutes`}>
-                      <Text style={[manageStyles.pickerItemText, tempEditMinute === m && manageStyles.pickerItemTextSel]}>:{m}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                {!validTempEditTime && <Text style={manageStyles.directTimeError}>Enter an hour from 1–12 and minutes from 00–59.</Text>}
-                <TouchableOpacity style={[manageStyles.pickerDoneBtn, !validTempEditTime && { opacity: 0.45 }]} onPress={confirmEditTime} disabled={!validTempEditTime} accessibilityRole="button" accessibilityState={{ disabled: !validTempEditTime }}>
-                  <Text style={manageStyles.pickerDoneBtnText}>Done</Text>
-                </TouchableOpacity>
-              </Pressable>
-            </Pressable>
-          )}
+          {/* Reuse the same time sheet without nesting native Modals. */}
+          {showEditTimePicker && <TimePickerSheet
+            embedded
+            appearance={appearance}
+            initial={{ hour: editTimeHour, minute: editTimeMinute, period: editTimePeriod }}
+            onCancel={() => setShowEditTimePicker(false)}
+            onConfirm={confirmEditTime}
+          />}
 
           {/* BrandedAlert inside the modal so it renders on top, not behind it */}
           <BrandedAlert
@@ -3835,69 +3805,6 @@ const legacyManageStyles = StyleSheet.create({
     color: Colors.asphalt,
     textAlign: 'center',
     marginBottom: 12,
-  },
-  pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  directTimeInput: {
-    width: 55,
-    minHeight: 50,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 6,
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  directPeriod: {
-    flex: 1,
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 6,
-  },
-  directMinutes: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  directTimeError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 10 },
-  pickerCol: {
-    flex: 1,
-  },
-  pickerColSm: {
-    flex: 0.7,
-  },
-  pickerItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  pickerItemSelected: {
-    backgroundColor: Colors.terracotta,
-  },
-  pickerItemText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  pickerItemTextSel: {
-    color: Colors.white,
-    fontFamily: Fonts.sansBold,
-  },
-  pickerDoneBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  pickerDoneBtnText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.white,
   },
   capacitySection: {
     marginTop: 12,

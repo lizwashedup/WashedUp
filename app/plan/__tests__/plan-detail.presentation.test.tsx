@@ -2,8 +2,9 @@ const mockNotificationRequest = jest.fn();
 jest.mock('../../../lib/planNotificationPrompt', () => ({ requestPlanNotificationPrompt: (...args: any[]) => mockNotificationRequest(...args) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Dimensions, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
+import { Dimensions, FlatList, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import PlanDetailScreen from '../[id]';
+import TimePickerSheet from '../../../components/composer/TimePickerSheet';
 import { PlanDetailOverview } from '../../../components/plans/PlanDetailOverview';
 
 let mockMemberAppearance = true;
@@ -788,4 +789,48 @@ it.each([true, false])('shows the purple planning category on detail without cha
   expect(allText()).toContain('Plan in the making');
   expect(mockJoinOptions.ready).toBe(true);
   if (appearance) expect(tree.root.findByType(PlanDetailOverview).props).toMatchObject({ planInMaking: true, featuredLabel: 'Plan in the making' });
+});
+
+
+const timeControl = (label: string) => tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!;
+it('reuses the shared time sheet inside Manage without another native Modal and cancels without a schedule write', async () => {
+  mockPlan.start_time = '2040-08-01T02:37:00.000Z';
+  await openEditor();
+  const modalCount = tree.root.findAllByType(Modal).length;
+  act(() => timeControl('Edit plan time').props.onPress());
+  expect(tree.root.findAllByType(Modal)).toHaveLength(modalCount);
+  const sheet = tree.root.findByType(TimePickerSheet);
+  expect(sheet.props.initial).toEqual({ hour: 7, minute: '37', period: 'PM' });
+  expect(tree.root.findAll(node => node.props.accessibilityElementsHidden === true && node.props.importantForAccessibility === 'no-hide-descendants').length).toBeGreaterThan(0);
+  act(() => tree.root.findByType(FlatList).props.renderItem({item: {hour: 8, minute: '15', period: 'PM'}}).props.onPress());
+  act(() => timeControl('Cancel time changes').props.onPress());
+  expect(mockUpdate).not.toHaveBeenCalled();
+  act(() => timeControl('Edit plan time').props.onPress());
+  expect(tree.root.findByType(TimePickerSheet).props.initial.minute).toBe('37');
+  act(() => timeControl('Cancel time changes').props.onPress());
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
+});
+it('keeps confirmed time changes in the Manage draft until Save and converts through the existing LA schedule rules', async () => {
+  mockPlan.start_time = '2040-08-01T02:37:00.000Z';
+  await openEditor();
+  act(() => timeControl('Edit plan time').props.onPress());
+  act(() => tree.root.findByType(FlatList).props.renderItem({item: {hour: 8, minute: '15', period: 'PM'}}).props.onPress());
+  act(() => timeControl('Done, confirm time').props.onPress());
+  expect(mockUpdate).not.toHaveBeenCalled();
+  expect(tree.root.findAllByType(TimePickerSheet)).toHaveLength(0);
+  act(() => timeControl('Edit plan time').props.onPress());
+  expect(tree.root.findByType(TimePickerSheet).props.initial).toEqual({hour:8,minute:'15',period:'PM'});
+  act(() => timeControl('Cancel time changes').props.onPress());
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0].start_time).toBe('2040-08-01T03:15:00.000Z');
+});
+it('ignores a retained Done after the containing Manage editor closes', async () => {
+  await openEditor(); act(() => timeControl('Edit plan time').props.onPress());
+  const oldDone = timeControl('Done, confirm time').props.onPress;
+  act(() => manageModal().props.onRequestClose());
+  act(() => button('Manage Plan').props.onPress());
+  act(() => oldDone());
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
 });
