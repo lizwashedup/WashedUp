@@ -222,3 +222,9 @@ it.each([undefined, appearance])('shows the purple planning pill and keeps a 50-
   act(() => outer(tree).props.onPress());
   expect(mockPush).toHaveBeenCalledWith('/plan/featured-1');
 });
+
+it.each([undefined, appearance])('shows the verified count even when attendee photos are unavailable (%p)', appearance => {
+  const tree = mount({ appearance, plan: { ...plan, member_count: 12, max_invites: 49, attendees: [] } });
+  expect(text(tree)).toContain('12 going');
+  expect(text(tree)).not.toContain('0 going');
+});

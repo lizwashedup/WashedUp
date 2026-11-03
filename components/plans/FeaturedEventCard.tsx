@@ -310,8 +310,9 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
 
       {/* Bottom row: avatar stack + CTA */}
       <View style={styles.bottomRow}>
-        {isClosed ? <Text style={styles.creatorMeta}>{closedLabel}</Text> : attendees.length > 0 ? (
-          <View style={styles.avatarStack}>
+        {isClosed ? <Text style={styles.creatorMeta}>{closedLabel}</Text> : (
+          <View style={styles.attendance}>
+          {attendees.length > 0 && <View style={styles.avatarStack}>
             {attendees.slice(0, 5).map((a, i) => (
               a.profile_photo_url ? (
                 <Image
@@ -343,9 +344,9 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
                 <Text style={styles.moreCount}>+{attendees.length - 5}</Text>
               </View>
             )}
+          </View>}
+          <Text style={styles.attendanceCount}>{`${Math.max(1, plan.member_count)} going`}</Text>
           </View>
-        ) : (
-          <View />
         )}
         <TouchableOpacity
           style={[styles.ctaButton, !isClosed && isMember && styles.ctaButtonJoined]}
@@ -376,6 +377,8 @@ export const FeaturedEventCard = React.memo<FeaturedEventCardProps>(({
 FeaturedEventCard.displayName = 'FeaturedEventCard';
 
 const baseStyles = StyleSheet.create({
+  attendance: { flexShrink: 1, minWidth: 0, gap: 5 },
+  attendanceCount: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.asphalt },
   creatorIdentity: { flex: 1, minWidth: 0 },
   creatorMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.textLight },
   iconAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
