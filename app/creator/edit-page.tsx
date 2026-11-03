@@ -222,7 +222,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
       // LIZ COPY (proposed)
       return count === 0
         ? 'empty for now — add what membership feels like, a pinned note, or your events'
-        : `${count} live on your page`;
+        : `${count} section${count === 1 ? '' : 's'} shown on your page`;
     }
     const gallery = group.find((b) => b.block_type === 'gallery');
     const links = group.find((b) => b.block_type === 'links');

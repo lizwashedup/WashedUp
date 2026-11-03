@@ -215,3 +215,19 @@ Verification: **8 focused suites / 143 tests passed**, covering the resolver, ac
 The full native walkthrough of this increment remains pending: the separate calendar-reliability task is using the shared Device Hub window on SE/13. This task did not take over that window, change their devices, or claim a native result from automated tests. The existing connected Metro on 8872 continues serving this checkout to the iPhone 17 Pro Max development client. Existing preview-only package/entry changes remain uncommitted.
 
 Changed product files: `app/community/[id].tsx`, `app/creator/edit-page.tsx`, `app/creator/page-edit.tsx`, `app/creator/page-events.tsx`, `components/communities/CommunityCreatorActions.tsx`, `components/communities/CommunityPeople.tsx`, `components/creator/ManagementLayout.tsx`, `components/creator/pages/ApprovedPageEditorScreen.tsx`, `components/creator/pages/CreatorPageEventsScreen.tsx`, and `lib/communityManageEntry.ts`, plus their focused tests and this record. This increment does not establish complete creator UX acceptance or release readiness.
+
+
+### Connected native follow-up — November 2, 11:15 PM Pacific
+
+After the calendar task released Device Hub, the signed-in iPhone 17 Pro Max / Metro8872 walkthrough completed for the existing Sunset LA Club draft:
+
+- Main chat → community title opened the real community page. The new **Continue setup** and **Edit community** controls appeared under the cover; no Create event button was offered for the draft.
+- **Edit community** opened the exact Sunset editor. Basics retained Sunset’s existing name; section navigation and Back returned to that same community page.
+- **Continue setup** opened Sunset’s existing settings with its draft/publication state intact. The header said **Back to Sunset LA Club**, and Back returned directly to its community page.
+- The header gear opened **Manage Sunset LA Club**, also with the contextual Back destination. That return worked.
+- The walkthrough exposed a misleading existing editor summary, “3 live on your page,” on a draft. It now says “3 sections shown on your page.” The new wording was verified in the native accessibility tree.
+- Sunset’s creator byline remains absent because it is a legacy draft and the legacy public leader-card RPC only returns active communities. This confirms the documented backend gap; the top-right photo is the signed-in member’s Profile action, not a substitute creator label.
+
+[Actual community screen](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-community-direct-actions.png>). This capture is from the connected app, not the fictional prototype. Ordinary layout was visually checked. No Plan, event, community, member, invite or broadcast record was saved/published/sent during this walkthrough. No native build or OTA was made. SE/iPhone13, simulator text settings, and the calendar task’s Metro were untouched; the shared Device Hub window is released with iPhone17ProMax left on the community page.
+
+Still open: active-community event entry on a matching native test identity, page-system profile links and collaborator roles on device, narrow/large-text and Android coverage of this new increment, and the separate backend work for creator identity, invitations and broadcasts. The 143-test result above remains automated coverage rather than proof of those unperformed device cases.
