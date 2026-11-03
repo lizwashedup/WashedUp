@@ -8,7 +8,7 @@ import { PageAction, PageFrame } from '../../components/creator/pages/PageFrame'
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
 import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
-import { creationDestinations, loadCreationEntry, type SceneCreationKind } from '../../lib/creationEntry';
+import { communitySetupDestinations, creationDestinations, loadCreationEntry, type SceneCreationKind } from '../../lib/creationEntry';
 import { setWorkspace } from '../../lib/workspaceContext';
 import { setSelectedCommunityId } from '../../lib/selectedCommunity';
 
@@ -26,6 +26,9 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
   const latest = useRef({ scope, ready, data });
   latest.current = { scope, ready, data };
   const destinations = data ? creationDestinations(kind, data.access) : [];
+  const unfinishedCommunities = kind === 'event' && data ? communitySetupDestinations(data.access) : [];
+  const waitingForAdmin = kind === 'event' && data
+    ? data.access.ledCommunities.filter(community => community.status === 'draft' && community.role === 'events') : [];
   const grant = data?.grants.find(item => item.track === (kind === 'community' ? 'community_leader' : 'event_host'));
   const pending = grant?.status === 'applied' || grant?.status === 'in_review';
   const canApply = !grant || ['withdrawn', 'declined', 'needs_more_info'].includes(grant.status);
@@ -57,13 +60,29 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
         })} />
         {copy(destination.description)}
       </View>)}
+      {unfinishedCommunities.length > 0 && <>
+        <Text accessibilityRole="header" style={[styles.label, { fontFamily: fonts.medium }]}>Finish community setup</Text>
+        {unfinishedCommunities.map(destination => <View key={destination.id} style={styles.card}>
+          <PageAction compact disclosure title={destination.title} onPress={() => go(destination.route, () => {
+            setWorkspace(destination.workspace);
+            setSelectedCommunityId(destination.communityId ?? null);
+          })} />
+          {copy(destination.description)}
+        </View>)}
+      </>}
+      {waitingForAdmin.map(community => <View key={community.id} style={styles.card}>
+        <Text style={[styles.label, { fontFamily: fonts.medium }]}>{community.name}</Text>
+        {copy('A community admin needs to finish and publish this page before you can create an event for it.')}
+      </View>)}
       {CREATOR_PAGES_ENABLED ? <View style={styles.card}>
         {copy(kind === 'event' ? 'Choose another community or organization, or set up your public creator identity.' : 'Continue a community draft or start setting up your new community.')}
         <PageAction compact primary singleLine title={kind === 'community' ? 'Continue setup' : 'Choose creator'} onPress={() => go('/creator/pages?create=' + kind)} />
       </View> : <>
         {canApply && <View style={styles.card}>
           {copy(kind === 'event'
-            ? 'Creating events requires creator approval. Apply with your own public name or an organization. You don’t need to start a community.'
+            ? destinations.length > 0 || unfinishedCommunities.length > 0 || waitingForAdmin.length > 0
+              ? 'To create events under a separate public name or organization, apply for that creator identity.'
+              : 'Creating events requires creator approval. Apply with your own public name or an organization. You don’t need to start a community.'
             : 'New community creators apply before setting up a public community and its group conversations.')}
           {copy('We’ll review new applications when the refreshed Scene is ready.')}
           <PageAction compact primary singleLine title={grant?.status === 'needs_more_info' ? 'Update application' : 'Apply'}
@@ -77,7 +96,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
           {copy('This creator application is closed. Open its status for more information.')}
           <PageAction compact quiet title="View application" onPress={() => go('/creator/apply')} />
         </View>}
-        {kind === 'event' && destinations.length === 0 && data.access.hasLeaderGrant && <View style={styles.card}>
+        {kind === 'event' && destinations.length === 0 && data.access.hasLeaderGrant && data.access.ledCommunities.length === 0 && <View style={styles.card}>
           {copy('Your community creator access is approved. Set up your community before creating its first event.')}
           <PageAction compact primary singleLine title="Set up community" onPress={() => go('/creator/setup-community', () => setWorkspace('community'))} />
         </View>}

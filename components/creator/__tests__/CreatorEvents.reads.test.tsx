@@ -3,16 +3,17 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockPush=jest.fn();
 const mockRefetch=jest.fn(async()=>({}));
 let mockEvents:any;
+let mockCommunityStatus = 'active', mockRole = 'leader', mockWorkspace = 'community';
 jest.mock('@tanstack/react-query',()=>({useQuery:({queryKey}:any)=>queryKey[0]==='creator-events-tab'?mockEvents:{data:queryKey[0]==='creator-access'?{}:[]},useQueryClient:()=>({invalidateQueries:jest.fn()}),useMutation:()=>({mutate:jest.fn(),isPending:false,isError:false})}));
 jest.mock('expo-router',()=>({useLocalSearchParams:()=>({}),useFocusEffect:(fn:any)=>require('react').useEffect(fn,[fn]),useRouter:()=>({push:mockPush})}));
-jest.mock('../../../lib/creatorMode',()=>({}));
+jest.mock('../../../lib/creatorMode',()=>({isAdminTierRole:(role:string)=>['leader','co_leader','admin'].includes(role)}));
 jest.mock('../../../lib/creatorEvents',()=>({}));
 jest.mock('../../../lib/creatorPageEventTemplateLibrary',()=>({}));
 jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:null,account:{isLoading:false}})}));
 jest.mock('../../../hooks/useCreatorPageRead',()=>({useCreatorPageRead:()=>({loading:false,data:[],refresh:jest.fn()})}));
 jest.mock('../../../constants/FeatureFlags',()=>({CREATOR_PAGES_ENABLED:false,EVENT_SUMMARY_ENABLED:true}));
-jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>({id:'community'})}));
-jest.mock('../../../lib/workspaceContext',()=>({useWorkspace:()=> 'community',eventBelongsToWorkspace:()=>true}));
+jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>({id:'community',role:mockRole,status:mockCommunityStatus})}));
+jest.mock('../../../lib/workspaceContext',()=>({useWorkspace:()=>mockWorkspace,eventBelongsToWorkspace:()=>true}));
 jest.mock('../../../lib/supabase',()=>({supabase:{}}));
 jest.mock('../../../lib/haptics',()=>({hapticLight:jest.fn()}));
 jest.mock('../WorkspaceSwitcher',()=>({WorkspaceSwitcher:()=>null}));
@@ -24,7 +25,7 @@ import Screen from '../../../app/(creator)/events';
 let tree:ReactTestRenderer;
 const visibleText=(node:any):string=>typeof node==='string'?node:Array.isArray(node)?node.map(visibleText).join(''):(node?.children??[]).map(visibleText).join('');
 const render=async()=>{await act(async()=>{tree=create(<Screen/>)});return visibleText(tree.toJSON());};
-beforeEach(()=>{jest.clearAllMocks();mockEvents={data:[],isPending:false,isError:false,isFetching:false,isRefetching:false,refetch:mockRefetch};});
+beforeEach(()=>{jest.clearAllMocks();mockCommunityStatus='active';mockRole='leader';mockWorkspace='community';mockEvents={data:[],isPending:false,isError:false,isFetching:false,isRefetching:false,refetch:mockRefetch};});
 afterEach(()=>act(()=>tree?.unmount()));
 it('never reports no attention after an event read fails and retries the same query',async()=>{
  mockEvents.isError=true;expect(await render()).toContain('Events unavailable');expect(visibleText(tree.toJSON())).not.toContain('Nothing needs your attention');
@@ -53,4 +54,30 @@ it('keeps all five event controls individually reachable and sends each to its e
   await act(async()=>button.props.onPress());
   expect(mockPush).toHaveBeenLastCalledWith(`/creator/${route}?id=one`);
  }
+});
+it('continues draft community setup while keeping its existing events reachable',async()=>{
+ mockCommunityStatus='draft'; await render();
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='New event')).toHaveLength(0);
+ const setup=tree.root.findAll(n=>n.props.accessibilityLabel==='Continue setup'&&typeof n.props.onPress==='function')[0];
+ act(()=>setup.props.onPress());
+ expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/community');
+ const next=tree.root.findAll(n=>n.props.accessibilityLabel==='Next event'&&typeof n.props.onPress==='function')[0];
+ act(()=>next.props.onPress());
+ expect(visibleText(tree.toJSON())).not.toContain('Create one');
+});
+it('explains an events-only collaborator’s draft without offering admin tools',async()=>{
+ mockCommunityStatus='draft';mockRole='events';expect(await render()).toContain('A community admin needs to finish and publish');
+ expect(tree.root.findAll(n=>['New event','Continue setup'].includes(n.props.accessibilityLabel))).toHaveLength(0);
+});
+it('directs an archived community back to the identity directory',async()=>{
+ mockCommunityStatus='archived';expect(await render()).toContain('This community is archived');
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='New event')).toHaveLength(0);
+ const directory=tree.root.findAll(n=>n.props.accessibilityLabel==='You manage'&&typeof n.props.onPress==='function')[0];
+ act(()=>directory.props.onPress()); expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
+});
+it.each(['community','organization'])('retains new event creation for active %s tools',async workspace=>{
+ mockWorkspace=workspace;await render();
+ const createEvent=tree.root.findAll(n=>n.props.accessibilityLabel==='New event'&&typeof n.props.onPress==='function')[0];
+ act(()=>createEvent.props.onPress());
+ expect(mockPush).toHaveBeenCalledWith(workspace==='community'?'/creator/event-form?workspace=community&communityId=community':'/creator/event-form?workspace=organization');
 });

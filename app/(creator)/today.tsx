@@ -1,5 +1,6 @@
 import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import { CommunityDailyActions } from '../../components/creator/CommunityDailyActions';
+import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import { ScaledText as Text } from '../../components/ScaledText';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
@@ -158,12 +159,13 @@ export default function CreatorTodayScreen() {
         <Text style={styles.title}>{community ? community.name : 'Your community'}</Text>
 
         {!online && <OfflineBanner />}
+        <CommunitySetupNotice community={community} onNavigate={route => router.push(route as never)} />
 
         {/* Screen 11 gap closed 2026-09-06: Invite (Screen 56) now has a real
             destination -- app/creator/member-invites.tsx, backend live since
             2026-09-05 -- so it's wired in here in the spec's fixed order. */}
         <View style={styles.quickActions}>
-          <TouchableOpacity
+          {community?.status === 'active' && <TouchableOpacity
             style={[styles.quickAction, styles.quickActionPrimary]}
             onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/(tabs)/friends/manage') as never)}
             accessibilityRole="button"
@@ -175,7 +177,7 @@ export default function CreatorTodayScreen() {
               <Plus size={16} color={Colors.white} strokeWidth={2.5} />
               <Text style={styles.quickActionText} numberOfLines={1}>create event</Text>
             </View>
-          </TouchableOpacity>
+          </TouchableOpacity>}
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
             onPress={() => router.push('/(tabs)/friends/manage/(tools)/community')}
@@ -239,13 +241,13 @@ export default function CreatorTodayScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
             <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
-            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : 'Plan your next gathering'}</Text>
+            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : community?.status === 'active' ? 'Plan your next gathering' : 'Your events'}</Text>
             <Text style={styles.cardMeta}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
                     .filter(Boolean)
                     .join(' · ')
-                : 'Bring your community together. Start with an event.'}
+                : community?.status === 'active' ? 'Bring your community together. Start with an event.' : 'Find existing events and saved drafts here.'}
             </Text>
             {attendanceLabel && (
               <Text style={styles.cardCounts} numberOfLines={1}>{attendanceLabel}</Text>

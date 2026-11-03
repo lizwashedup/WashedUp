@@ -3,6 +3,7 @@ import { getCreatorAccess, isAdminTierRole, type CreatorAccess } from './creator
 import { fetchMyGrants, type OperatorGrant } from './operatorApplications';
 import { requestWithDeadline } from './requestWithDeadline';
 import type { CreatorPageScope } from './creatorPageReview';
+import { managementRoute } from './managementNavigation';
 
 export type SceneCreationKind = 'event' | 'community';
 export type CreationEntryData = { access: CreatorAccess; grants: OperatorGrant[] };
@@ -18,6 +19,17 @@ export async function loadCreationEntry(scope: CreatorPageScope): Promise<Creati
   ]), 12_000);
   if (!scope.isCurrent()) throw new Error('Creation entry changed.');
   return { access, grants };
+}
+
+/** Resume the existing page; a draft is not yet an event-creation identity. */
+export function communitySetupDestinations(access: CreatorAccess): CreationDestination[] {
+  return access.ledCommunities
+    .filter(community => community.status === 'draft' && isAdminTierRole(community.role))
+    .map(community => ({
+      id: community.id, title: community.name,
+      description: 'Finish and publish this community’s page before creating its first event.',
+      route: managementRoute('community'), workspace: 'community', communityId: community.id,
+    }));
 }
 
 /** Every event choice uses that community's own role, never privileges from another. */
@@ -38,7 +50,7 @@ export function creationDestinations(kind: SceneCreationKind, access: CreatorAcc
       if (community.status === 'archived' || !isAdminTierRole(community.role)) continue;
       destinations.push({ id: community.id, title: community.name,
         description: community.status === 'draft' ? 'Continue setting up your community.' : 'Manage your community, its events and members.',
-        route: '/(tabs)/friends/manage/(tools)/today', workspace: 'community', communityId: community.id });
+        route: managementRoute(community.status === 'draft' ? 'community' : 'today'), workspace: 'community', communityId: community.id });
     }
   }
   return destinations;

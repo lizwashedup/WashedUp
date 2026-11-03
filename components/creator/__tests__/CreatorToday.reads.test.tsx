@@ -6,10 +6,11 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch = jest.fn(async () => ({}));
 let mockQueries: Record<string, any>;
+let mockCommunityStatus = 'active';
 jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]]}));
 jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null}));
 jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,isAdminTierRole:()=>true,creatorLandingRoute:()=>'/'}));
-jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table'})}));
+jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table',role:'leader',status:mockCommunityStatus})}));
 jest.mock('../../../lib/communityChat', () => ({}));
 jest.mock('../../../lib/supabase', () => ({supabase:{}}));
 jest.mock('../../../lib/ticketAttendees', () => ({countAttendees:()=>({sold:0,checkedIn:0})}));
@@ -22,10 +23,11 @@ jest.mock('../CreatorActionFill', () => ({CreatorActionFill:()=>null}));
 jest.mock('../../events/EventMediaImage', () => ({EventMediaImage:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
 import Screen from '../../../app/(creator)/today';
+import { router } from 'expo-router';
 let tree: ReactTestRenderer;
 const result=(data:unknown)=>({data,isFetchedAfterMount:true,isError:false,isLoading:false,isFetching:false,isRefetching:false,refetch:mockRefetch});
 beforeEach(()=>{
- jest.clearAllMocks();
+ jest.clearAllMocks(); mockCommunityStatus='active';
  mockQueries={
  'creator-access':result({hasLeaderGrant:true,ledCommunities:[{id:'community'}]}),
  'creator-members':result([{status:'active'}]),'creator-broadcasts':result([]),
@@ -54,4 +56,17 @@ it('does not show sales or RSVP totals after either attendance read fails',async
 });
 it('retains the confirmed empty and populated presentation when reads succeed',async()=>{
  const text=await render();expect(text).toContain('no join requests waiting');expect(text).toContain('1 member so far');expect(text).toContain('5 going');expect(text).not.toContain('unavailable');
+});
+it('replaces draft community event creation with its existing setup page',async()=>{
+ mockCommunityStatus='draft'; await render();
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Create event')).toHaveLength(0);
+ const setup=tree.root.findAll(n=>n.props.accessibilityLabel==='Continue setup'&&typeof n.props.onPress==='function')[0];
+ act(()=>setup.props.onPress());
+ expect(router.push).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/community');
+});
+it('retains active community event creation with its exact identity',async()=>{
+ await render();
+ const createEvent=tree.root.findAll(n=>n.props.accessibilityLabel==='Create event'&&typeof n.props.onPress==='function')[0];
+ act(()=>createEvent.props.onPress());
+ expect(router.push).toHaveBeenCalledWith('/creator/event-form?workspace=community&communityId=community');
 });

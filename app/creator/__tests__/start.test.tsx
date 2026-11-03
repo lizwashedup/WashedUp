@@ -57,6 +57,28 @@ it('clears a previous community selection before opening organization tools', ()
   expect(mockCommunity).toHaveBeenCalledWith(null);
   expect(mockPush).toHaveBeenCalledTimes(1);
 });
+it('continues an existing draft community instead of suggesting a duplicate setup', () => {
+  mockData.access = { ...mockEmpty, hasLeaderGrant: true, ledCommunities: [{ id: 'sunset', name: 'Sunset Club', role: 'leader', status: 'draft' }] }; mount();
+  expect(text()).toContain('Finish community setup');
+  expect(text()).not.toContain('Creating events requires creator approval.');
+  expect(action('Set up community')).toBeUndefined();
+  act(() => action('Sunset Club').props.onPress());
+  expect(mockWorkspace).toHaveBeenCalledWith('community');
+  expect(mockCommunity).toHaveBeenCalledWith('sunset');
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/community');
+});
+it('explains the admin step without giving an events-only collaborator setup access', () => {
+  mockData.access = { ...mockEmpty, hasLeaderGrant: true, ledCommunities: [{ id: 'sunset', name: 'Sunset Club', role: 'events', status: 'draft' }] }; mount();
+  expect(text()).toContain('A community admin needs to finish and publish');
+  expect(action('Sunset Club')).toBeUndefined();
+  expect(action('Set up community')).toBeUndefined();
+});
+it('still offers first-community setup when an approved creator has no community', () => {
+  mockData.access = { ...mockEmpty, hasLeaderGrant: true }; mount();
+  act(() => action('Set up community').props.onPress());
+  expect(mockWorkspace).toHaveBeenCalledWith('community');
+  expect(mockPush).toHaveBeenCalledWith('/creator/setup-community');
+});
 it('does not navigate through a callback retained after account or visit retirement', () => {
   mount(); const press = action('Apply').props.onPress;
   mockCurrent = false;

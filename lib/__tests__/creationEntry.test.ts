@@ -1,4 +1,4 @@
-import { creationDestinations, loadCreationEntry } from '../creationEntry';
+import { communitySetupDestinations, creationDestinations, loadCreationEntry } from '../creationEntry';
 import { getCreatorAccess, type CreatorAccess, type LedCommunity } from '../creatorMode';
 import { fetchMyGrants } from '../operatorApplications';
 
@@ -30,6 +30,13 @@ it('requires the actual creation grant for a new community while retaining allow
   const access = { ...empty, ledCommunities: [community('admin', 'admin'), community('care', 'member_care'), community('draft', 'leader', 'draft')] };
   expect(creationDestinations('community', access).map(item => item.id)).toEqual(['admin', 'draft']);
   expect(creationDestinations('community', { ...access, hasLeaderGrant: true })[0]).toMatchObject({ route: '/creator/setup-community' });
+});
+it('resumes only a draft’s own admin setup without borrowing another community’s role', () => {
+  const access = { ...empty, ledCommunities: [community('active-admin', 'leader'), community('draft-admin', 'admin', 'draft'), community('draft-events', 'events', 'draft'), community('archived', 'leader', 'archived')] };
+  expect(communitySetupDestinations(access)).toEqual([
+    expect.objectContaining({ id: 'draft-admin', communityId: 'draft-admin', workspace: 'community', route: '/(tabs)/friends/manage/(tools)/community' }),
+  ]);
+  expect(creationDestinations('community', access).find(item => item.id === 'draft-admin')?.route).toBe('/(tabs)/friends/manage/(tools)/community');
 });
 it('scopes both reads to the signed-in account', async () => {
   jest.mocked(getCreatorAccess).mockResolvedValue(empty);

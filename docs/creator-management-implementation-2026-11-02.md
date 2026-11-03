@@ -129,3 +129,40 @@ Before release, finish an authorized disposable draft save/reopen journey, narro
 No OTA, push, merge or native build was performed by this increment. Next product acceptance should ask a creator to find their named item and complete a daily task without instructions.
 
 The complete changed-file inventory for this navigation increment is [recorded here](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-navigation-files-2026-11-02.txt). The most substantial new files are `ManagementLayout.tsx`, `ManagementDirectoryScreen.tsx`, `OrganizationDailyActions.tsx`, `managementNavigation.ts`, and the nested Yours route wrappers. Other application changes primarily replace old route literals, remove duplicate mode navigation, or explain blocked creation.
+
+
+## November 2 follow-up: finish existing community setup
+
+The connected review exposed a second setup dead end: the event chooser could suggest starting a new community when an approved creator already had an unfinished one. Community home and Events also offered event creation for that draft, only to reject it in the form gate.
+
+This increment changes the navigation and explanation, not the publishing or access contract:
+
+- Event creation separates ready creator identities from **Finish community setup**. An admin continues the exact existing community's Settings page, retaining its ID. Starting a second community is no longer suggested as the way to finish the first one.
+- Choosing an existing draft from community creation also goes directly to its Settings page. Explicit new-community creation remains available through its existing grant.
+- Draft community home and Events show the same explanation and **Continue setup** action. Archived communities explain that new events are unavailable and link to **You manage**. Existing event lists, drafts and history remain reachable.
+- An events-only collaborator sees that a community admin must finish the page; the UI does not offer that collaborator admin settings. Roles are checked for each community, not borrowed from another membership.
+- Active community and organization event creation retain their existing routes and downstream access checks. The application explanation now distinguishes applying for a separate public creator identity from using a community already managed.
+- The existing main community chat now gives its legacy Back control an accessibility label and button role. This is not the larger main-chat visual parity redesign.
+
+### Evidence and limits
+
+**9 focused suites passed, 65 tests passed.** This run covers creation entry, exact identity selection, draft/admin/collaborator/archived cases, active community and organization event entry, existing templates, first-community setup, daily actions, the event creation gate and the main chat header. TypeScript and `git diff --check` passed. The chat-header suite emitted the existing Expo Go push-use warning; push registration was not validated. Earlier 39-suite navigation results remain recorded above and were not presented as a new full regression run.
+
+Full-app native checks used the same signed-in iPhone 17 Pro Max simulator and installed local development client:
+
+1. Named community → Main chat loaded its existing message history. Back returned to the same community management home. No message, reaction or preference was sent; normal read-state effects from opening a chat were not suppressed.
+2. The selected draft community home displayed **Continue setup** in place of Create event. The action opened that community's existing Settings page, where its draft status and explicit publication control remained visible. No publication was performed.
+3. Community Events showed the same setup explanation and retained its existing event drafts. The blocked New event shortcut was absent.
+4. The full event-creation entry showed the organization as a ready identity and Sunset LA Club separately under **Finish community setup**. Selecting Sunset opened that same community's Settings page, not a new-community form.
+
+Captures are [community home](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-community-setup.png>) and [community Events](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-draft-community-events.png>). A local Main chat capture is retained in the same folder for review; it contains existing conversation content. These observations apply to the selected record, not every community or account.
+
+The existing Android emulator was inventoried and started, then stopped without replacing its app or clearing its data. Its installed 1.0.7 (18) release app cannot load this source candidate; **Android candidate validation remains open**. No native build was created. The reusable local `run-connected-review.cjs` launcher is documented in the artifact folder. Metro was stopped, the original package entry restored, and its temporary entry file removed.
+
+No database migration, permission policy, audience restriction, rollout flag, membership or community identity changed. No event or community draft was saved by this follow-up. No OTA, push or merge was performed. Device Hub was released to the separately owned reliability review after these checks; its SE and iPhone 13 devices were not operated here.
+
+### Remaining acceptance work
+
+The next release gate is a complete disposable event draft save/reopen journey in an authorized test environment, then physical-iPhone and Android coverage, narrower creator roles, expired access, keyboard/large-text checks, and eligible/ineligible audience checks. The existing main-chat visual differences, broad community Settings composition and Event card design are still separate unfinished product work. This patch makes the current setup path truthful and reachable; it does not claim those larger screens are finished.
+
+This increment's changed-file inventory is [recorded here](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-setup-followup-files-2026-11-02.txt).

@@ -776,7 +776,7 @@ export default function CommunityThreadScreen() {
         </ChatOptionsButton>}
 
       /> : <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
           <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
         </TouchableOpacity>
         <TouchableOpacity

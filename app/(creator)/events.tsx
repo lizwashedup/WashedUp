@@ -1,4 +1,5 @@
 import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
 import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
 import {listCreatorEventTemplates,deleteCreatorEventTemplate,creatorTemplateRoute,type PageEventLibraryTemplate} from '../../lib/creatorPageEventTemplateLibrary';
@@ -104,6 +105,7 @@ export default function CreatorEventsScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
+  const canStartEvent = workspace === 'organization' || workspace === 'community' && community?.status === 'active';
 
   const eventsQuery = useQuery({
     queryKey: ['creator-events-tab', workspace, community?.id],
@@ -346,7 +348,7 @@ export default function CreatorEventsScreen() {
       case 'next':
         return next
           ? renderEventCard(next)
-          : <Text style={styles.empty}>{EMPTY_HINTS.next}</Text>;
+          : <Text style={styles.empty}>{canStartEvent ? EMPTY_HINTS.next : 'Scheduled events appear here. You can also check your saved drafts and past events.'}</Text>;
       case 'drafts':
         return drafts.length > 0
           ? drafts.map((e) => renderEventCard(e, { draft: true }))
@@ -414,9 +416,9 @@ export default function CreatorEventsScreen() {
 
         <Text style={styles.kicker}>Manage</Text>
         <Text style={styles.title}>Events</Text>
+        {workspace === 'community' && <CommunitySetupNotice community={community} onNavigate={route => router.push(route as never)} />}
 
-
-        <TouchableOpacity
+        {canStartEvent && <TouchableOpacity
           style={styles.postBtn}
           onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/(tabs)/friends/manage') as never)}
           accessibilityRole="button"
@@ -427,7 +429,7 @@ export default function CreatorEventsScreen() {
             <Plus size={16} color={Colors.white} strokeWidth={2.5} />
             <Text style={styles.postBtnText}>New event</Text>
           </View>
-        </TouchableOpacity>
+        </TouchableOpacity>}
 
         {/* Six labels cannot stay readable in one compressed phone-width
             row. Keep the underline-tab pattern and let the row scroll. */}

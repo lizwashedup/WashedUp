@@ -104,6 +104,9 @@ it('retains the original header and pinned event when the development redesign i
     expect(tree.root.findAllByType(ChatContextHeader)).toHaveLength(0);
     expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('everyone in Sunset Club LA');
     expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('up next');
+    expect(button('Back').props.accessibilityRole).toBe('button');
+    act(() => button('Back').props.onPress());
+    expect(mockBack).toHaveBeenCalledTimes(1);
     act(() => button('View upcoming event: Sunset volleyball').props.onPress());
     expect(mockPush).toHaveBeenCalledWith('/event/event-a');
   } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
