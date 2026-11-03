@@ -220,7 +220,7 @@ interface PlanDetail {
   creator_user_id: string;
   tickets_url: string | null;
   is_featured: boolean;
-  featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | null;
+  featured_type: 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null;
   explore_event_id: string | null;
   circle_id?: string | null;
   creator: {
@@ -380,7 +380,7 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
     creator_user_id: row.creator_user_id ?? null,
     tickets_url: row.tickets_url ?? null,
     is_featured: row.is_featured ?? false,
-    featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | null) ?? null,
+    featured_type: (row.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null) ?? null,
     explore_event_id: row.explore_event_id ?? null,
     circle_id: row.circle_id,
     member_count: row.member_count ?? 0,
@@ -637,7 +637,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   };
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [featuredToggle, setFeaturedToggle] = useState(false);
-  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party' | 'special_event'>('washedup_event');
+  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making'>('washedup_event');
   const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
   const [featuredSaving, setFeaturedSaving] = useState(false);
   // A missing or invalid upload uses the existing branded Plan artwork.
@@ -866,6 +866,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const isFeatured = plan?.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan?.featured_type === 'birthday_party';
   const isSpecialEvent = isFeatured && plan?.featured_type === 'special_event';
+  const isPlanInMaking = isFeatured && plan?.featured_type === 'plan_in_making';
   // Use actual member count when available — member_count can be out of sync
   const displayMemberCount = isCirclePlan ? (members.length > 0 ? members.length : plan?.member_count ?? 0) : members.length > 0 ? capDisplayCount(members.length, isFeatured) : capDisplayCount(plan?.member_count ?? 0, isFeatured);
   const totalCapacity = isFeatured
@@ -1382,7 +1383,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     ].filter(Boolean);
   const isWomenOnly = plan.gender_rule === 'women_only';
 
-  const groupSizeLabel = isFeatured ? (isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
+  const groupSizeLabel = isFeatured ? (isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'Birthday Party' : isSpecialEvent ? 'Special Event' : 'WashedUp Event') : totalCapacity <= 4 ? 'Small • intimate' : totalCapacity <= 6 ? 'Cozy' : 'Larger';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -1454,7 +1455,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       >
         {appearance ? <PlanDetailOverview fonts={fonts} plan={plan} visibleHandles={visibleHandles} mapCoords={mapCoords}
           date={formatFullDate(plan.start_time)} time={formatTime(plan.start_time)} audience={formatGenderLabel(plan.gender_rule)} ageLabel={ageLabel}
-          featuredLabel={isFeatured ? (isBirthdayParty ? 'Birthday party' : isSpecialEvent ? 'Special event' : 'WashedUp event') : null}
+          planInMaking={isPlanInMaking}
+          featuredLabel={isFeatured ? (isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'Birthday party' : isSpecialEvent ? 'Special event' : 'WashedUp event') : null}
           capacity={isClosedPlan ? terminalStatus === 'cancelled' ? 'Plan cancelled' : 'Plan ended' : !contextReady || !!planError || !membersQuery.isSuccess ? 'Checking availability…' : isMember ? 'You’re going' : isCirclePlan ? `${displayMemberCount} going` : isFeatured ? `${displayMemberCount} going` : spotsLeft === 0 ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
           capacityDetail={isClosedPlan ? undefined : !contextReady || !!planError || !membersQuery.isSuccess ? undefined : isMember ? `${displayMemberCount} going, including you` : isCirclePlan ? !contextReady ? 'Checking availability…' : circleViewerIsMember ? 'Circle members can join this plan.' : circleCtx?.circle_visibility === 'circle_only' ? 'For circle members' : `${circleCtx?.viewer_stranger_spots_left ?? 0} public ${circleCtx?.viewer_stranger_spots_left === 1 ? 'spot' : 'spots'} open` : isFeatured ? undefined : `Up to ${totalCapacity} people, including the creator`}
           circleLabel={isCirclePlan ? 'Made from a circle' : undefined}
@@ -1496,6 +1498,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 styles.featuredPill,
                 isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
                 isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
+                isPlanInMaking && { backgroundColor: Colors.planInMakingPurple },
               ]}
             >
               <Text
@@ -1503,9 +1506,10 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                   styles.featuredPillText,
                   isBirthdayParty && { color: Colors.birthdayPink },
                   isSpecialEvent && { color: Colors.specialEventCream },
+                  isPlanInMaking && { color: Colors.white },
                 ]}
               >
-                {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
+                {isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
               </Text>
             </View>
             {ageLabel ? <View style={styles.categoryTag}><Text accessibilityLabel={`Age range: ${ageLabel}`} style={styles.categoryTagText}>{ageLabel}</Text></View> : null}
@@ -2512,7 +2516,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                           setFeaturedCapacity(editOriginal?.is_featured ? (editOriginal.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
                         }
                       }}
-                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: appearance ? AfterglowColors.clay : featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
+                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.clay : featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
                       thumbColor={Colors.white}
                     />
                   </View>
@@ -2574,6 +2578,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                         >
                           special event
                         </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity accessibilityRole="button"
+                        style={[manageStyles.featuredTypePill, { backgroundColor: featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.white : Colors.inputBg }]}
+                        disabled={edit.isBusy || edit.unknown}
+                        accessibilityState={{ selected: featuredType === 'plan_in_making' }}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('plan_in_making'); }}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[manageStyles.featuredTypePillText, { color: featuredType === 'plan_in_making' ? Colors.white : appearance ? AfterglowColors.ink : Colors.tertiary }]}>Plan in the making</Text>
                       </TouchableOpacity>
                     </View>
                   )}

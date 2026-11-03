@@ -17,7 +17,7 @@ type Props = {
     primary_vibe: string | null; location_text: string | null; tickets_url: string | null;
     creator: { id: string; first_name_display: string | null; profile_photo_url: string | null; handle?: string | null } | null;
   };
-  date: string; time: string; audience: string | null; ageLabel?: string | null; featuredLabel: string | null;
+  date: string; time: string; audience: string | null; ageLabel?: string | null; featuredLabel: string | null; planInMaking?: boolean;
   capacity: string; capacityDetail?: string; circleLabel?: string; circleExplanation?: string;
   members: DetailPerson[]; memberCount: number; membersLoading: boolean; membersError: boolean;
   onRetryMembers: () => void; onProfile: (id: string) => void; onCalendar: () => void; onMap: () => void; onTickets: () => void;
@@ -46,7 +46,7 @@ export function PlanDetailOverview(p: Props) {
   return <View>
     {p.plan.image_url && failedImage !== p.plan.image_url ? <Image source={{ uri: p.plan.image_url }} style={s.hero} contentFit="cover" onError={() => setFailedImage(p.plan.image_url)} /> : null}
     <View style={s.tags}>
-      {[p.featuredLabel || p.plan.primary_vibe, p.audience].filter(Boolean).map((label, i) => <View key={`${label}-${i}`} style={s.tag}><Text style={s.tagText}>{label}</Text></View>)}
+      {[p.featuredLabel || p.plan.primary_vibe, p.audience].filter(Boolean).map((label, i) => <View key={`${label}-${i}`} style={[s.tag, i === 0 && p.planInMaking && { backgroundColor: Colors.planInMakingPurple }]}><Text style={[s.tagText, i === 0 && p.planInMaking && { color: Colors.white, textTransform: 'none' }]}>{label}</Text></View>)}
       {p.ageLabel ? <View style={s.tag}><Text accessibilityLabel={`Age range: ${p.ageLabel}`} style={s.tagText}>{p.ageLabel}</Text></View> : null}
       {p.happeningNow ? <View style={s.liveTag}><Text style={s.tagText}>Happening now</Text></View> : null}
     </View>

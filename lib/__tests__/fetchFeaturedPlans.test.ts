@@ -11,7 +11,7 @@ jest.mock('../supabase', () => ({ supabase: {
 } }));
 jest.mock('../fetchPlans', () => ({ fetchRealMemberCounts: jest.fn().mockResolvedValue({ picnic: 2 }) }));
 beforeEach(() => {
-  mockRpc.mockReset().mockResolvedValue({ data: ['picnic'], error: null });
+  mockRpc.mockReset().mockImplementation(name => ({ data: name === 'get_featured_eligible_ids' ? ['picnic'] : [], error: null }));
   mockRead.mockReset().mockImplementation(table => ({ data: table === 'events' ? [{
     id: 'picnic', title: 'Sunset picnic', creator_user_id: 'viewer', gender_rule: 'women_only',
     start_time: '2099-11-07T23:00:00Z', status: 'forming', is_featured: true,
@@ -35,4 +35,20 @@ it('does not read events when the eligibility RPC returns no IDs', async () => {
   mockRpc.mockResolvedValue({ data: [], error: null });
   expect(await fetchFeaturedPlans('viewer')).toEqual([]);
   expect(mockRead).not.toHaveBeenCalled();
+});
+
+it('loads outsider-visible attendee photos through the public roster instead of the member-only table', async () => {
+  mockRpc.mockImplementation(name => ({ data: name === 'get_featured_eligible_ids' ? ['picnic'] : [
+    { profile_photo_url: 'https://example.test/member.jpg' }, { profile_photo_url: null },
+  ], error: null }));
+  const [plan] = await fetchFeaturedPlans('viewer');
+  expect(mockRpc).toHaveBeenCalledWith('get_event_members_public', { p_event_id: 'picnic' });
+  expect(mockRead).not.toHaveBeenCalledWith('event_members');
+  expect(plan.attendees).toEqual([{profile_photo_url:'https://example.test/member.jpg'},{profile_photo_url:null}]);
+  expect(plan.member_count).toBe(2);
+});
+it('does not turn a failed public roster read into an empty featured group', async () => {
+  mockRpc.mockImplementation(name => name === 'get_featured_eligible_ids'
+    ? {data:['picnic'],error:null} : {data:null,error:{message:'Roster unavailable'}});
+  await expect(fetchFeaturedPlans('viewer')).rejects.toThrow('Roster unavailable');
 });

@@ -9,7 +9,7 @@ type DraftRules = {
   ageChanged: boolean; ages: {min:number|null;max:number|null};
   circlePlan: boolean; groupChanged: boolean; maxInvites: number;
   officialCreator: boolean; featuredChanged: boolean; featured: boolean;
-  featuredType: 'washedup_event'|'birthday_party'|'special_event'; featuredCapacity: number;
+  featuredType: 'washedup_event'|'birthday_party'|'special_event'|'plan_in_making'; featuredCapacity: number;
 };
 /** Only send rules the creator actually edited. Title-only changes must not
  * erase saved custom bounds, rewrite a DST-fold instant, or change Circle caps. */

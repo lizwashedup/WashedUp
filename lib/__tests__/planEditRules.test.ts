@@ -15,3 +15,8 @@ it('does not let nonofficial edit inputs rewrite Featured state',()=>{expect(bui
 it.each([[null,null,'All ages'],[21,null,'Ages 21+'],[null,35,'Ages up to 35'],[25,35,'Ages 25–35']] as const)('labels saved %s / %s bounds without claiming All ages', (min,max,label)=>expect(savedAgeLabel(min,max)).toBe(label));
 
 it('preserves the original fold instant and seconds when the same displayed time is confirmed',()=>{expect(buildPlanEditRulePatch(original,{...draft,timeChanged:true,proposedStart:new Date('2026-11-01T08:30:00Z')})).toEqual({});});
+
+it('preserves the planning category and creator-inclusive 50-person capacity when explicitly saved',()=>{
+  expect(buildPlanEditRulePatch(original,{...draft,featured:true,featuredChanged:true,featuredType:'plan_in_making',featuredCapacity:50})).toEqual({is_featured:true,featured_type:'plan_in_making',max_invites:49});
+  expect(buildPlanEditRulePatch(original,{...draft,featured:true,featuredType:'plan_in_making',featuredCapacity:50})).toEqual({});
+});

@@ -210,3 +210,21 @@ it.each(['mixed', null, undefined])('does not invent a women-only restriction fo
   expect(text(tree)).not.toContain('Women Only');
   expect(outer(tree).props.accessibilityLabel).not.toContain('women only');
 });
+
+it.each([undefined, appearance])('shows the purple planning pill and keeps a 50-person plan joinable (%p)', appearance => {
+  const tree = mount({ appearance, plan: { ...plan, featured_type: 'plan_in_making', max_invites: 49, member_count: 12 } });
+  const label = tree.root.findAllByType(Text).find(n => n.props.children === 'Plan in the making')!;
+  expect(label).toBeDefined();
+  expect(StyleSheet.flatten(label.props.style).color).toBe(Colors.white);
+  expect(StyleSheet.flatten(label.parent!.props.style).backgroundColor).toBe(Colors.planInMakingPurple);
+  expect(text(tree)).not.toContain('washedup event');
+  expect(outer(tree).props.accessibilityLabel).toContain('Plan in the making');
+  act(() => outer(tree).props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/plan/featured-1');
+});
+
+it.each([undefined, appearance])('shows the verified count even when attendee photos are unavailable (%p)', appearance => {
+  const tree = mount({ appearance, plan: { ...plan, member_count: 12, max_invites: 49, attendees: [] } });
+  expect(text(tree)).toContain('12 going');
+  expect(text(tree)).not.toContain('0 going');
+});
