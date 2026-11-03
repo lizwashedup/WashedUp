@@ -2198,7 +2198,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
-        <KeyboardAvoidingView style={manageStyles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={manageStyles.sheet}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title}>Manage Plan</Text>
@@ -2645,7 +2645,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <Text numberOfLines={1} style={manageStyles.cancelBtnText}>Cancel plan</Text>
               </TouchableOpacity>
             </ScrollView>
-            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>              {edit.unknown && <View style={manageStyles.recovery}>
+            <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              {edit.unknown && <View style={manageStyles.recovery}>
                 <Text style={manageStyles.label}>Check your changes</Text>
                 <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
               </View>}
@@ -3585,6 +3586,9 @@ const legacyManageStyles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    // Shrink inside the space left above the keyboard. Without this, the
+    // bottom-aligned sheet keeps its full height and pushes the title offscreen.
+    flexShrink: 1,
     backgroundColor: Colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
