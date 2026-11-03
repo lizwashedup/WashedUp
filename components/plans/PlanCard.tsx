@@ -68,7 +68,7 @@ interface PlanCardProps {
     max_invites: number;
     member_count: number;
     is_featured?: boolean;
-    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
+    featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null;
     allow_duplicate?: boolean;
     // Circle-aware plans (optional; absent on normal plans). When circle_id is
     // set the card carries the "from a circle" badge / "private to circle" tag,
@@ -240,6 +240,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
   const isFeatured = plan.is_featured ?? false;
   const isBirthdayParty = isFeatured && plan.featured_type === 'birthday_party';
   const isSpecialEvent = isFeatured && plan.featured_type === 'special_event';
+  const isPlanInMaking = isFeatured && plan.featured_type === 'plan_in_making';
   const circleCard = circlePlanCardState(plan);
   const usesOrdinaryCapacity = circleCard.kind === 'ordinary';
   const going = Math.max(1, usesOrdinaryCapacity ? capDisplayCount(plan.member_count, isFeatured) : plan.member_count);
@@ -648,6 +649,7 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
                 styles.featuredPill,
                 isBirthdayParty && { backgroundColor: Colors.birthdayPinkTint15 },
                 isSpecialEvent && { backgroundColor: Colors.specialEventMaroon },
+                isPlanInMaking && { backgroundColor: Colors.planInMakingPurple },
               ]}
             >
               <Text
@@ -655,9 +657,10 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
                   styles.featuredPillText,
                   isBirthdayParty && { color: Colors.birthdayPink },
                   isSpecialEvent && { color: Colors.specialEventCream },
+                  isPlanInMaking && { color: Colors.white },
                 ]}
               >
-                {isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
+                {isPlanInMaking ? 'Plan in the making' : isBirthdayParty ? 'birthday party' : isSpecialEvent ? 'special event' : 'washedup event'}
               </Text>
             </View>
           ) : (

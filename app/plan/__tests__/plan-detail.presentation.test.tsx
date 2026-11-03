@@ -780,3 +780,12 @@ it('retains membership gating for the plan photo lookup', async () => {
   expect(mockQueries.get('planAlbumExists/plan-1/viewer/1').enabled).toBe(false);
   expect(button('View photos')).toBeUndefined();
 });
+
+it.each([true, false])('shows the purple planning category on detail without changing admission (%s)', async appearance => {
+  mockMemberAppearance = appearance;
+  mockPlan = { ...mockPlan, is_featured: true, featured_type: 'plan_in_making', max_invites: 49, member_count: 12, status: 'forming' };
+  await mount();
+  expect(allText()).toContain('Plan in the making');
+  expect(mockJoinOptions.ready).toBe(true);
+  if (appearance) expect(tree.root.findByType(PlanDetailOverview).props).toMatchObject({ planInMaking: true, featuredLabel: 'Plan in the making' });
+});

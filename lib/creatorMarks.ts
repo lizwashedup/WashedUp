@@ -48,7 +48,7 @@ export interface PlanCardPlan extends Pick<Plan, 'circle_id' | 'circle_visibilit
   max_invites: number;
   member_count: number;
   is_featured?: boolean;
-  featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | null;
+  featured_type?: 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null;
   allow_duplicate?: boolean;
   creator: {
     id: string;

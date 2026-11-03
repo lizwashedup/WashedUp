@@ -34,37 +34,36 @@ export async function fetchFeaturedPlans(userId: string): Promise<FeaturedPlan[]
   const creatorIds = [...new Set(events.map((e: any) => e.creator_user_id).filter(Boolean))];
   const eventIds = events.map((e: any) => e.id);
 
-  const [{ data: profiles }, { data: members }, realCounts] = await Promise.all([
+  const [{ data: profiles }, realCounts] = await Promise.all([
     creatorIds.length > 0
       ? supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
       : Promise.resolve({ data: [] as any[] }),
-    supabase.from('event_members').select('event_id, user_id, status').in('event_id', eventIds).eq('status', 'joined'),
     fetchRealMemberCounts(eventIds),
   ]);
 
   const profileMap: Record<string, any> = {};
   (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
-  // Gather member user IDs per event for avatar fetch
-  const membersByEvent: Record<string, string[]> = {};
-  (members ?? []).forEach((m: any) => {
-    if (!membersByEvent[m.event_id]) membersByEvent[m.event_id] = [];
-    membersByEvent[m.event_id].push(m.user_id);
-  });
-
-  const allMemberIds = [...new Set((members ?? []).map((m: any) => m.user_id))];
-  const { data: memberProfiles } = allMemberIds.length > 0
-    ? await supabase.from('profiles_public').select('id, profile_photo_url').in('id', allMemberIds)
-    : { data: [] as any[] };
-
-  const memberPhotoMap: Record<string, string | null> = {};
-  (memberProfiles ?? []).forEach((p: any) => { memberPhotoMap[p.id] = p.profile_photo_url ?? null; });
+  // Direct event_members reads are member-only under RLS. Featured viewers
+  // usually have not joined: use the same privacy-filtered public roster as
+  // plan details, so a real group never looks empty to an eligible outsider.
+  const attendeesByEvent: Record<string, { profile_photo_url: string | null }[]> = {};
+  // Bound concurrent roster reads even if the featured list grows.
+  for (let offset = 0; offset < eventIds.length; offset += 8) {
+    await Promise.all(eventIds.slice(offset, offset + 8).map(async eventId => {
+      const { data: members, error: memberError } = await supabase
+        .rpc('get_event_members_public', { p_event_id: eventId });
+      if (memberError) throw new Error(memberError.message ?? 'Could not load featured members');
+      attendeesByEvent[eventId] = (members ?? []).map((member: { profile_photo_url?: string | null }) => ({
+        profile_photo_url: member.profile_photo_url ?? null,
+      }));
+    }));
+  }
 
   return events
     .filter((e: any) => !isPlanPast(e.start_time, e.end_time))
     .map((e: any) => {
     const hp = profileMap[e.creator_user_id] ?? null;
-    const eventMembers = membersByEvent[e.id] ?? [];
     return {
       id: e.id,
       title: e.title,
@@ -82,15 +81,13 @@ export async function fetchFeaturedPlans(userId: string): Promise<FeaturedPlan[]
       member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0),
       slug: e.slug ?? null,
       is_featured: true,
-      featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | null) ?? null,
+      featured_type: (e.featured_type as 'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making' | null) ?? null,
       creator: {
         id: e.creator_user_id,
         first_name_display: hp?.first_name_display ?? 'Creator',
         profile_photo_url: hp?.profile_photo_url ?? null,
       },
-      attendees: eventMembers.map((uid: string) => ({
-        profile_photo_url: memberPhotoMap[uid] ?? null,
-      })),
+      attendees: attendeesByEvent[e.id] ?? [],
     } as FeaturedPlan;
   });
 }

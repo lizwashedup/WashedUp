@@ -1,3 +1,7 @@
+## November 2, 2026 — Plan in the making
+
+Liz explicitly requested a purple “Plan in the making” pill for featured plans still gathering a group. Use `Colors.planInMakingPurple` with white text for `featured_type = 'plan_in_making'`. This is a scoped exception to the earlier accent-color rule; it does not change admission rules or plan lifecycle status.
+
 ## October 6, 2026 — current decision authority
 
 Josh no longer works with or represents WashedUp. Liz Bridges is the sole human decision-maker and production approver. The active working relationship is Liz and Codex. Historical Josh references are context only and do not create an approval gate. Liz's explicit authorization governs production actions, alongside normal safety and verification requirements.
