@@ -158,6 +158,29 @@ it('retains image selection/crop/format and carries only prepared photo bytes in
   expect(mockManipulate).toHaveBeenCalledWith('selected.jpg', [{ resize: { width: 800, height: 800 } }], { compress: 0.85, format: 'jpeg', base64: true });
   await press(byLabel('Save changes')); expect(mockSave.mock.calls[0][0].photoBase64).toBe('jpeg');
 });
+it('opens the library with denied broad photo access and preserves draft edits', async () => {
+  mockPermission.mockResolvedValue({ status: 'denied' });
+  await mount(); await edit(); change('Display name', 'Kept draft');
+  await press(byLabel('Change photo'));
+  act(() => alert().buttons[1].onPress()); await flush(); await dismissPhotoChooser();
+  expect(mockPermission).not.toHaveBeenCalled();
+  expect(mockLibrary).toHaveBeenCalledWith({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
+  expect(field('Display name').props.value).toBe('Kept draft');
+  await press(byLabel('Save changes'));
+  expect(mockSave.mock.calls[0][0]).toMatchObject({ name: 'Kept draft', photoBase64: 'jpeg' });
+});
+it('keeps the existing profile and draft after cancelling the native library picker', async () => {
+  mockPermission.mockResolvedValue({ status: 'denied' });
+  mockLibrary.mockResolvedValueOnce({ canceled: true, assets: null });
+  await mount(); await edit(); change('Display name', 'Kept draft');
+  await press(byLabel('Change photo'));
+  act(() => alert().buttons[1].onPress()); await flush(); await dismissPhotoChooser();
+  expect(mockPermission).not.toHaveBeenCalled(); expect(mockManipulate).not.toHaveBeenCalled();
+  expect(field('Display name').props.value).toBe('Kept draft');
+  expect(tree!.root.findByType(SettingsPortrait).props.uri).toBe('photo.jpg');
+  expect(byLabel('Change photo').props.disabled).toBe(false);
+  expect(mockSave).not.toHaveBeenCalled();
+});
 it('does not launch a native picker when permission arrives after closing the edit', async () => {
   const pending = deferred<any>(); mockPermission.mockReturnValue(pending.promise); await mount(); await edit(); await press(byLabel('Change photo'));
   act(() => alert().buttons[0].onPress()); await flush(); await dismissPhotoChooser(); await press(byLabel('Back from profile editing')); pending.resolve({ status: 'granted' }); await flush(); expect(mockCamera).not.toHaveBeenCalled();
@@ -250,7 +273,7 @@ it.each([0, 1])('waits for native chooser dismissal before permission and picker
   await mount(); await edit(); await press(byLabel('Change photo'));
   const chooser = alert(); act(() => { chooser.buttons[index].onPress(); chooser.onClose(); }); await flush();
   expect(mockPermission).not.toHaveBeenCalled(); expect(mockLibrary).not.toHaveBeenCalled(); expect(mockCamera).not.toHaveBeenCalled();
-  await dismissPhotoChooser(); expect(mockPermission).toHaveBeenCalledTimes(1);
+  await dismissPhotoChooser(); expect(mockPermission).toHaveBeenCalledTimes(index === 0 ? 1 : 0);
   expect(index === 0 ? mockCamera : mockLibrary).toHaveBeenCalledTimes(1);
 });
 it('locks repeated chooser taps and dispatches one selected destination after repeated dismissals', async () => {

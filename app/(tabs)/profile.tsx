@@ -241,9 +241,13 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     const { scope, kind } = attempt;
     const current = () => scope.isCurrent() && photoLock.current === attempt;
     try {
-      const permission = kind === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!current()) return;
-      if (permission.status !== 'granted') { setAlertInfo({ title: 'Permission needed', message: kind === 'camera' ? 'Go to Settings and allow camera access.' : 'Go to Settings and allow photo access.' }); return; }
+      if (kind === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!current()) return;
+        if (permission.status !== 'granted') { setAlertInfo({ title: 'Permission needed', message: 'Go to Settings and allow camera access.' }); return; }
+      }
+      // The system library picker grants access only to the selected photo;
+      // broad Photos permission is not required, even after an earlier denial.
       const result = kind === 'camera' ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 1 }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 });
       if (!current() || result.canceled || !result.assets?.[0]) return;
       const manipulated = await ImageManipulator.manipulateAsync(result.assets[0].uri, [{ resize: { width: 800, height: 800 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true });
