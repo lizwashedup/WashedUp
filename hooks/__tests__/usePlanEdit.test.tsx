@@ -49,8 +49,8 @@ it('reconciles a lost receipt by reading the original patch without writing agai
 it('keeps unknown state through closing/reopening and an inconclusive read',async()=>{mockWrite.mockResolvedValue({data:null,error:null});mockRead.mockResolvedValue(success({title:'Old'}));const h=mount();await act(async()=>h.current.save({title:'New title'}));act(()=>{h.current.close();h.current.begin();});await act(async()=>h.current.check());expect(h.current.unknown).toBe(true);expect(h.current.error).toContain('still can’t confirm');expect(h.onSaved).not.toHaveBeenCalled();});
 it('does not close or report into a new visit after an old save completes',async()=>{const response=deferred();mockWrite.mockReturnValue(response.promise);const h=mount();let work!:Promise<void>;await act(async()=>{work=h.current.save({title:'New title'});});h.blur();h.focus();await act(async()=>{response.resolve(success());await work;});expect(h.onSaved).not.toHaveBeenCalled();act(()=>{expect(h.current.begin()).toBe(true);});});
 it('retains uncertainty from a save that lost its receipt after blur',async()=>{const response=deferred();mockWrite.mockReturnValue(response.promise);const h=mount();let work!:Promise<void>;await act(async()=>{work=h.current.save({title:'New title'});});h.blur();h.focus();await act(async()=>{response.resolve({data:null,error:null});await work;});act(()=>{h.current.begin();});expect(h.current.canChange()).toBe(false);await act(async()=>h.current.check());expect(h.onSaved).toHaveBeenCalledTimes(1);});
-it('locks from photo permission through upload and only publishes the uploaded URL',async()=>{const permission=deferred();mockPermission.mockReturnValueOnce(permission.promise);const h=mount();let work!:Promise<void>;act(()=>{work=h.current.pickPhoto();void h.current.pickPhoto();void h.current.save({title:'New title'});expect(h.current.close()).toBe(false);});expect(mockPermission).toHaveBeenCalledTimes(1);expect(mockWrite).not.toHaveBeenCalled();expect(h.onPhoto).not.toHaveBeenCalled();await act(async()=>{permission.resolve({status:'granted'});await work;});expect(mockUpload).toHaveBeenCalledWith('event-images',expect.stringMatching(/^alice\/\d+\.jpg$/),'photo');expect(h.onPhoto).toHaveBeenCalledTimes(1);expect(h.onPhoto).toHaveBeenCalledWith('https://example.test/new.jpg');});
-it.each(['permission','picker','prepare','upload'])('preserves the old photo when %s fails',async(stage)=>{({permission:mockPermission,picker:mockPicker,prepare:mockPrepare,upload:mockUpload}[stage]!).mockRejectedValueOnce(new Error('Failed'));const h=mount();await act(async()=>h.current.pickPhoto());expect(h.onPhoto).not.toHaveBeenCalled();expect(h.current.error).toBeTruthy();expect(h.current.isBusy).toBe(false);});
+it('locks from the photo picker through upload and only publishes the uploaded URL',async()=>{const picker=deferred();mockPicker.mockReturnValueOnce(picker.promise);const h=mount();let work!:Promise<void>;act(()=>{work=h.current.pickPhoto();void h.current.pickPhoto();void h.current.save({title:'New title'});expect(h.current.close()).toBe(false);});expect(mockPicker).toHaveBeenCalledTimes(1);expect(mockPermission).not.toHaveBeenCalled();expect(mockWrite).not.toHaveBeenCalled();expect(h.onPhoto).not.toHaveBeenCalled();await act(async()=>{picker.resolve({canceled:false,assets:[{uri:'file://chosen'}]});await work;});expect(mockUpload).toHaveBeenCalledWith('event-images',expect.stringMatching(/^alice\/\d+\.jpg$/),'photo');expect(h.onPhoto).toHaveBeenCalledTimes(1);expect(h.onPhoto).toHaveBeenCalledWith('https://example.test/new.jpg');});
+it.each(['picker','prepare','upload'])('preserves the old photo when %s fails',async(stage)=>{({picker:mockPicker,prepare:mockPrepare,upload:mockUpload}[stage]!).mockRejectedValueOnce(new Error('Failed'));const h=mount();await act(async()=>h.current.pickPhoto());expect(h.onPhoto).not.toHaveBeenCalled();expect(h.current.error).toBeTruthy();expect(h.current.isBusy).toBe(false);});
 it('treats cancellation as unchanged with no error',async()=>{mockPicker.mockResolvedValue({canceled:true});const h=mount();await act(async()=>h.current.pickPhoto());expect(h.onPhoto).not.toHaveBeenCalled();expect(h.current.error).toBeNull();expect(mockUpload).not.toHaveBeenCalled();});
 it('does not upload if authentication changes during refresh',async()=>{mockAuth.mockResolvedValueOnce({data:{user:{id:'alice'}},error:null}).mockResolvedValueOnce({data:{user:{id:'bob'}},error:null});const h=mount();await act(async()=>h.current.pickPhoto());expect(mockUpload).not.toHaveBeenCalled();expect(h.onPhoto).not.toHaveBeenCalled();});
 it('ignores a retired picker and never starts preparation',async()=>{const picker=deferred();mockPicker.mockReturnValueOnce(picker.promise);const h=mount();let work!:Promise<void>;await act(async()=>{work=h.current.pickPhoto();});h.retire();await act(async()=>{picker.resolve({canceled:false,assets:[{uri:'file://late'}]});await work;});expect(mockPrepare).not.toHaveBeenCalled();expect(mockUpload).not.toHaveBeenCalled();});
@@ -79,6 +79,53 @@ it.each(['owner', 'refresh', 'owner-after-refresh', 'upload'] as const)('release
     expect(mockUpload).toHaveBeenCalledTimes(writes); expect(f.onPhoto).toHaveBeenCalledTimes(1);
     expect(mockWrite).not.toHaveBeenCalled();
   } finally { jest.useRealTimers(); }
+});
+
+describe('photo preparation recovery', () => {
+  const flush = async () => { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('releases stalled preparation and ignores its late result while a retry is pending', async () => {
+    const old = deferred(), retry = deferred();
+    mockPrepare.mockReturnValueOnce(old.promise).mockReturnValueOnce(retry.promise);
+    const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush();
+    await act(async () => { jest.advanceTimersByTime(30_000); });
+    expect(h.current.isBusy).toBe(false);
+    expect(h.current.error).toContain('Couldn’t prepare this photo');
+    expect(h.onPhoto).not.toHaveBeenCalled(); expect(mockAuth).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled(); expect(mockWrite).not.toHaveBeenCalled();
+    act(() => { expect(h.current.close()).toBe(true); expect(h.current.begin()).toBe(true); void h.current.pickPhoto(); }); await flush();
+    await act(async () => { old.resolve({ base64: 'old-photo' }); }); await flush();
+    expect(h.current.isBusy).toBe(true); expect(h.current.close()).toBe(false);
+    expect(mockUpload).not.toHaveBeenCalled(); expect(h.onPhoto).not.toHaveBeenCalled();
+    await act(async () => { retry.resolve({ base64: 'retry-photo' }); }); await flush();
+    expect(h.current.isBusy).toBe(false); expect(h.current.error).toBeNull();
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(mockUpload.mock.calls[0][2]).toBe('retry-photo');
+    expect(h.onPhoto).toHaveBeenCalledTimes(1); expect(mockWrite).not.toHaveBeenCalled();
+  });
+
+  it('releases an off-screen preparation timeout without applying results to a reopened editor', async () => {
+    const old = deferred(); mockPrepare.mockReturnValueOnce(old.promise); const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush(); h.blur();
+    await act(async () => { jest.advanceTimersByTime(30_000); }); h.focus();
+    act(() => { expect(h.current.begin()).toBe(true); });
+    expect(h.current.error).toBeNull(); expect(h.current.isBusy).toBe(false);
+    await act(async () => { old.resolve({ base64: 'retired-photo' }); }); await flush();
+    expect(mockAuth).not.toHaveBeenCalled(); expect(mockUpload).not.toHaveBeenCalled();
+    expect(h.onPhoto).not.toHaveBeenCalled(); expect(h.current.canChange()).toBe(true);
+  });
+
+  it('does not time out time spent choosing a photo', async () => {
+    const picker = deferred(); mockPicker.mockReturnValueOnce(picker.promise); const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(h.current.isPhotoPending).toBe(true); expect(mockPrepare).not.toHaveBeenCalled();
+    await act(async () => { picker.resolve({ canceled: true }); }); await flush();
+    expect(h.current.isBusy).toBe(false); expect(h.current.error).toBeNull();
+  });
 });
 
 describe('stalled plan saves and reconciliation', () => {
@@ -146,4 +193,14 @@ describe('stalled plan saves and reconciliation', () => {
     await act(async () => { write.resolve(success()); });
     expect(h.onSaved).not.toHaveBeenCalled(); expect(h.current.unknown).toBe(true);
   });
+});
+
+it('chooses a plan photo even when broad library access is denied', async () => {
+  mockPermission.mockResolvedValue({status:'denied',canAskAgain:false});
+  const h=mount();
+  await act(async()=>h.current.pickPhoto());
+  expect(mockPermission).not.toHaveBeenCalled();
+  expect(mockPicker).toHaveBeenCalledWith(expect.objectContaining({mediaTypes:['images'],allowsEditing:true,aspect:[16,10]}));
+  expect(h.current.error).toBeNull();
+  expect(h.onPhoto).toHaveBeenCalledWith('https://example.test/new.jpg');
 });

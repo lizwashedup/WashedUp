@@ -1,4 +1,4 @@
-import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { RequestDeadlineError, requestWithDeadline } from '../lib/requestWithDeadline';
 import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -71,13 +71,12 @@ export function usePlanEdit(options: Options) {
     pending.current = 'photo'; setOperation('photo'); setError(null);
     let stage: 'choose' | 'prepare' | 'upload' = 'choose';
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!isCurrent()) return;
-      if (permission.status !== 'granted') { setError('Allow photo access in Settings to choose a photo.'); return; }
+      // The system picker grants access to the selected photo without requiring
+      // broad library permission, including when that permission was denied.
       const selection = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1 });
       if (!isCurrent() || selection.canceled || !selection.assets?.[0]) return;
       stage = 'prepare';
-      const image = await ImageManipulator.manipulateAsync(selection.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      const image = await requestWithDeadline(ImageManipulator.manipulateAsync(selection.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true }), 30_000);
       if (!isCurrent()) return;
       if (!image.base64) throw new Error('Missing prepared photo');
       stage = 'upload';
@@ -92,8 +91,10 @@ export function usePlanEdit(options: Options) {
       if (refreshed.error || refreshed.data.user?.id !== viewerId) throw new Error('Account changed');
       const url = await requestWithDeadline(uploadBase64ToStorage('event-images', `${viewerId}/${Date.now()}.jpg`, image.base64), 30_000);
       if (isCurrent()) latest.current.onPhoto(url);
-    } catch {
-      if (isCurrent()) setError(stage === 'choose' ? 'Couldn’t open photos. Try again.' : stage === 'prepare' ? PHOTO_FORMAT_ERROR_MESSAGE : 'Couldn’t upload this photo. Try again.');
+    } catch (cause) {
+      if (isCurrent()) setError(stage === 'choose' ? 'Couldn’t open photos. Try again.' : stage === 'prepare'
+        ? cause instanceof RequestDeadlineError ? 'Couldn’t prepare this photo. Your current photo is unchanged. Try again.' : PHOTO_FORMAT_ERROR_MESSAGE
+        : 'Couldn’t upload this photo. Try again.');
     } finally { finish(); }
   };
   const save = async (draft: Patch) => {
