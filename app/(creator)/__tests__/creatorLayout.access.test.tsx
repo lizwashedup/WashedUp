@@ -8,8 +8,8 @@ jest.mock('expo-router',()=>{const element=require('react')['createElement'];con
 jest.mock('../../../lib/creatorMode',()=>({...jest.requireActual('../../../lib/creatorMode'),getCreatorAccess:(...args:any[])=>mockRead(...args)}));
 jest.mock('../../../lib/supabase',()=>({supabase:{}}));
 jest.mock('../../../lib/viewAs',()=>({useViewAsEventHost:()=>false,setViewAsEventHost:jest.fn(),isViewingAsEventHost:()=>false}));
-jest.mock('../../../lib/selectedCommunity',()=>({hydrateSelectedCommunity:async()=>{}}));
-jest.mock('../../../lib/workspaceContext',()=>({hydrateWorkspace:async()=>{},useWorkspace:(access:any)=>access?.hasLeaderGrant?'community':access?.hasEventHostGrant?'organization':null}));
+jest.mock('../../../lib/selectedCommunity',()=>({hydrateSelectedCommunity:async()=>{},useLedCommunity:(access:any)=>access?.ledCommunities?.[0]??null}));
+jest.mock('../../../lib/workspaceContext',()=>({hydrateWorkspace:async()=>{},useWorkspace:(access:any)=>(access?.hasLeaderGrant||access?.ledCommunities?.length)?'community':access?.hasEventHostGrant?'organization':null}));
 jest.mock('../../../constants/FeatureFlags',()=>({COMMUNITIES_ENABLED:true,CREATOR_PAGES_ENABLED:true}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
 import CreatorLayout from '../_layout';
@@ -74,4 +74,12 @@ it('bounds a stalled fresh access read and offers recovery without a denial redi
   await act(async()=>{jest.advanceTimersByTime(10);});
   expect(mockRedirect).not.toHaveBeenCalled();expect(tree.root.findAll(p=>p.props.accessibilityLabel==='Retry creator access').length).toBeGreaterThan(0);
  }finally{jest.useRealTimers();}
+});
+
+
+it('uses the selected community’s narrow role instead of a stronger role in another community',async()=>{
+ mockRead.mockResolvedValue({...denied,ledCommunities:[{id:'finance',role:'finance',status:'active'},{id:'owner',role:'leader',status:'active'}]});
+ act(()=>{tree=create(<QueryClientProvider client={client}><CreatorLayout/></QueryClientProvider>);});await flush();
+ const screens=tree.root.findAll(n=>n.props.name&&n.props.options);const options=(name:string)=>screens.find(n=>n.props.name===name)!.props.options;
+ expect(options('today').href).toBeNull();expect(options('community').href).toBeNull();expect(options('events').href).toBeNull();expect(options('menu').href).toBeUndefined();
 });

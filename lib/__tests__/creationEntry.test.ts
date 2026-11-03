@@ -22,8 +22,8 @@ it('checks event permission separately for every community', () => {
 it('sets a specific identity for organization and community events', () => {
   const choices = creationDestinations('event', { ...empty, hasEventHostGrant: true, ledCommunities: [community('club', 'admin')] });
   expect(choices).toEqual([
-    expect.objectContaining({ workspace: 'organization', route: '/(creator)/events' }),
-    expect.objectContaining({ workspace: 'community', communityId: 'club', route: '/(creator)/events' }),
+    expect.objectContaining({ workspace: 'organization', route: '/creator/event-form?workspace=organization' }),
+    expect.objectContaining({ workspace: 'community', communityId: 'club', route: '/creator/event-form?workspace=community&communityId=club' }),
   ]);
 });
 it('requires the actual creation grant for a new community while retaining allowed management', () => {

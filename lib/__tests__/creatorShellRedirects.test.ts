@@ -104,7 +104,7 @@ describe('creatorLandingRoute (redirect destination once access is granted)', ()
     [access({ ledCommunities: led('leader') }), '/(creator)/today'],
     [access({ ledCommunities: led('member_care') }), '/(creator)/members'],
     [access({ ledCommunities: led('finance') }), '/(creator)/menu'],
-    [access({ ledCommunities: led('events') }), '/(creator)/organizer-home'],
+    [access({ ledCommunities: led('events') }), '/(creator)/events'],
     [access({ hasEventHostGrant: true }), '/(creator)/organizer-home'],
   ])('lands at %s', (a, expected) => {
     expect(creatorLandingRoute(a)).toBe(expected);
@@ -134,7 +134,7 @@ describe('(creator)/_layout.tsx static contract (source assertions, extends crea
     expect(communitySource).toContain("router.push('/creator/member-invites'");
     expect(communitySource).toContain("router.push('/creator/payouts'");
     expect(communitySource).toContain("router.push('/creator/help')");
-    expect(communitySource).toContain("router.replace('/(tabs)/profile')");
+    expect(communitySource).toContain("router.replace('/(tabs)/friends')");
   });
 
   it('never registers organizer-broadcast as a visible tab, for any shell kind (regression: the "phantom sixth tab" bug)', () => {

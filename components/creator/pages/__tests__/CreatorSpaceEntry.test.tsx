@@ -1,35 +1,66 @@
 import React from 'react';
-import {Dimensions,Text} from 'react-native';
-import {act,create,type ReactTestRenderer} from 'react-test-renderer';
-const mockPush=jest.fn(),mockRead=jest.fn(),mockRefresh=jest.fn();let mockActive=true,mockUser='alice';
+import { Text, Dimensions } from 'react-native';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+const mockPush=jest.fn(),mockPrepare=jest.fn(),mockRefresh=jest.fn(),mockApplicationsRefresh=jest.fn();
+let mockActive=true,mockUser='alice',mockSpaces:any,mockApplications:any;
 const mockScope={userId:'alice',isCurrent:()=>mockActive};
 jest.mock('expo-router',()=>({router:{push:(...a:unknown[])=>mockPush(...a)}}));
-jest.mock('../../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{viewerId:mockUser,error:null}})}));
-jest.mock('../../../../hooks/useCreatorPageRead',()=>({useCreatorPageRead:(...a:unknown[])=>mockRead(...a)}));
+jest.mock('../../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{viewerId:mockUser,error:null,isLoading:false}})}));
+jest.mock('../../../../hooks/useCreatorPageRead',()=>({useCreatorPageRead:(_scope:any,read:any)=>read===require('../../../../lib/creatorManagement').loadManagedApplications?mockApplications:mockSpaces}));
 jest.mock('../../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:require('../../../../constants/Typography').AfterglowFallbackFonts})}));
-jest.mock('../../../../lib/creatorSpaceEntry',()=>({loadCreatorSpaceEntry:jest.fn()}));
-jest.mock('expo-linear-gradient',()=>({LinearGradient:require('react-native').View}));
-jest.mock('lucide-react-native',()=>({ChevronRight:()=>null,Mail:()=>null,Users:()=>null}));
+jest.mock('../../../../lib/creatorManagement',()=>({loadManagedSpaces:jest.fn(),loadManagedApplications:jest.fn(),managedSpaceStatus:()=> 'Community · Manage',prepareCreatorSpace:(...a:unknown[])=>mockPrepare(...a)}));
+jest.mock('lucide-react-native',()=>({ChevronRight:()=>null}));
 import {CreatorSpaceEntry} from '../CreatorSpaceEntry';
 let tree:ReactTestRenderer;
-const data={title:'Your community',subtitle:'Sunday Table',route:'/creator/page?id=one',invitations:[]};
+const community={id:'sunset',kind:'community',name:'Sunset Club',route:'/(creator)/today',legacy:{workspace:'community',communityId:'sunset',status:'active'}};
+const data={spaces:[community],invitations:[]};
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
-function mount(){act(()=>{tree=create(<CreatorSpaceEntry userId={mockUser}/>);});}
-beforeEach(()=>{jest.clearAllMocks();mockActive=true;mockUser='alice';mockRefresh.mockResolvedValue(undefined);mockRead.mockReturnValue({data,loading:false,error:null,refresh:mockRefresh});});
+function mount(expanded=false){act(()=>{tree=create(<CreatorSpaceEntry userId={mockUser} expanded={expanded}/>);});}
+beforeEach(()=>{jest.clearAllMocks();mockActive=true;mockUser='alice';mockSpaces={data,loading:false,error:null,refresh:mockRefresh};mockApplications={data:[],loading:false,error:null,refresh:mockApplicationsRefresh};mockRefresh.mockResolvedValue(data);mockApplicationsRefresh.mockResolvedValue([]);});
 afterEach(()=>act(()=>tree?.unmount()));
-it('opens the selected existing workspace and rejects retired callbacks',()=>{mount();const press=button('Your community: Sunday Table').props.onPress;act(()=>press());expect(mockPush).toHaveBeenCalledWith('/creator/page?id=one');mockPush.mockClear();mockActive=false;act(()=>press());expect(mockPush).not.toHaveBeenCalled();});
-it('provides an exact pending invitation entry alongside the community',()=>{mockRead.mockReturnValue({data:{...data,invitations:[{pageId:'team',invitationId:'invite'}]}});mount();act(()=>button('Review invitation').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page-team?id=team&invitationId=invite');expect(button('Your community: Sunday Table')).toBeDefined();});
-it('uses the chooser during loading rather than a speculative workspace',()=>{mockRead.mockReturnValue({loading:true});mount();act(()=>button('Creator space').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/pages');});
-it('does not show stale personalized details after a read failure and offers recovery',()=>{mockRead.mockReturnValue({data,error:'Offline',refresh:mockRefresh});mount();expect(button('Your community: Sunday Table')).toBeUndefined();act(()=>button('Try again to load creator space').props.onPress());expect(mockRefresh).toHaveBeenCalledTimes(1);act(()=>button('Creator space').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/pages');});
-it('does not borrow a previous account’s scope while the observer catches up',()=>{mockUser='bob';mockRead.mockReturnValue({loading:true});mount();expect(mockRead.mock.calls[0][0]).toBeNull();expect(button('Creator space').props.disabled).toBe(true);act(()=>button('Creator space').props.onPress());expect(mockPush).not.toHaveBeenCalled();});
+it('opens the named community only after refreshing its exact access and selecting its context',async()=>{
+ mount();await act(async()=>button('Manage Sunset Club').props.onPress());expect(mockRefresh).toHaveBeenCalledTimes(1);expect(mockPrepare).toHaveBeenCalledWith(community,mockScope);expect(mockPush).toHaveBeenCalledWith('/(creator)/today');
+});
+it('does not open a removed or revoked community from a stale row',async()=>{
+ mount();mockRefresh.mockResolvedValue({spaces:[],invitations:[]});await act(async()=>button('Manage Sunset Club').props.onPress());expect(mockPrepare).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
+});
+it('rejects repeated taps and a result arriving after the visit ends',async()=>{
+ let resolve!:(v:any)=>void;mockRefresh.mockImplementation(()=>new Promise(done=>resolve=done));mount();const press=button('Manage Sunset Club').props.onPress;
+ act(()=>{press();press();});expect(mockRefresh).toHaveBeenCalledTimes(1);mockActive=false;await act(async()=>resolve(data));expect(mockPush).not.toHaveBeenCalled();
+});
+it('opens the current pending invitation without inventing another destination',async()=>{
+ const invitation={pageId:'team',invitationId:'invite',pageName:'Sunset Studio'};mockSpaces.data={...data,invitations:[invitation]};mockRefresh.mockResolvedValue(mockSpaces.data);mount();
+ await act(async()=>button('Review invitation to Sunset Studio').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page-team?id=team&invitationId=invite');
+});
+it('keeps application status reachable when management reads fail',async()=>{
+ mockSpaces={...mockSpaces,error:'offline'};mockApplications.data=[{id:'app',track:'community_leader',status:'in_review'}];mockApplicationsRefresh.mockResolvedValue(mockApplications.data);mount();
+ expect(button('Manage Sunset Club')).toBeUndefined();await act(async()=>button('View community application').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/apply');
+});
+it('never navigates from a speculative loading state or a previous account',()=>{
+ mockSpaces={...mockSpaces,data:undefined,loading:true};mount();expect(button('Manage Sunset Club')).toBeUndefined();mockUser='bob';act(()=>tree.update(<CreatorSpaceEntry userId={mockUser}/>));expect(tree.toJSON()).toBeNull();
+});
+it('keeps Yours compact and provides all named entries in the expanded directory',()=>{
+ mockSpaces.data={spaces:[community,{...community,id:'two',name:'Second Club'},{...community,id:'three',name:'Third Club'}],invitations:[]};mount();
+ expect(button('Manage Third Club')).toBeUndefined();act(()=>button('See everything you manage').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/manage');
+ act(()=>tree.update(<CreatorSpaceEntry userId={mockUser} expanded/>));expect(button('Manage Third Club')).toBeDefined();
+});
+it('hides the compact section for ordinary members and explains the expanded empty state',()=>{
+ mockSpaces.data={spaces:[],invitations:[]};mount();expect(tree.toJSON()).toBeNull();
+ act(()=>tree.update(<CreatorSpaceEntry userId={mockUser} expanded/>));expect(tree.root.findAllByType(Text).some(n=>String(n.props.children).includes('Start a community or create an event.'))).toBe(true);
+});
 
-it('remeasures Creator space title and subtitle without replacing its route, entry or read scope',()=>{
- const previous=Dimensions.get('window');act(()=>Dimensions.set({window:{...previous,width:390,fontScale:1}}));
+
+it('does not finish an old entry when Yours has already changed accounts',async()=>{
+ let finish!:(v:any)=>void;mockRefresh.mockImplementation(()=>new Promise(resolve=>finish=resolve));mount();act(()=>button('Manage Sunset Club').props.onPress());
+ act(()=>tree.update(<CreatorSpaceEntry userId="bob"/>));await act(async()=>finish(data));expect(mockPush).not.toHaveBeenCalled();expect(mockPrepare).not.toHaveBeenCalled();
+});
+
+
+it('leaves room for Yours content on a small phone with larger text',()=>{
+ const previous=Dimensions.get('window');
  try {
-  mount();const entry=tree.root.findByType(CreatorSpaceEntry);const open=button('Your community: Sunday Table');const reads=mockRead.mock.calls.length;
-  const leaf=(value:string)=>tree.root.findAllByType(Text).find(n=>n.props.children===value)!;
-  let title=leaf('Your community'),subtitle=leaf('Sunday Table');
-  for(const fontScale of [1.35,1]) {act(()=>Dimensions.set({window:{...previous,width:390,fontScale}}));expect(leaf('Your community')).not.toBe(title);expect(leaf('Sunday Table')).not.toBe(subtitle);expect(tree.root.findByType(CreatorSpaceEntry)).toBe(entry);expect(button('Your community: Sunday Table')).toBe(open);expect(mockRead).toHaveBeenCalledTimes(reads);title=leaf('Your community');subtitle=leaf('Sunday Table');}
-  act(()=>open.props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page?id=one');
+  act(()=>Dimensions.set({window:{...previous,height:568,width:320,fontScale:1.35}}));
+  mockSpaces.data={spaces:[community,{...community,id:'two',name:'Second Club'}],invitations:[]};mount();
+  expect(button('Manage Sunset Club')).toBeDefined();expect(button('Manage Second Club')).toBeUndefined();expect(button('See everything you manage')).toBeDefined();
  } finally {act(()=>Dimensions.set({window:previous}));}
 });

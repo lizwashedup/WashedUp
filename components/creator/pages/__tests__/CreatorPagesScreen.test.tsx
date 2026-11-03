@@ -31,7 +31,7 @@ it('opens the same saved page and local draft without showing a duplicate editor
 });
 it('creates only one draft for rapid taps and uses its returned ID',async()=>{
  await mount();const press=button('Create a page').props.onPress;
- await act(async()=>{press();press();});expect(mockStart).toHaveBeenCalledTimes(1);expect(mockStart).toHaveBeenCalledWith(mockScope,expect.any(Function));expect(mockPush).toHaveBeenCalledWith('/creator/page-edit?id=new-draft');
+ await act(async()=>{press();press();});expect(mockStart).toHaveBeenCalledTimes(1);expect(mockStart).toHaveBeenCalledWith(mockScope,expect.any(Function),'community');expect(mockPush).toHaveBeenCalledWith('/creator/page-edit?id=new-draft');
 });
 it('does not navigate from retired page rows or a late draft receipt',async()=>{
  let resolve:(value:{id:string})=>void=()=>{};mockStart.mockImplementation(()=>new Promise(r=>{resolve=r;}));await mount();
@@ -81,7 +81,7 @@ it('existing live community remains reachable even when new-page reads fail',asy
 });
 it('approved organizer selects its independent workspace without a new page',async()=>{
  mockSaved.mockResolvedValue([]);mockLocal.mockResolvedValue([]);mockLegacy.mockResolvedValue([legacy({id:'legacy-organizer-approval',name:'Your events',kind:'organization',route:'/(creator)/organizer-home',legacy:{workspace:'organization',status:'approved'}})]);await mount();
- act(()=>button('Manage Your events').props.onPress());expect(mockWorkspace).toHaveBeenCalledWith('organization');expect(mockSelect).not.toHaveBeenCalled();expect(mockPush).toHaveBeenCalledWith('/(creator)/organizer-home');
+ act(()=>button('Manage Your events').props.onPress());expect(mockWorkspace).toHaveBeenCalledWith('organization');expect(mockSelect).toHaveBeenCalledWith(null);expect(mockPush).toHaveBeenCalledWith('/(creator)/organizer-home');
 });
 it('does not duplicate an existing community that has a new page identity',async()=>{
  mockLegacy.mockResolvedValue([legacy({id:'saved',name:'Sunday Table'})]);await mount();
@@ -121,4 +121,15 @@ it('distinguishes same-named saved and local pages by actual kind and truthful v
  const labels=['Manage Shared name, Community · Private page','Manage Shared name, Organization · Published','Continue Shared name, Community · Check saved status','Continue Shared name, Organization · Draft on this device'];
  labels.forEach(label=>expect(button(label)).toBeDefined());labels.forEach(label=>act(()=>button(label).props.onPress()));
  expect(mockPush.mock.calls.map(c=>c[0])).toEqual(['/creator/page?id=community','/creator/page?id=organization','/creator/page-edit?id=local-community','/creator/page-edit?id=local-org']);
+});
+
+
+it.each([['community','community','Start a community'],['event','organization','Set up creator page']] as const)('retains the %s creation choice when reserving a new draft',async(creationKind,pageKind,label)=>{
+ await act(async()=>{tree=create(<CreatorPagesScreen creationKind={creationKind}/>);});
+ expect(mockStart).not.toHaveBeenCalled();await act(async()=>button(label).props.onPress());
+ expect(mockStart).toHaveBeenCalledWith(mockScope,expect.any(Function),pageKind);
+});
+it('takes an event creator to the selected published page’s Events list',async()=>{
+ mockSaved.mockResolvedValue([{id:'published',page_kind:'community',page_data:{name:'Sunset Club'},published_data:{name:'Sunset Club'}}]);
+ await act(async()=>{tree=create(<CreatorPagesScreen creationKind="event"/>);});act(()=>button('Manage Sunset Club').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page-events?id=published');
 });

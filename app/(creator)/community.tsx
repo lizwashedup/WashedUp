@@ -398,7 +398,7 @@ export default function CreatorCommunityScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.hubRow}
-              onPress={() => router.replace('/(tabs)/profile')}
+              onPress={() => router.replace('/(tabs)/friends')}
               accessibilityRole="button"
               accessibilityLabel="Back to Yours"
             >

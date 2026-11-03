@@ -1,3 +1,6 @@
+import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
+import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { CommunityDailyActions } from '../../components/creator/CommunityDailyActions';
 import { ScaledText as Text } from '../../components/ScaledText';
 import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
@@ -22,6 +25,7 @@ import {
   getBroadcasts,
   getCreatorEvents,
   isLeaderAccess,
+  isAdminTierRole,
   creatorLandingRoute,
 } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
@@ -111,6 +115,7 @@ export default function CreatorTodayScreen() {
   // today is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.2). The layout already hides the tab; this covers the
   // landing route, stale pushes, and deep links.
+  if (access && community && !isAdminTierRole(community.role)) return <Redirect href={creatorLandingRoute({ ...access, ledCommunities: [community], hasLeaderGrant: false, hasEventHostGrant: false })} />;
   if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   // stage 2 entry state: an approved leader who has not started their
@@ -122,7 +127,8 @@ export default function CreatorTodayScreen() {
         <CreatorScreenHeader title="Community overview" />
         <ScrollView contentContainerStyle={styles.content}>
           {/* LIZ COPY */}
-          <Text style={styles.kicker}>creator mode</Text>
+          <BackToYoursButton />
+        <Text style={styles.kicker}>creator mode</Text>
           {/* LIZ COPY */}
           <Text style={styles.title}>you're in.</Text>
           {/* LIZ COPY */}
@@ -161,6 +167,7 @@ export default function CreatorTodayScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetchMembers} tintColor={Colors.terracotta} />}
       >
+        <BackToYoursButton />
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{community ? community.name : 'today'}</Text>
         <WorkspaceSwitcher access={access} />
@@ -173,7 +180,7 @@ export default function CreatorTodayScreen() {
         <View style={styles.quickActions}>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionPrimary]}
-            onPress={() => router.push('/creator/event-form')}
+            onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/creator/manage') as never)}
             accessibilityRole="button"
             accessibilityLabel="Create event"
             activeOpacity={0.85}
@@ -205,6 +212,8 @@ export default function CreatorTodayScreen() {
             <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>invite</Text>
           </TouchableOpacity>
         </View>
+
+        {community && <CommunityDailyActions communityId={community.id} />}
 
         {/* Unknown reads must not appear as a zero or empty community. */}
         {membersQuery.isError || membersQuery.isLoading ? (
@@ -286,15 +295,15 @@ export default function CreatorTodayScreen() {
           <TouchableOpacity
             accessibilityRole="button"
             style={styles.card}
-            onPress={() => router.push(`/community-topic/${rooms[0].id}` as never)}
+            onPress={() => router.push(`/community/${community.id}` as never)}
             activeOpacity={0.8}
           >
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.cardTitle}>
-                {rooms.length === 1 ? rooms[0].name : `${rooms.length} chat spaces open`}
+                All community chats
               </Text>
               <Text style={styles.cardMeta}>
-                the chat spaces members join. tap to open{rooms.length > 1 ? ' the first one' : ''}.
+                Browse your community’s conversations and optional groups.
               </Text>
             </View>
             <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />

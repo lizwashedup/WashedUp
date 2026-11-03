@@ -1,3 +1,5 @@
+import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
+import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * Organizer/producer home (CTO scope item 06; design spec item 04
@@ -143,6 +145,7 @@ export default function OrganizerHomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* LIZ COPY */}
+        <BackToYoursButton />
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>{producerName}</Text>
         <WorkspaceSwitcher access={access} />
@@ -252,7 +255,7 @@ export default function OrganizerHomeScreen() {
           // LIZ COPY: invitation, never a bare "nothing yet" (matches events.tsx's own empty hint)
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>nothing on the calendar yet. put one on and it lives here.</Text>
-            <TouchableOpacity accessibilityRole="button" style={styles.emptyBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
+            <TouchableOpacity accessibilityRole="button" style={styles.emptyBtn} onPress={() => router.push((newCreatorEventRoute('organization')) as never)} activeOpacity={0.85}>
               <CreatorActionFill />
               <View style={styles.actionContent}>
                 <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />
@@ -367,7 +370,7 @@ export default function OrganizerHomeScreen() {
             it is about the event already up, this is the next action once
             you've read all of that, not a distraction ahead of it */}
         {nextEvent && (
-          <TouchableOpacity accessibilityRole="button" style={styles.postBtn} onPress={() => router.push('/creator/event-form')} activeOpacity={0.85}>
+          <TouchableOpacity accessibilityRole="button" style={styles.postBtn} onPress={() => router.push((newCreatorEventRoute('organization')) as never)} activeOpacity={0.85}>
             <CreatorActionFill />
             <View style={styles.actionContent}>
               <Plus size={16} color={EventAction.onPrimary} strokeWidth={2.5} />

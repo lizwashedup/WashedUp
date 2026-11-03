@@ -138,3 +138,11 @@ it('preserves the exact original uncertain submission even if new classification
  mockSubmit.mockResolvedValueOnce({id:'original'});await submitPageEditing(record,scope);
  expect(mockSubmit.mock.calls[0][0].submissionId).toBe('original');expect(mockSequence).toBe(0);
 });
+
+
+it('retains the intended organization kind without reusing a community reservation',async()=>{
+ const community=await startPageEditor(scope);const organization=await startPageEditor(scope,undefined,'organization');
+ expect(community.kind).toBe('community');expect(organization.kind).toBe('organization');expect(organization.id).not.toBe(community.id);
+ expect((await readPageEditor(organization.id,scope))?.kind).toBe('organization');
+ expect((await startPageEditor(scope,undefined,'organization')).id).toBe(organization.id);
+});

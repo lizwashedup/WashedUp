@@ -47,7 +47,7 @@ it('retains existing community identity and uses its guarded event workspace', (
   act(() => action('Sunset Club').props.onPress());
   expect(mockWorkspace).toHaveBeenCalledWith('community');
   expect(mockCommunity).toHaveBeenCalledWith('sunset');
-  expect(mockPush).toHaveBeenCalledWith('/(creator)/events');
+  expect(mockPush).toHaveBeenCalledWith('/creator/event-form?workspace=community&communityId=sunset');
 });
 it('clears a previous community selection before opening organization tools', () => {
   mockData.access = { ...mockEmpty, hasEventHostGrant: true }; mount();
@@ -72,6 +72,6 @@ it('keeps the enabled page workflow available without creating a page as a side 
   mockPages = true; mount('community');
   expect(action('Apply')).toBeUndefined();
   expect(mockPush).not.toHaveBeenCalled();
-  act(() => action('Creator space').props.onPress());
-  expect(mockPush).toHaveBeenCalledWith('/creator/pages');
+  act(() => action('Continue setup').props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/creator/pages?create=community');
 });

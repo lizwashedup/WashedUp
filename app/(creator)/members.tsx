@@ -1,3 +1,4 @@
+import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 /**
  * Creator mode: members. The join approval loop (approve / decline pending
  * requests) plus the active member directory with remove. Leader powers are
@@ -188,7 +189,8 @@ export default function CreatorMembersScreen() {
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
-          <Text style={styles.title}>members</Text>
+          <BackToYoursButton />
+          <Text style={styles.title}>Members</Text>
           <CommunitySwitcher access={access} />
 
           {CO_CREATOR_INVITES_ENABLED && (

@@ -121,7 +121,7 @@ export function creatorShellKind(a: CreatorAccess | undefined | null): CreatorSh
  */
 export function creatorLandingRoute(
   a: CreatorAccess | undefined | null,
-): '/(creator)/today' | '/(creator)/organizer-home' | '/(creator)/members' | '/(creator)/menu' {
+): '/(creator)/today' | '/(creator)/organizer-home' | '/(creator)/members' | '/(creator)/menu' | '/(creator)/events' {
   switch (creatorShellKind(a)) {
     case 'full':
       return '/(creator)/today';
@@ -130,6 +130,7 @@ export function creatorLandingRoute(
     case 'finance':
       return '/(creator)/menu';
     case 'events':
+      return '/(creator)/events';
     case 'organizer':
     default:
       return '/(creator)/organizer-home';

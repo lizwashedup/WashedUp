@@ -26,7 +26,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { COMMUNITIES_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import { hasCreatorAccess, creatorShellKind } from '../../lib/creatorMode';
-import { hydrateSelectedCommunity } from '../../lib/selectedCommunity';
+import { hydrateSelectedCommunity, useLedCommunity } from '../../lib/selectedCommunity';
 import { hydrateWorkspace, useWorkspace } from '../../lib/workspaceContext';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 
@@ -36,6 +36,7 @@ export default function CreatorLayout() {
   const viewingAsEventHost = useViewAsEventHost();
   const { data: access, isLoading, isError, refetch, isFetching } = useCreatorAccessRead();
   const workspace = useWorkspace(access);
+  const selectedCommunity = useLedCommunity(access);
 
   // Restore the persisted community selection and product-level workspace
   // (master plan §5.1 A4) the moment the creator shell mounts -- once per
@@ -83,9 +84,10 @@ export default function CreatorLayout() {
   // A creator can hold both independent approvals. The persisted workspace
   // choice decides which product shell is active instead of always forcing a
   // Community creator into Community and making Organization unreachable.
-  const shellKind = workspace === 'organization' ? 'organizer' : creatorShellKind(access);
+  const selectedAccess = access && selectedCommunity ? { ...access, ledCommunities: [selectedCommunity], hasLeaderGrant: false, hasEventHostGrant: false } : access;
+  const shellKind = workspace === 'organization' ? 'organizer' : creatorShellKind(selectedAccess);
   const showToday = shellKind === 'full';
-  const showOrganizerHome = shellKind === 'organizer' || shellKind === 'events';
+  const showOrganizerHome = shellKind === 'organizer';
   const showEvents = shellKind === 'full' || shellKind === 'organizer' || shellKind === 'events';
   const showCommunity = shellKind === 'full';
   // Build 35 final navigation removes the old global Members and Menu tabs

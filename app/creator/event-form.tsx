@@ -1,3 +1,5 @@
+import { LegacyEventCreateGate } from '../../components/creator/LegacyEventCreateGate';
+import { prepareLegacyEventCreate, type LegacyEventCreateContext } from '../../lib/legacyEventCreate';
 import {getPageEventSaveState} from '../../lib/creatorPageEventSave';
 import {RequestDeadlineError,requestWithDeadline} from '../../lib/requestWithDeadline';
 import { eventCategories } from '../../lib/eventCategories';
@@ -68,7 +70,7 @@ import { OFFER_TYPE_OPTIONS, isOfferTypeSellableToday, isOfferType, type OfferTy
 import { runPaidTicketSetupHandoff } from '../../lib/paidTicketFlow';
 import {
   announceEventToMembers as existingAnnounceEventToMembers,
-  createOperatorEvent,
+  createOperatorEvent as existingCreateOperatorEvent,
   EVENT_CATEGORIES,
   getEventTemplate,
   getOperatorEvent,
@@ -111,7 +113,13 @@ function parseDateString(s: string): CalendarDay | null {
 }
 
 export default function EventFormRoute() {
-  const { pageId, id, team, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ pageId?: string; id?: string; team?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
+  const { workspace: creationWorkspace, communityId: creationCommunityId, pageId, id, team, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ workspace?: string; communityId?: string; pageId?: string; id?: string; team?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
+  if (creationWorkspace !== undefined || creationCommunityId !== undefined) {
+    if (id !== undefined || pageId !== undefined || team !== undefined || duplicateFrom !== undefined || templateId !== undefined) return <Redirect href="/creator/manage" />;
+    return <LegacyEventCreateGate workspace={creationWorkspace} communityId={creationCommunityId}>
+      {(context, scope) => <EventFormScreen creationContext={context} creationScope={scope} />}
+    </LegacyEventCreateGate>;
+  }
   if (pageId !== undefined || team !== undefined) {
     const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
     if (!CREATOR_PAGES_ENABLED || !uuid(pageId) || !uuid(id) || (team !== undefined && team !== '1')) {
@@ -130,26 +138,34 @@ export default function EventFormRoute() {
   return <EventFormScreen />;
 }
 
-function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: CreatorPageEventContext; pageScope?: CreatorPageScope; pageEvent?: OperatorEventRow }) {
+function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, creationScope }: { pageContext?: CreatorPageEventContext; pageScope?: CreatorPageScope; pageEvent?: OperatorEventRow; creationContext?: LegacyEventCreateContext; creationScope?: CreatorPageScope }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => eventFormStyles(fonts), [fonts]);
   const appearance = useMemo(() => ({ fonts, sunset: true }), [fonts]);
   // A page context comes only from the authorized saved-page/event gate, never route text.
-  const assertPageVisit = () => { if (pageScope && !pageScope.isCurrent()) throw new CreatorPageScopeExpired(); };
+  const operationScope = pageScope ?? creationScope;
+  const assertPageVisit = () => { if (operationScope && !operationScope.isCurrent()) throw new CreatorPageScopeExpired(); };
   const withPageScope = async <T,>(action: () => Promise<T>, readOnly = false): Promise<T> => {
     assertPageVisit();
     if (pageScope && (publicationUncertain.current || !pageSave.canWrite() || !pageStatus.canWrite() || !pageTemplate.canEdit()) && !readOnly) throw new Error('Check the saved event status before continuing.');
-    if (pageScope) {
+    if (operationScope) {
       const { data: { user }, error } = await supabase.auth.getUser();
       assertPageVisit();
       if (error) throw error;
-      if (user?.id !== pageScope.userId) throw new CreatorPageScopeExpired();
-      if (!readOnly && (!pageSave.canWrite() || !pageStatus.canWrite() || !pageTemplate.canEdit())) throw new Error('Check the complete event save before continuing.');
+      if (user?.id !== operationScope.userId) throw new CreatorPageScopeExpired();
+      if (pageScope && !readOnly && (!pageSave.canWrite() || !pageStatus.canWrite() || !pageTemplate.canEdit())) throw new Error('Check the complete event save before continuing.');
     }
     const result = await action();
     assertPageVisit();
     return result;
   };
+  const createOperatorEvent: typeof existingCreateOperatorEvent = (...args) => withPageScope(async () => {
+    if (creationContext && creationScope) {
+      const selected = await prepareLegacyEventCreate(creationContext, creationScope);
+      if (args[1] !== (selected.community?.id ?? null)) throw new Error('The event creator changed. Open the event again from Yours.');
+    }
+    return creationScope ? existingCreateOperatorEvent(args[0], args[1], args[2], creationScope) : existingCreateOperatorEvent(...args);
+  });
   const updateOperatorEvent: typeof updateExistingOperatorEvent = (...args) => withPageScope(() => updateExistingOperatorEvent(...args));
   const setOperatorEventCoords: typeof existingSetOperatorEventCoords = (...args) => withPageScope(() => existingSetOperatorEventCoords(...args));
   const setEventOfferType: typeof existingSetEventOfferType = (...args) => withPageScope(() => existingSetEventOfferType(...args));
@@ -238,12 +254,13 @@ function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: 
   const [ticketPrice, setTicketPrice] = useState('');
   const [publicName, setPublicName] = useState('');
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = useLedCommunity(access);
+  const selectedCommunity = useLedCommunity(access);
+  const community = creationContext ? creationContext.community : selectedCommunity;
   const workspace = useWorkspace(access);
   // New events follow the selected authorized workspace. Saved/template
   // ownership and an explicit selection still take precedence.
   const [chosenCommunity, setFromCommunity] = useState<boolean | null>(null);
-  const fromCommunity = chosenCommunity ?? workspace !== 'organization';
+  const fromCommunity = creationContext ? creationContext.workspace === 'community' : chosenCommunity ?? workspace !== 'organization';
   const selectedCategories=eventCategories({categories}, (pageContext ? pageContext.kind==='community' : fromCommunity));
   const category=selectedCategories[0]??'';
   const [pinToChat, setPinToChat] = useState(true);
@@ -860,7 +877,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: 
       }
       hapticSuccess();
       afterSave();
-      leaveEditor();
+      if (creationContext) router.replace('/(creator)/events?section=drafts'); else leaveEditor();
     } catch (e) {
       showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
@@ -1788,9 +1805,10 @@ function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: 
             <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} placeholder="a brand or venue name" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
             </View>
 
-            <Text style={styles.sectionHeader}>who puts it on</Text>
+            <Text style={styles.sectionHeader}>Created by</Text>
             <View style={styles.sectionCard}>
-            {!editing && !community && (
+            {creationContext && <Text style={styles.fieldLabel}>{creationContext.community?.name ?? 'Your organization'}</Text>}
+            {!editing && !creationContext && !community && (
               <>
                 <Text style={styles.fieldLabel}>whose event is this</Text>
                 <View style={styles.chipWrap}>
@@ -1800,7 +1818,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent }: { pageContext?: 
                 </View>
               </>
             )}
-            {!editing && community && (
+            {!editing && !creationContext && community && (
               <>
                 <Text style={styles.fieldLabel}>whose event is this</Text>
                 <View style={styles.chipWrap}>

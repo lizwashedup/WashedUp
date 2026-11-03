@@ -1,3 +1,5 @@
+import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
+import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
 import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
 import {listCreatorEventTemplates,deleteCreatorEventTemplate,creatorTemplateRoute,type PageEventLibraryTemplate} from '../../lib/creatorPageEventTemplateLibrary';
@@ -22,7 +24,7 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Plus, X, ArrowUpRight, FileText, Ticket, Users, ScanLine, Wallet, RotateCcw } from 'lucide-react-native';
@@ -99,7 +101,9 @@ export default function CreatorEventsScreen() {
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [segment, setSegment] = useState<Segment>('attention');
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const [segment, setSegment] = useState<Segment>(section === 'drafts' ? 'drafts' : 'attention');
+  useFocusEffect(useCallback(() => { if (section === 'drafts') setSegment('drafts'); }, [section]));
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
@@ -410,6 +414,7 @@ export default function CreatorEventsScreen() {
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
       >
         {/* LIZ COPY */}
+        <BackToYoursButton />
         <Text style={styles.kicker}>creator mode</Text>
         <Text style={styles.title}>Events</Text>
         <WorkspaceSwitcher access={access} stayOnEvents />
@@ -417,7 +422,7 @@ export default function CreatorEventsScreen() {
 
         <TouchableOpacity
           style={styles.postBtn}
-          onPress={() => router.push('/creator/event-form')}
+          onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/creator/manage') as never)}
           accessibilityRole="button"
           accessibilityLabel="New event"
         >

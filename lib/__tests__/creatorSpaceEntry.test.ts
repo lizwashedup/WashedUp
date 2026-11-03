@@ -59,7 +59,7 @@ it('deduplicates a community already represented by its new page identity',async
  expect(await loadCreatorSpaceEntry(scope)).toMatchObject({spaces:[expect.objectContaining({route:'/creator/page?id=old-community'})]});
  expect((await loadCreatorSpaceEntry(scope)).spaces).toHaveLength(1);
 });
-it.each([['events','/(creator)/organizer-home'],['member_care','/(creator)/members'],['finance','/(creator)/menu']])('routes a %s collaborator by this community tier',async(role,route)=>{
+it.each([['events','/(creator)/events'],['member_care','/(creator)/members'],['finance','/(creator)/menu']])('routes a %s collaborator by this community tier',async(role,route)=>{
  mockLegacy.mockResolvedValue(legacyAccess({hasLeaderGrant:true,ledCommunities:[led({role})]}));
  expect(await loadLegacyCreatorSpaces(scope)).toEqual([expect.objectContaining({route})]);
 });

@@ -58,8 +58,8 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
         {copy(destination.description)}
       </View>)}
       {CREATOR_PAGES_ENABLED ? <View style={styles.card}>
-        {copy(kind === 'event' ? 'Open your creator space to use another community or organization, or set one up.' : 'Open your creator space to create or continue a community page.')}
-        <PageAction compact primary singleLine title="Creator space" onPress={() => go('/creator/pages')} />
+        {copy(kind === 'event' ? 'Choose another community or organization, or set up your public creator identity.' : 'Continue a community draft or start setting up your new community.')}
+        <PageAction compact primary singleLine title={kind === 'community' ? 'Continue setup' : 'Choose creator'} onPress={() => go('/creator/pages?create=' + kind)} />
       </View> : <>
         {canApply && <View style={styles.card}>
           {copy(kind === 'event'
