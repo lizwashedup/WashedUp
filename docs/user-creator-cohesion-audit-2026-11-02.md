@@ -356,3 +356,10 @@ No fresh database design, schema migration, permissions rewrite, blanket new she
 No phone connection or additional account setup is needed for this design review. Ask Liz to try finding management, editing the description, reviewing requests and returning to the community. Record hesitation before explaining the route. Then run short uncoached sessions with existing community and organization creators plus people unfamiliar with WashedUp. Include the three-way creation choice and ask participants to predict where their item will appear. Research supports hypotheses; successful independent use is the acceptance evidence still missing.
 
 This increment changes the proposal and documentation only. It does not add app features, release an OTA, mutate production data or claim that the creator system is complete.
+
+
+### Founder refinement: create an event directly from the community
+
+The community page now proposes a prominent **Create event** action immediately below its identity/member information, alongside the secondary **Edit community** action (renamed from Edit page). It opens event creation with that community already selected. The gear remains available for other management tasks. This supersedes the earlier proposal that required entering management/Events to start creation. Show each action only to roles permitted to perform it. Preserve existing active/draft/archived setup and publication gates; a shortcut must not bypass eligibility or create a replacement community.
+
+The interactive proposal was updated and checked: the direct action opens a form labeled Created by Sunday Club; Cancel returns to the community. At a 320-pixel inspection viewport, root clientWidth and scrollWidth both measured 273 pixels. JavaScript syntax passed. This refinement updates the design only; no native app code, data or release changed.
