@@ -45,7 +45,8 @@ import {
 import { GooglePlacesAutocomplete, GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandedAlert } from '../../components/BrandedAlert';
-import WashedUpCalendar from '../../components/calendar/WashedUpCalendar';
+import type { CalendarDay } from '../../components/calendar/WashedUpCalendar';
+import DatePickerSheet from '../../components/composer/DatePickerSheet';
 import TimePickerSheet, { type PickerTime } from '../../components/composer/TimePickerSheet';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
@@ -575,9 +576,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [editTimePeriod, setEditTimePeriod] = useState<'AM' | 'PM'>('PM');
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const [showEditTimePicker, setShowEditTimePicker] = useState(false);
-  const [tempEditMonth, setTempEditMonth] = useState(0);
-  const [tempEditDay, setTempEditDay] = useState(1);
-  const [tempEditYear, setTempEditYear] = useState(new Date().getFullYear());
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [editGenderRule, setEditGenderRule] = useState('mixed');
@@ -1184,10 +1182,16 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   // Date picker open / confirm
   const openEditDatePicker = () => {
     if (!edit.canChange()) return;
-    setTempEditMonth(editDateMonth);
-    setTempEditDay(editDateDay);
-    setTempEditYear(editDateYear);
+    Keyboard.dismiss();
     setShowEditDatePicker(true);
+  };
+  const confirmEditDate = (day: CalendarDay) => {
+    if (!edit.canChange()) return;
+    setEditTimeChanged(true);
+    setEditDateYear(day.year);
+    setEditDateMonth(day.month);
+    setEditDateDay(day.day);
+    setShowEditDatePicker(false);
   };
   // Time picker open / confirm
   const openEditTimePicker = () => {
@@ -2195,7 +2199,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
         <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={manageStyles.sheet} accessibilityElementsHidden={showEditTimePicker} importantForAccessibility={showEditTimePicker ? "no-hide-descendants" : "auto"}>
+          <View style={manageStyles.sheet} accessibilityElementsHidden={showEditTimePicker || showEditDatePicker} importantForAccessibility={showEditTimePicker || showEditDatePicker ? "no-hide-descendants" : "auto"}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title}>Manage Plan</Text>
               <TouchableOpacity style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -2675,30 +2679,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
             </View>
           </View>
-          {/* Date picker overlay — child of the manage modal overlay so we
-              avoid the Modal-inside-Modal stacking issue on iOS. */}
-          {showEditDatePicker && (
-            <Pressable
-              style={manageStyles.pickerOverlay}
-              onPress={() => setShowEditDatePicker(false)}
-            >
-              <Pressable style={manageStyles.pickerSheet} onPress={(e) => e.stopPropagation()}>
-                <Text style={manageStyles.pickerTitle}>Select date</Text>
-                <WashedUpCalendar
-                  mode="pick"
-                  selected={{ year: tempEditYear, month: tempEditMonth, day: tempEditDay }}
-                  onSelect={(day) => {
-                    if (!edit.canChange()) return;
-                    setEditTimeChanged(true);
-                    setEditDateYear(day.year);
-                    setEditDateMonth(day.month);
-                    setEditDateDay(day.day);
-                    setShowEditDatePicker(false);
-                  }}
-                />
-              </Pressable>
-            </Pressable>
-          )}
+          {/* Keep the date picker inside the existing editor's native Modal. */}
+          {showEditDatePicker && <DatePickerSheet
+            selected={{ year: editDateYear, month: editDateMonth, day: editDateDay }}
+            onCancel={() => setShowEditDatePicker(false)}
+            onSelect={confirmEditDate}
+          />}
 
           {/* Reuse the same time sheet without nesting native Modals. */}
           {showEditTimePicker && <TimePickerSheet
@@ -3780,31 +3766,6 @@ const legacyManageStyles = StyleSheet.create({
     fontFamily: Fonts.sansMedium,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,
-  },
-  // Date / time picker overlays (inside the manage modal so they stack
-  // above the form sheet without spawning a nested RN Modal).
-  pickerOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: Colors.overlayDark40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    elevation: 24,
-  },
-  pickerSheet: {
-    width: '88%',
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 20,
-    maxHeight: '70%',
-  },
-  pickerTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'center',
-    marginBottom: 12,
   },
   capacitySection: {
     marginTop: 12,

@@ -5,6 +5,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Dimensions, FlatList, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import PlanDetailScreen from '../[id]';
 import TimePickerSheet from '../../../components/composer/TimePickerSheet';
+import DatePickerSheet from '../../../components/composer/DatePickerSheet';
 import { PlanDetailOverview } from '../../../components/plans/PlanDetailOverview';
 
 let mockMemberAppearance = true;
@@ -831,6 +832,72 @@ it('ignores a retained Done after the containing Manage editor closes', async ()
   act(() => manageModal().props.onRequestClose());
   act(() => button('Manage Plan').props.onPress());
   act(() => oldDone());
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
+});
+
+
+it('opens the accessible date sheet inside Manage and Cancel leaves the exact schedule untouched', async () => {
+  mockPlan.start_time = '2040-08-01T02:37:17.123Z';
+  mockPlan.end_time = '2040-08-01T04:07:17.123Z';
+  await openEditor();
+  const count = tree.root.findAllByType(Modal).length;
+  act(() => timeControl('Edit plan date').props.onPress());
+  expect(tree.root.findAllByType(Modal)).toHaveLength(count);
+  expect(tree.root.findByType(DatePickerSheet).props.selected).toEqual({ year: 2040, month: 6, day: 31 });
+  expect(tree.root.findAll(node => node.props.accessibilityElementsHidden === true && node.props.importantForAccessibility === 'no-hide-descendants').length).toBeGreaterThan(0);
+  act(() => timeControl('Cancel date changes').props.onPress());
+  expect(tree.root.findAllByType(DatePickerSheet)).toHaveLength(0);
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
+  expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('end_time');
+});
+
+it('keeps a chosen date as a draft until Save, preserving local time and duration', async () => {
+  mockPlan.start_time = '2040-08-01T02:37:00.000Z';
+  mockPlan.end_time = '2040-08-01T04:07:00.000Z';
+  await openEditor();
+  act(() => timeControl('Edit plan date').props.onPress());
+  act(() => tree.root.findByType(DatePickerSheet).props.onSelect({ year: 2040, month: 7, day: 2 }));
+  expect(mockUpdate).not.toHaveBeenCalled();
+  expect(tree.root.findAllByType(DatePickerSheet)).toHaveLength(0);
+  act(() => timeControl('Edit plan date').props.onPress());
+  expect(tree.root.findByType(DatePickerSheet).props.selected).toEqual({ year: 2040, month: 7, day: 2 });
+  act(() => timeControl('Cancel date changes').props.onPress());
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate.mock.calls[0][0]).toMatchObject({ start_time: '2040-08-03T02:37:00.000Z', end_time: '2040-08-03T04:07:00.000Z' });
+});
+
+
+it('retains the selected date after a rejected save and retries the same schedule', async () => {
+  mockPlan.start_time = '2040-08-01T02:37:00.000Z';
+  mockPlan.end_time = '2040-08-01T04:07:00.000Z';
+  mockEditResponse = { data: null, error: { code: '42501' } };
+  await openEditor();
+  act(() => timeControl('Edit plan date').props.onPress());
+  act(() => tree.root.findByType(DatePickerSheet).props.onSelect({ year: 2040, month: 7, day: 2 }));
+  await act(async () => button('Save changes').props.onPress());
+  expect(manageModal().props.visible).toBe(true);
+  expect(allText()).toContain('Your edits are still here');
+  act(() => timeControl('Edit plan date').props.onPress());
+  expect(tree.root.findByType(DatePickerSheet).props.selected).toEqual({ year: 2040, month: 7, day: 2 });
+  act(() => timeControl('Cancel date changes').props.onPress());
+  const originalPatch = mockUpdate.mock.calls[0][0];
+  mockEditResponse = undefined;
+  await act(async () => button('Save changes').props.onPress());
+  expect(mockUpdate).toHaveBeenCalledTimes(2);
+  expect(mockUpdate.mock.calls[1][0]).toEqual(originalPatch);
+  expect(tree.root.findAllByType(Modal).some(n => n.props.visible && n.props.animationType === 'slide')).toBe(false);
+});
+
+it('ignores a date selection retained from an editor that has closed and reopened', async () => {
+  await openEditor();
+  act(() => timeControl('Edit plan date').props.onPress());
+  const calendar = require('../../../components/calendar/WashedUpCalendar');
+  const oldSelect = tree.root.findByType(calendar).props.onSelect;
+  act(() => manageModal().props.onRequestClose());
+  act(() => button('Manage Plan').props.onPress());
+  act(() => oldSelect({ year: 2040, month: 7, day: 2 }));
   await act(async () => button('Save changes').props.onPress());
   expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
 });

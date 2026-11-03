@@ -122,9 +122,9 @@ function VisibleWhenCalendarSheet({ whenSelected, onToggleWhen, daySelected, onS
           <View style={[styles.sheetHandle, fonts && afterglow.handle]} />
         </View>
         <View style={styles.sheetHeader}>
-          <Text accessibilityRole="header" style={[styles.sheetTitle, layout.title, fonts && afterglow.title, fonts && { fontFamily: fonts.display }]}>When</Text>
+          <Text accessibilityRole="header" numberOfLines={1} adjustsFontSizeToFit style={[styles.sheetTitle, layout.title, fonts && afterglow.title, fonts && { fontFamily: fonts.display }]}>When</Text>
           <TouchableOpacity style={layout.clear} onPress={clear} accessibilityRole="button" accessibilityLabel="Clear all">
-            <Text numberOfLines={1} style={[styles.sheetClear, fonts && afterglow.clear, fonts && { fontFamily: fonts.semibold }]}>Clear all</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.sheetClear, fonts && afterglow.clear, fonts && { fontFamily: fonts.semibold }]}>Clear all</Text>
           </TouchableOpacity>
         </View>
         <ScrollView style={layout.scroll} contentContainerStyle={layout.content} keyboardShouldPersistTaps="handled">
@@ -135,7 +135,7 @@ function VisibleWhenCalendarSheet({ whenSelected, onToggleWhen, daySelected, onS
                 <TouchableOpacity key={opt.key} style={[styles.chip, checked && styles.chipOn, fonts && afterglow.chip, checked && fonts && afterglow.chipSelected]}
                   accessibilityRole="checkbox" accessibilityLabel={opt.label} accessibilityState={{ checked }}
                   onPress={() => { if (active()) { hapticSelection(); latest.current.onToggleWhen(opt.key); } }} activeOpacity={0.8}>
-                  <Text numberOfLines={1} style={[styles.chipText, checked && styles.chipTextOn, fonts && afterglow.chipText,
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.chipText, checked && styles.chipTextOn, fonts && afterglow.chipText,
                     fonts && { fontFamily: checked ? fonts.semibold : fonts.medium }, checked && fonts && afterglow.chipTextSelected]}>{opt.label}</Text>
                 </TouchableOpacity>
               );
@@ -146,7 +146,7 @@ function VisibleWhenCalendarSheet({ whenSelected, onToggleWhen, daySelected, onS
             markedDays={markedDays} appearance={appearance} />
         </ScrollView>
         <TouchableOpacity style={[styles.sheetDone, fonts && afterglow.done]} onPress={dismiss} accessibilityRole="button" accessibilityLabel="Done">
-          <Text numberOfLines={1} style={[styles.sheetDoneText, fonts && afterglow.doneText, fonts && { fontFamily: fonts.semibold }]}>Done</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.sheetDoneText, fonts && afterglow.doneText, fonts && { fontFamily: fonts.semibold }]}>Done</Text>
         </TouchableOpacity>
       </Animated.View>
     </Modal>
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
   sheetClear: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
   chipRow: { gap: 8, paddingBottom: 16 },
   chip: {
-    paddingHorizontal: 14, height: 34, borderRadius: 18,
+    paddingHorizontal: 14, paddingVertical: 8, minHeight: 44, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.inputBg,
   },
   chipOn: { backgroundColor: Colors.terracotta },
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
 const layout = StyleSheet.create({
   grabber: { flexShrink: 0, minHeight: 32, justifyContent: 'center' },
   title: { flex: 1, minWidth: 0, marginRight: 12 },
-  clear: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' },
+  clear: { maxWidth: '45%', minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' },
   scroll: { flexShrink: 1, minHeight: 0 },
   content: { paddingBottom: 4 },
 });
