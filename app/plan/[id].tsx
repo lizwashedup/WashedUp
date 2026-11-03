@@ -2198,7 +2198,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
-        <KeyboardAvoidingView style={manageStyles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={manageStyles.sheet}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title}>Manage Plan</Text>
@@ -3586,6 +3586,9 @@ const legacyManageStyles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    // Shrink inside the space left above the keyboard. Without this, the
+    // bottom-aligned sheet keeps its full height and pushes the title offscreen.
+    flexShrink: 1,
     backgroundColor: Colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
