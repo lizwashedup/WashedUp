@@ -80,3 +80,70 @@ it.each(['owner', 'refresh', 'owner-after-refresh', 'upload'] as const)('release
     expect(mockWrite).not.toHaveBeenCalled();
   } finally { jest.useRealTimers(); }
 });
+
+describe('stalled plan saves and reconciliation', () => {
+  const flush = async () => { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); };
+  const advance = async (ms: number) => { await act(async () => { jest.advanceTimersByTime(ms); }); await flush(); };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('releases stalled authentication without writing and ignores it during a retry', async () => {
+    const oldAuth = deferred(), retryAuth = deferred();
+    mockAuth.mockReturnValueOnce(oldAuth.promise).mockReturnValueOnce(retryAuth.promise);
+    const h = mount();
+    act(() => { void h.current.save({ title: 'Original draft' }); });
+    await advance(12_000);
+    expect(h.current.isBusy).toBe(false); expect(h.current.unknown).toBe(false);
+    expect(h.current.error).toContain('Your edits are still here'); expect(mockWrite).not.toHaveBeenCalled();
+    act(() => { void h.current.save({ title: 'Retry draft' }); });
+    await act(async () => { oldAuth.resolve({ data: { user: { id: 'alice' } }, error: null }); });
+    expect(h.current.isBusy).toBe(true); expect(mockWrite).not.toHaveBeenCalled();
+    await act(async () => { retryAuth.resolve({ data: { user: { id: 'alice' } }, error: null }); });
+    expect(mockWrite).toHaveBeenCalledTimes(1); expect(mockWrite.mock.calls[0][1]).toEqual({ title: 'Retry draft' });
+    expect(h.onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns a stalled dispatched write into read-only checking and ignores the late receipt', async () => {
+    const write = deferred(); mockWrite.mockReturnValueOnce(write.promise);
+    const h = mount();
+    act(() => { void h.current.save({ title: 'New title' }); }); await flush();
+    await advance(15_000);
+    expect(h.current.isBusy).toBe(false); expect(h.current.unknown).toBe(true);
+    expect(h.current.canChange()).toBe(false); expect(h.onSaved).not.toHaveBeenCalled();
+    act(() => { expect(h.current.close()).toBe(true); expect(h.current.begin()).toBe(true); });
+    await act(async () => { await h.current.save({ title: 'Duplicate' }); await h.current.pickPhoto(); });
+    expect(mockWrite).toHaveBeenCalledTimes(1); expect(mockPicker).not.toHaveBeenCalled();
+    await act(async () => { write.resolve(success()); });
+    expect(h.current.unknown).toBe(true); expect(h.onSaved).not.toHaveBeenCalled();
+    await act(async () => { await h.current.check(); });
+    expect(mockWrite).toHaveBeenCalledTimes(1); expect(h.current.unknown).toBe(false);
+    expect(h.onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['auth', 'read'])('releases a stalled reconciliation %s and keeps retry read-only', async stage => {
+    mockWrite.mockResolvedValueOnce({ data: null, error: null });
+    const h = mount(); await act(async () => { await h.current.save({ title: 'New title' }); });
+    const stalled = deferred();
+    if (stage === 'auth') mockAuth.mockReturnValueOnce(stalled.promise);
+    else mockRead.mockReturnValueOnce(stalled.promise);
+    act(() => { void h.current.check(); }); await flush();
+    await advance(stage === 'auth' ? 12_000 : 15_000);
+    expect(h.current.isBusy).toBe(false); expect(h.current.unknown).toBe(true);
+    expect(h.current.error).toContain('still can’t confirm');
+    await act(async () => { await h.current.check(); });
+    expect(h.onSaved).toHaveBeenCalledTimes(1); expect(mockWrite).toHaveBeenCalledTimes(1);
+    const reads = mockRead.mock.calls.length;
+    await act(async () => { stalled.resolve(stage === 'auth' ? { data: { user: { id: 'alice' } }, error: null } : success()); });
+    expect(mockRead).toHaveBeenCalledTimes(reads); expect(h.onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an unresolved write across blur and timeout without closing a later editor', async () => {
+    const write = deferred(); mockWrite.mockReturnValueOnce(write.promise);
+    const h = mount(); act(() => { void h.current.save({ title: 'New title' }); }); await flush();
+    h.blur(); await advance(15_000); h.focus();
+    act(() => { expect(h.current.begin()).toBe(true); });
+    expect(h.current.unknown).toBe(true); expect(h.current.canChange()).toBe(false);
+    await act(async () => { write.resolve(success()); });
+    expect(h.onSaved).not.toHaveBeenCalled(); expect(h.current.unknown).toBe(true);
+  });
+});
