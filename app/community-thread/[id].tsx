@@ -1292,7 +1292,9 @@ const styles = StyleSheet.create({
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
   faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   bubble: {
-    maxWidth: '78%',
+    // The message column already caps the row. A second percentage squeezes
+    // main-chat messages more than the topic rooms beside them.
+    maxWidth: '100%',
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
     borderWidth: 1,
