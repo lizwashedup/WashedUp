@@ -553,6 +553,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   };
 
   const [manageModalVisible, setManageModalVisible] = useState(false);
+  const manageScrollRef = useRef<ScrollView>(null);
   const [departureVisit, setDepartureVisit] = useState<{ action: PlanDepartureAction; isCurrent: () => boolean } | null>(null);
   const departureVisitRef = useRef(departureVisit); departureVisitRef.current = departureVisit;
   const [departureError, setDepartureError] = useState<string | null>(null);
@@ -596,6 +597,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     },
   });
   const editSaving = edit.isSaving, editImageLoading = edit.isPhotoPending;
+  useEffect(() => {
+    // Keep recovery feedback visible even when Save was tapped from a lower field.
+    if (manageModalVisible && (edit.error || edit.unknown)) {
+      manageScrollRef.current?.scrollTo({ y: 0, animated: false });
+    }
+  }, [manageModalVisible, edit.error, edit.unknown]);
   const closeManageModal = () => {
     if (!edit.close()) return false;
     Keyboard.dismiss(); setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
@@ -2208,6 +2215,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             </View>
 
             <ScrollView
+              ref={manageScrollRef}
               style={manageStyles.body}
               decelerationRate="normal"
               showsVerticalScrollIndicator={true}
