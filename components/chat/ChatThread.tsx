@@ -1513,7 +1513,8 @@ function ChatThread(props: ChatThreadProps) {
       // Fresh text detaches atomically before its storage wait in the draft hook.
       // Edits retain the existing clear-after-preparation behavior.
       if (original.edit && !retryOriginal && draftRevision.current === revision) { setInputText(''); inputTextRef.current = ''; setMentionQuery(null); stopTyping(); }
-      if (!retryOriginal || !await checkChatComposerAttempt(draftRoom, original, draftOwner)) {
+      const alreadyConfirmed = retryOriginal && await checkChatComposerAttempt(draftRoom, original, draftOwner);
+      if (!alreadyConfirmed) {
         if (retryOriginal) await verifyChatComposerTarget(draftRoom, original, draftOwner);
         const confirmed = original.edit
           ? await editMessage(original.id, original.text, entryScope, original.edit.content, original.mentions, original.edit.mentions, { errorPresentation: 'caller' })
@@ -1526,6 +1527,10 @@ function ChatThread(props: ChatThreadProps) {
       if (!canWrite()) return;
       timingOutcome = 'ok'; finishTiming();
       await composerDraft.finish(original);
+      // A lost receipt removes the optimistic bubble. Finding the saved row
+      // on retry confirms delivery, but must also reconcile visible history.
+      // Keep that refresh separate from delivery and never hold newer typing.
+      if (alreadyConfirmed && canWrite()) void refetch(true).catch(() => {});
       if (canWrite() && scrollIntentIsCurrent()) scrollToBottom();
     } catch (error) {
       timingOutcome = 'error';
@@ -1541,7 +1546,7 @@ function ChatThread(props: ChatThreadProps) {
       finishTiming(isCurrentEntry() ? timingOutcome : 'retired');
       if (sendingRef.current === token) { sendingRef.current = null; setSendingText(false); }
     }
-  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, scrollToBottom, captureScrollIntent, setInputText, stopTyping, changeDraft]);
+  }, [canWrite, draftOwner, uploading, composerDraft, draftRoom, editMessage, sendMessage, entryScope, refetch, scrollToBottom, captureScrollIntent, setInputText, stopTyping, changeDraft]);
 
   // Send button morph (mic when empty, send when typing). A single shared value
   // drives the crossfade so the two stacked icon layers animate in opposition.
