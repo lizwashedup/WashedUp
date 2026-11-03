@@ -34,12 +34,14 @@ import {
   Pressable,
   TextInput,
   Keyboard,
+  KeyboardAvoidingView,
   StyleSheet,
   Animated,
   Dimensions,
   ActivityIndicator,
   Platform,
   useWindowDimensions,
+  ScrollView,
 } from 'react-native';
 import { Image } from 'expo-image';
 import {
@@ -132,6 +134,11 @@ function SurveySession({
   const [rating, setRating] = useState<Rating | null>(null);
   const [comment, setComment] = useState('');
   const [showComment, setShowComment] = useState(false);
+  const bodyScroll = useRef<ScrollView>(null);
+  const commentFocused = useRef(false);
+  const revealFocusedComment = () => {
+    if (step === 'how' && commentFocused.current) bodyScroll.current?.scrollToEnd({ animated: false });
+  };
   const [answers, setAnswers] = useState<Record<string, AttendanceAnswer>>({});
   const noShows = useMemo(() => new Set(peoplePool.filter(member => answers[member.id] === 'no_show').map(member => member.id)), [answers, peoplePool]);
   const [attendanceStarted, setAttendanceStarted] = useState(false);
@@ -177,32 +184,11 @@ function SurveySession({
   // from HALF to TALL on the first non-'how' step. Both JS-driven so height can
   // animate; Reduce Motion snaps to final.
   const reduceMotion = useReduceMotion();
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_H)).current;
   const backdrop = useRef(new Animated.Value(0)).current;
   const sheetHeight = useRef(new Animated.Value(HALF_H)).current;
   const grownRef = useRef(false);
-
-  // Keyboard lift. Step 1's optional comment box would sit under the keyboard on
-  // the half sheet; lift the whole sheet by the keyboard height while editing.
-  const kb = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const onShow = Keyboard.addListener(showEvt, (e) => {
-      Animated.timing(kb, {
-        toValue: -e.endCoordinates.height,
-        duration: 220,
-        useNativeDriver: false,
-      }).start();
-    });
-    const onHide = Keyboard.addListener(hideEvt, () => {
-      Animated.timing(kb, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-    });
-    return () => {
-      onShow.remove();
-      onHide.remove();
-    };
-  }, [kb]);
 
   // Enter.
   useEffect(() => {
@@ -478,10 +464,14 @@ function SurveySession({
           </Animated.View>
 
           {/* The grow-sheet. */}
+          <KeyboardAvoidingView
+            style={[styles.keyboardSpace, { paddingTop: insets.top + 8 }]}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
           <Animated.View
             style={[
               styles.sheet,
-              { height: sheetHeight, transform: [{ translateY: Animated.add(translateY, kb) }] },
+              { height: sheetHeight, transform: [{ translateY }] },
             ]}
           >
             <View style={styles.handle} />
@@ -494,10 +484,12 @@ function SurveySession({
 
             {/* Bodies land in checkpoints 2-4. */}
             <Animated.ScrollView
+              ref={bodyScroll}
               style={styles.body}
               contentContainerStyle={styles.bodyContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
+              onLayout={revealFocusedComment}
             >
               {step === 'how' && (
                 <StepHow
@@ -511,6 +503,8 @@ function SurveySession({
                   comment={comment}
                   setComment={setComment}
                   showComment={showComment}
+                  onCommentFocus={() => { commentFocused.current = true; revealFocusedComment(); }}
+                  onCommentBlur={() => { commentFocused.current = false; }}
                 />
               )}
               {step === 'who' && (
@@ -590,6 +584,7 @@ function SurveySession({
               />
             )}
           </Animated.View>
+          </KeyboardAvoidingView>
 
           {result && (
             <SurveyOutcomeOverlay result={result} onDismiss={exit} />
@@ -727,12 +722,16 @@ function StepHow({
   comment,
   setComment,
   showComment,
+  onCommentFocus,
+  onCommentBlur,
 }: {
   selected: Rating | null;
   onPick: (r: Rating) => void;
   comment: string;
   setComment: (s: string) => void;
   showComment: boolean;
+  onCommentFocus: () => void;
+  onCommentBlur: () => void;
 }) {
   const reduceMotion = useReduceMotion();
   const reveal = useRef(new Animated.Value(0)).current;
@@ -787,6 +786,9 @@ function StepHow({
       >
         <Text style={styles.commentLabel}>{COPY.surveyBadFollowup}</Text>
         <TextInput
+          accessibilityLabel="Optional feedback"
+          onFocus={onCommentFocus}
+          onBlur={onCommentBlur}
           value={comment}
           onChangeText={setComment}
           placeholder=""
@@ -1025,6 +1027,7 @@ const styles = StyleSheet.create({
   attendanceError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
   skipAttendance: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   root: { flex: 1, justifyContent: 'flex-end' },
+  keyboardSpace: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.surveyScrim },
 
   // ── Plan card behind ──
@@ -1063,6 +1066,9 @@ const styles = StyleSheet.create({
 
   // ── Sheet ──
   sheet: {
+    // Stay inside the safe space above the keyboard instead of translating
+    // a fixed-height sheet past the top of a small screen.
+    flexShrink: 1,
     backgroundColor: Colors.cream,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

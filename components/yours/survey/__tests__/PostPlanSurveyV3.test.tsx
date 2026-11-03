@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { Pressable, Text } from 'react-native';
+import { Pressable, Text, TextInput, ScrollView } from 'react-native';
 import PostPlanSurveyV3 from '../PostPlanSurveyV3';
 import type { SurveyProps, SurveyMember } from '../../../PostPlanSurvey';
 const mockRpc=jest.fn(),mockAuth=jest.fn(),mockHandled=jest.fn(),mockComplete=jest.fn();
@@ -88,4 +88,17 @@ it('keeps exit available when feedback or keep-in-touch requests fail',async()=>
 });
 it('can submit attendance and close when the People feature is disabled',async()=>{
  mockPeople=false;mount();attendance();press('Alex: Didn’t show up');press('Continue');await flush();expect(reports()).toHaveLength(1);expect(mockComplete).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the focused comment in view as the keyboard resizes the body, without stealing later scrolling',()=>{
+ mount();press('Not great');
+ const input=tree.root.findByType(TextInput),body=tree.root.findByType(ScrollView);
+ const scroll=jest.spyOn(body.instance,'scrollToEnd').mockImplementation(()=>{});
+ act(()=>input.props.onFocus());expect(scroll).toHaveBeenCalledWith({animated:false});scroll.mockClear();
+ act(()=>body.props.onLayout());expect(scroll).toHaveBeenCalledTimes(1);
+ act(()=>input.props.onChangeText('Keep my comment'));act(()=>input.props.onBlur());scroll.mockClear();
+ act(()=>body.props.onLayout());expect(scroll).not.toHaveBeenCalled();expect(tree.root.findByType(TextInput).props.value).toBe('Keep my comment');
+ act(()=>input.props.onFocus());press('Continue');scroll.mockClear();
+ act(()=>tree.root.findByType(ScrollView).props.onLayout());expect(scroll).not.toHaveBeenCalled();
+ expect(mockRpc).toHaveBeenCalledWith('upsert_plan_feedback',expect.objectContaining({p_rating:'thumbs_down',p_comment:'Keep my comment'}));expect(words()).toContain('Did these people attend?');
 });
