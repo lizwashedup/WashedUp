@@ -32,10 +32,11 @@ export default function TimePicker({ hour, minute, period, selected, appearance,
       <Text style={[legacyStyles.change, appearance && { fontFamily: appearance.fonts.medium }]}>Change</Text>
     </TouchableOpacity>
     <Modal visible={open} transparent animationType="slide" statusBarTranslucent onRequestClose={cancel}>
-      {open && <TimePickerSheet initial={{ hour, minute, period }} appearance={appearance} onCancel={cancel} onConfirm={time => {
+      {/* Keep native modal content attached throughout its dismissal animation. */}
+      <TimePickerSheet key={renderedVisit} initial={{ hour, minute, period }} appearance={appearance} onCancel={cancel} onConfirm={time => {
         if (!current()) return;
         active.current = false; setOpen(false); onChange(time.hour, time.minute, time.period);
-      }} />}
+      }} />
     </Modal>
   </>;
 }

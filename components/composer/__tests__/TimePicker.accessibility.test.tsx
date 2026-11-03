@@ -140,3 +140,17 @@ it('shows a custom edit as a selected option when returning to the list', async 
   act(() => done().props.onPress());
   expect(props.onChange).toHaveBeenCalledWith(7,'37','PM');
 });
+
+// UIKit can finish dismissing after visible becomes false. Keep its content
+// attached until the next visit instead of tearing it out mid-transition.
+it('retains content during native dismissal and starts a fresh next visit', async () => {
+  await mount(); open(); exact();
+  act(() => field('Minute').props.onChangeText('37'));
+  act(() => done().props.onPress());
+  expect(modal().visible).toBe(false);
+  expect(tree.root.findAllByType(TimePickerSheet)).toHaveLength(1);
+  expect(field('Minute').props.value).toBe('37');
+  open();
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  expect(row({hour:7,minute:'00',period:'PM'}).props.accessibilityState.selected).toBe(true);
+});
