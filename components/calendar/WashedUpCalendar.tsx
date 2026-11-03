@@ -9,7 +9,7 @@
  * this component owns the DATE only.
  */
 import React, { useMemo, useState } from 'react';
-import { View, Text, Pressable, PanResponder, StyleSheet } from 'react-native';
+import { View, Text, Pressable, PanResponder, StyleSheet, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
@@ -27,6 +27,7 @@ export type CalendarDay = { year: number; month: number; day: number };
 
 const DAY_HIGHLIGHT = 40;
 const SWIPE_THRESHOLD = 40;
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function WashedUpCalendar({
   mode = 'pick',
@@ -43,6 +44,7 @@ export default function WashedUpCalendar({
   markedDays?: Set<string>;
 }) {
   const styles = useMemo(() => calendarStyles(appearance), [appearance]);
+  const largeText = useWindowDimensions().fontScale > 1.6;
   const [view, setView] = useState<{ m: number; y: number }>(() => {
     if (selected) return { m: selected.month, y: selected.year };
     const t = getTodayInLA();
@@ -97,8 +99,8 @@ export default function WashedUpCalendar({
             color={appearance ? (atCurrentMonth ? AfterglowColors.line : AfterglowColors.ink) : (atCurrentMonth ? Colors.textLight : Colors.asphalt)}
           />
         </Pressable>
-        <Pressable style={appearance ? { minHeight: 44, justifyContent: 'center', flexShrink: 1 } : undefined} onPress={() => setShowMonthJump((visible) => !visible)} accessibilityRole="button" accessibilityLabel={`Choose month, currently ${MONTHS[view.m]} ${view.y}`} accessibilityState={{ expanded: showMonthJump }}>
-          <Text style={styles.monthLabel}>{MONTHS[view.m]} {view.y} ▾</Text>
+        <Pressable style={{ minHeight: 44, justifyContent: 'center', flex: 1, minWidth: 0 }} onPress={() => setShowMonthJump((visible) => !visible)} accessibilityRole="button" accessibilityLabel={`Choose month, currently ${MONTHS[view.m]} ${view.y}`} accessibilityState={{ expanded: showMonthJump }}>
+          <Text style={styles.monthLabel} numberOfLines={1} adjustsFontSizeToFit>{MONTHS[view.m]} {view.y} ▾</Text>
         </Pressable>
         <Pressable
           onPress={() => step(1)}
@@ -118,14 +120,30 @@ export default function WashedUpCalendar({
             const month = monthDate.getUTCMonth();
             const year = monthDate.getUTCFullYear();
             return (
-              <Pressable key={`${year}-${month}`} style={styles.monthChoice} onPress={() => { setView({ m: month, y: year }); setShowMonthJump(false); hapticSelection(); }} accessibilityRole="button" accessibilityLabel={`${MONTHS[month]} ${year}`}>
-                <Text style={styles.monthChoiceText}>{MONTHS[month].slice(0, 3)} {year}</Text>
+              <Pressable key={`${year}-${month}`} style={[styles.monthChoice, largeText && { width: '100%' }]} onPress={() => { setView({ m: month, y: year }); setShowMonthJump(false); hapticSelection(); }} accessibilityRole="button" accessibilityLabel={`${MONTHS[month]} ${year}`}>
+                <Text style={styles.monthChoiceText} numberOfLines={1} adjustsFontSizeToFit>{MONTHS[month].slice(0, 3)} {year}</Text>
               </Pressable>
             );
           })}
         </View>
       )}
 
+      {largeText ? <View>
+        {buildMonthGrid(view.y, view.m).flat().filter((day): day is number => day !== null).map(day => {
+          const past = isBeforeTodayLA(view.y, view.m, day);
+          const isToday = view.y === t.y && view.m === t.m && day === t.d;
+          const isSel = !!selected && selected.year === view.y && selected.month === view.m && selected.day === day;
+          const marked = mode === 'filter' && !!markedDays?.has(dayKey(view.y, view.m, day));
+          const weekday = DAY_NAMES[new Date(Date.UTC(view.y, view.m, day)).getUTCDay()];
+          return <Pressable key={day} style={[styles.largeDay, isToday && !isSel && styles.dayToday, isSel && styles.daySelected]}
+            disabled={past} accessibilityRole="button" accessibilityLabel={`${MONTHS[view.m]} ${day}, ${view.y}`}
+            accessibilityState={{ disabled: past, selected: isSel }} onPress={() => { onSelect({ year: view.y, month: view.m, day }); hapticLight(); }}>
+            <Text style={[styles.dayText, styles.largeDayText, past && styles.dayTextDisabled, isSel && styles.dayTextSelected]} numberOfLines={1} adjustsFontSizeToFit>{weekday}, {day}</Text>
+            {isSel && <Text style={[styles.dayText, styles.dayTextSelected]} accessible={false}>✓</Text>}
+            {marked && !isSel && <View style={styles.dot} />}
+          </Pressable>;
+        })}
+      </View> : <>
       <View style={styles.weekdayRow}>
         {WEEKDAY_LABELS.map((label, i) => (
           <Text key={i} style={styles.weekdayLabel}>{label}</Text>
@@ -181,6 +199,8 @@ export default function WashedUpCalendar({
           </View>
         ))}
       </View>
+      </>}
+
     </View>
   );
 }
@@ -205,7 +225,7 @@ const legacyStyles = StyleSheet.create({
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
   },
-  navBtn: { paddingVertical: 6, paddingHorizontal: 8 },
+  navBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   monthChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   monthChoice: { width: '23%', minHeight: 42, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   monthChoiceText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt },
@@ -232,6 +252,8 @@ const legacyStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  largeDay: { minHeight: 48, paddingHorizontal: 12, paddingVertical: 12, marginVertical: 3, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  largeDayText: { flex: 1 },
   dayToday: { borderWidth: 1.5, borderColor: Colors.terracotta },
   daySelected: { backgroundColor: Colors.terracotta },
   dayText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.asphalt },

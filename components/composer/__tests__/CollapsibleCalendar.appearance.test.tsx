@@ -36,7 +36,7 @@ it('forwards the staged appearance to the expanded original calendar and preserv
  const onSelect=await render({appearance});expect(StyleSheet.flatten(trigger().props.style)).toMatchObject({minHeight:48,borderRadius:6,backgroundColor:AfterglowColors.white});
  act(()=>trigger().props.onPress());expect(tree.root.findByType(WashedUpCalendar).props.appearance).toBe(appearance);
  expect(StyleSheet.flatten(byLabel('Choose tomorrow').props.style).minHeight).toBe(44);
- const day=byLabel('September 16, 2040');expect(StyleSheet.flatten(day.props.style).minHeight).toBe(44);
+ const day=byLabel('September 16, 2040');expect(StyleSheet.flatten(day.props.style).minHeight).toBeGreaterThanOrEqual(44);
  act(()=>day.props.onPress());expect(onSelect).toHaveBeenCalledTimes(1);expect(onSelect).toHaveBeenCalledWith({year:2040,month:8,day:16});
  expect(trigger().props.accessibilityState.expanded).toBe(false);
 });
