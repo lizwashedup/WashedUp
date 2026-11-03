@@ -1,6 +1,6 @@
 /**
- * Community settings keeps page editing and joining configuration first.
- * Daily updates live in their own management screen.
+ * Page configuration and account tools. Everyday member/chat/update actions
+ * remain on the selected community's management home.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -11,21 +11,21 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, CircleDollarSign, HelpCircle, UserPlus, UserRound, Users } from 'lucide-react-native';
+import { useQueryClient } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
+import { ChevronRight, CircleDollarSign, HelpCircle } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticWarning } from '../../lib/haptics';
-import { getCreatorAccess, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, buildCommunityPublicLink } from '../../lib/creatorMode';
-import { getCommunityRooms } from '../../lib/communityChat';
+import { isAdminTierRole, type LedCommunity, publishCommunity, archiveCommunity, buildCommunityPublicLink } from '../../lib/creatorMode';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { PUBLIC_PAGE_CONTROL_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
@@ -33,20 +33,25 @@ import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 export default function CreatorCommunityScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => createStyles(fonts), [fonts]);
+  const focused = useIsFocused();
+  const access = useCreatorAccessRead();
+  const community = useLedCommunity(access.data);
+  if (access.isLoading) return <View style={styles.centered}><ActivityIndicator accessibilityLabel="Loading community settings" color={Colors.terracotta} /></View>;
+  if (access.isError) return <View style={styles.centered}>
+    <Text accessibilityRole="alert" style={styles.hint}>Couldn’t load community settings.</Text>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry community settings" disabled={access.isFetching}
+      style={styles.inlineAction} onPress={() => void access.refetch()}><Text style={styles.liveBannerLink}>{access.isFetching ? 'Checking…' : 'Try again'}</Text></TouchableOpacity>
+  </View>;
+  if (!community || !isAdminTierRole(community.role)) return focused ? <Redirect href="/(tabs)/friends/manage" /> : null;
+  return <CommunitySettings key={community.id} community={community} refreshing={access.isFetching} refresh={() => void access.refetch()} />;
+}
+
+function CommunitySettings({ community, refreshing, refresh }: { community: LedCommunity; refreshing: boolean; refresh: () => void }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
-
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  const community = useLedCommunity(access);
-
-  const roomsQuery = useQuery({
-    queryKey: ['creator-rooms', community?.id],
-    queryFn: () => getCommunityRooms(community!.id),
-    enabled: !!community,
-  });
-
-  const { data: rooms = [], refetch, isRefetching } = roomsQuery;
 
   const [publishing, setPublishing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -87,12 +92,12 @@ export default function CreatorCommunityScreen() {
     if (!community || archiving) return;
     // LIZ COPY
     setAlertInfo({
-      title: 'archive this community?',
-      message: 'no one new can find it or join. your current members keep their chat and everything they already have.',
+      title: 'Archive this community?',
+      message: 'This hides your page from discovery and closes it to new members. Existing members keep their chat and access. You can’t undo this from here.',
       buttons: [
-        { text: 'not yet', style: 'cancel' },
+        { text: 'Not yet', style: 'cancel' },
         {
-          text: 'archive it',
+          text: 'Archive community',
           style: 'destructive',
           onPress: async () => {
             setArchiving(true);
@@ -111,22 +116,16 @@ export default function CreatorCommunityScreen() {
     });
   };
 
-  // community is a leader screen: an event-host-only grant never sees it
-  // (doc 34 §1.3). The layout hides the tab; this covers stale pushes and
-  // deep links.
-  if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
-
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={Colors.terracotta} />}
         >
-          <Text style={styles.title}>Community settings</Text>
+          <Text accessibilityRole="header" style={styles.title}>Community settings</Text>
+          <Text style={styles.intro}>Edit your page and choose how people join.</Text>
 
-          <Text style={styles.sectionLabel}>Page &amp; joining</Text>
           <View style={styles.hubStack}>
             <TouchableOpacity
               style={styles.editPageCard}
@@ -156,39 +155,6 @@ export default function CreatorCommunityScreen() {
                 <Text style={styles.editPageHint}>
                   Set joining options, welcome text, introduction questions and guidelines.
                 </Text>
-              </View>
-              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Build 35 final navigation removes global Members and Menu tabs.
-              Their real destinations live here so nothing becomes harder to
-              reach when the Community shell contracts to three tabs. */}
-          <Text style={styles.sectionLabel}>Members</Text>
-          <View style={styles.hubStack}>
-            <TouchableOpacity
-              style={styles.hubRow}
-              onPress={() => router.push('/(tabs)/friends/manage/(tools)/members')}
-              accessibilityRole="button"
-              accessibilityLabel="Members and join requests"
-            >
-              <Users size={19} color={Colors.terracotta} strokeWidth={2} />
-              <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>Members &amp; requests</Text>
-                <Text style={styles.editPageHint}>Review requests and manage membership.</Text>
-              </View>
-              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.hubRow}
-              onPress={() => router.push('/creator/member-invites' as never)}
-              accessibilityRole="button"
-              accessibilityLabel="Invite members"
-            >
-              <UserPlus size={19} color={Colors.terracotta} strokeWidth={2} />
-              <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>Invite members</Text>
-                <Text style={styles.editPageHint}>Bring your people into this community.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
@@ -234,78 +200,46 @@ export default function CreatorCommunityScreen() {
                 {buildCommunityPublicLink(community.handle).replace('https://', '')}.{' '}
                 Your visibility and joining settings still apply.
               </Text>
-              <TouchableOpacity
-                style={styles.inlineAction}
-                onPress={() => router.push('/creator/public-page' as never)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Manage your page"
-              >
-                {/* LIZ COPY */}
-                <Text style={styles.liveBannerLink}>manage your page &rarr;</Text>
-              </TouchableOpacity>
+              {PUBLIC_PAGE_CONTROL_ENABLED && (
+                <TouchableOpacity
+                  style={styles.inlineAction}
+                  onPress={() => router.push('/creator/public-page' as never)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Visibility and link"
+                >
+                  <Text style={styles.liveBannerLink}>Visibility &amp; link &rarr;</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
-          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>chat spaces</Text>
-          <Text style={styles.hint}>
-            the chat spaces members can join, found on your page.
-          </Text>
-          <View style={styles.lastCard}>
-            {(roomsQuery.isLoading || roomsQuery.isError) ? <CommunityReadState label="Chat spaces" query={roomsQuery} /> : rooms.length === 0 ? <Text style={styles.hint}>No chat spaces yet.</Text> : null}
-            {rooms.map((r) => (
-              <TouchableOpacity
-                key={r.id}
-                style={styles.roomRow}
-                onPress={() => router.push(`/community-topic/${r.id}` as never)}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel={`Open chat space: ${r.name}`}
-              >
-                <Text style={styles.roomRowName}>{r.name}</Text>
-                <Text style={styles.roomRowOpen}>open</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <Text style={styles.sectionLabel}>account</Text>
-          <View style={styles.hubStack}>
+          <Text accessibilityRole="header" style={styles.sectionLabel}>Payments &amp; support</Text>
+          <View style={styles.supportGroup}>
             <TouchableOpacity
-              style={styles.hubRow}
+              style={styles.supportRow}
               onPress={() => router.push('/creator/payouts' as never)}
               accessibilityRole="button"
               accessibilityLabel="Money and payouts"
             >
               <CircleDollarSign size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>money and payouts</Text>
-                <Text style={styles.editPageHint}>set up payouts and see what has been paid.</Text>
+                <Text style={styles.editPageTitle}>Money &amp; payouts</Text>
+                <Text style={styles.editPageHint}>Set up payouts and review payments.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
+            <View style={styles.supportDivider} />
             <TouchableOpacity
-              style={styles.hubRow}
+              style={styles.supportRow}
               onPress={() => router.push('/creator/help')}
               accessibilityRole="button"
               accessibilityLabel="Help and permissions"
             >
               <HelpCircle size={19} color={Colors.terracotta} strokeWidth={2} />
               <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>help and permissions</Text>
-                <Text style={styles.editPageHint}>see what you can do or ask a real person for help.</Text>
-              </View>
-              <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.hubRow}
-              onPress={() => router.replace('/(tabs)/friends')}
-              accessibilityRole="button"
-              accessibilityLabel="Back to Yours"
-            >
-              <UserRound size={19} color={Colors.terracotta} strokeWidth={2} />
-              <View style={styles.editPageTextWrap}>
-                <Text style={styles.editPageTitle}>Back to Yours</Text>
-                <Text style={styles.editPageHint}>your plans, chats, and people stay exactly where you left them.</Text>
+                <Text style={styles.editPageTitle}>Help &amp; permissions</Text>
+                <Text style={styles.editPageHint}>Check your access or contact support.</Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
@@ -313,23 +247,18 @@ export default function CreatorCommunityScreen() {
 
           {canArchive && (
             <View style={styles.archiveSection}>
-              <Text style={styles.sectionLabel}>archive</Text>
               {community?.status === 'archived' ? (
                 <View style={styles.archivedBanner}>
                   {/* LIZ COPY */}
-                  <Text style={styles.archivedBannerTitle}>this community is archived</Text>
+                  <Text style={styles.archivedBannerTitle}>Archived community</Text>
                   <Text style={styles.archivedBannerBody}>
-                    it&apos;s hidden from discovery and closed to new members. your
-                    current members keep their chat and everything they already have.
+                    Hidden from discovery and closed to new members. Existing members keep their chat and access.
                   </Text>
                 </View>
               ) : (
                 <>
                   <Text style={styles.hint}>
-                    hides your page from discovery and closes the door to new
-                    members. your current members keep their chat and
-                    everything they already have. this can&apos;t be undone
-                    from here.
+                    Close this community to new members. Existing members keep their chat and access.
                   </Text>
                   <TouchableOpacity
                     style={[styles.archiveBtn, archiving && styles.archiveBtnBusy]}
@@ -342,7 +271,7 @@ export default function CreatorCommunityScreen() {
                     {archiving ? (
                       <ActivityIndicator size="small" color={Colors.errorRed} />
                     ) : (
-                      <Text style={styles.archiveBtnText}>archive this community</Text>
+                      <Text style={styles.archiveBtnText} numberOfLines={1}>Archive community</Text>
                     )}
                   </TouchableOpacity>
                 </>
@@ -350,7 +279,6 @@ export default function CreatorCommunityScreen() {
             </View>
           )}
         </ScrollView>
-      </KeyboardAvoidingView>
 
       <BrandedAlert
         visible={!!alertInfo}
@@ -363,23 +291,10 @@ export default function CreatorCommunityScreen() {
   );
 }
 
-function CommunityReadState({ label, query }: {
-  label: string;
-  query: { isError: boolean; isFetching: boolean; refetch: () => Promise<unknown> };
-}) {
-  const { fonts } = useAfterglowFonts(true, 'creator');
-  const styles = useMemo(() => createStyles(fonts), [fonts]);
-  return <View style={styles.readState} accessibilityLiveRegion="polite">
-    <Text style={styles.editPageTitle}>{query.isError ? `${label} unavailable` : `Loading ${label.toLowerCase()}…`}</Text>
-    {query.isError && <TouchableOpacity style={styles.inlineAction} accessibilityRole="button" accessibilityLabel={`Retry ${label.toLowerCase()}`} disabled={query.isFetching} onPress={() => void query.refetch()}>
-      <Text style={styles.liveBannerLink}>{query.isFetching ? 'Checking…' : 'Retry'}</Text>
-    </TouchableOpacity>}
-  </View>;
-}
-
 function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   inlineAction: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-  readState: { marginTop: 12, paddingVertical: 12, gap: 4 },
+  centered: { flex: 1, padding: 24, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.parchment },
+  intro: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary, marginBottom: 20 },
   actionContent: { zIndex: 1, alignItems: 'center' },
   container: { flex: 1, backgroundColor: Colors.parchment },
   content: { padding: 20 },
@@ -447,10 +362,9 @@ function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   },
   sectionLabel: {
     fontFamily: fonts.semibold,
-    fontSize: FontSizes.caption,
+    fontSize: FontSizes.bodySM,
     color: Colors.terracotta,
-    letterSpacing: 1.5,
-    marginBottom: 4,
+    marginBottom: 10,
   },
   hint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM, marginBottom: 10 },
   editPageCard: {
@@ -464,42 +378,13 @@ function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
     gap: 10,
   },
   hubStack: { gap: 8, marginBottom: 24 },
-  hubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-    gap: 10,
-  },
-  lastCard: { marginBottom: 40 },
-  roomRow: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
-    gap: 10,
-  },
-  roomRowName: {
-    flex: 1,
-    fontFamily: fonts.medium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.darkWarm,
-  },
-  roomRowOpen: { fontFamily: fonts.semibold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
+  supportGroup: { borderWidth: 1, borderColor: Colors.border, borderRadius: 16, backgroundColor: Colors.cardBg, overflow: 'hidden' },
+  supportDivider: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginHorizontal: 14 },
+  supportRow: { flexDirection: 'row', alignItems: 'center', minHeight: 64, padding: 14, gap: 10 },
   editPageTextWrap: { flex: 1, minWidth: 0, gap: 4 },
   editPageTitle: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   editPageHint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
-  archiveSection: { marginTop: 24, marginBottom: 40 },
+  archiveSection: { marginTop: 28, marginBottom: 28, paddingTop: 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
   archiveBtn: {
     minHeight: 44, justifyContent: 'center',
     borderRadius: 999,

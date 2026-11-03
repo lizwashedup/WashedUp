@@ -1,45 +1,57 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-const mockRefetch = jest.fn(async () => ({}));
-let mockQueries: Record<string, any>;
-jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]],useQueryClient:()=>({invalidateQueries:jest.fn()})}));
-jest.mock('expo-router', () => ({useRouter:()=>({push:jest.fn(),replace:jest.fn()}),Redirect:()=>null}));
-jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,isAdminTierRole:()=>true,creatorLandingRoute:()=> '/',buildCommunityPublicLink:()=> 'https://example.test/community/sunday'}));
-jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table',status:'active',role:'leader'})}));
-jest.mock('../../../lib/communityChat', () => ({}));
-jest.mock('../../../lib/haptics', () => ({hapticSuccess:jest.fn(),hapticWarning:jest.fn()}));
-jest.mock('../WorkspaceSwitcher', () => ({WorkspaceSwitcher:()=>null}));
-jest.mock('../CommunitySwitcher', () => ({CommunitySwitcher:()=>null}));
-jest.mock('../CreatorActionFill', () => ({CreatorActionFill:()=>null}));
-jest.mock('../../BrandedAlert', () => ({BrandedAlert:()=>null}));
-jest.mock('../../keyboard/KeyboardDoneBar', () => ({KEYBOARD_DONE_ACCESSORY_ID:'done'}));
-jest.mock('../../../hooks/useAfterglowFonts', () => ({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
+const mockRefetch=jest.fn(async()=>({})), mockPush=jest.fn(), mockPublish=jest.fn(), mockArchive=jest.fn();
+let mockAccess: any, mockCommunity: any, mockPublicPage: boolean, mockFocused: boolean;
+jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
+jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:jest.fn()})}));
+jest.mock('../../../hooks/useCreatorAccessRead',()=>({useCreatorAccessRead:()=>mockAccess}));
+jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush}),Redirect:()=>null}));
+jest.mock('../../../lib/creatorMode',()=>({isAdminTierRole:(role:string)=>['leader','co_leader','admin'].includes(role),buildCommunityPublicLink:()=> 'https://example.test/community/sunday',publishCommunity:(...a:unknown[])=>mockPublish(...a),archiveCommunity:(...a:unknown[])=>mockArchive(...a)}));
+jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockCommunity}));
+jest.mock('../../../constants/FeatureFlags',()=>({get PUBLIC_PAGE_CONTROL_ENABLED(){return mockPublicPage;}}));
+jest.mock('../../../lib/haptics',()=>({hapticSuccess:jest.fn(),hapticWarning:jest.fn()}));
+jest.mock('../CreatorActionFill',()=>({CreatorActionFill:()=>null}));
+jest.mock('../../BrandedAlert',()=>({BrandedAlert:()=>null}));
+jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
 import Screen from '../../../app/(creator)/community';
-let tree: ReactTestRenderer;
-const result=(data:unknown)=>({data,isError:false,isLoading:false,isFetching:false,isRefetching:false,refetch:mockRefetch});
-beforeEach(()=>{
- jest.clearAllMocks();mockQueries={
- 'creator-access':result({hasLeaderGrant:true,ledCommunities:[{id:'community'}]}),
- 'creator-broadcasts':result([]),'creator-broadcast-audience':result(24),'creator-rooms':result([])};
-});
+import { BrandedAlert } from '../../BrandedAlert';
+import { Redirect } from 'expo-router';
+let tree:ReactTestRenderer;
+const text=(node:any):string=>typeof node==='string'?node:Array.isArray(node)?node.map(text).join(''):(node?.children??[]).map(text).join('');
+const control=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
+const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return text(tree.toJSON());};
+beforeEach(()=>{jest.clearAllMocks();mockPublicPage=true;mockFocused=true;mockAccess={data:{},isLoading:false,isError:false,isFetching:false,refetch:mockRefetch};mockCommunity={id:'community',name:'Our Sunday Table',status:'active',role:'leader'};});
 afterEach(()=>act(()=>tree?.unmount()));
-const visibleText=(node:any):string => typeof node==='string' ? node : Array.isArray(node) ? node.map(visibleText).join('') : (node?.children ?? []).map(visibleText).join('');
-const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return visibleText(tree.toJSON());};
-it('keeps failed chat-space reads distinct from empty and retries', async () => {
- mockQueries['creator-rooms']={...result(undefined),isError:true};
- const text=await render();expect(text).toContain('Chat spaces unavailable');expect(text).not.toContain('No chat spaces yet.');
- const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry chat spaces'&&typeof n.props.onPress==='function')[0];
- await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
+it('waits for account-owned settings before showing any tools or publication actions',async()=>{
+ mockAccess.isLoading=true;await render();expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Loading community settings').length).toBeGreaterThan(0);expect(control('Edit community')).toBeUndefined();expect(control('Archive this community')).toBeUndefined();
 });
-it('keeps loading distinct from confirmed empty',async()=>{
- mockQueries['creator-rooms']={...result(undefined),isLoading:true};
- const text=await render();expect(text).toContain('Loading chat spaces');expect(text).not.toContain('No chat spaces yet.');
+it('exposes failed settings reads and retries without pretending the page is empty',async()=>{
+ mockAccess.isError=true;const visible=await render();expect(visible).toContain('Couldn’t load community settings.');expect(visible).not.toContain('Draft community');expect(control('Edit community')).toBeUndefined();
+ await act(async()=>control('Retry community settings').props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
+ mockAccess.isError=false;await act(async()=>tree.update(<Screen/>));expect(control('Edit community')).toBeDefined();
 });
-it('retains cached rooms during a background refresh failure',async()=>{
- mockQueries['creator-rooms']={...result([{id:'one',name:'Sunday walkers'}]),isError:true};
- const text=await render();expect(text).toContain('Chat spaces unavailable');expect(text).toContain('Sunday walkers');
+it.each([['Edit community','/creator/edit-page'],['Joining settings','/creator/join-gate'],['Money and payouts','/creator/payouts'],['Help and permissions','/creator/help'],['Visibility and link','/creator/public-page']])('preserves the existing %s destination',async(label,route)=>{
+ await render();act(()=>control(label).props.onPress());expect(mockPush).toHaveBeenCalledWith(route);
 });
-it('keeps page editing and joining in settings, with daily updates on their own screen',async()=>{
- const text=await render();expect(text).toContain('No chat spaces yet.');expect(text).toContain('Edit community');expect(text).toContain('Joining settings');
- expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Community update')).toHaveLength(0);
+it('keeps daily actions out of Settings and retains configuration and support',async()=>{
+ await render();for(const label of ['Members and join requests','Invite members','Main chat','Community update','Back to Yours'])expect(control(label)).toBeUndefined();
+ expect(text(tree.toJSON())).toContain('Payments & support');expect(control('Money and payouts')).toBeDefined();expect(control('Help and permissions')).toBeDefined();
+});
+it('does not send people into a disabled page-control screen',async()=>{
+ mockPublicPage=false;await render();expect(text(tree.toJSON())).toContain('Published community');expect(control('Visibility and link')).toBeUndefined();
+});
+it.each(['events','member_care','finance'])('does not borrow another community’s admin role for a selected %s collaborator',async(role)=>{
+ mockCommunity.role=role;mockAccess.data={ledCommunities:[mockCommunity,{id:'other',role:'leader'}]};await render();expect(control('Edit community')).toBeUndefined();expect(control('Publish your page')).toBeUndefined();
+});
+it('keeps publication and archiving behind their existing explicit confirmations',async()=>{
+ mockCommunity.status='draft';await render();act(()=>control('Publish your page').props.onPress());expect(tree.root.findByType(BrandedAlert).props.title).toBe('Publish this page?');expect(mockPublish).not.toHaveBeenCalled();
+ act(()=>tree.root.findByType(BrandedAlert).props.onClose());act(()=>control('Archive this community').props.onPress());
+ expect(tree.root.findByType(BrandedAlert).props.message).toContain('You can’t undo this from here.');expect(mockArchive).not.toHaveBeenCalled();
+});
+it('distinguishes an archived community from an unpublished draft',async()=>{
+ mockCommunity.status='archived';const visible=await render();expect(visible).toContain('Archived community');expect(control('Publish your page')).toBeUndefined();expect(control('Archive this community')).toBeUndefined();expect(control('Edit community')).toBeDefined();
+});
+it('does not pull another app tab back into management after access changes',async()=>{
+ mockCommunity.role='events';mockFocused=false;await render();expect(tree.root.findAllByType(Redirect)).toHaveLength(0);
+ mockFocused=true;await act(async()=>tree.update(<Screen/>));expect(tree.root.findByType(Redirect).props.href).toBe('/(tabs)/friends/manage');
 });

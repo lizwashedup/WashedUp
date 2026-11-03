@@ -41,7 +41,8 @@ import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 export default function CreatorTodayScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => createStyles(fonts), [fonts]);
-  const { data: access } = useCreatorAccessRead();
+  const accessRead = useCreatorAccessRead();
+  const { data: access } = accessRead;
   const community = useLedCommunity(access);
 
   const membersQuery = useQuery({
@@ -108,6 +109,14 @@ export default function CreatorTodayScreen() {
     : counts.sold > 0 || !rsvpCount
       ? `${counts.sold} sold · ${counts.checkedIn} checked in`
       : `${rsvpCount} going`;
+
+  // Disabled community queries are not evidence of an empty community.
+  if (accessRead.isLoading) return <View style={styles.accessState}><ActivityIndicator accessibilityLabel="Loading community management" color={Colors.terracotta} /></View>;
+  if (accessRead.isError) return <View style={styles.accessState}>
+    <Text accessibilityRole="alert" style={styles.cardMeta}>Couldn’t load your community management.</Text>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry community management" style={styles.retry}
+      disabled={accessRead.isFetching} onPress={() => void accessRead.refetch()}><Text style={styles.retryText}>{accessRead.isFetching ? 'Checking…' : 'Try again'}</Text></TouchableOpacity>
+  </View>;
 
   // today is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.2). The layout already hides the tab; this covers the
@@ -281,6 +290,8 @@ export default function CreatorTodayScreen() {
         {community && !roomsQuery.isError && !roomsQuery.isLoading && rooms.length > 0 && (
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="All community chats"
+            accessibilityHint="Browse Main chat and optional groups for this community."
             style={styles.card}
             onPress={() => router.push(`/community/${community.id}` as never)}
             activeOpacity={0.8}
@@ -320,6 +331,7 @@ function OverviewReadState({ label, query }: {
 }
 
 function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  accessState: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: Colors.parchment },
   retry: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   retryText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   container: { flex: 1, backgroundColor: Colors.parchment },
