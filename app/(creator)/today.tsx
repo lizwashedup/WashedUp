@@ -180,13 +180,13 @@ export default function CreatorTodayScreen() {
           </TouchableOpacity>}
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
-            onPress={() => router.push('/(tabs)/friends/manage/(tools)/community')}
+            onPress={() => router.push('/(tabs)/friends/manage/(tools)/updates')}
             accessibilityRole="button"
-            accessibilityLabel="Broadcast"
+            accessibilityLabel="Send update"
             activeOpacity={0.85}
           >
             <Megaphone size={16} color={Colors.terracotta} strokeWidth={2.5} />
-            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>broadcast</Text>
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>Send update</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
@@ -241,7 +241,7 @@ export default function CreatorTodayScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
             <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
-            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : community?.status === 'active' ? 'Plan your next gathering' : 'Your events'}</Text>
+            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : community?.status === 'active' ? 'Create your next event' : 'Your events'}</Text>
             <Text style={styles.cardMeta}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
@@ -264,13 +264,13 @@ export default function CreatorTodayScreen() {
         {broadcastsQuery.isError || broadcastsQuery.isLoading ? (
           <OverviewReadState label="Updates" query={broadcastsQuery} />
         ) : (
-        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/community')} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/updates')} activeOpacity={0.8}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>
-              {latestBroadcast ? 'last broadcast' : 'say something to your people'}
+              {latestBroadcast ? 'Latest update' : 'Share an update'}
             </Text>
             <Text style={styles.cardMeta} numberOfLines={2}>
-              {latestBroadcast ? latestBroadcast.body : 'your first broadcast pins to the top of every member’s chats'}
+              {latestBroadcast ? latestBroadcast.body : 'Post news or a reminder in your community’s Main chat.'}
             </Text>
           </View>
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />

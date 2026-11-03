@@ -25,29 +25,21 @@ beforeEach(()=>{
 afterEach(()=>act(()=>tree?.unmount()));
 const visibleText=(node:any):string => typeof node==='string' ? node : Array.isArray(node) ? node.map(visibleText).join('') : (node?.children ?? []).map(visibleText).join('');
 const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return visibleText(tree.toJSON());};
-it.each([['creator-broadcasts','Sent updates'],['creator-rooms','Chat spaces']])('distinguishes failed %s from empty and retries without dropping a draft',async(key,label)=>{
- mockQueries[key]={...result(undefined),isError:true};
- const text=await render();expect(text).toContain(`${label} unavailable`);if(key==='creator-rooms')expect(text).not.toContain('No chat spaces yet.');
- const input=tree.root.findAll(n=>n.props.accessibilityLabel==='Community update'&&typeof n.props.onChangeText==='function')[0];
- await act(async()=>input.props.onChangeText('Keep this unsent update'));
- const retry=tree.root.findAll(n=>n.props.accessibilityLabel===`Retry ${label.toLowerCase()}`&&typeof n.props.onPress==='function')[0];
+it('keeps failed chat-space reads distinct from empty and retries', async () => {
+ mockQueries['creator-rooms']={...result(undefined),isError:true};
+ const text=await render();expect(text).toContain('Chat spaces unavailable');expect(text).not.toContain('No chat spaces yet.');
+ const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry chat spaces'&&typeof n.props.onPress==='function')[0];
  await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
- mockQueries[key]=result([]);await act(async()=>tree.update(<Screen/>));
- expect(visibleText(tree.toJSON())).not.toContain(`${label} unavailable`);
- expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Community update'&&typeof n.props.onChangeText==='function')[0].props.value).toBe('Keep this unsent update');
-});
-it('does not leave a failed audience read looking pending',async()=>{
- mockQueries['creator-broadcast-audience']={...result(undefined),isError:true};const text=await render();expect(text).toContain('Audience unavailable');expect(text).not.toContain('Checking update notifications');expect(text).not.toContain('No active members');
- const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry audience'&&typeof n.props.onPress==='function')[0];await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
 });
 it('keeps loading distinct from confirmed empty',async()=>{
- for(const key of ['creator-broadcasts','creator-rooms'])mockQueries[key]={...result(undefined),isLoading:true};
- const text=await render();expect(text).toContain('Loading sent updates');expect(text).toContain('Loading chat spaces');expect(text).not.toContain('No chat spaces yet.');
+ mockQueries['creator-rooms']={...result(undefined),isLoading:true};
+ const text=await render();expect(text).toContain('Loading chat spaces');expect(text).not.toContain('No chat spaces yet.');
 });
-it('retains cached content during a background refresh failure',async()=>{
- mockQueries['creator-broadcasts']={...result([{id:'one',body:'Bring a picnic',created_at:'2026-09-18T17:00:00Z'}]),isError:true};
- const text=await render();expect(text).toContain('Sent updates unavailable');expect(text).toContain('Bring a picnic');
+it('retains cached rooms during a background refresh failure',async()=>{
+ mockQueries['creator-rooms']={...result([{id:'one',name:'Sunday walkers'}]),isError:true};
+ const text=await render();expect(text).toContain('Chat spaces unavailable');expect(text).toContain('Sunday walkers');
 });
-it('shows confirmed zero audience and empty rooms honestly',async()=>{
- mockQueries['creator-broadcast-audience']=result(0);const text=await render();expect(text).toContain('No other members currently receive update notifications.');expect(text).toContain('No chat spaces yet.');expect(text).not.toContain('unavailable');
+it('keeps page editing and joining in settings, with daily updates on their own screen',async()=>{
+ const text=await render();expect(text).toContain('No chat spaces yet.');expect(text).toContain('Edit community');expect(text).toContain('Joining settings');
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Community update')).toHaveLength(0);
 });

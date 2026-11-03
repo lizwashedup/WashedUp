@@ -12,7 +12,7 @@ it('returns an unknown old management destination to the directory', () => {
 });
 it.each(['leader', 'co_leader', 'admin'] as const)('keeps all existing daily tools for a selected %s', role => {
   const selected = community(role);
-  expect(managementAccess(access({ ledCommunities: [selected] }), 'community', selected).screens).toEqual(expect.arrayContaining(['today', 'members', 'events', 'community', 'menu']));
+  expect(managementAccess(access({ ledCommunities: [selected] }), 'community', selected).screens).toEqual(expect.arrayContaining(['today', 'members', 'events', 'community', 'updates', 'menu']));
 });
 it.each([
   ['events', 'events', ['events', 'menu']],

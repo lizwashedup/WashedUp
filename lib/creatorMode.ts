@@ -15,6 +15,8 @@ import { areaFromZip } from './zipAreas';
 import { isViewingAsEventHost } from './viewAs';
 import type { OperatorGrantStatus, OperatorTrack } from './operatorApplications';
 import type { TicketTier } from './ticketing';
+import type { CreatorPageScope } from './creatorPageReview';
+import { requestWithDeadline } from './requestWithDeadline';
 
 export type CommunityMemberRole =
   | 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
@@ -932,15 +934,49 @@ export async function getBroadcastAudienceCount(communityId: string): Promise<nu
   return count;
 }
 
-export async function sendBroadcast(communityId: string, body: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in');
-  const { error } = await supabase.from('community_broadcasts').insert({
-    community_id: communityId,
-    sender_id: user.id,
-    body: body.trim(),
-  });
+function assertBroadcastScope(scope: CreatorPageScope) {
+  if (!scope.isCurrent()) throw Error('This community visit has changed.');
+}
+async function broadcastAuthorization(scope: CreatorPageScope) {
+  assertBroadcastScope(scope);
+  const { data, error } = await requestWithDeadline(supabase.auth.getSession(), 8_000);
+  assertBroadcastScope(scope);
   if (error) throw error;
+  if (data.session?.user.id !== scope.userId || !data.session.access_token) throw Error('Your account changed.');
+  return `Bearer ${data.session.access_token}`;
+}
+/** Read-only recovery of the exact update, never a body-text guess or a resend. */
+export async function checkBroadcast(communityId: string, body: string, scope: CreatorPageScope, id: string): Promise<boolean> {
+  const authorization = await broadcastAuthorization(scope);
+  const { data, error } = await requestWithDeadline(supabase.from('community_broadcasts')
+    .select('id,community_id,sender_id,body,kind').eq('id', id).eq('community_id', communityId)
+    .eq('sender_id', scope.userId).eq('kind', 'broadcast').maybeSingle().setHeader('Authorization', authorization), 8_000);
+  assertBroadcastScope(scope);
+  if (error) throw error;
+  if (!data) return false;
+  if (data.id !== id || data.community_id !== communityId || data.sender_id !== scope.userId ||
+    data.kind !== 'broadcast' || data.body !== body.trim()) throw Error('The original update could not be confirmed.');
+  return true;
+}
+/** The persisted UUID is reused on retry; a lost response cannot create a new update. */
+export async function sendBroadcast(communityId: string, body: string, scope: CreatorPageScope, id: string): Promise<void> {
+  assertBroadcastScope(scope);
+  if (!body.trim() || body.trim().length > 4000 || !/^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(id)) throw Error('Check your update before sending.');
+  const access = await requestWithDeadline(getCreatorAccess(scope.userId), 12_000);
+  assertBroadcastScope(scope);
+  if (!access.ledCommunities.some(item => item.id === communityId && isAdminTierRole(item.role))) throw Error('You no longer have permission to send updates to this community.');
+  const authorization = await broadcastAuthorization(scope);
+  try {
+    const { error } = await requestWithDeadline(supabase.from('community_broadcasts').insert({
+      id, community_id: communityId, sender_id: scope.userId, kind: 'broadcast', body: body.trim(),
+    }).setHeader('Authorization', authorization), 12_000);
+    assertBroadcastScope(scope);
+    if (error) throw error;
+  } catch (failure) {
+    assertBroadcastScope(scope);
+    if (await checkBroadcast(communityId, body, scope, id)) return;
+    throw failure;
+  }
 }
 
 // -- events (read-only this slice) --------------------------------------------

@@ -16,7 +16,7 @@ const actions = [
   { key: 'chat', title: 'Main chat', hint: 'Open your community’s conversation.' },
   { key: 'members', title: 'Members', hint: 'Review join requests and manage your members.' },
   { key: 'events', title: 'Events', hint: 'Manage events and saved drafts.' },
-  { key: 'settings', title: 'Settings', hint: 'Edit your page, joining settings and updates.' },
+  { key: 'settings', title: 'Settings', hint: 'Edit your page and how people join.' },
 ] as const;
 
 export function CommunityDailyActions({ communityId }: { communityId: string }) {

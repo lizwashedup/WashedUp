@@ -2,7 +2,7 @@ import type { CreatorAccess, LedCommunity } from './creatorMode';
 import type { Workspace } from './workspaceContext';
 
 export const MANAGEMENT_HOME = '/(tabs)/friends/manage' as const;
-export const MANAGEMENT_SCREENS = ['today', 'organizer-home', 'events', 'members', 'community', 'menu', 'organizer-broadcast'] as const;
+export const MANAGEMENT_SCREENS = ['today', 'organizer-home', 'events', 'members', 'community', 'updates', 'menu', 'organizer-broadcast'] as const;
 export type ManagementScreen = typeof MANAGEMENT_SCREENS[number];
 export const managementRoute = (screen: ManagementScreen) => `${MANAGEMENT_HOME}/(tools)/${screen}` as const;
 
@@ -20,7 +20,7 @@ export function managementAccess(access: CreatorAccess, workspace: Workspace | n
   }
   const role = community?.role;
   if (workspace === 'community' && (role === 'leader' || role === 'co_leader' || role === 'admin')) {
-    return { home: managementRoute('today'), screens: ['today', 'events', 'members', 'community', 'menu'] as ManagementScreen[] };
+    return { home: managementRoute('today'), screens: ['today', 'events', 'members', 'community', 'updates', 'menu'] as ManagementScreen[] };
   }
   if (workspace === 'community' && !community && access.hasLeaderGrant) {
     return { home: managementRoute('today'), screens: ['today'] as ManagementScreen[] };

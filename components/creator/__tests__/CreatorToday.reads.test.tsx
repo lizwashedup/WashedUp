@@ -47,7 +47,7 @@ it('keeps a failed member read distinct from an empty community and offers retry
 it('does not present empty member facts while loading',async()=>{
  mockQueries['creator-members']={...result(undefined),isLoading:true};const text=await render();expect(text).toContain('Loading members');expect(text).not.toContain('no join requests waiting');
 });
-it.each([['creator-events','Events','Plan your next gathering'],['creator-broadcasts','Updates','say something to your people'],['creator-rooms','Chat spaces','unused']])('exposes failed %s reads without inventing an empty state',async(key,label,empty)=>{
+it.each([['creator-events','Events','Create your next event'],['creator-broadcasts','Updates','Share an update'],['creator-rooms','Chat spaces','unused']])('exposes failed %s reads without inventing an empty state',async(key,label,empty)=>{
  mockQueries[key]={...result(undefined),isError:true};const text=await render();expect(text).toContain(`${label} unavailable`);if(empty!=='unused')expect(text).not.toContain(empty);
 });
 it('does not show sales or RSVP totals after either attendance read fails',async()=>{
@@ -69,4 +69,10 @@ it('retains active community event creation with its exact identity',async()=>{
  const createEvent=tree.root.findAll(n=>n.props.accessibilityLabel==='Create event'&&typeof n.props.onPress==='function')[0];
  act(()=>createEvent.props.onPress());
  expect(router.push).toHaveBeenCalledWith('/creator/event-form?workspace=community&communityId=community');
+});
+
+it('opens the dedicated update composer from the daily action',async()=>{
+ await render();
+ const action=tree.root.findAll(n=>n.props.accessibilityLabel==='Send update'&&typeof n.props.onPress==='function')[0];
+ act(()=>action.props.onPress());expect(router.push).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/updates');
 });

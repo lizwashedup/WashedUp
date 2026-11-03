@@ -1,6 +1,6 @@
 /**
  * Community settings keeps page editing and joining configuration first.
- * Existing member, update, chat and account tools retain their destinations.
+ * Daily updates live in their own management screen.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -8,7 +8,6 @@ import { ScaledText as Text } from '../../components/ScaledText';
 import {
   View,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -23,12 +22,10 @@ import { ChevronRight, CircleDollarSign, HelpCircle, UserPlus, UserRound, Users 
 import Colors from '../../constants/Colors';
 import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
-import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticWarning } from '../../lib/haptics';
-import { getCreatorAccess, getBroadcasts, getBroadcastAudienceCount, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, sendBroadcast, buildCommunityPublicLink } from '../../lib/creatorMode';
+import { getCreatorAccess, isLeaderAccess, isAdminTierRole, creatorLandingRoute, publishCommunity, archiveCommunity, buildCommunityPublicLink } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
-import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
@@ -38,32 +35,18 @@ export default function CreatorCommunityScreen() {
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = useLedCommunity(access);
 
-  const broadcastsQuery = useQuery({
-    queryKey: ['creator-broadcasts', community?.id],
-    queryFn: () => getBroadcasts(community!.id),
-    enabled: !!community,
-  });
-  const audienceQuery = useQuery({
-    queryKey: ['creator-broadcast-audience', community?.id],
-    queryFn: () => getBroadcastAudienceCount(community!.id),
-    enabled: !!community,
-  });
   const roomsQuery = useQuery({
     queryKey: ['creator-rooms', community?.id],
     queryFn: () => getCommunityRooms(community!.id),
     enabled: !!community,
   });
 
-  const { data: broadcasts = [], refetch, isRefetching } = broadcastsQuery;
-  const { data: audienceCount } = audienceQuery;
-  const { data: rooms = [] } = roomsQuery;
+  const { data: rooms = [], refetch, isRefetching } = roomsQuery;
 
   const [publishing, setPublishing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -126,21 +109,6 @@ export default function CreatorCommunityScreen() {
         },
       ],
     });
-  };
-
-  const handleSend = async () => {
-    if (!community || !draft.trim()) return;
-    setSending(true);
-    try {
-      await sendBroadcast(community.id, draft);
-      hapticSuccess();
-      setDraft('');
-      queryClient.invalidateQueries({ queryKey: ['creator-broadcasts', community.id] });
-    } catch (e) {
-      setAlertInfo({ title: 'That did not send', message: friendlyError(e, 'Try again in a moment.') });
-    } finally {
-      setSending(false);
-    }
   };
 
   // community is a leader screen: an event-host-only grant never sees it
@@ -277,68 +245,6 @@ export default function CreatorCommunityScreen() {
                 <Text style={styles.liveBannerLink}>manage your page &rarr;</Text>
               </TouchableOpacity>
             </View>
-          )}
-
-          <Text style={styles.sectionLabel}>Send update</Text>
-          <Text style={styles.hint}>
-            Post an update in your community chat. Members receive notifications according to their settings.
-          </Text>
-          <View style={styles.composer}>
-            <View style={styles.audienceRow}>
-              <Users size={14} color={Colors.terracotta} strokeWidth={2} />
-              {/* LIZ COPY: honest preview, Screen 19's audience count + channel display requirement */}
-              <Text style={styles.audienceText}>
-                {audienceQuery.isError ? 'Audience unavailable. Retry to check update notifications.' : audienceCount == null
-                  ? 'Checking update notifications…'
-                  : audienceCount === 0
-                    ? 'No other members currently receive update notifications.'
-                    : `Update notifications: ${audienceCount} ${audienceCount === 1 ? 'member' : 'members'}`}
-              </Text>
-            </View>
-            {audienceQuery.isError && <TouchableOpacity style={styles.inlineAction} accessibilityRole="button" accessibilityLabel="Retry audience" disabled={audienceQuery.isFetching} onPress={() => void audienceQuery.refetch()}>
-              <Text style={styles.liveBannerLink}>{audienceQuery.isFetching ? 'Checking…' : 'Retry audience'}</Text>
-            </TouchableOpacity>}
-            <TextInput
-              style={styles.composerInput}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="What would you like members to know?"
-              placeholderTextColor={Colors.inkSoft}
-              multiline
-              maxLength={4000}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              accessibilityLabel="Community update"
-            />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!draft.trim() || sending) && { opacity: 0.4 }]}
-              onPress={handleSend}
-              disabled={!draft.trim() || sending}
-              accessibilityRole="button"
-              accessibilityLabel="Send update"
-              accessibilityState={{ disabled: !draft.trim() || sending, busy: sending }}
-            >
-              <CreatorActionFill />
-              <View style={styles.actionContent}>
-              {sending ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <Text style={styles.sendBtnText} numberOfLines={1}>Send update</Text>
-              )}
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {(broadcastsQuery.isLoading || broadcastsQuery.isError) && <CommunityReadState label="Sent updates" query={broadcastsQuery} />}
-          {broadcasts.length > 0 && (
-            <>
-              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Sent updates</Text>
-              {broadcasts.map((b) => (
-                <View key={b.id} style={styles.broadcastCard}>
-                  <Text style={styles.broadcastBody}>{b.body}</Text>
-                  <Text style={styles.broadcastMeta}>{formatTimestampLA(b.created_at)}</Text>
-                </View>
-              ))}
-            </>
           )}
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>chat spaces</Text>
@@ -547,50 +453,6 @@ function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
     marginBottom: 4,
   },
   hint: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, color: Colors.secondary, lineHeight: LineHeights.bodySM, marginBottom: 10 },
-  composer: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-    gap: 10,
-  },
-  audienceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  audienceText: {
-    flex: 1,
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.caption,
-    color: Colors.secondary,
-  },
-  composerInput: {
-    minHeight: 70,
-    textAlignVertical: 'top',
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.darkWarm,
-  },
-  sendBtn: {
-    overflow: 'hidden', minHeight: 44, justifyContent: 'center',
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  sendBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  broadcastCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-    marginBottom: 10,
-  },
-  broadcastBody: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  broadcastMeta: { fontFamily: fonts.regular, fontSize: FontSizes.caption, color: Colors.tertiary, marginTop: 6 },
   editPageCard: {
     flexDirection: 'row',
     alignItems: 'center',
