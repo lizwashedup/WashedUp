@@ -102,12 +102,14 @@ export function usePlanEdit(options: Options) {
     pending.current = 'save'; setOperation('save'); setError(null);
     let dispatched = false;
     try {
-      const auth = await supabase.auth.getUser();
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!isCurrent() || !latest.current.canEdit()) return;
       if (auth.error || auth.data.user?.id !== viewerId) throw new Error('Couldn’t check your account. Try again.');
       dispatched = true;
-      const response = await supabase.from('events').update(patch).eq('id', eventId).eq('creator_user_id', viewerId)
-        .select(['id', 'creator_user_id', ...Object.keys(patch)].join(',')).maybeSingle();
+      // A deadline cannot prove the server rolled back. Keep a timed-out write
+      // unresolved and reconcile its exact patch instead of resubmitting it.
+      const response = await requestWithDeadline(supabase.from('events').update(patch).eq('id', eventId).eq('creator_user_id', viewerId)
+        .select(['id', 'creator_user_id', ...Object.keys(patch)].join(',')).maybeSingle(), 15_000);
       if (response.error && rejected.has(String(response.error.code))) { dispatched = false; throw response.error; }
       if (response.error !== null || !confirmsPlanEdit(response.data, eventId, viewerId, patch)) throw new Error('Unconfirmed save');
       // A late receipt must not close a different edit. Refresh occurs on the
@@ -129,11 +131,11 @@ export function usePlanEdit(options: Options) {
     if (attempt.viewerId !== options.viewerId || attempt.eventId !== options.eventId) return;
     pending.current = 'check'; setOperation('check'); setError(null);
     try {
-      const auth = await supabase.auth.getUser();
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!isCurrent()) return;
       if (auth.error || auth.data.user?.id !== attempt.viewerId) throw new Error('Account changed');
-      const response = await supabase.from('events').select(['id', 'creator_user_id', ...Object.keys(attempt.patch)].join(','))
-        .eq('id', attempt.eventId).eq('creator_user_id', attempt.viewerId).maybeSingle();
+      const response = await requestWithDeadline(supabase.from('events').select(['id', 'creator_user_id', ...Object.keys(attempt.patch)].join(','))
+        .eq('id', attempt.eventId).eq('creator_user_id', attempt.viewerId).maybeSingle(), 15_000);
       if (!isCurrent()) return;
       if (response.error !== null || !confirmsPlanEdit(response.data, attempt.eventId, attempt.viewerId, attempt.patch)) throw new Error('Save not confirmed');
       confirm(isCurrent);

@@ -901,3 +901,26 @@ it('ignores a date selection retained from an editor that has closed and reopene
   await act(async () => button('Save changes').props.onPress());
   expect(mockUpdate.mock.calls[0][0]).not.toHaveProperty('start_time');
 });
+
+
+it('releases a stalled save to Check changes, preserving the draft without a duplicate write', async () => {
+  jest.useFakeTimers();
+  try {
+    mockEditResponse = new Promise(() => {});
+    await openEditor();
+    act(() => manageInput(mockPlan.title).props.onChangeText('Keep my edited title'));
+    act(() => { void button('Save changes').props.onPress(); });
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(timeControl('Close editor').props.disabled).toBe(true);
+    await act(async () => { jest.advanceTimersByTime(15_000); });
+    expect(manageModal().props.visible).toBe(true);
+    expect(manageInput('Keep my edited title')).toBeDefined();
+    expect(timeControl('Close editor').props.disabled).toBe(false);
+    expect(button('Save changes')).toBeUndefined();
+    expect(button('Check changes')).toBeDefined();
+    mockEditResponse = undefined;
+    await act(async () => button('Check changes').props.onPress());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(tree.root.findAllByType(Modal).some(n => n.props.visible && n.props.animationType === 'slide')).toBe(false);
+  } finally { jest.useRealTimers(); }
+});
