@@ -29,7 +29,7 @@ it('rejects repeated taps and a result arriving after the visit ends',async()=>{
  act(()=>{press();press();});expect(mockRefresh).toHaveBeenCalledTimes(1);mockActive=false;await act(async()=>resolve(data));expect(mockPush).not.toHaveBeenCalled();
 });
 it('opens the current pending invitation without inventing another destination',async()=>{
- const invitation={pageId:'team',invitationId:'invite',pageName:'Sunset Studio'};mockSpaces.data={...data,invitations:[invitation]};mockRefresh.mockResolvedValue(mockSpaces.data);mount();
+ const invitation={pageId:'team',invitationId:'invite',pageName:'Sunset Studio'};mockSpaces.data={...data,invitations:[invitation]};mockRefresh.mockResolvedValue(mockSpaces.data);mount(true);
  await act(async()=>button('Review invitation to Sunset Studio').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page-team?id=team&invitationId=invite');
 });
 it('keeps application status reachable when management reads fail',async()=>{

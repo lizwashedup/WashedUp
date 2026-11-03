@@ -1,5 +1,7 @@
 # Creation clarity: first implementation
 
+Historical first increment. The [creator-management implementation record](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-implementation-2026-11-02.md) supersedes its status and intermediate Event routing: the local code now has a direct form entry with explicit creator identity and renewed access checks. Neither increment has been released by this task.
+
 Status: local implementation, not an OTA release. Base: `aba944642c877f782f38cf63c7427220995c3060`. Worktree: `/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102`.
 
 Liz deferred flexible/undated Plans and discussion-versus-trip modeling to make progress on communities, organizations and event creation. Keep those deferred ideas out of this release.

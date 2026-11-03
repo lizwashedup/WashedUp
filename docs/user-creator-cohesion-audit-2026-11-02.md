@@ -1,5 +1,7 @@
 # WashedUp member and creator cohesion audit
 
+Historical pre-implementation audit. The findings below describe the audited revision; see the [implementation and verification record](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-implementation-2026-11-02.md) for what has since changed locally and what remains open.
+
 **Date:** November 2, 2026  
 **Status:** Source-based audit and proposed implementation sequence. No app changes or release performed by this audit.  
 **Checkout:** `/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102`  
