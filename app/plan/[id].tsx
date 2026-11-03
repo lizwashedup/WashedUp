@@ -553,6 +553,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   };
 
   const [manageModalVisible, setManageModalVisible] = useState(false);
+  const manageScrollRef = useRef<ScrollView>(null);
   const [departureVisit, setDepartureVisit] = useState<{ action: PlanDepartureAction; isCurrent: () => boolean } | null>(null);
   const departureVisitRef = useRef(departureVisit); departureVisitRef.current = departureVisit;
   const [departureError, setDepartureError] = useState<string | null>(null);
@@ -596,6 +597,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     },
   });
   const editSaving = edit.isSaving, editImageLoading = edit.isPhotoPending;
+  useEffect(() => {
+    // Keep recovery feedback visible even when Save was tapped from a lower field.
+    if (manageModalVisible && (edit.error || edit.unknown)) {
+      manageScrollRef.current?.scrollTo({ y: 0, animated: false });
+    }
+  }, [manageModalVisible, edit.error, edit.unknown]);
   const closeManageModal = () => {
     if (!edit.close()) return false;
     Keyboard.dismiss(); setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
@@ -2201,13 +2208,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={manageStyles.sheet} accessibilityElementsHidden={showEditTimePicker || showEditDatePicker} importantForAccessibility={showEditTimePicker || showEditDatePicker ? "no-hide-descendants" : "auto"}>
             <View style={manageStyles.headerRow}>
-              <Text style={manageStyles.title}>Manage Plan</Text>
-              <TouchableOpacity style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                <Text style={manageStyles.closeX}>✕</Text>
+              <Text style={manageStyles.title} accessibilityRole="header" numberOfLines={1} adjustsFontSizeToFit>Manage Plan</Text>
+              <TouchableOpacity style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <X size={24} color={manageStyles.closeX.color} />
               </TouchableOpacity>
             </View>
 
             <ScrollView
+              ref={manageScrollRef}
+              style={manageStyles.body}
               decelerationRate="normal"
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
@@ -2221,6 +2230,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               }}
               scrollIndicatorInsets={{ right: 2 }}
             >
+              {edit.unknown && <View style={manageStyles.recovery}>
+                <Text style={manageStyles.label}>Check your changes</Text>
+                <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
+              </View>}
+              {edit.error && <Text accessibilityRole="alert" style={manageStyles.editError}>{edit.error}</Text>}
 <View pointerEvents={edit.isBusy || edit.unknown ? "none" : "auto"}>
               {/* Title */}
               <Text style={manageStyles.label}>Title</Text>
@@ -2657,11 +2671,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               </TouchableOpacity>
             </ScrollView>
             <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-              {edit.unknown && <View style={manageStyles.recovery}>
-                <Text style={manageStyles.label}>Check your changes</Text>
-                <Text style={manageStyles.hint}>Your changes may have saved, but we didn’t receive confirmation. Check before saving again.</Text>
-              </View>}
-              {edit.error && <Text accessibilityRole="alert" style={manageStyles.editError}>{edit.error}</Text>}
               {/* Save button */}
               <TouchableOpacity accessibilityRole="button"
                 style={[manageStyles.saveBtn, (editSaving || editImageLoading || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
@@ -2670,9 +2679,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 activeOpacity={0.85}
               >
                 {editSaving ? (
-                  <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><ActivityIndicator size="small" color={Colors.white} /><Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Checking…" : "Saving…"}</Text></View>
+                  <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><ActivityIndicator size="small" color={Colors.white} /><Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.saveBtnText}>{edit.unknown ? "Checking…" : "Saving…"}</Text></View>
                 ) : (
-                  <Text numberOfLines={1} style={manageStyles.saveBtnText}>{edit.unknown ? "Check changes" : "Save changes"}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.saveBtnText}>{edit.unknown ? "Check changes" : "Save changes"}</Text>
                 )}
               </TouchableOpacity>
 
@@ -3546,7 +3555,8 @@ const legacyManagePlacesStyles = {
 };
 
 const legacyManageStyles = StyleSheet.create({
-  footer: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12, gap: 12 },
+  footer: { flexShrink: 0, borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 12 },
+  body: { flexShrink: 1, minHeight: 0 },
   recovery: { marginTop: 0 },
   editError: { color: Colors.errorRed, fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, marginTop: 12 },
   overlay: {
@@ -3567,11 +3577,15 @@ const legacyManageStyles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
+    flexShrink: 0,
+    gap: 12,
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
   title: {
+    flex: 1,
+    minWidth: 0,
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.displayMD,
     color: Colors.asphalt,
@@ -3709,13 +3723,14 @@ const legacyManageStyles = StyleSheet.create({
     backgroundColor: Colors.terracotta,
     borderRadius: 14,
     paddingVertical: 14,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 0,
   },
   saveBtnDisabled: {
     opacity: 0.4,
   },
-  saveBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG },
+  saveBtnText: { flexShrink: 1, color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG },
   cancelBtn: {
     alignItems: 'center',
     paddingVertical: 14,
