@@ -2,6 +2,7 @@ import React from 'react';
 import { SectionList, TouchableOpacity, Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import MyPlansView from '../MyPlansView';
+jest.mock('../../../../hooks/useInterestedPlanActions', () => ({ useInterestedPlanActions: () => ({ feedback: {}, run: jest.fn() }) }));
 let mockPlans: any[] = [];
 const mockEmpty: any[] = [];
 jest.mock('../../../../hooks/useMyPlansData', () => ({ useMyPlans: () => ({ data: mockPlans }), useMyPlanDrafts: () => ({ data: mockEmpty }), useWaitlistedPlans: () => ({ data: mockEmpty }), useInterestedPlans: () => ({ data: mockEmpty }), useSavedPlans: () => ({ data: mockEmpty }) }));

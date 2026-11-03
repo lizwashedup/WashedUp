@@ -34,6 +34,8 @@ import { formatEventDateLA } from '../../../lib/laDate';
 import { BrandedAlert, type BrandedAlertButton } from '../../BrandedAlert';
 import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
+import { useInterestedPlanActions } from '../../../hooks/useInterestedPlanActions';
+import { canMakeSimilarPlan } from '../../../lib/interestedPlanActions';
 
 const WISHLISTS_TIMEOUT_MS = 8000;
 
@@ -53,6 +55,8 @@ export default function MyPlansView({ userId }: { userId: string }) {
 
   const [waitlistExpanded, setWaitlistExpanded] = useState(false);
   const [pastExpanded, setPastExpanded] = useState(false);
+  const [interestedExpanded, setInterestedExpanded] = useState(true);
+  const interestedActions = useInterestedPlanActions(userId);
   const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
@@ -236,11 +240,11 @@ export default function MyPlansView({ userId }: { userId: string }) {
     const s: { title: string; data: Plan[] }[] = [];
     if (myPlansUpcoming.length > 0) s.push({ title: 'Upcoming', data: myPlansUpcoming });
     if (savedPlans.length > 0) s.push({ title: 'Saved', data: savedPlans });
-    if (interestedPlans.length > 0) s.push({ title: 'Interested', data: interestedPlans });
+    if (interestedPlans.length > 0) s.push({ title: 'Interested', data: interestedExpanded ? interestedPlans : [] });
     if (waitlistedPlans.length > 0) s.push({ title: 'Waitlisted', data: waitlistExpanded ? waitlistedPlans : [] });
     if (myPlansPast.length > 0) s.push({ title: 'Past', data: pastExpanded ? myPlansPast : [] });
     return s;
-  }, [myPlansUpcoming, savedPlans, interestedPlans, waitlistedPlans, waitlistExpanded, myPlansPast, pastExpanded]);
+  }, [myPlansUpcoming, savedPlans, interestedPlans, interestedExpanded, waitlistedPlans, waitlistExpanded, myPlansPast, pastExpanded]);
 
   const handleReport = useCallback((planId: string) => {
     const plan = [...myPlans, ...waitlistedPlans, ...savedBase, ...interestedPlans].find((p) => p.id === planId);
@@ -261,7 +265,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
   }, [myPlans, waitlistedPlans, savedBase, interestedPlans, blockUser]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Plan }) => (
+    ({ item, section }: { item: Plan; section: { title: string } }) => (
       <View style={styles.cardWrap}>
         <PlanCard
           appearance={cardAppearance}
@@ -281,13 +285,55 @@ export default function MyPlansView({ userId }: { userId: string }) {
           onBlock={handleBlock}
           onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
         />
+        {section.title === 'Interested' && <View style={styles.interestedActions}>
+          {canMakeSimilarPlan(item) && <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Make a similar plan to ${item.title}`}
+            accessibilityState={{ disabled: !!interestedActions.feedback[item.id]?.pending }}
+            disabled={!!interestedActions.feedback[item.id]?.pending}
+            style={styles.interestedAction}
+            onPress={() => void interestedActions.run(item, 'similar')}
+          >
+            <Text style={styles.interestedActionText}>{interestedActions.feedback[item.id]?.pending === 'similar' ? 'Opening…' : 'Make a similar plan'}</Text>
+          </TouchableOpacity>}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${item.title} from Interested`}
+            accessibilityState={{ disabled: !!interestedActions.feedback[item.id]?.pending }}
+            disabled={!!interestedActions.feedback[item.id]?.pending}
+            style={styles.interestedAction}
+            onPress={() => void interestedActions.run(item, 'remove')}
+          >
+            <Text style={styles.interestedActionText}>{interestedActions.feedback[item.id]?.pending === 'remove' ? 'Removing…' : 'Remove from Interested'}</Text>
+          </TouchableOpacity>
+          {!!interestedActions.feedback[item.id]?.error && <View style={styles.interestedRecovery}>
+            <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.recoveryText}>{interestedActions.feedback[item.id].error}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retry for ${item.title}`} style={styles.interestedAction}
+              disabled={!!interestedActions.feedback[item.id]?.pending}
+              onPress={() => void interestedActions.run(item, interestedActions.feedback[item.id].retry)}>
+              <Text style={styles.interestedActionText}>Try again</Text>
+            </TouchableOpacity>
+          </View>}
+        </View>}
       </View>
     ),
-    [cardAppearance, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans],
+    [cardAppearance, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans, interestedActions],
   );
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: { title: string } }) => {
+      if (section.title === 'Interested') {
+        return <TouchableOpacity style={styles.pastSectionHeader} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityLabel={`Interested, ${interestedPlans.length} ${interestedPlans.length === 1 ? 'plan' : 'plans'}`}
+          accessibilityState={{ expanded: interestedExpanded }}
+          onPress={() => { hapticLight(); setInterestedExpanded(value => !value); }}>
+          <Text style={[styles.sectionHeader, styles.interestedHeading]}>Interested</Text>
+          <View style={styles.pastChevronRow}>
+            <Text style={styles.pastCount}>{interestedPlans.length}</Text>
+            {interestedExpanded ? <ChevronDown size={16} color={Colors.tertiary} /> : <ChevronRight size={16} color={Colors.tertiary} />}
+          </View>
+        </TouchableOpacity>;
+      }
       if (section.title === 'Past') {
         return (
           <TouchableOpacity
@@ -324,7 +370,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
       }
       return <Text style={styles.sectionHeader}>{section.title}</Text>;
     },
-    [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length],
+    [pastExpanded, myPlansPast.length, waitlistExpanded, waitlistedPlans.length, interestedExpanded, interestedPlans.length],
   );
 
   const hasContent = sections.length > 0 || !!draftsHeader;
@@ -434,6 +480,11 @@ const styles = StyleSheet.create({
   draftMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
   listContent: { paddingHorizontal: 20, paddingBottom: 32 },
   cardWrap: { marginBottom: 14 },
+  interestedActions: { paddingHorizontal: 8, paddingTop: 4, flexDirection: 'row', flexWrap: 'wrap', columnGap: 16 },
+  interestedAction: { minHeight: 44, justifyContent: 'center', paddingVertical: 10, maxWidth: '100%' },
+  interestedActionText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
+  interestedRecovery: { width: '100%', paddingTop: 4 },
+  interestedHeading: { marginTop: 0, marginBottom: 0, flexShrink: 1 },
   sectionHeader: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,

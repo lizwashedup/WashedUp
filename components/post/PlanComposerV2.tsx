@@ -186,6 +186,7 @@ export default function PlanComposerV2() {
     duplicatedFromEventId?: string;
     // resuming a saved draft: post updates this row instead of inserting
     draftId?: string;
+    similarPlanRequest?: string;
   }>();
 
   const composerViewer = useObservedUser();
@@ -319,6 +320,7 @@ export default function PlanComposerV2() {
     hapticLight();
     photoVisit.current = null; photoAttempt.current = null;
     setImageLoading(false); setImageUrl(current => current?.startsWith('http') ? current : null);
+    if (params.similarPlanRequest) resetForm();
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/plans');
   };
@@ -360,6 +362,25 @@ export default function PlanComposerV2() {
   // so duplicates silently dropped date/time/place/ticket/etc.; this mirrors
   // LegacyComposer's hydration so "Post your own" carries the source plan over. ──
   useEffect(() => {
+    if (params.similarPlanRequest) {
+      // A tab may still contain another draft. Start this review with no
+      // previous dates, event links, people, or asynchronous photo/write work.
+      retireWrite();
+      photoAttempt.current = null;
+      setImageLoading(false);
+      setLoading(false);
+      resetFields();
+      postInvitations.reset();
+      setPeoplePickerOpen(false);
+      setShowNeighborhoodPicker(false);
+      setConfirmVisible(false);
+      setShareModalVisible(false);
+      setShareWanted(false);
+      setPostedPlanId(null);
+      postedPlanIdRef.current = null;
+      setRecoveryNudge(false);
+      setAlertInfo(null);
+    }
     if (params.prefillTitle) setTitle(String(params.prefillTitle));
     if (params.prefillExploreEventId) setExploreEventId(String(params.prefillExploreEventId));
     if (params.prefillInvitePersonId) {
@@ -460,7 +481,7 @@ export default function PlanComposerV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto, params.duplicatedFromEventId]);
+  }, [params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto, params.duplicatedFromEventId, params.similarPlanRequest]);
 
   // ── Invite suggestions (want-in only; reactance fix) ──
   const inviteSuggestions = useMemo<InviteSuggestion[]>(() => {
@@ -651,7 +672,7 @@ export default function PlanComposerV2() {
     <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.fieldError}>{fieldErrors[field]}</Text>
   ) : null;
 
-  const resetForm = () => {
+  const resetFields = () => {
     setValidationMode(null);
     setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
@@ -659,6 +680,12 @@ export default function PlanComposerV2() {
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
     setAllowDuplicate(true); setInvited([]);
     setEndTimeSelected(false);
+    setDateMonth(today.m); setDateDay(today.d); setDateYear(today.y);
+    setTimeHour(8); setTimeMinute('00'); setTimePeriod('PM');
+    setEndTimeHour(9); setEndTimeMinute('00'); setEndTimePeriod('PM');
+  };
+  const resetForm = () => {
+    resetFields();
     // Clear every prefill/duplicate param after a successful post. Otherwise a
     // "Post your own" leaves duplicatedFromEventId (and the rest) in route state,
     // and the NEXT plan posted from this same screen is mis-tagged a duplicate -
@@ -677,6 +704,7 @@ export default function PlanComposerV2() {
       prefillExploreEventId: undefined,
       duplicatedFromEventId: undefined,
       draftId: undefined,
+      similarPlanRequest: undefined,
     } as never);
   };
 
@@ -760,6 +788,7 @@ export default function PlanComposerV2() {
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
       explore_event_id: exploreEventId,
+      ...(params.similarPlanRequest ? { skip_explore_auto_link: true } : {}),
     };
     const write = beginWrite();
     if (!write) return;
@@ -867,6 +896,7 @@ export default function PlanComposerV2() {
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
       explore_event_id: exploreEventId,
+      ...(params.similarPlanRequest ? { skip_explore_auto_link: true } : {}),
       duplicated_from_event_id: params.duplicatedFromEventId ? String(params.duplicatedFromEventId) : null,
     };
     const inviteIds = invited.map((c) => c.user_id);

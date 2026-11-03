@@ -4,7 +4,7 @@
  *
  * Flow (every beat escapable):
  *   1. "How was it?" (always)        -> upsert_plan_feedback (complete state)
- *   2. "Who made it?" (conditional)  -> no_show_reports
+ *   2. "Did these people attend?" (conditional) -> explicit no_show_reports
  *   3. "Keep these people" (only when YOURS_PAGE_ENABLED) -> the handshake
  *
  * FORM FACTOR (survey-v3-visual-spec): a bottom sheet that GROWS with
@@ -21,11 +21,12 @@
  * NON-NEGOTIABLE rails (2026-05-18 lockout): an escape on every step, never
  * network-gated; markPostPlanSurveyHandled on EVERY exit BEFORE any network
  * write; all plan_feedback writes through upsert_plan_feedback with COMPLETE
- * state (last-write-wins); write errors swallowed, never trap.
+ * state (last-write-wins). Feedback errors never trap. Attendance failures stay
+ * visible and retryable; skipping remains available while requests are pending.
  *
  * No emoji, no em dashes, no forbidden words.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -38,6 +39,7 @@ import {
   Dimensions,
   ActivityIndicator,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import {
@@ -47,6 +49,7 @@ import {
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { supabase } from '../../../lib/supabase';
+import { requestWithDeadline } from '../../../lib/requestWithDeadline';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useReduceMotion } from '../a11y/useReduceMotion';
@@ -61,6 +64,7 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────
 type Step = 'how' | 'who' | 'keep';
 type Rating = 'thumbs_up' | 'thumbs_down' | 'fine';
+type AttendanceAnswer = 'there' | 'no_show' | 'unsure';
 
 // The handshake result overlay. Celebration (gold-ruled toast) only when
 // someone became a mutual connection; otherwise a quiet auto-dismissing line.
@@ -85,7 +89,12 @@ function joinNames(names: string[]): string {
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
-export default function PostPlanSurveyV3({
+export default function PostPlanSurveyV3(props: SurveyProps) {
+  // Each opening, plan and account owns fresh, initially unanswered choices.
+  return props.visible ? <SurveySession key={`${props.userId}:${props.plan.id}`} {...props} /> : null;
+}
+
+function SurveySession({
   visible,
   plan,
   members,
@@ -123,7 +132,17 @@ export default function PostPlanSurveyV3({
   const [rating, setRating] = useState<Rating | null>(null);
   const [comment, setComment] = useState('');
   const [showComment, setShowComment] = useState(false);
-  const [noShows, setNoShows] = useState<Set<string>>(new Set());
+  const [answers, setAnswers] = useState<Record<string, AttendanceAnswer>>({});
+  const noShows = useMemo(() => new Set(peoplePool.filter(member => answers[member.id] === 'no_show').map(member => member.id)), [answers, peoplePool]);
+  const [attendanceStarted, setAttendanceStarted] = useState(false);
+  const attendanceFrozen = useRef(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const attendanceAttempt = useRef<object | null>(null);
+  const attendanceCommitted = useRef(new Set<string>());
+  const ratingAdvanced = useRef(false);
+  const keepAttempt = useRef<object | null>(null);
+  const mounted = useRef(false);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; attendanceAttempt.current = null; keepAttempt.current = null; }; }, []);
   const [addSel, setAddSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<HandshakeResult | null>(null);
@@ -149,6 +168,7 @@ export default function PostPlanSurveyV3({
 
   const wroteRef = useRef(false);
   const exitedRef = useRef(false);
+  const isCurrent = () => mounted.current && !exitedRef.current;
   // True once the user commits the TOP rating ("Really good"). Reported up on
   // exit so the owner can fire the native review ask after this modal dismisses.
   const topRatedRef = useRef(false);
@@ -230,8 +250,11 @@ export default function PostPlanSurveyV3({
   // swallowed; a failure never traps the user. The close plays the slide-down
   // first, then hands control back to the owner (onComplete).
   const exit = () => {
-    if (exitedRef.current) return;
+    if (!isCurrent()) return;
     exitedRef.current = true;
+    Keyboard.dismiss();
+    attendanceAttempt.current = null;
+    keepAttempt.current = null;
     void markPostPlanSurveyHandled(plan.id);
     if (!wroteRef.current) {
       void supabase
@@ -261,11 +284,12 @@ export default function PostPlanSurveyV3({
         duration: 220,
         useNativeDriver: false,
       }),
-    ]).start(() => onComplete(topRatedRef.current));
+    ]).start(() => { if (mounted.current) onComplete(topRatedRef.current); });
   };
 
   // Rail 3: complete-state upsert (rating + comment together), fire-and-forget.
   const commitFeedback = (r: Rating, cmt: string | null) => {
+    if (!isCurrent()) return;
     wroteRef.current = true;
     void supabase
       .rpc('upsert_plan_feedback', {
@@ -289,28 +313,59 @@ export default function PostPlanSurveyV3({
     }
   };
 
-  // Record who didn't make it, as the spec requires ("writes no_show_reports
-  // rows as before"). Fire-and-forget + idempotent: the SECURITY DEFINER RPC
-  // validates the reporter and target are members and ignores duplicates, so a
-  // re-entered step never double-counts. Called once when attendance is
-  // finalized (advancing off the "who made it" step).
-  const commitNoShows = (ids: Set<string>) => {
-    for (const id of ids) {
-      supabase
-        .rpc('report_no_show', { p_event_id: plan.id, p_no_show_user_id: id })
-        .then(({ error }) => {
-          if (error) console.warn('[survey] report_no_show failed:', error.message);
-        });
+  const submitAttendance = async () => {
+    if (!isCurrent() || attendanceAttempt.current || !showWhoMadeIt) return;
+    const attempt = {}; attendanceAttempt.current = attempt;
+    const current = () => isCurrent() && attendanceAttempt.current === attempt;
+    const selected = new Set(noShows);
+    setAttendanceError(null);
+    if (selected.size === 0) {
+      attendanceAttempt.current = null;
+      goToKeepOrClose(selected);
+      return;
     }
+    // Once reports have been dispatched, keep this submitted selection stable.
+    // A timeout may have committed; the existing RPC makes retries idempotent.
+    attendanceFrozen.current = true;
+    setAttendanceStarted(true); setBusy(true);
+    try {
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
+      if (!current()) return;
+      if (auth.error || auth.data.user?.id !== userId) throw new Error('account changed');
+      const results = await Promise.allSettled([...selected].filter(id => !attendanceCommitted.current.has(id)).map(async id => {
+        if (!current()) return;
+        const response = await requestWithDeadline(supabase.rpc('report_no_show', { p_event_id: plan.id, p_no_show_user_id: id }), 8000);
+        if (response.error) throw response.error;
+        if (current()) attendanceCommitted.current.add(id);
+      }));
+      if (!current()) return;
+      if (results.some(result => result.status === 'rejected')) throw new Error('report failed');
+      attendanceAttempt.current = null;
+      setBusy(false);
+      goToKeepOrClose(selected);
+    } catch {
+      if (current()) {
+        attendanceAttempt.current = null;
+        setBusy(false);
+        setAttendanceError('Some no-show reports couldn’t be submitted. Try again or skip the rest. Reports already sent are kept.');
+      }
+    }
+  };
+
+  const skipAttendance = () => {
+    if (!isCurrent()) return;
+    attendanceAttempt.current = null;
+    setBusy(false); setAttendanceError(null);
+    // Skipping before submission must never turn a selection into a report.
+    if (!attendanceFrozen.current) setAnswers({});
+    goToKeepOrClose(attendanceFrozen.current ? noShows : new Set());
   };
 
   // Step 3 gating: only with the people system on, and only when there is at
   // least one eligible person (incoming_pending or none; mutual / outgoing /
   // blocked are excluded server-side via keep_state). Otherwise close.
   const goToKeepOrClose = (currentNoShows: Set<string>) => {
-    // Persist attendance before we branch to keep-or-close, so the no-show
-    // record is written whether or not a keep step follows.
-    commitNoShows(currentNoShows);
+    if (!isCurrent()) return;
     if (!YOURS_PAGE_ENABLED) {
       exit();
       return;
@@ -352,20 +407,29 @@ export default function PostPlanSurveyV3({
   // THE HANDSHAKE. One atomic server RPC per person; the client never branches
   // the relationship logic itself. blocked (a race) raises and is a silent skip.
   const submitAdd = async () => {
+    if (!isCurrent() || keepAttempt.current) return;
     const selected = keepCandidates.filter((m) => addSel.has(m.id));
     if (selected.length === 0) return;
+    const attempt = {}; keepAttempt.current = attempt;
+    const current = () => isCurrent() && keepAttempt.current === attempt;
     setBusy(true);
+    const auth = await requestWithDeadline(supabase.auth.getUser(), 8000).catch(() => null);
+    if (!current()) return;
+    if (!auth || auth.error || auth.data.user?.id !== userId) {
+      keepAttempt.current = null; setBusy(false); setResult({ connectedNames: [], requested: 0, failed: true }); return;
+    }
     const settled = await Promise.allSettled(
       selected.map(async (m) => {
-        const { data, error } = await supabase.rpc('add_or_accept_person', {
+        const { data, error } = await requestWithDeadline(supabase.rpc('add_or_accept_person', {
           p_target: m.id,
           p_context: 'plan_history',
           p_context_event_id: plan.id,
-        });
+        }), 8000);
         if (error) throw error;
         return { member: m, outcome: String(data) };
       }),
     );
+    if (!current()) return;
     setBusy(false);
 
     const connectedNames: string[] = [];
@@ -452,15 +516,12 @@ export default function PostPlanSurveyV3({
               {step === 'who' && (
                 <StepWho
                   list={whoMadeItList}
-                  noShows={noShows}
-                  onToggle={(id) => {
+                  answers={answers}
+                  disabled={attendanceStarted}
+                  onAnswer={(id, answer) => {
+                    if (!isCurrent() || attendanceFrozen.current || attendanceAttempt.current) return;
                     hapticSelection();
-                    setNoShows((s) => {
-                      const n = new Set(s);
-                      if (n.has(id)) n.delete(id);
-                      else n.add(id);
-                      return n;
-                    });
+                    setAnswers(current => ({ ...current, [id]: answer }));
                   }}
                 />
               )}
@@ -468,7 +529,9 @@ export default function PostPlanSurveyV3({
                 <StepKeep
                   candidates={keepCandidates}
                   selected={addSel}
+                  disabled={busy || !!result}
                   onToggle={(id) => {
+                    if (!isCurrent() || keepAttempt.current) return;
                     hapticSelection();
                     setAddSel((s) => {
                       const n = new Set(s);
@@ -480,6 +543,16 @@ export default function PostPlanSurveyV3({
                 />
               )}
             </Animated.ScrollView>
+
+            {step === 'who' && <View style={styles.attendanceSummary}>
+              <Text accessibilityLiveRegion="polite" style={styles.whoHelper}>
+                {noShows.size === 1 ? '1 person marked ‘Didn’t show up.’' : `${noShows.size} people marked ‘Didn’t show up.’`}
+              </Text>
+              {attendanceError && <Text accessibilityRole="alert" style={styles.attendanceError}>{attendanceError}</Text>}
+              <Pressable accessibilityRole="button" accessibilityLabel={attendanceStarted ? 'Skip remaining attendance reports' : 'Skip attendance'} style={styles.skipAttendance} onPress={skipAttendance}>
+                <Text style={styles.escapeText}>{attendanceStarted ? 'Skip remaining' : 'Skip'}</Text>
+              </Pressable>
+            </View>}
 
             {/* Footer. Steps 1-2: a single Continue. Step 3: equal-weight Add /
                 Skip (fill vs ghost only). "Not now" stays present on all steps. */}
@@ -494,12 +567,15 @@ export default function PostPlanSurveyV3({
               />
             ) : (
               <Footer
-                primaryLabel={COPY.surveyContinue}
+                primaryLabel={attendanceError ? 'Try again' : COPY.surveyContinue}
                 primaryActive={step !== 'how' || rating != null}
                 busy={busy}
                 onPrimary={() => {
+                  if (!isCurrent()) return;
                   if (step === 'how') {
-                    if (rating == null) return;
+                    if (rating == null || ratingAdvanced.current) return;
+                    ratingAdvanced.current = true;
+                    Keyboard.dismiss();
                     if (rating !== 'thumbs_down') commitFeedback(rating, null);
                     else commitFeedback('thumbs_down', comment.trim() || null);
                     // The TOP rating is the soft-ask for the native review sheet;
@@ -507,7 +583,7 @@ export default function PostPlanSurveyV3({
                     topRatedRef.current = rating === 'thumbs_up';
                     afterRating();
                   } else {
-                    goToKeepOrClose(noShows);
+                    void submitAttendance();
                   }
                 }}
                 onEscape={exit}
@@ -550,7 +626,7 @@ function PlanCardBehind({
           <Text style={styles.cardBehindTitle} numberOfLines={2}>
             {plan.title}
           </Text>
-          <Text style={styles.cardBehindMeta}>{wentCount} went</Text>
+          <Text style={styles.cardBehindMeta}>{wentCount} joined</Text>
         </View>
       </View>
     </View>
@@ -617,6 +693,9 @@ function Footer({
     <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
       <Pressable
         style={[styles.primary, !primaryActive && styles.primaryOff]}
+        accessibilityRole="button"
+        accessibilityLabel={primaryLabel}
+        accessibilityState={{ disabled: !primaryActive || busy, busy }}
         disabled={!primaryActive || busy}
         onPress={onPrimary}
       >
@@ -721,42 +800,44 @@ function StepHow({
   );
 }
 
-// ─── Step 2: Who made it? (explicit two-state rows) ─────────────────────────
+// ─── Step 2: Explicit attendance choices, initially unanswered ─────────────
 function StepWho({
   list,
-  noShows,
-  onToggle,
+  answers,
+  disabled,
+  onAnswer,
 }: {
   list: SurveyMember[];
-  noShows: Set<string>;
-  onToggle: (id: string) => void;
+  answers: Record<string, AttendanceAnswer>;
+  disabled: boolean;
+  onAnswer: (id: string, answer: AttendanceAnswer) => void;
 }) {
+  const { width, fontScale } = useWindowDimensions();
+  const choiceWidth = Math.min(width - 48, 154 * fontScale);
   return (
     <View>
       <Text style={styles.whoHelper}>{COPY.surveyWhoHelper}</Text>
       <View style={styles.attendList}>
         {list.map((m) => {
-          const out = noShows.has(m.id);
           const name = m.first_name_display ?? 'Someone';
           return (
-            <Pressable
-              key={m.id}
-              style={[styles.attendRow, out && styles.attendRowOut]}
-              onPress={() => onToggle(m.id)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: !out }}
-              accessibilityLabel={`${name}, ${out ? COPY.surveyDidntMakeIt : COPY.surveyMadeIt}`}
-            >
-              <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={44} bucket="none" />
-              <Text style={styles.attendName} numberOfLines={1}>
-                {name}
-              </Text>
-              <View style={[styles.tag, out ? styles.tagMissed : styles.tagMade]}>
-                <Text style={[styles.tagText, out ? styles.tagTextMissed : styles.tagTextMade]}>
-                  {out ? COPY.surveyDidntMakeIt : COPY.surveyMadeIt}
-                </Text>
+            <View key={m.id} style={styles.attendancePerson}>
+              <View style={styles.attendRow}>
+                <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={44} bucket="none" />
+                <Text style={styles.attendName}>{name}</Text>
               </View>
-            </Pressable>
+              <View accessibilityRole="radiogroup" accessibilityLabel={`Attendance for ${name}`} style={styles.attendanceChoices}>
+                {([['there', 'Was there'], ['no_show', 'Didn’t show up'], ['unsure', 'Not sure']] as const).map(([answer, label]) => {
+                  const selected = answers[m.id] === answer;
+                  return <Pressable key={answer} accessibilityRole="radio" accessibilityLabel={`${name}: ${label}`}
+                    accessibilityState={{ checked: selected, disabled }} disabled={disabled}
+                    onPress={() => onAnswer(m.id, answer)}
+                    style={[styles.attendanceChoice, { flexBasis: choiceWidth }, selected && styles.attendanceChoiceSelected]}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.attendanceChoiceText, selected && styles.attendanceChoiceTextSelected]}>{selected ? `✓ ${label}` : label}</Text>
+                  </Pressable>;
+                })}
+              </View>
+            </View>
           );
         })}
       </View>
@@ -768,10 +849,12 @@ function StepWho({
 function StepKeep({
   candidates,
   selected,
+  disabled,
   onToggle,
 }: {
   candidates: SurveyMember[];
   selected: Set<string>;
+  disabled: boolean;
   onToggle: (id: string) => void;
 }) {
   return (
@@ -785,8 +868,10 @@ function StepKeep({
               key={m.id}
               style={[styles.chip, on ? styles.chipOn : styles.chipOff]}
               onPress={() => onToggle(m.id)}
+              disabled={disabled}
               accessibilityRole="button"
-              accessibilityState={{ selected: on }}
+              accessibilityLabel={`Keep in touch with ${m.first_name_display ?? 'this person'}`}
+              accessibilityState={{ selected: on, disabled }}
             >
               <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={28} bucket="none" />
               <Text style={styles.chipName} numberOfLines={1}>
@@ -823,6 +908,9 @@ function KeepFooter({
         <Pressable
           style={[styles.keepBtn, styles.keepBtnFill, !canAdd && styles.primaryOff]}
           disabled={!canAdd || busy}
+          accessibilityRole="button"
+          accessibilityLabel={addLabel}
+          accessibilityState={{ disabled: !canAdd || busy, busy }}
           onPress={onAdd}
         >
           {busy ? (
@@ -927,6 +1015,15 @@ export function SurveyOutcomeOverlay({
 }
 
 const styles = StyleSheet.create({
+  attendancePerson: { paddingVertical: 8 },
+  attendanceChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 8 },
+  attendanceChoice: { flexGrow: 1, minHeight: 44, paddingVertical: 10, paddingHorizontal: 10, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, justifyContent: 'center' },
+  attendanceChoiceSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
+  attendanceChoiceText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, textAlign: 'center' },
+  attendanceChoiceTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
+  attendanceSummary: { paddingHorizontal: 24, paddingTop: 8 },
+  attendanceError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
+  skipAttendance: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.surveyScrim },
 
