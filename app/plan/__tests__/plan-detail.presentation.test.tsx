@@ -45,7 +45,7 @@ const mockSelect = jest.fn();
 const mockUpdate = jest.fn();
 let mockRead: any = null;
 let mockEditResponse: any = undefined, mockPlacesProps: any;
-const mockPhotoUpload=jest.fn();
+const mockPhotoUpload=jest.fn(), mockImagePrepare=jest.fn();
 let mockWaitlist:any, mockWaitlistOptions:any;
 const mockWaitlistChange=jest.fn(),mockWaitlistRefresh=jest.fn(),mockWaitlistRetry=jest.fn();
 const mockTable: any = { select: (...args: any[]) => { mockSelect(...args); return mockTable; }, eq: () => mockTable, is: () => mockTable, update: (payload: any) => {mockUpdate(payload);return mockTable;},
@@ -96,7 +96,7 @@ jest.mock('../../../lib/addToCalendar', () => ({ showAddToCalendar: jest.fn() })
 jest.mock('../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: any[])=>mockPhotoUpload(...args) }));
 jest.mock('expo-location', () => ({ geocodeAsync: async () => [] }));
 jest.mock('expo-image-picker', () => ({requestMediaLibraryPermissionsAsync:async()=>({status:'granted'}),launchImageLibraryAsync:async()=>({canceled:false,assets:[{uri:'file://sample'}]})}));
-jest.mock('expo-image-manipulator', () => ({SaveFormat:{JPEG:'jpeg'},manipulateAsync:async()=>({base64:'sample'})}));
+jest.mock('expo-image-manipulator', () => ({SaveFormat:{JPEG:'jpeg'},manipulateAsync:(...args:any[])=>mockImagePrepare(...args)}));
 jest.mock('react-native-google-places-autocomplete', () => ({ GooglePlacesAutocomplete: (props:any) => {mockPlacesProps=props;return null;} }));
 jest.mock('../../../components/MapView', () => ({ MapView: () => null, Marker: () => null }));
 jest.mock('../../../components/MiniProfileCard', () => () => null);
@@ -121,6 +121,7 @@ beforeEach(() => {
   mockInvitePrepare.mockReturnValue(mockInviteComplete);mockInvitation={invitation:null,attempt:null,loading:false,busy:false,ready:true,error:null,decline:mockInviteDecline,refresh:mockInviteRefresh,retry:mockInviteRetry,prepareAcceptance:mockInvitePrepare,keepInvitation:jest.fn()};
   mockWaitlist={entry:null,ready:true,loading:false,busy:false,error:null,intent:null,change:mockWaitlistChange,refresh:mockWaitlistRefresh,retry:mockWaitlistRetry,clearAfterJoining:jest.fn(),setExceptionStatus:jest.fn(),capture:()=>mockCurrent};
   mockEditResponse=undefined;mockPhotoUpload.mockReset().mockResolvedValue("https://example.test/photo.jpg");
+  mockImagePrepare.mockReset().mockResolvedValue({base64:'sample'});
   jest.clearAllMocks(); mockQueries.clear(); mockMutationCalls.length = 0;
   mockNotice.mockResolvedValue({ needsAssent: false }); mockAssent.mockResolvedValue(true); mockJoin.mockReset();
   mockDeparture = { leave: mockLeave, cancel: mockCancel, checkResult: mockCheckDeparture, isPending: false, isChecking: false, unknownAction: null, isCurrent: mockCurrent };
@@ -408,6 +409,31 @@ it('keeps an uncertain save visible and checks it without a second write',async(
 it('clears old map coordinates when the creator types a new location',async()=>{mockPlan.location_lat=34.005;mockPlan.location_lng=-118.487;await openEditor();act(()=>mockPlacesProps.textInputProps.onChangeText('A different cafe'));await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({location_text:'A different cafe',location_lat:null,location_lng:null});});
 it('keeps the selected place name and coordinates together',async()=>{await openEditor();act(()=>mockPlacesProps.onPress({description:'New cafe',structured_formatting:{main_text:'New cafe'}},{geometry:{location:{lat:34.1,lng:-118.2}}}));await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({location_text:'New cafe',location_lat:34.1,location_lng:-118.2});});
 it('preserves the previous photo when replacement upload fails',async()=>{mockPlan.image_url='https://example.test/old.jpg';mockPhotoUpload.mockRejectedValue(new Error('Rejected'));await openEditor();await act(async()=>button('Change photo').props.onPress());expect(mockPhotoUpload).toHaveBeenCalledTimes(1);expect(allText()).toContain('Couldn’t upload this photo');await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({image_url:'https://example.test/old.jpg'});});
+
+it('preserves the photo and typed title after preparation stalls, then accepts a fresh replacement', async () => {
+  jest.useFakeTimers();
+  try {
+    let finishOld!: (value: any) => void;
+    mockImagePrepare.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve; }));
+    mockPlan.image_url='https://example.test/old.jpg'; await openEditor();
+    act(() => manageInput(mockPlan.title).props.onChangeText('Keep this draft'));
+    act(() => { void button('Change photo').props.onPress(); });
+    await act(async () => { for(let i=0;i<12;i++) await Promise.resolve(); });
+    expect(timeControl('Close editor').props.disabled).toBe(true);
+    await act(async () => { jest.advanceTimersByTime(30_000); });
+    expect(timeControl('Close editor').props.disabled).toBe(false);
+    expect(manageInput('Keep this draft')).toBeDefined();
+    expect(allText()).toContain('Your current photo is unchanged');
+    const Image = require('expo-image').Image;
+    expect(manageModal().findAllByType(Image).some(n => n.props.source?.uri === 'https://example.test/old.jpg')).toBe(true);
+    expect(mockPhotoUpload).not.toHaveBeenCalled(); expect(mockUpdate).not.toHaveBeenCalled();
+    await act(async () => { await button('Change photo').props.onPress(); });
+    await act(async () => { finishOld({base64:'old-late-photo'}); });
+    expect(mockPhotoUpload).toHaveBeenCalledTimes(1);
+    await act(async () => { await button('Save changes').props.onPress(); });
+    expect(mockUpdate.mock.calls[0][0]).toMatchObject({title:'Keep this draft',image_url:'https://example.test/photo.jpg'});
+  } finally { jest.useRealTimers(); }
+});
 
 function fillOrdinaryPlan(){mockMembers=Array.from({length:8},(_,i)=>({id:String(i),user_id:String(i),first_name_display:`Person ${i}`,profile_photo_url:null}));mockPlan.allow_duplicate=false;}
 it('keeps failed waitlist reads distinct from an empty waitlist',async()=>{fillOrdinaryPlan();mockWaitlist.ready=false;mockWaitlist.error='Couldn’t check your waitlist. Try again.';await mount();expect(button('Join waitlist')).toBeUndefined();act(()=>button('Try again').props.onPress());expect(mockWaitlistRefresh).toHaveBeenCalledTimes(1);expect(mockWaitlistChange).not.toHaveBeenCalled();});

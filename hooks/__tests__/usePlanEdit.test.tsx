@@ -81,6 +81,53 @@ it.each(['owner', 'refresh', 'owner-after-refresh', 'upload'] as const)('release
   } finally { jest.useRealTimers(); }
 });
 
+describe('photo preparation recovery', () => {
+  const flush = async () => { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('releases stalled preparation and ignores its late result while a retry is pending', async () => {
+    const old = deferred(), retry = deferred();
+    mockPrepare.mockReturnValueOnce(old.promise).mockReturnValueOnce(retry.promise);
+    const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush();
+    await act(async () => { jest.advanceTimersByTime(30_000); });
+    expect(h.current.isBusy).toBe(false);
+    expect(h.current.error).toContain('Couldn’t prepare this photo');
+    expect(h.onPhoto).not.toHaveBeenCalled(); expect(mockAuth).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled(); expect(mockWrite).not.toHaveBeenCalled();
+    act(() => { expect(h.current.close()).toBe(true); expect(h.current.begin()).toBe(true); void h.current.pickPhoto(); }); await flush();
+    await act(async () => { old.resolve({ base64: 'old-photo' }); }); await flush();
+    expect(h.current.isBusy).toBe(true); expect(h.current.close()).toBe(false);
+    expect(mockUpload).not.toHaveBeenCalled(); expect(h.onPhoto).not.toHaveBeenCalled();
+    await act(async () => { retry.resolve({ base64: 'retry-photo' }); }); await flush();
+    expect(h.current.isBusy).toBe(false); expect(h.current.error).toBeNull();
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(mockUpload.mock.calls[0][2]).toBe('retry-photo');
+    expect(h.onPhoto).toHaveBeenCalledTimes(1); expect(mockWrite).not.toHaveBeenCalled();
+  });
+
+  it('releases an off-screen preparation timeout without applying results to a reopened editor', async () => {
+    const old = deferred(); mockPrepare.mockReturnValueOnce(old.promise); const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush(); h.blur();
+    await act(async () => { jest.advanceTimersByTime(30_000); }); h.focus();
+    act(() => { expect(h.current.begin()).toBe(true); });
+    expect(h.current.error).toBeNull(); expect(h.current.isBusy).toBe(false);
+    await act(async () => { old.resolve({ base64: 'retired-photo' }); }); await flush();
+    expect(mockAuth).not.toHaveBeenCalled(); expect(mockUpload).not.toHaveBeenCalled();
+    expect(h.onPhoto).not.toHaveBeenCalled(); expect(h.current.canChange()).toBe(true);
+  });
+
+  it('does not time out time spent choosing a photo', async () => {
+    const picker = deferred(); mockPicker.mockReturnValueOnce(picker.promise); const h = mount();
+    act(() => { void h.current.pickPhoto(); }); await flush();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(h.current.isPhotoPending).toBe(true); expect(mockPrepare).not.toHaveBeenCalled();
+    await act(async () => { picker.resolve({ canceled: true }); }); await flush();
+    expect(h.current.isBusy).toBe(false); expect(h.current.error).toBeNull();
+  });
+});
+
 describe('stalled plan saves and reconciliation', () => {
   const flush = async () => { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); }); };
   const advance = async (ms: number) => { await act(async () => { jest.advanceTimersByTime(ms); }); await flush(); };
