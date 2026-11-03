@@ -205,14 +205,14 @@ export default function SetupCommunityScreen() {
         <Stack.Screen options={{ headerShown: false }} />
         <CreatorScreenHeader title="Community created" />
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.kicker}>creator mode</Text>
+          <Text style={styles.kicker}>Community</Text>
           <Text style={styles.title}>you're set.</Text>
           <Text style={styles.subtext}>
             {createdCommunity.name} is up. your page starts as a draft only you can see. you choose when it opens.
           </Text>
           <TouchableOpacity
             style={styles.createBtn}
-            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.dismissTo('/(creator)/today'); }}
+            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.dismissTo('/(tabs)/friends/manage/(tools)/today'); }}
             activeOpacity={0.85}
           >
             <Text style={styles.createBtnText}>view community</Text>
@@ -242,7 +242,7 @@ export default function SetupCommunityScreen() {
       <CreatorScreenHeader title="Create community" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* LIZ COPY */}
-        <Text style={styles.kicker}>creator mode</Text>
+        <Text style={styles.kicker}>Community</Text>
         {/* LIZ COPY */}
         <Text style={styles.title}>name your community</Text>
         {/* LIZ COPY */}

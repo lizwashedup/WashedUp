@@ -1,4 +1,3 @@
-import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
 import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
@@ -41,8 +40,6 @@ import { useLedCommunity } from '../../lib/selectedCommunity';
 import { eventBelongsToWorkspace, useWorkspace } from '../../lib/workspaceContext';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 type Segment = 'attention' | 'next' | 'drafts' | 'later' | 'past' | 'templates';
 
@@ -408,21 +405,20 @@ export default function CreatorEventsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
       >
         {/* LIZ COPY */}
-        <BackToYoursButton />
-        <Text style={styles.kicker}>creator mode</Text>
+
+        <Text style={styles.kicker}>Manage</Text>
         <Text style={styles.title}>Events</Text>
-        <WorkspaceSwitcher access={access} stayOnEvents />
-        {workspace === 'community' && <CommunitySwitcher access={access} />}
+
 
         <TouchableOpacity
           style={styles.postBtn}
-          onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/creator/manage') as never)}
+          onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/(tabs)/friends/manage') as never)}
           accessibilityRole="button"
           accessibilityLabel="New event"
         >

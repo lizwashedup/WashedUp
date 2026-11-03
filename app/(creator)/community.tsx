@@ -32,10 +32,8 @@ import { getCreatorAccess, getBroadcasts, getBroadcastAudienceCount, isLeaderAcc
 import { getCommunityRooms } from '../../lib/communityChat';
 import { formatTimestampLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 
 export default function CreatorCommunityScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
@@ -153,16 +151,15 @@ export default function CreatorCommunityScreen() {
   if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
-          <Text style={styles.title}>Community</Text>
-          <WorkspaceSwitcher access={access} />
-          <CommunitySwitcher access={access} />
+          <Text style={styles.title}>Community settings</Text>
+
 
           {/* Build 35 final navigation removes global Members and Menu tabs.
               Their real destinations live here so nothing becomes harder to
@@ -171,7 +168,7 @@ export default function CreatorCommunityScreen() {
           <View style={styles.hubStack}>
             <TouchableOpacity
               style={styles.hubRow}
-              onPress={() => router.push('/(creator)/members')}
+              onPress={() => router.push('/(tabs)/friends/manage/(tools)/members')}
               accessibilityRole="button"
               accessibilityLabel="Members and join requests"
             >

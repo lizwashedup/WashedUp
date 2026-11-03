@@ -26,11 +26,11 @@ export function legacyCreatorSpaceLinks(access: CreatorAccess): CreatorSpaceLink
     legacy: { workspace: 'community', communityId: community.id, status: community.status },
   }));
   if (access.hasLeaderGrant && !access.ledCommunities.length) spaces.push({
-    id: 'legacy-community-approval', kind: 'community', name: 'Your community', route: '/(creator)/today',
+    id: 'legacy-community-approval', kind: 'community', name: 'Your community', route: '/(tabs)/friends/manage/(tools)/today',
     legacy: { workspace: 'community', status: 'approved' },
   });
   if (access.hasEventHostGrant) spaces.push({
-    id: 'legacy-organizer-approval', kind: 'organization', name: 'Your events', route: '/(creator)/organizer-home',
+    id: 'legacy-organizer-approval', kind: 'organization', name: 'Your events', route: '/(tabs)/friends/manage/(tools)/organizer-home',
     legacy: { workspace: 'organization', status: 'approved' },
   });
   return spaces;

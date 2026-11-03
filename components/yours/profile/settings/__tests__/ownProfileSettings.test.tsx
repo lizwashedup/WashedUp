@@ -176,17 +176,19 @@ it('falls back to the real name initial for a broken portrait and isolates error
 it('uses the existing native handle share and ticket destination', async () => {
   await mount(); await press(byLabel('Share your handle')); expect(Share.share).toHaveBeenCalledWith({ message: '@liz' }); await press(button('your tickets')); expect(mockPush).toHaveBeenCalledWith('/tickets');
 });
-it('keeps approved organization access when grants and its optional name fail', async () => {
+it('keeps management reachable when optional creator reads fail', async () => {
   mockAccess.mockResolvedValue({ hasEventHostGrant: true, ledCommunities: [] }); mockGrants.mockRejectedValue(new Error('grants offline')); mockOrganizer.mockRejectedValue(new Error('name offline'));
-  await mount(); expect(text('Some creator details couldn’t load.')).toBe(true); expect(button('switch to your events')).toBeDefined(); await press(button('switch to your events')); expect(mockReplace).toHaveBeenCalledWith('/(creator)/organizer-home');
+  await mount(); expect(text('Some creator details couldn’t load.')).toBe(true);
+  await press(byLabel('Open your management tools')); expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
 });
-it('keeps successful pending grants when access fails, and clears only recovered failure on retry', async () => {
-  mockAccess.mockRejectedValueOnce(new Error('offline')); mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]); await mount(); expect(text('needs more info')).toBe(true); expect(button('putting on events')).toBeDefined();
-  await press(byLabel('Try again to load creator spaces')); expect(text('Some creator details couldn’t load.')).toBe(false); expect(button('putting on events')).toBeDefined();
+it('keeps application status reachable through the directory and clears recovered errors on retry', async () => {
+  mockAccess.mockRejectedValueOnce(new Error('offline')); mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]); await mount();
+  expect(byLabel('Open your management tools')).toBeDefined(); await press(byLabel('Try again to load creator spaces'));
+  expect(text('Some creator details couldn’t load.')).toBe(false); expect(byLabel('Open your management tools')).toBeDefined();
 });
-it('preserves one selected community route and blocks a delayed old row after leaving', async () => {
-  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'club', name: 'Sunset Club', status: 'active' }], hasEventHostGrant: false }); await mount(); const row = button('switch to sunset club & your events');
-  await press(row); expect(mockSelected).toHaveBeenCalledWith('club'); expect(mockReplace).toHaveBeenCalledWith('/(creator)/today'); await press(row); expect(mockReplace).toHaveBeenCalledTimes(1);
+it('opens the named directory instead of silently selecting a community, and ignores an old row after leaving', async () => {
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'club', name: 'Sunset Club', status: 'active' }], hasEventHostGrant: false }); await mount(); const row = byLabel('Open your management tools');
+  await press(row); expect(mockSelected).not.toHaveBeenCalled(); expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage'); await press(row); expect(mockPush).toHaveBeenCalledTimes(1);
 });
 it('preserves both delete stages and the typed confirmation gate', async () => {
   await mount(); await press(byLabel('Delete account')); expect(text('Are you sure?')).toBe(true); expect(field('Type DELETE to confirm')).toBeUndefined();
@@ -237,11 +239,11 @@ it('retires a logout confirmation after account replacement and retains the curr
   await press(byLabel('Log out')); const info = alert(); act(() => { info.buttons[1].onPress(); info.buttons[1].onPress(); info.onClose(); }); await flush(); expect(mockForget).toHaveBeenCalledTimes(1); expect(mockSignOut).toHaveBeenCalledTimes(1); expect(deliberateSignOutAt.ts).toBeGreaterThan(0);
 });
 
-it('opens contextual Creator space from profile without replacing the personal navigation', async () => {
+it('opens management inside the personal navigation', async () => {
   mockPagesEnabled = true;
   await mount();
-  await press(button('Creator space'));
-  expect(mockPush).toHaveBeenCalledWith('/creator/pages');
+  await press(byLabel('Open your management tools'));
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
   expect(mockReplace).not.toHaveBeenCalled();
   expect(mockSelected).not.toHaveBeenCalled();
 });

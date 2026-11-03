@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('creator layout access failure contract', () => {
-  const source = readFileSync(resolve(__dirname, '../../app/(creator)/_layout.tsx'), 'utf8');
+  const source = readFileSync(resolve(__dirname, '../../components/creator/ManagementLayout.tsx'), 'utf8');
 
   it('handles query failure before any no-access redirect', () => {
     expect(source.indexOf('if (isError)')).toBeGreaterThan(-1);

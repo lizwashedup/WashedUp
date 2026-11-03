@@ -2,6 +2,8 @@
 
 November 2, 2026. **Implemented locally; no OTA published by this task.**
 
+**Latest status:** The second increment below removes the separate creator bottom navigation and has now been exercised in the full signed-in iOS app. Earlier component-only results remain historical evidence. Read the November 2 evening update for current verification and remaining release work.
+
 Checkout: `/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102`
 
 Branch: `codex/create-community-clarity-20261102`
@@ -78,3 +80,52 @@ All paths below are relative to the checkout named above. This groups the manage
 | Component and route tests | `components/creator/__tests__/CommunityDailyActions.test.tsx`; `components/creator/__tests__/LegacyEventCreateGate.test.tsx`; `components/creator/__tests__/OrganizationManageLink.test.tsx`; `components/creator/pages/__tests__/CreatorSpaceEntry.test.tsx`; `components/creator/pages/__tests__/CreatorPagesScreen.test.tsx`; `app/(creator)/__tests__/creatorLayout.access.test.tsx`; `app/creator/__tests__/eventForm.workspaceOwner.test.tsx`; `app/creator/__tests__/start.test.tsx` |
 | Model tests | `lib/__tests__/creatorManagement.test.ts`; `lib/__tests__/legacyEventCreate.test.ts`; `lib/__tests__/creatorSpaceEntry.test.ts`; `lib/__tests__/creatorPageEditor.test.ts`; `lib/__tests__/creationEntry.test.ts`; `lib/__tests__/communityManageEntry.test.ts`; `lib/__tests__/creatorShellRedirects.test.ts`; `lib/__tests__/creatorEvents.test.ts` |
 | Documentation | This record, `docs/user-creator-cohesion-audit-2026-11-02.md`, and `docs/create-clarity-2026-11-02.md` |
+
+## November 2 evening update: management inside Yours
+
+The normal **Plans | Scene | + | Chats | Yours** navigation now stays visible in community and organization management. Yours contains a nested stack for the named directory and existing tools. Creators no longer switch to a second set of bottom tabs.
+
+- Yours, Profile, the approved-creator banner, and approved application status lead to the same named management directory. The banner explains where the tools live.
+- Community home keeps Main chat, Members, Events and Settings. Organization home now provides explicit Events and Settings links, retaining payouts, profile and follower-update destinations.
+- Back from a tool returns to its management home; Back from that home returns to the directory; Back from the directory returns to Yours. Focused editors and conversations retain their ordinary full-screen routes.
+- The old `(creator)` route layout redirects saved links into Yours. Screen implementations are reused rather than duplicated. Existing notification, invitation and setup callers target the nested routes.
+- The shared header keeps Profile available. The follower-update composer owns its Back callback and has only one header, preserving its timer cleanup.
+- Permissions are evaluated for the selected identity. Inactive management screens cannot redirect someone who has left for Plans or an event form. A late storage read cannot overwrite an explicit community/organization selection.
+- Native review exposed a NativeWind interaction that dropped callback-based Pressable styles in the management directory. Its cards now explicitly retain their React Native styles, and the corrected cards were rechecked in the full app.
+- Native review also found that the selected Sunset LA Club record is a draft. Creation remains blocked; the message now explains publishing its page from Settings and offers a return to You manage. No community was published or changed during review.
+- The default tab-bar keyboard behavior is retained. A temporary hide-on-keyboard option was removed after observing the directory bar displaced offscreen; the corrected directory was captured with all five tabs visible.
+
+### Current verification
+
+**39 suites passed: 529 tests passed, one existing skipped.** TypeScript and `git diff --check` passed. Coverage includes route compatibility, selected-role access, asynchronous ownership, hydration ordering, application entry, Yours, community/organization actions, event form and draft-return behavior, and follower-update lifecycle. Jest reported lingering asynchronous handles after its assertions; the process subsequently exited successfully. This was not treated as proof that the existing timer warning is resolved.
+
+The full app was bundled from this checkout and launched in the already-installed development client on **iPhone 17 Pro Max / iOS 26.4**, with its existing signed-in session and configured backend. This review did not use the fictional component services. No native build was created.
+
+Observed journeys:
+
+1. Plans banner → management → named Sunset LA Club → Events. The main tabs remained available, and switching back to Plans did not bounce into management.
+2. Directory → existing organization → Events → new event form. The form identified the organization. Back returned to organization Events without saving.
+3. Organization home → Settings → Back → home → Back → directory → Back → Yours. The Yours management entries and See all path remained reachable.
+4. + from organization Events → the three explained creation choices → dismiss → the same Events screen.
+5. Direct local link into the nested management directory → corrected cards and all five visible tabs.
+
+Current native captures, all from the full app:
+
+- [Yours with management entries](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-yours.png>)
+- [Named management directory](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-directory.png>)
+- [Community home inside the normal tabs](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-community.png>)
+- [The + menu opened from management](</Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/connected-create-menu.png>)
+
+No event, membership, announcement or community setup was intentionally saved during the walkthrough. The displayed draft community is evidence about that selected record, not verification of every Sunset Club record or every production membership/history path. No rollout flags, audience rules, migrations or database policies changed in this increment. Ghost Protocol and Plan eligibility code were not rewritten.
+
+### Review setup and remaining work
+
+Metro now includes the parent of the real shared dependency directory and resolves both dependency paths; this fixes package resolution in this linked checkout. Full-app review used local port 8872 and a temporary local entry file because of the shared dependency entrypoint. The server was stopped, `package.json` restored to `expo-router/entry`, the temporary entry removed, and diagnostic layout logging removed. No temporary fixture or credential is part of the commit. The earlier `connected-app` bootstrap directory is an abandoned review attempt, not an application source or launch target.
+
+The installed client logged an Expo registration/keychain entitlement error at launch. It did not prevent the reviewed navigation; push registration was not validated and remains a separate device check.
+
+Before release, finish an authorized disposable draft save/reopen journey, narrow-role and expired-access device cases, all community actions including Main chat, creator onboarding, complete keyboard/large-text checks, Android, and a physical iPhone smoke test. The older component fixture's narrow/large-text captures do not replace those full-app checks. Current backend eligibility and membership/history checks remain open. This implementation improves navigation; it does not establish that the complete Event editor, public Event design or creator onboarding is finished.
+
+No OTA, push, merge or native build was performed by this increment. Next product acceptance should ask a creator to find their named item and complete a daily task without instructions.
+
+The complete changed-file inventory for this navigation increment is [recorded here](/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-navigation-files-2026-11-02.txt). The most substantial new files are `ManagementLayout.tsx`, `ManagementDirectoryScreen.tsx`, `OrganizationDailyActions.tsx`, `managementNavigation.ts`, and the nested Yours route wrappers. Other application changes primarily replace old route literals, remove duplicate mode navigation, or explain blocked creation.

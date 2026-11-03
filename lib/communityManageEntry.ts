@@ -54,5 +54,5 @@ export async function resolveCommunityManageEntry(id: string, scope: CreatorPage
   const access = await getCreatorAccess(); await authorization(scope);
   const community = access.ledCommunities.find(item => item.id === id);
   if (!community || !isAdminTierRole(community.role)) return null;
-  return { kind: 'legacy', communityId: id, route: '/(creator)/today' };
+  return { kind: 'legacy', communityId: id, route: '/(tabs)/friends/manage/(tools)/today' };
 }

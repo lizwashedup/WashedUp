@@ -7,7 +7,7 @@ jest.mock('../workspaceContext',()=>({setWorkspace:(...a:unknown[])=>mockWorkspa
 jest.mock('../selectedCommunity',()=>({setSelectedCommunityId:(...a:unknown[])=>mockCommunity(...a)}));
 jest.mock('../creatorPageReview',()=>({CreatorPageScopeExpired:class extends Error {}}));
 let active=true;const scope={userId:'alice',isCurrent:()=>active};
-const org={id:'org',name:'Your events',kind:'organization' as const,route:'/(creator)/organizer-home',legacy:{workspace:'organization' as const,status:'approved'}};
+const org={id:'org',name:'Your events',kind:'organization' as const,route:'/(tabs)/friends/manage/(tools)/organizer-home',legacy:{workspace:'organization' as const,status:'approved'}};
 beforeEach(()=>{jest.clearAllMocks();active=true;mockLegacy.mockResolvedValue([]);mockPages.mockResolvedValue({spaces:[],invitations:[]});mockProfile.mockResolvedValue(null);mockGrants.mockResolvedValue([]);});
 it('does not call the gated page backend for existing creators when pages are disabled',async()=>{
  mockLegacy.mockResolvedValue([{...org,kind:'community',legacy:{workspace:'community',communityId:'sunset',status:'active'}}]);

@@ -14,7 +14,7 @@ beforeEach(()=>{jest.clearAllMocks();mockActive=true;mockUser='alice';mockRead.m
 afterEach(()=>act(()=>tree?.unmount()));
 function mount(){act(()=>{tree=create(<OrganizationManageLink organizationId="alice"/>);});}
 it('rechecks the organization approval and selects its workspace before opening tools',async()=>{
- mount();await act(async()=>tree.root.findByType(PageAction).props.onPress());expect(mockRead).toHaveBeenCalledWith('alice');expect(mockPrepare).toHaveBeenCalledWith(expect.objectContaining({legacy:{workspace:'organization',status:'approved'}}),expect.objectContaining({userId:'alice'}));expect(mockPush).toHaveBeenCalledWith('/(creator)/organizer-home');
+ mount();await act(async()=>tree.root.findByType(PageAction).props.onPress());expect(mockRead).toHaveBeenCalledWith('alice');expect(mockPrepare).toHaveBeenCalledWith(expect.objectContaining({legacy:{workspace:'organization',status:'approved'}}),expect.objectContaining({userId:'alice'}));expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/organizer-home');
 });
 it('does not show management on another person’s public organization',()=>{mockUser='bob';mount();expect(tree.toJSON()).toBeNull();});
 it('does not navigate after the approval is revoked',async()=>{mockRead.mockResolvedValue({hasEventHostGrant:false});mount();await act(async()=>tree.root.findByType(PageAction).props.onPress());expect(mockPush).not.toHaveBeenCalled();expect(mockPrepare).not.toHaveBeenCalled();});

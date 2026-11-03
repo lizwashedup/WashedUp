@@ -16,9 +16,11 @@ export async function resolveLegacyEventCreate(workspace: unknown, communityId: 
     return { workspace };
   }
   const community = access.ledCommunities.find(item => item.id === communityId);
-  if (!community || community.status !== 'active' || !(isAdminTierRole(community.role) || community.role === 'events')) {
+  if (!community || !(isAdminTierRole(community.role) || community.role === 'events')) {
     throw Error('This community is not available for event creation with your current access.');
   }
+  if (community.status === 'draft') throw Error('This community is still a draft. Publish its page from community Settings before creating an event.');
+  if (community.status !== 'active') throw Error('This community is archived. Choose an active community or organization from You manage.');
   return { workspace, community };
 }
 export async function prepareLegacyEventCreate(context: LegacyEventCreateContext, scope: CreatorPageScope) {

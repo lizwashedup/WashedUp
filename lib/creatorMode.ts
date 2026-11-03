@@ -121,19 +121,19 @@ export function creatorShellKind(a: CreatorAccess | undefined | null): CreatorSh
  */
 export function creatorLandingRoute(
   a: CreatorAccess | undefined | null,
-): '/(creator)/today' | '/(creator)/organizer-home' | '/(creator)/members' | '/(creator)/menu' | '/(creator)/events' {
+): '/(tabs)/friends/manage/(tools)/today' | '/(tabs)/friends/manage/(tools)/organizer-home' | '/(tabs)/friends/manage/(tools)/members' | '/(tabs)/friends/manage/(tools)/menu' | '/(tabs)/friends/manage/(tools)/events' {
   switch (creatorShellKind(a)) {
     case 'full':
-      return '/(creator)/today';
+      return '/(tabs)/friends/manage/(tools)/today';
     case 'member_care':
-      return '/(creator)/members';
+      return '/(tabs)/friends/manage/(tools)/members';
     case 'finance':
-      return '/(creator)/menu';
+      return '/(tabs)/friends/manage/(tools)/menu';
     case 'events':
-      return '/(creator)/events';
+      return '/(tabs)/friends/manage/(tools)/events';
     case 'organizer':
     default:
-      return '/(creator)/organizer-home';
+      return '/(tabs)/friends/manage/(tools)/organizer-home';
   }
 }
 

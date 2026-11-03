@@ -1,8 +1,6 @@
-import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import { CommunityDailyActions } from '../../components/creator/CommunityDailyActions';
 import { ScaledText as Text } from '../../components/ScaledText';
-import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
@@ -32,13 +30,11 @@ import { getCommunityRooms } from '../../lib/communityChat';
 import { pickNextUpcomingEvent } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import { supabase } from '../../lib/supabase';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { getRsvpCount } from '../../lib/eventRsvp';
 import { OfflineBanner } from '../../components/state/StateViews';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorTodayScreen() {
@@ -123,12 +119,11 @@ export default function CreatorTodayScreen() {
   // never the empty triage cards.
   if (access && access.hasLeaderGrant && access.ledCommunities.length === 0) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <CreatorScreenHeader title="Community overview" />
+      <SafeAreaView style={styles.container} edges={[]}>
+
         <ScrollView contentContainerStyle={styles.content}>
           {/* LIZ COPY */}
-          <BackToYoursButton />
-        <Text style={styles.kicker}>creator mode</Text>
+          <Text style={styles.kicker}>Manage</Text>
           {/* LIZ COPY */}
           <Text style={styles.title}>you're in.</Text>
           {/* LIZ COPY */}
@@ -152,26 +147,16 @@ export default function CreatorTodayScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-        <CreatorScreenHeader title="Community overview" />
-      {/* Screen 11 gap: persistent active-community name. Outside the
-          ScrollView on purpose so it survives scrolling, unlike the big
-          title below which is the first-paint moment, not the ongoing
-          reminder of which community you're in. */}
-      {community && (
-        <View style={styles.stickyHeader}>
-          <Text style={styles.stickyHeaderText} numberOfLines={1}>{community.name}</Text>
-        </View>
-      )}
+    <SafeAreaView style={styles.container} edges={[]}>
+
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetchMembers} tintColor={Colors.terracotta} />}
       >
-        <BackToYoursButton />
-        <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>{community ? community.name : 'today'}</Text>
-        <WorkspaceSwitcher access={access} />
-        <CommunitySwitcher access={access} />
+
+        <Text style={styles.kicker}>Manage</Text>
+        <Text style={styles.title}>{community ? community.name : 'Your community'}</Text>
+
         {!online && <OfflineBanner />}
 
         {/* Screen 11 gap closed 2026-09-06: Invite (Screen 56) now has a real
@@ -180,7 +165,7 @@ export default function CreatorTodayScreen() {
         <View style={styles.quickActions}>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionPrimary]}
-            onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/creator/manage') as never)}
+            onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/(tabs)/friends/manage') as never)}
             accessibilityRole="button"
             accessibilityLabel="Create event"
             activeOpacity={0.85}
@@ -193,7 +178,7 @@ export default function CreatorTodayScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
-            onPress={() => router.push('/(creator)/community')}
+            onPress={() => router.push('/(tabs)/friends/manage/(tools)/community')}
             accessibilityRole="button"
             accessibilityLabel="Broadcast"
             activeOpacity={0.85}
@@ -222,7 +207,7 @@ export default function CreatorTodayScreen() {
         <TouchableOpacity
           accessibilityRole="button"
           style={[styles.card, pending.length > 0 && styles.cardAttention]}
-          onPress={() => router.push('/(creator)/members')}
+          onPress={() => router.push('/(tabs)/friends/manage/(tools)/members')}
           activeOpacity={0.8}
         >
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -242,7 +227,7 @@ export default function CreatorTodayScreen() {
         {eventsQuery.isError || eventsQuery.isLoading ? (
           <OverviewReadState label="Events" query={eventsQuery} />
         ) : (
-        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/events')} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/events')} activeOpacity={0.8}>
           {/* the next event's cover, so the home reads finished not skeletal */}
           {nextEvent?.image_url ? (
             <EventMediaImage eventId={nextEvent.id} reference={nextEvent.image_url} style={styles.cardThumb} contentFit="cover" />
@@ -277,7 +262,7 @@ export default function CreatorTodayScreen() {
         {broadcastsQuery.isError || broadcastsQuery.isLoading ? (
           <OverviewReadState label="Updates" query={broadcastsQuery} />
         ) : (
-        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/community')} activeOpacity={0.8}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>
               {latestBroadcast ? 'last broadcast' : 'say something to your people'}

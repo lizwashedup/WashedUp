@@ -150,8 +150,8 @@ it('continues the existing draft from workspace preview and returns to the same 
 });
 
 it('retains existing legacy community identity without routing through new-page creation', async () => {
-  mockLegacy.mockResolvedValue([{ id: 'existing-community', name: 'Existing community', kind: 'community', route: '/(creator)/today', legacy: { workspace: 'community', communityId: 'existing-community', status: 'active' } }]);
+  mockLegacy.mockResolvedValue([{ id: 'existing-community', name: 'Existing community', kind: 'community', route: '/(tabs)/friends/manage/(tools)/today', legacy: { workspace: 'community', communityId: 'existing-community', status: 'active' } }]);
   await mount(); await tap('Manage Existing community, Community');
   expect(mockSelect).toHaveBeenCalledWith('existing-community'); expect(mockWorkspace).toHaveBeenCalledWith('community');
-  expect(mockPath()).toBe('/(creator)/today'); expect(mockStart).not.toHaveBeenCalled(); expect(mockSave).not.toHaveBeenCalled();
+  expect(mockPath()).toBe('/(tabs)/friends/manage/(tools)/today'); expect(mockStart).not.toHaveBeenCalled(); expect(mockSave).not.toHaveBeenCalled();
 });

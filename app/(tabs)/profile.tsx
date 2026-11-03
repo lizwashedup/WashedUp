@@ -952,7 +952,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
           <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>You manage</Text></View>
           <View style={styles.settingsGroup}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open your management tools"
-              style={styles.settingsRow} onPress={() => { if (canUseProfile()) navigate('/creator/manage'); }}>
+              style={styles.settingsRow} onPress={() => { if (canUseProfile()) navigate('/(tabs)/friends/manage'); }}>
               <View style={styles.settingsLabelStack}>
                 <Text style={styles.settingsLabel}>Communities & events</Text>
                 <Text style={styles.creatorLifecycleBadge}>Manage your spaces and check application status</Text>

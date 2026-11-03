@@ -115,7 +115,7 @@ function parseDateString(s: string): CalendarDay | null {
 export default function EventFormRoute() {
   const { workspace: creationWorkspace, communityId: creationCommunityId, pageId, id, team, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ workspace?: string; communityId?: string; pageId?: string; id?: string; team?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
   if (creationWorkspace !== undefined || creationCommunityId !== undefined) {
-    if (id !== undefined || pageId !== undefined || team !== undefined || duplicateFrom !== undefined || templateId !== undefined) return <Redirect href="/creator/manage" />;
+    if (id !== undefined || pageId !== undefined || team !== undefined || duplicateFrom !== undefined || templateId !== undefined) return <Redirect href="/(tabs)/friends/manage" />;
     return <LegacyEventCreateGate workspace={creationWorkspace} communityId={creationCommunityId}>
       {(context, scope) => <EventFormScreen creationContext={context} creationScope={scope} />}
     </LegacyEventCreateGate>;
@@ -877,7 +877,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
       }
       hapticSuccess();
       afterSave();
-      if (creationContext) router.replace('/(creator)/events?section=drafts'); else leaveEditor();
+      if (creationContext) router.dismissTo('/(tabs)/friends/manage/(tools)/events?section=drafts'); else leaveEditor();
     } catch (e) {
       showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {

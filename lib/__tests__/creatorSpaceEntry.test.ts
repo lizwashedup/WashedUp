@@ -41,13 +41,13 @@ const legacyAccess=(extra={})=>({ledCommunities:[],hasLeaderGrant:false,hasEvent
 const led=(extra={})=>({id:'old-community',name:'Already here',role:'leader',status:'active',handle:'already',...extra});
 it('retains an existing live community without a new page record and uses the unified chooser',async()=>{
  mockLegacy.mockResolvedValue(legacyAccess({ledCommunities:[led()]}));
- expect(await loadCreatorSpaceEntry(scope)).toMatchObject({title:'Your community',route:'/creator/pages',spaces:[{id:'old-community',name:'Already here',route:'/(creator)/today',legacy:{communityId:'old-community',workspace:'community'}}]});
+ expect(await loadCreatorSpaceEntry(scope)).toMatchObject({title:'Your community',route:'/creator/pages',spaces:[{id:'old-community',name:'Already here',route:'/(tabs)/friends/manage/(tools)/today',legacy:{communityId:'old-community',workspace:'community'}}]});
  expect(mockLegacy).toHaveBeenCalledWith('alice');
 });
 it('retains approved organizer and approved community setup access without reapplication',async()=>{
  mockLegacy.mockResolvedValue(legacyAccess({hasLeaderGrant:true,hasEventHostGrant:true}));
  const result=await loadCreatorSpaceEntry(scope);
- expect(result.spaces.map(s=>s.route)).toEqual(['/(creator)/today','/(creator)/organizer-home']);
+ expect(result.spaces.map(s=>s.route)).toEqual(['/(tabs)/friends/manage/(tools)/today','/(tabs)/friends/manage/(tools)/organizer-home']);
  expect(result.route).toBe('/creator/pages');
 });
 it('does not create legacy access for an unapproved or solely revoked applicant',async()=>{
@@ -59,7 +59,7 @@ it('deduplicates a community already represented by its new page identity',async
  expect(await loadCreatorSpaceEntry(scope)).toMatchObject({spaces:[expect.objectContaining({route:'/creator/page?id=old-community'})]});
  expect((await loadCreatorSpaceEntry(scope)).spaces).toHaveLength(1);
 });
-it.each([['events','/(creator)/events'],['member_care','/(creator)/members'],['finance','/(creator)/menu']])('routes a %s collaborator by this community tier',async(role,route)=>{
+it.each([['events','/(tabs)/friends/manage/(tools)/events'],['member_care','/(tabs)/friends/manage/(tools)/members'],['finance','/(tabs)/friends/manage/(tools)/menu']])('routes a %s collaborator by this community tier',async(role,route)=>{
  mockLegacy.mockResolvedValue(legacyAccess({hasLeaderGrant:true,ledCommunities:[led({role})]}));
  expect(await loadLegacyCreatorSpaces(scope)).toEqual([expect.objectContaining({route})]);
 });

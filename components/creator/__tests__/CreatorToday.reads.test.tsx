@@ -1,3 +1,4 @@
+jest.mock('../CommunityDailyActions',()=>({CommunityDailyActions:()=>null}));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'creator', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() }) }));
 // Profile header owns its query provider; this suite exercises the surrounding journey.
 jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null }));
@@ -7,7 +8,7 @@ const mockRefetch = jest.fn(async () => ({}));
 let mockQueries: Record<string, any>;
 jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]]}));
 jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null}));
-jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,creatorLandingRoute:()=>'/'}));
+jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,isAdminTierRole:()=>true,creatorLandingRoute:()=>'/'}));
 jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table'})}));
 jest.mock('../../../lib/communityChat', () => ({}));
 jest.mock('../../../lib/supabase', () => ({supabase:{}}));

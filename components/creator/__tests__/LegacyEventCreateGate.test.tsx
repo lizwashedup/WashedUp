@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { TextInput } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-const mockRefresh=jest.fn();let mockRead:any,mockEpoch=1,mockActive=true,mockUser='alice';
+const mockRefresh=jest.fn(), mockDismissTo=jest.fn();let mockRead:any,mockEpoch=1,mockActive=true,mockUser='alice';
+jest.mock('expo-router',()=>({router:{dismissTo:(...args:unknown[])=>mockDismissTo(...args)}}));
 const mockScope={userId:'alice',isCurrent:()=>mockActive};
 jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{viewerId:mockUser,epoch:mockEpoch,isLoading:false,error:null}})}));
 jest.mock('../../../hooks/useCreatorPageRead',()=>({useCreatorPageRead:()=>mockRead}));
 jest.mock('../../../lib/legacyEventCreate',()=>({resolveLegacyEventCreate:jest.fn()}));
-jest.mock('../pages/PageFrame',()=>({PageFrame:({children}:any)=>require('react').createElement(require('react-native').View,{},children),PageAction:()=>null,pageStyles:{body:{}}}));
+jest.mock('../pages/PageFrame',()=>({PageFrame:({children}:any)=>require('react').createElement(require('react-native').View,{},children),PageAction:({title,onPress}:any)=>require('react').createElement(require('react-native').Pressable,{accessibilityLabel:title,onPress}),pageStyles:{body:{}}}));
 import { LegacyEventCreateGate } from '../LegacyEventCreateGate';
 import type { CreatorPageScope } from '../../../lib/creatorPageReview';
 let tree:ReactTestRenderer,writeScope:CreatorPageScope;
@@ -30,4 +31,11 @@ it('never carries a former account’s unsaved form or permission into the new a
 it('retains unsaved text but removes write access on a failed or revoked access check',()=>{
  act(()=>{tree=create(screen());});const former=writeScope;mockRead={...mockRead,error:'Access revoked',loading:false};act(()=>tree.update(screen()));
  expect(tree.root.findAllByType(Draft)).toHaveLength(1);expect(former.isCurrent()).toBe(false);
+});
+it('offers a way back to named management when event creation is unavailable',()=>{
+ mockRead={...mockRead,data:undefined,error:'This community is still a draft.',loading:false};
+ act(()=>{tree=create(screen());});
+ act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='You manage')[0].props.onPress());
+ expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage');
+ expect(tree.root.findAllByType(Draft)).toHaveLength(0);
 });

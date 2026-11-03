@@ -7,8 +7,8 @@ const reviewConfig = withNativeWind(config, { input: './global.css' });
 // already-installed dependencies outside its source directory.
 const dependencyPath = path.join(__dirname, 'node_modules');
 const dependencyRealPath = require('node:fs').realpathSync(dependencyPath);
-reviewConfig.watchFolders = [...new Set([...(reviewConfig.watchFolders || []), dependencyRealPath])];
-reviewConfig.resolver.nodeModulesPaths = [...new Set([dependencyPath, ...(reviewConfig.resolver.nodeModulesPaths || [])])];
+reviewConfig.watchFolders = [...new Set([...(reviewConfig.watchFolders || []), path.dirname(dependencyRealPath)])];
+reviewConfig.resolver.nodeModulesPaths = [...new Set([dependencyPath, dependencyRealPath, ...(reviewConfig.resolver.nodeModulesPaths || [])])];
 // Isolate review transforms from earlier compilation-only exports and held harnesses.
 // Environment substitutions must invalidate even when the source file is unchanged.
 const crypto = require('node:crypto');

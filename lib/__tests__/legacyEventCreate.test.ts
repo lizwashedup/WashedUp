@@ -16,6 +16,11 @@ it.each(['member_care','finance','member'])('does not borrow another communityâ€
  mockAccess.mockResolvedValue({hasEventHostGrant:true,ledCommunities:[club(role),club('leader','active',other)]});await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow('not available');
 });
 it.each(['draft','archived'])('does not create under a %s community',async status=>{mockAccess.mockResolvedValue({ledCommunities:[club('leader',status)]});await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow();});
+it('explains how an authorized creator can recover from a draft community',async()=>{
+ mockAccess.mockResolvedValue({ledCommunities:[club('leader','draft')]});
+ await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow('Publish its page from community Settings');
+ expect(mockPrepare).not.toHaveBeenCalled();
+});
 it('permits the events role for its own active community',async()=>{mockAccess.mockResolvedValue({ledCommunities:[club('events')]});await expect(resolveLegacyEventCreate('community',id,scope)).resolves.toMatchObject({community:{id}});});
 it('requires a current organization approval and no mixed identity',async()=>{
  await expect(resolveLegacyEventCreate('organization',id,scope)).rejects.toThrow('Choose');

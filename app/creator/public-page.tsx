@@ -117,7 +117,7 @@ export default function PublicPageControlScreen() {
   };
 
   if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
-  if (!PUBLIC_PAGE_CONTROL_ENABLED) return <Redirect href="/(creator)/menu" />;
+  if (!PUBLIC_PAGE_CONTROL_ENABLED) return <Redirect href="/(tabs)/friends/manage/(tools)/menu" />;
 
   const isPublished = community?.status === 'active';
 

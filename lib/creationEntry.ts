@@ -38,7 +38,7 @@ export function creationDestinations(kind: SceneCreationKind, access: CreatorAcc
       if (community.status === 'archived' || !isAdminTierRole(community.role)) continue;
       destinations.push({ id: community.id, title: community.name,
         description: community.status === 'draft' ? 'Continue setting up your community.' : 'Manage your community, its events and members.',
-        route: '/(creator)/today', workspace: 'community', communityId: community.id });
+        route: '/(tabs)/friends/manage/(tools)/today', workspace: 'community', communityId: community.id });
     }
   }
   return destinations;

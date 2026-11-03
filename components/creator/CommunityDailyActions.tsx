@@ -35,7 +35,7 @@ export function CommunityDailyActions({ communityId }: { communityId: string }) 
       const allowed = community && (key === 'chat' || isAdminTierRole(community.role)
         || key === 'members' && community.role === 'member_care' || key === 'events' && community.role === 'events');
       if (!allowed) throw Error('Your access has changed. Return to Yours to see your current tools.');
-      const route = key === 'chat' ? '/community-thread/' + communityId : key === 'settings' ? '/(creator)/community' : '/(creator)/' + key;
+      const route = key === 'chat' ? '/community-thread/' + communityId : key === 'settings' ? '/(tabs)/friends/manage/(tools)/community' : '/(tabs)/friends/manage/(tools)/' + key;
       prepareCreatorSpace({ id: communityId, name: community.name, kind: 'community', route,
         legacy: { workspace: 'community', communityId, status: community.status } }, owned);
       router.push(route as never);

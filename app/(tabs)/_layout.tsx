@@ -334,7 +334,7 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="friends/index"
+        name="friends"
         options={{
           title: 'Your People',
           tabBarLabel: 'Yours',

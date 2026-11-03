@@ -25,16 +25,17 @@ export function PageAction({ title, onPress, disabled, primary = false, quiet = 
     {disclosure && <ChevronRight size={17} color={C.muted} />}
   </Pressable>;
 }
-export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef }: {
+export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef, inTabs = false }: {
   children: React.ReactNode; title?: string; footer?: React.ReactNode; busy?: boolean; onBack?: () => void; contentKey?: string; onRefresh?: () => void; refreshing?: boolean;
   scrollRef?: React.Ref<ScrollView>;
   innerViewRef?: React.ComponentProps<typeof ScrollView>['innerViewRef'];
   onContentSizeChange?: React.ComponentProps<typeof ScrollView>['onContentSizeChange'];
   onViewportLayout?: React.ComponentProps<typeof ScrollView>['onLayout'];
   onScrollBeginDrag?: React.ComponentProps<typeof ScrollView>['onScrollBeginDrag'];
+  inTabs?: boolean;
 }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
-  return <SafeAreaView style={s.root} edges={['top', 'bottom']}>
+  return <SafeAreaView style={s.root} edges={inTabs ? ['top'] : ['top', 'bottom']}>
     <Stack.Screen options={{ headerShown: false }} />
     <StatusBar style="dark" />
     <View style={s.header}>

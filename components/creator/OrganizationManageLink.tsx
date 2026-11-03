@@ -22,7 +22,7 @@ export function OrganizationManageLink({ organizationId }: { organizationId: str
       const access = await requestWithDeadline(getCreatorAccess(owned.userId), 12_000);
       if (!owned.isCurrent()) return;
       if (!access.hasEventHostGrant) throw Error('Your creator access has changed. Check your status in Yours.');
-      const route = '/(creator)/organizer-home';
+      const route = '/(tabs)/friends/manage/(tools)/organizer-home';
       prepareCreatorSpace({ id: organizationId, kind: 'organization', name: 'Your organization', route,
         legacy: { workspace: 'organization', status: 'approved' } }, owned);
       router.push(route);

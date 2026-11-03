@@ -208,7 +208,7 @@ export default function MemberInvitesScreen() {
     });
   };
 
-  if (!MEMBER_INVITES_ENABLED) return <Redirect href="/(creator)/members" />;
+  if (!MEMBER_INVITES_ENABLED) return <Redirect href="/(tabs)/friends/manage/(tools)/members" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>

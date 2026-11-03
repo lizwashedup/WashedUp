@@ -73,15 +73,15 @@ it('published list identity reflects live changes while the original private dra
  expect(button('Manage Current community')).toBeDefined();expect(button('Manage Old application title')).toBeUndefined();act(()=>button('Manage Current community').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/page?id=saved');
 });
 
-const legacy=(extra={})=>({id:'legacy',name:'Existing community',kind:'community',route:'/(creator)/today',legacy:{workspace:'community',communityId:'legacy',status:'active'},...extra});
+const legacy=(extra={})=>({id:'legacy',name:'Existing community',kind:'community',route:'/(tabs)/friends/manage/(tools)/today',legacy:{workspace:'community',communityId:'legacy',status:'active'},...extra});
 it('existing live community remains reachable even when new-page reads fail',async()=>{
  mockSaved.mockRejectedValue(Error('new-page contract unavailable'));mockLegacy.mockResolvedValue([legacy()]);await mount();
  act(()=>button('Manage Existing community').props.onPress());
- expect(mockWorkspace).toHaveBeenCalledWith('community');expect(mockSelect).toHaveBeenCalledWith('legacy');expect(mockPush).toHaveBeenCalledWith('/(creator)/today');
+ expect(mockWorkspace).toHaveBeenCalledWith('community');expect(mockSelect).toHaveBeenCalledWith('legacy');expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/today');
 });
 it('approved organizer selects its independent workspace without a new page',async()=>{
- mockSaved.mockResolvedValue([]);mockLocal.mockResolvedValue([]);mockLegacy.mockResolvedValue([legacy({id:'legacy-organizer-approval',name:'Your events',kind:'organization',route:'/(creator)/organizer-home',legacy:{workspace:'organization',status:'approved'}})]);await mount();
- act(()=>button('Manage Your events').props.onPress());expect(mockWorkspace).toHaveBeenCalledWith('organization');expect(mockSelect).toHaveBeenCalledWith(null);expect(mockPush).toHaveBeenCalledWith('/(creator)/organizer-home');
+ mockSaved.mockResolvedValue([]);mockLocal.mockResolvedValue([]);mockLegacy.mockResolvedValue([legacy({id:'legacy-organizer-approval',name:'Your events',kind:'organization',route:'/(tabs)/friends/manage/(tools)/organizer-home',legacy:{workspace:'organization',status:'approved'}})]);await mount();
+ act(()=>button('Manage Your events').props.onPress());expect(mockWorkspace).toHaveBeenCalledWith('organization');expect(mockSelect).toHaveBeenCalledWith(null);expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/organizer-home');
 });
 it('does not duplicate an existing community that has a new page identity',async()=>{
  mockLegacy.mockResolvedValue([legacy({id:'saved',name:'Sunday Table'})]);await mount();

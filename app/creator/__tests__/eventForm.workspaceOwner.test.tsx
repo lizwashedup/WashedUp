@@ -91,7 +91,7 @@ it.each(['community','organization'] as const)('explicit %s creation ignores ano
  act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.onChangeText('Explicit creator event'));
  act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Category: music'&&typeof n.props.onPress==='function')[0].props.onPress());
  await act(async()=>{await button('save it as a draft')!.props.onPress();});
- expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockCreate.mock.calls[0][1]).toBe(workspace==='community'?club.id:null);expect(mockReplace).toHaveBeenCalledWith('/(creator)/events?section=drafts');
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockCreate.mock.calls[0][1]).toBe(workspace==='community'?club.id:null);expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/events?section=drafts');
 });
 it('does not create after the selected community permission is revoked while filling the form',async()=>{
  const club={...community,id:'00000000-0000-4000-8000-000000000001'};

@@ -83,7 +83,7 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
   return <View style={[s.wrap, expanded && s.expanded]}>
     {!expanded && <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.semibold }]}>You manage</Text>}
     {expanded && <Text style={[s.intro, { fontFamily: fonts.regular }]}>Your communities, organizations and unfinished setup.</Text>}
-    {visible.map(entry => <Pressable key={entry.key} accessibilityRole="button" accessibilityLabel={entry.action} accessibilityHint={entry.subtitle}
+    {visible.map(entry => <Pressable cssInterop={false} key={entry.key} accessibilityRole="button" accessibilityLabel={entry.action} accessibilityHint={entry.subtitle}
       disabled={busy || loading || !current()} accessibilityState={{ disabled: busy || loading || !current() }}
       onPress={() => { void run(entry); }} style={({ pressed }) => [s.entry, pressed && s.pressed]}>
       <View style={s.copy}><Text style={[s.title, { fontFamily: fonts.medium }]}>{entry.title}</Text>
@@ -97,7 +97,7 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
         <Text style={[s.link, { fontFamily: fonts.medium }]}>Try again</Text>
       </Pressable></View>}
     {notice?.scope === owned && <Text accessibilityRole="alert" style={[s.subtitle, { fontFamily: fonts.regular }]}>{notice.text}</Text>}
-    {!expanded && entries.length > visible.length && <Pressable accessibilityRole="button" accessibilityLabel="See everything you manage" style={s.linkTarget} onPress={() => go('/creator/manage')}>
+    {!expanded && entries.length > visible.length && <Pressable accessibilityRole="button" accessibilityLabel="See everything you manage" style={s.linkTarget} onPress={() => go('/(tabs)/friends/manage')}>
       <Text style={[s.link, { fontFamily: fonts.medium }]}>See all ({entries.length})</Text></Pressable>}
     {expanded && !loading && !failed && !entries.length && <Text style={[s.intro, { fontFamily: fonts.regular }]}>Start a community or create an event. Your setup and management tools will stay here.</Text>}
     {expanded && <View style={s.create}>

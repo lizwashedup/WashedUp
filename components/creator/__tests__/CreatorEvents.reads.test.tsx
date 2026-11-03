@@ -4,7 +4,7 @@ const mockPush=jest.fn();
 const mockRefetch=jest.fn(async()=>({}));
 let mockEvents:any;
 jest.mock('@tanstack/react-query',()=>({useQuery:({queryKey}:any)=>queryKey[0]==='creator-events-tab'?mockEvents:{data:queryKey[0]==='creator-access'?{}:[]},useQueryClient:()=>({invalidateQueries:jest.fn()}),useMutation:()=>({mutate:jest.fn(),isPending:false,isError:false})}));
-jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush})}));
+jest.mock('expo-router',()=>({useLocalSearchParams:()=>({}),useFocusEffect:(fn:any)=>require('react').useEffect(fn,[fn]),useRouter:()=>({push:mockPush})}));
 jest.mock('../../../lib/creatorMode',()=>({}));
 jest.mock('../../../lib/creatorEvents',()=>({}));
 jest.mock('../../../lib/creatorPageEventTemplateLibrary',()=>({}));

@@ -1,5 +1,5 @@
-import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { OrganizationDailyActions } from '../../components/creator/OrganizationDailyActions';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
  * Organizer/producer home (CTO scope item 06; design spec item 04
@@ -14,9 +14,8 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
  * never touch community/member/join/door/room concepts, only events,
  * tickets, and follows.
  *
- * Landing tab for an event-host-only grant (lib/creatorMode.ts
- * creatorLandingRoute); leaders never see this tab (app/(creator)/_layout.tsx
- * hides it via href when isLeaderAccess is true).
+ * Opened for the selected organization under Yours. ManagementLayout
+ * requires the organization grant; community roles do not carry over.
  *
  * New Block B screen: uses the Q2 event-surface tokens (constants/
  * EventDesign.ts) already adopted by the sibling ticket screens (tickets.tsx,
@@ -45,7 +44,6 @@ import { daysUntilLabel, failedPayoutLabel, hasUnpublishedTickets, inventoryLabe
 import { supabase } from '../../lib/supabase';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function OrganizerHomeScreen() {
@@ -142,13 +140,13 @@ export default function OrganizerHomeScreen() {
   const checkInText = attendeesQuery.isError ? 'Check-in count unavailable' : attendeesQuery.isPending ? 'Checking attendance…' : `${counts.checkedIn} of ${counts.sold} checked in`;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* LIZ COPY */}
-        <BackToYoursButton />
-        <Text style={styles.kicker}>creator mode</Text>
+
+        <Text style={styles.kicker}>Manage</Text>
         <Text style={styles.title}>{producerName}</Text>
-        <WorkspaceSwitcher access={access} />
+        <OrganizationDailyActions />
 
         {/* Build 35 Screen 01: exception-first surfacing. Rises above the
             routine next-event card on purpose -- a stuck payout matters
@@ -322,7 +320,7 @@ export default function OrganizerHomeScreen() {
           <TouchableOpacity
             accessibilityRole="button"
             style={styles.linkRow}
-            onPress={() => router.push('/organizer-broadcast' as never)}
+            onPress={() => router.push('/(tabs)/friends/manage/(tools)/organizer-broadcast' as never)}
             activeOpacity={0.8}
           >
             <View style={{ flex: 1 }}>

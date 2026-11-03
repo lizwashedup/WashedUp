@@ -43,7 +43,7 @@ it.each([{creatorPageId:'../../wrong',communityMemberId:member},{creatorPageId:p
  expect(click({type:'community_join_request',notificationId:notice,...fields})).toHaveBeenCalledWith('/(tabs)/friends');
 });
 it('preserves unmapped legacy behavior and feature-gated safety',()=>{
- expect(click({type:'community_join_request'})).toHaveBeenCalledWith('/(creator)/members');
+ expect(click({type:'community_join_request'})).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/members');
  expect(click({type:'community_join_approved'})).toHaveBeenCalledWith('/(tabs)/chats');
  expect(click({type:'community_join_request',notificationId:notice,creatorPageId:page,communityMemberId:member},false)).toHaveBeenCalledWith('/(tabs)/friends');
 });

@@ -13,7 +13,7 @@ let tree:ReactTestRenderer;
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
 beforeEach(()=>{jest.clearAllMocks();mockActive=true;mockAccess.mockResolvedValue({ledCommunities:[{id:'sunset',name:'Sunset Club',status:'active',role:'leader'}]});act(()=>{tree=create(<CommunityDailyActions communityId="sunset"/>);});});
 afterEach(()=>act(()=>tree.unmount()));
-it.each([['Main chat','/community-thread/sunset'],['Members','/(creator)/members'],['Events','/(creator)/events'],['Settings','/(creator)/community']])('opens %s in the selected community',async(label,route)=>{
+it.each([['Main chat','/community-thread/sunset'],['Members','/(tabs)/friends/manage/(tools)/members'],['Events','/(tabs)/friends/manage/(tools)/events'],['Settings','/(tabs)/friends/manage/(tools)/community']])('opens %s in the selected community',async(label,route)=>{
  await act(async()=>button(label).props.onPress());expect(mockAccess).toHaveBeenCalledWith('alice');expect(mockPrepare).toHaveBeenCalledWith(expect.objectContaining({legacy:expect.objectContaining({communityId:'sunset',workspace:'community'})}),mockScope);expect(mockPush).toHaveBeenCalledWith(route);
 });
 it('does not borrow a stronger role from another community',async()=>{

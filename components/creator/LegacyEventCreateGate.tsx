@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef } from 'react';
+import { router } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { ScaledText as Text } from '../ScaledText';
 import { PageAction, PageFrame, pageStyles } from './pages/PageFrame';
@@ -7,6 +8,7 @@ import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
 import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
 import { resolveLegacyEventCreate, type LegacyEventCreateContext } from '../../lib/legacyEventCreate';
 import type { CreatorPageScope } from '../../lib/creatorPageReview';
+import { MANAGEMENT_HOME } from '../../lib/managementNavigation';
 
 export function LegacyEventCreateGate({ workspace, communityId, children }: {
   workspace: unknown; communityId?: unknown;
@@ -35,6 +37,7 @@ export function LegacyEventCreateGate({ workspace, communityId, children }: {
     {result.loading || account.isLoading ? <ActivityIndicator accessibilityLabel="Checking event creation access" color={Colors.terracotta} /> : <>
       <Text accessibilityRole="alert" style={pageStyles.body}>{result.error ?? 'Check your account to create this event.'}</Text>
       <PageAction title="Try again" singleLine onPress={() => { void (account.error ? account.retry() : result.refresh()).catch(() => undefined); }} />
+      <PageAction title="You manage" quiet singleLine onPress={() => router.dismissTo(MANAGEMENT_HOME)} />
     </>}
   </PageFrame>;
 }

@@ -12,14 +12,14 @@ jest.mock('../../../../lib/creatorManagement',()=>({loadManagedSpaces:jest.fn(),
 jest.mock('lucide-react-native',()=>({ChevronRight:()=>null}));
 import {CreatorSpaceEntry} from '../CreatorSpaceEntry';
 let tree:ReactTestRenderer;
-const community={id:'sunset',kind:'community',name:'Sunset Club',route:'/(creator)/today',legacy:{workspace:'community',communityId:'sunset',status:'active'}};
+const community={id:'sunset',kind:'community',name:'Sunset Club',route:'/(tabs)/friends/manage/(tools)/today',legacy:{workspace:'community',communityId:'sunset',status:'active'}};
 const data={spaces:[community],invitations:[]};
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
 function mount(expanded=false){act(()=>{tree=create(<CreatorSpaceEntry userId={mockUser} expanded={expanded}/>);});}
 beforeEach(()=>{jest.clearAllMocks();mockActive=true;mockUser='alice';mockSpaces={data,loading:false,error:null,refresh:mockRefresh};mockApplications={data:[],loading:false,error:null,refresh:mockApplicationsRefresh};mockRefresh.mockResolvedValue(data);mockApplicationsRefresh.mockResolvedValue([]);});
 afterEach(()=>act(()=>tree?.unmount()));
 it('opens the named community only after refreshing its exact access and selecting its context',async()=>{
- mount();await act(async()=>button('Manage Sunset Club').props.onPress());expect(mockRefresh).toHaveBeenCalledTimes(1);expect(mockPrepare).toHaveBeenCalledWith(community,mockScope);expect(mockPush).toHaveBeenCalledWith('/(creator)/today');
+ mount();await act(async()=>button('Manage Sunset Club').props.onPress());expect(mockRefresh).toHaveBeenCalledTimes(1);expect(mockPrepare).toHaveBeenCalledWith(community,mockScope);expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/today');
 });
 it('does not open a removed or revoked community from a stale row',async()=>{
  mount();mockRefresh.mockResolvedValue({spaces:[],invitations:[]});await act(async()=>button('Manage Sunset Club').props.onPress());expect(mockPrepare).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
@@ -41,7 +41,7 @@ it('never navigates from a speculative loading state or a previous account',()=>
 });
 it('keeps Yours compact and provides all named entries in the expanded directory',()=>{
  mockSpaces.data={spaces:[community,{...community,id:'two',name:'Second Club'},{...community,id:'three',name:'Third Club'}],invitations:[]};mount();
- expect(button('Manage Third Club')).toBeUndefined();act(()=>button('See everything you manage').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/manage');
+ expect(button('Manage Third Club')).toBeUndefined();act(()=>button('See everything you manage').props.onPress());expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
  act(()=>tree.update(<CreatorSpaceEntry userId={mockUser} expanded/>));expect(button('Manage Third Club')).toBeDefined();
 });
 it('hides the compact section for ordinary members and explains the expanded empty state',()=>{
