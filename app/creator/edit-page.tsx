@@ -46,6 +46,7 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { BlockEditorCard } from '../../components/creator/BlockEditorCard';
 import { friendlyError } from '../../lib/friendlyError';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { isAdminTierRole, type LedCommunity } from '../../lib/creatorMode';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
@@ -122,22 +123,35 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const blocksKey = ['community-blocks', community?.id];
-  const { data: blocks = [], isLoading, refetch, isRefetching } = useQuery({
+  const blocksRead = useQuery({
     queryKey: blocksKey,
-    queryFn: () => getBlocksForEditor(community!.id),
+    queryFn: () => requestWithDeadline(getBlocksForEditor(community.id), 12_000),
     enabled: !!community,
+    retry: false,
   });
+  const blocks = blocksRead.data ?? [];
 
   // Opening the editor is read-only. New sections are added explicitly below;
   // never seed missing sections just because a creator visits their page.
 
   // identity (screen 34): name + promise live on communities, not a block
   const identityKey = ['community-identity', community?.id];
-  const { data: identity } = useQuery({
+  const identityRead = useQuery({
     queryKey: identityKey,
-    queryFn: () => getCommunityIdentity(community!.id),
+    queryFn: () => requestWithDeadline(getCommunityIdentity(community.id), 12_000),
     enabled: !!community,
+    retry: false,
   });
+  const identity = identityRead.data;
+  // A failed read is not an empty page. Keep an already loaded editor mounted
+  // during refresh failures so its unsaved text and block edits survive.
+  const pageReady = Array.isArray(blocksRead.data) && !!identity;
+  const readFailed = blocksRead.isError || identityRead.isError;
+  const loadingPage = blocksRead.isLoading || identityRead.isLoading;
+  const refreshingPage = blocksRead.isFetching || identityRead.isFetching;
+  const refreshPage = async () => {
+    await Promise.allSettled([blocksRead.refetch(), identityRead.refetch()]);
+  };
   const [nameDraft, setNameDraft] = useState('');
   const [purposeDraft, setPurposeDraft] = useState('');
   const [identitySaving, setIdentitySaving] = useState(false);
@@ -168,7 +182,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   };
 
   const handleSaveIdentity = async () => {
-    if (!community) return;
+    if (!pageReady || identitySaving) return;
     const name = nameDraft.trim();
     const purpose = purposeDraft.trim();
     if (name.length < IDENTITY_NAME_MIN || name.length > IDENTITY_NAME_MAX) {
@@ -236,7 +250,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   };
 
   const handleAdd = async (type: CommunityBlockType) => {
-    if (!community || addBusy) return;
+    if (!pageReady || addBusy) return;
     setAddBusy(true);
     try {
       const nextPosition = blocks.length > 0 ? Math.max(...blocks.map((b) => b.position)) + 1 : 0;
@@ -257,6 +271,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
       appear to jump across it (see the file-header comment for why a raw
       position-value swap is unsafe here). */
   const handleMoveInSection = async (group: CommunityBlock[], index: number, direction: -1 | 1) => {
+    if (!pageReady) return;
     const targetIndex = index + direction;
     if (targetIndex < 0 || targetIndex >= group.length) return;
     const a = group[index];
@@ -281,6 +296,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   };
 
   const confirmDelete = (block: CommunityBlock) => {
+    if (!pageReady) return;
     setAlertInfo({
       title: 'remove this block?',
       message: `your ${BLOCK_TYPE_INFO[block.block_type].label} block comes off the page. you can add it back fresh anytime.`,
@@ -504,20 +520,25 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
           <View style={styles.flex} /><ProfileButton compact />
         </View>
 
-        {isLoading ? (
+        {!pageReady && loadingPage && !readFailed ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={Colors.terracotta} />
+            <ActivityIndicator accessibilityLabel="Loading community details" size="large" color={Colors.terracotta} />
           </View>
-        ) : !community ? (
+        ) : !pageReady ? (
           <View style={styles.centered}>
-            <Text style={styles.hint}>This community is unavailable.</Text>
+            <Text style={styles.hint} accessibilityRole="alert">Couldn’t load community details. Try again to edit your page.</Text>
+            <PageAction title="Try again" disabled={!!refreshingPage} onPress={() => void refreshPage()} />
           </View>
         ) : (
           <ScrollView
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
-            refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
+            refreshControl={<RefreshControl refreshing={!!refreshingPage} onRefresh={() => void refreshPage()} tintColor={Colors.terracotta} />}
           >
+            {readFailed && <View style={styles.readWarning}>
+              <Text style={styles.hint} accessibilityRole="alert">Couldn’t refresh your page. Your edits are still here.</Text>
+              <PageAction title="Try again" quiet compact disabled={!!refreshingPage} onPress={() => void refreshPage()} />
+            </View>}
             {activeSection === null ? renderOverview() : renderSectionDetail(activeSection)}
           </ScrollView>
         )}
@@ -535,6 +556,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
 }
 
 const styles = StyleSheet.create({
+  readWarning: { marginBottom: 16, gap: 8 },
   container: { flex: 1, backgroundColor: Colors.parchment },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },

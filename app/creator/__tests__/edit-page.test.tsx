@@ -1,5 +1,7 @@
 import React from 'react';
 import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+import {TextInput, TouchableOpacity, RefreshControl} from 'react-native';
+import {PageAction} from '../../../components/creator/pages/PageFrame';
 const mockAccess=jest.fn(),mockSelected=jest.fn(),mockParams=jest.fn(),mockQuery=jest.fn(),mockAdd=jest.fn();
 jest.mock('../../../hooks/useCreatorAccessRead',()=>({useCreatorAccessRead:()=>mockAccess()}));
 jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockSelected()}));
@@ -13,8 +15,19 @@ jest.mock('../../../lib/communityBlocks',()=>({addBlock:(...args:unknown[])=>moc
 import EditPageScreen from '../edit-page';
 function text(node:any):string{return typeof node==='string'?node:Array.isArray(node)?node.map(text).join(' '):node?.children?text(node.children):'';}
 let tree:ReactTestRenderer;
+let mockBlocksRead: any, mockIdentityRead: any;
+const mockRefreshBlocks = jest.fn(), mockRefreshIdentity = jest.fn();
 const exact={id:'exact',name:'Exact community',role:'leader',status:'active'},other={id:'other',name:'Other community',role:'leader',status:'active'};
-beforeEach(()=>{jest.clearAllMocks();mockParams.mockReturnValue({communityId:'exact'});mockAccess.mockReturnValue({data:{ledCommunities:[exact,other]},isLoading:false,isError:false});mockSelected.mockReturnValue(other);mockQuery.mockImplementation(({queryKey}:any)=>queryKey[0]==='community-blocks'?{data:[],isLoading:false}:{data:{name:'Exact community',purpose:'Meet for walks'}});});
+beforeEach(() => {
+ jest.clearAllMocks();
+ mockParams.mockReturnValue({communityId:'exact'});
+ mockAccess.mockReturnValue({data:{ledCommunities:[exact,other]},isLoading:false,isError:false});
+ mockSelected.mockReturnValue(other);
+ mockRefreshBlocks.mockResolvedValue({}); mockRefreshIdentity.mockResolvedValue({});
+ mockBlocksRead = {data:[],isLoading:false,isError:false,isFetching:false,refetch:mockRefreshBlocks};
+ mockIdentityRead = {data:{name:'Exact community',purpose:'Meet for walks'},isLoading:false,isError:false,isFetching:false,refetch:mockRefreshIdentity};
+ mockQuery.mockImplementation(({queryKey}:any)=>queryKey[0]==='community-blocks'?mockBlocksRead:mockIdentityRead);
+});
 afterEach(()=>act(()=>tree?.unmount()));
 it('opens the requested community without inserting absent page sections',async()=>{
  await act(async()=>{tree=create(<EditPageScreen/>);});
@@ -29,4 +42,71 @@ it('a missing explicit community cannot fall back to the selected one',async()=>
 it('an event-only role cannot enter the community editor',async()=>{
  mockAccess.mockReturnValue({data:{ledCommunities:[{...exact,role:'events'},other]},isLoading:false,isError:false});
  await act(async()=>{tree=create(<EditPageScreen/>);});expect(mockQuery).not.toHaveBeenCalled();expect(mockAdd).not.toHaveBeenCalled();
+});
+
+
+function openBasics() {
+ const entry = tree.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel?.startsWith('Basics.'))!;
+ act(() => entry.props.onPress());
+}
+function field(label: string) {
+ return tree.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === label)!;
+}
+
+it.each(['sections', 'identity'] as const)('does not present a failed %s read as an empty editable community', async failure => {
+ if (failure === 'sections') mockBlocksRead = {...mockBlocksRead, data:undefined, isError:true};
+ else mockIdentityRead = {...mockIdentityRead, data:undefined, isError:true};
+ await act(async () => {tree=create(<EditPageScreen/>);});
+ expect(text(tree.toJSON())).toContain('Couldn’t load community details');
+ expect(text(tree.toJSON())).not.toContain('not started');
+ expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+ expect(tree.root.findAllByType(TouchableOpacity).some(node => node.props.accessibilityLabel === 'add a block')).toBe(false);
+ expect(mockAdd).not.toHaveBeenCalled();
+ await act(async () => {await tree.root.findByType(PageAction).props.onPress();});
+ expect(mockRefreshBlocks).toHaveBeenCalledTimes(1);
+ expect(mockRefreshIdentity).toHaveBeenCalledTimes(1);
+});
+
+it('waits for saved identity before exposing fields, then displays the loaded values', async () => {
+ mockIdentityRead = {...mockIdentityRead, data:undefined, isLoading:true, isFetching:true};
+ await act(async () => {tree=create(<EditPageScreen/>);});
+ expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+ expect(text(tree.toJSON())).not.toContain('not started');
+ mockIdentityRead = {...mockIdentityRead, data:{name:'Loaded community',purpose:'Weekly walks'}, isLoading:false, isFetching:false};
+ await act(async () => {tree.update(<EditPageScreen/>);});
+ openBasics();
+ expect(field('community name').props.value).toBe('Loaded community');
+ expect(field('Short community description').props.value).toBe('Weekly walks');
+ expect(mockAdd).not.toHaveBeenCalled();
+});
+
+it('keeps a missing identity unavailable instead of offering blank fields', async () => {
+ mockIdentityRead = {...mockIdentityRead, data:null};
+ await act(async () => {tree=create(<EditPageScreen/>);});
+ expect(text(tree.toJSON())).toContain('Couldn’t load community details');
+ expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+});
+
+it('preserves unsaved identity text across a refresh failure and successful retry', async () => {
+ await act(async () => {tree=create(<EditPageScreen/>);});
+ openBasics();
+ act(() => field('community name').props.onChangeText('My unsaved community name'));
+ mockBlocksRead = {...mockBlocksRead, isError:true};
+ await act(async () => {tree.update(<EditPageScreen/>);});
+ expect(text(tree.toJSON())).toContain('Your edits are still here');
+ expect(field('community name').props.value).toBe('My unsaved community name');
+ await act(async () => {await tree.root.findByType(PageAction).props.onPress();});
+ mockBlocksRead = {...mockBlocksRead, isError:false};
+ mockIdentityRead = {...mockIdentityRead, data:{name:'Server copy',purpose:'Meet for walks'}};
+ await act(async () => {tree.update(<EditPageScreen/>);});
+ expect(field('community name').props.value).toBe('My unsaved community name');
+ expect(text(tree.toJSON())).not.toContain('Couldn’t refresh your page');
+});
+
+it('refreshes both page sections and identity from the existing pull-to-refresh control', async () => {
+ await act(async () => {tree=create(<EditPageScreen/>);});
+ await act(async () => {await tree.root.findByType(RefreshControl).props.onRefresh();});
+ expect(mockRefreshBlocks).toHaveBeenCalledTimes(1);
+ expect(mockRefreshIdentity).toHaveBeenCalledTimes(1);
+ expect(mockAdd).not.toHaveBeenCalled();
 });

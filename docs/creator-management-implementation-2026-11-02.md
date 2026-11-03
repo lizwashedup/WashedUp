@@ -261,3 +261,12 @@ Readiness remains **local preview, not production release**. The preceding nativ
 Broader unfinished product work remains separate: legacy draft creator/community identity, invitations in and outside the app, broadcast chat/inbox/delivery semantics and creator workflow simplification. Existing code and UI accessibility are not proof that those capabilities are complete. Do not enable grouping/creator flags, run migrations or publish this preview to fill those gaps. The preview-only package entry remains deliberately uncommitted and is not a release artifact.
 
 The shared Device Hub is currently owned by the separate Manage Plan save-recovery task (SE/13, Metro8884). This reassessment did not interrupt that work or imply its checks were part of the 253-test result. No new native checks, real-user messages, data changes, build or OTA occurred.
+
+
+### Safe parallel QA: legacy editor load recovery — November 3
+
+While the separate Manage Plan large-text task owned Device Hub/SE/13 on Metro8884, continued in this checkout without operating the simulator. Found a concrete legacy editor issue: a failed blocks query defaulted to an empty array, while an unfinished/failed identity query could leave editable name/description fields blank. Pull-to-refresh only retried the blocks read.
+
+`app/creator/edit-page.tsx` now requires both successful datasets before showing an editable page, distinguishes failed/missing reads from a genuinely empty community, bounds initial reads with the existing 12-second deadline helper, and offers retry for both reads. Background refresh failure keeps the loaded editor mounted with a clear warning, preserving local identity text. Retrying a refresh does not reseed over an unsaved name. The original queries, backend functions, community IDs and writes remain in use; no section is inserted by opening or retrying the editor.
+
+Validation: **9 editor tests passed**, including six new cases for failed section/identity reads, delayed and missing identity, unsaved text through failed refresh/retry, and refresh of both datasets. TypeScript and diff checks passed. Changed files: the editor, `app/creator/__tests__/edit-page.test.tsx`, and this record. No other product files changed, no simulator was taken over, and no backend write/build/OTA occurred. This fix has not yet been visually checked on device. The wider release requirements above remain open; it does not claim to fix all legacy editor write/session/recovery behavior.
