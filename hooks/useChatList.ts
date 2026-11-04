@@ -238,6 +238,16 @@ export function useChatList(knownUserId: string | null | undefined) {
   const userIdRef = useRef<string | null>(null);
   const currentViewer = useRef(knownUserId);
   currentViewer.current = knownUserId;
+  // Keep committed rows synchronous across independent reads and realtime
+  // callbacks. React may batch renders; the cache must follow the same rows.
+  const rowsRef = useRef<ChatPreview[]>([]);
+  const showChats = useCallback((next: ChatPreview[] | ((rows: ChatPreview[]) => ChatPreview[]), cacheOwner?: string | null) => {
+    if (cacheOwner && (currentViewer.current !== cacheOwner || userIdRef.current !== cacheOwner)) return;
+    const rows = typeof next === 'function' ? next(rowsRef.current) : next;
+    rowsRef.current = rows;
+    if (cacheOwner) chatListMemoryCache.set(cacheOwner, rows);
+    setChats(rows);
+  }, []);
   const requestVersion = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; }; }, []);
@@ -272,13 +282,14 @@ export function useChatList(knownUserId: string | null | undefined) {
     // or delay successful conversations from the other branch.
     const publish = (kind: ChatPreview['kind'], rows: ChatPreview[] | null, complete: boolean, error = false) => {
       if (!current()) return;
+      latest = chatListMemoryCache.get(userId) ?? latest;
       if (rows !== null) latest = [...latest.filter(chat => chat.kind !== kind), ...rows];
       if (complete) pending[kind] = false;
       failed[kind] = error;
       const sorted = sortChatPreviews(latest);
       chatListMemoryCache.set(userId, sorted);
       senderNameCacheRef.current = names;
-      setChats(sorted);
+      showChats(sorted);
       setLoadError(failed.event || failed.circle);
       setLoading(sorted.length === 0 && (pending.event || pending.circle));
     };
@@ -480,7 +491,7 @@ export function useChatList(knownUserId: string | null | undefined) {
       }
     };
     await Promise.all([loadEvents(), loadCircles()]);
-  }, [knownUserId]);
+  }, [knownUserId, showChats]);
 
   useEffect(() => {
     requestVersion.current++;
@@ -494,16 +505,16 @@ export function useChatList(knownUserId: string | null | undefined) {
     const previous = knownUserId ? chatListMemoryCache.get(knownUserId) : undefined;
     const safeWarmRows = previous?.filter(chat => !chat.is_dm);
     if (knownUserId && safeWarmRows) chatListMemoryCache.set(knownUserId, safeWarmRows);
-    setChats(safeWarmRows ?? []);
+    showChats(safeWarmRows ?? []);
     if (knownUserId === undefined) { setLoading(true); return; }
     if (knownUserId === null) {
-      setChats([]);
+      showChats([]);
       setLoading(false);
       return;
     }
     const cached = chatListMemoryCache.get(knownUserId);
     if (cached) {
-      setChats(cached);
+      showChats(cached);
       setLoading(false);
     }
     void fetchChats(!!cached);
@@ -514,7 +525,7 @@ export function useChatList(knownUserId: string | null | undefined) {
     // Retire reads and realtime hydration started before the confirmed block.
     // A network failure must never restore the removed cached private row.
     requestVersion.current++;
-    setChats(chatListMemoryCache.get(viewerId) ?? []);
+    showChats(chatListMemoryCache.get(viewerId) ?? []);
     void fetchChats(true);
   }), [knownUserId, fetchChats]);
 
@@ -522,8 +533,9 @@ export function useChatList(knownUserId: string | null | undefined) {
   // row also drops its id from convIdsRef (the effect below), so the realtime
   // handler stops patching a conversation the user just left.
   const removeChat = useCallback((conversationId: string) => {
-    setChats(prev => prev.filter(c => c.conversationId !== conversationId));
-  }, []);
+    if (!mounted.current || !knownUserId || currentViewer.current !== knownUserId) return;
+    showChats(prev => prev.filter(c => c.conversationId !== conversationId), knownUserId);
+  }, [knownUserId, showChats]);
 
   const convIdsRef = useRef(new Set<string>());
   useEffect(() => {
@@ -578,7 +590,7 @@ export function useChatList(knownUserId: string | null | undefined) {
             }
             const preview = formatChatPreview(msg, senderName);
 
-            setChats(prev => {
+            showChats(prev => {
               if (!isCurrentPreview()) return prev;
               const updated = prev.map(c => {
                 if (c.conversationId !== convId) return c;
@@ -598,7 +610,7 @@ export function useChatList(knownUserId: string | null | undefined) {
                 comparePreviewTimes(b.last_message_at, a.last_message_at));
               const past = updated.filter(c => c.is_past);
               return [...active, ...past];
-            });
+            }, knownUserId);
           } catch {
             // Fallback: full refetch only for this active account.
             if (isCurrentPreview()) void fetchChats(true);
