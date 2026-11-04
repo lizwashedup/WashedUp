@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useChatList } from '../useChatList';
 
+let mockIncoming: (payload: any) => Promise<void>;
 let mockMembership: (viewer: string) => Promise<any>;
 let mockCircles: (viewer: string) => Promise<any>;
 let mockEnrichment: (table: string, columns: string, viewer: string) => Promise<any>;
@@ -24,7 +25,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
       },
     }; return query;
   },
-  channel: () => { const channel = { on: () => channel, subscribe: () => channel }; return channel; },
+  channel: () => { const channel = { on: (_e: any, _f: any, cb: any) => { mockIncoming = cb; return channel; }, subscribe: () => channel }; return channel; },
   removeChannel: jest.fn(),
 } }));
 let tree: ReactTestRenderer;
@@ -201,4 +202,55 @@ it('ignores an earlier circle completion after the newer same-account retry', as
   await act(async () => oldCircle.resolve(circleMembership('Stale circle title')));
   expect(value.chats.map(chat => chat.title)).toEqual(['Current circle title']);
   expect(value.loadError).toBe(false);
+});
+
+
+it('keeps a live plan preview when the slower circle branch completes', async () => {
+  const circle = deferred(); mockCircles = () => circle.promise;
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-circle-race');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  expect(value.chats[0].last_message).toBe('Aster: New arrival');
+  await act(async () => circle.resolve(circleMembership()));
+  expect(value.chats.find(chat => chat.kind === 'event')).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+});
+
+it('keeps the latest live preview through a failed refresh', async () => {
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-failed-refresh');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+  expect(value.loadError).toBe(true);
+});
+
+
+it('keeps a removed conversation absent when the next refresh fails', async () => {
+  useDetailedEnrichment();
+  await mount('removed-chat-cache');
+  act(() => value.removeChat(event.id));
+  expect(value.chats).toEqual([]);
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats).toEqual([]);
+});
+
+it('ignores an old account removal callback after switching accounts', async () => {
+  useDetailedEnrichment();
+  await mount('remove-account-old');
+  const oldRemove = value.removeChat;
+  await act(async () => tree.update(<Probe viewer="remove-account-new" />));
+  act(() => oldRemove(event.id));
+  expect(value.chats).toHaveLength(1);
+});
+
+it('retains a live ordinary preview on remount when the server is offline', async () => {
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-remount');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  act(() => tree.unmount());
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await mount('live-preview-remount');
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
 });
