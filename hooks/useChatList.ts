@@ -249,6 +249,7 @@ export function useChatList(knownUserId: string | null | undefined) {
     setChats(rows);
   }, []);
   const requestVersion = useRef(0);
+  const removals = useRef({ sequence: 0, at: new Map<string, number>() });
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; }; }, []);
   // Sender name cache (user_id -> first_name_display), populated from the roster
@@ -263,6 +264,7 @@ export function useChatList(knownUserId: string | null | undefined) {
       return;
     }
     const version = ++requestVersion.current;
+    const removalSequence = removals.current.sequence;
     const current = () => mounted.current && currentViewer.current === knownUserId && requestVersion.current === version;
     const read = async <T,>(work: PromiseLike<T>): Promise<T> => {
       const result = await requestWithDeadline(work, 12_000);
@@ -283,7 +285,8 @@ export function useChatList(knownUserId: string | null | undefined) {
     const publish = (kind: ChatPreview['kind'], rows: ChatPreview[] | null, complete: boolean, error = false) => {
       if (!current()) return;
       latest = chatListMemoryCache.get(userId) ?? latest;
-      if (rows !== null) latest = [...latest.filter(chat => chat.kind !== kind), ...rows];
+      if (rows !== null) latest = [...latest.filter(chat => chat.kind !== kind), ...rows.filter(chat =>
+        (removals.current.at.get(chat.conversationId) ?? 0) <= removalSequence)];
       if (complete) pending[kind] = false;
       failed[kind] = error;
       const sorted = sortChatPreviews(latest);
@@ -496,6 +499,7 @@ export function useChatList(knownUserId: string | null | undefined) {
   useEffect(() => {
     requestVersion.current++;
     userIdRef.current = knownUserId ?? null;
+    removals.current = { sequence: 0, at: new Map() };
     senderNameCacheRef.current = new Map();
     setLoadError(false);
     // A block may have changed on another device while this observer was gone.
@@ -529,11 +533,12 @@ export function useChatList(knownUserId: string | null | undefined) {
     void fetchChats(true);
   }), [knownUserId, fetchChats]);
 
-  // Optimistic removal for delete-chat / leave-circle (doc 120). Dropping the
-  // row also drops its id from convIdsRef (the effect below), so the realtime
-  // handler stops patching a conversation the user just left.
+  // The caller has confirmed delete-chat / leave-circle (doc 120). Keep older
+  // in-flight snapshots from restoring that row, without suppressing unrelated
+  // rows or a later read after an intentional rejoin.
   const removeChat = useCallback((conversationId: string) => {
     if (!mounted.current || !knownUserId || currentViewer.current !== knownUserId) return;
+    removals.current.at.set(conversationId, ++removals.current.sequence);
     showChats(prev => prev.filter(c => c.conversationId !== conversationId), knownUserId);
   }, [knownUserId, showChats]);
 
