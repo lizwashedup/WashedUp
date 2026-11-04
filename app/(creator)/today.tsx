@@ -10,10 +10,10 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
  * per decision 15a.
  */
 
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { ActivityIndicator, View, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Calendar, Megaphone, Plus, UserPlus } from 'lucide-react-native';
@@ -65,6 +65,12 @@ export default function CreatorTodayScreen() {
     enabled: access != null,
   });
   const { data: members = [], refetch: refetchMembers, isRefetching } = membersQuery;
+  const canRefreshMembers = !!community && !!access && !accessRead.isLoading && !accessRead.isError;
+  // A join or departure can happen while the creator is on another screen.
+  // React Navigation keeps this screen mounted, so mount-only reads go stale.
+  useFocusEffect(useCallback(() => {
+    if (canRefreshMembers) void refetchMembers();
+  }, [community?.id, canRefreshMembers, refetchMembers]));
   const { data: broadcasts = [] } = broadcastsQuery;
   const { data: allEvents = [] } = eventsQuery;
   const events = allEvents.filter((event) =>

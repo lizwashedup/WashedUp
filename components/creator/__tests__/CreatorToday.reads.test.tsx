@@ -7,8 +7,9 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch = jest.fn(async () => ({}));
 let mockQueries: Record<string, any>;
 let mockCommunityStatus = 'active';
+let mockOnFocus: () => void;
 jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]]}));
-jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null}));
+jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null,useFocusEffect:(callback:()=>void)=>{mockOnFocus=callback;}}));
 jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,isAdminTierRole:()=>true,creatorLandingRoute:()=>'/'}));
 jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table',role:'leader',status:mockCommunityStatus})}));
 jest.mock('../../../lib/communityChat', () => ({}));
@@ -96,4 +97,19 @@ it('keeps optional chat spaces reachable through the community page',async()=>{
  mockQueries['creator-rooms']=result([{id:'sunset-spots',name:'Sunset spots'}]);await render();
  const chats=tree.root.findAll(n=>n.props.accessibilityLabel==='All community chats'&&typeof n.props.onPress==='function')[0];
  expect(chats).toBeDefined();act(()=>chats.props.onPress());expect(router.push).toHaveBeenCalledWith('/community/community');
+});
+
+it('refreshes the member summary when returning after a member leaves elsewhere',async()=>{
+ mockQueries['creator-members']=result([{status:'active'},{status:'active'}]);
+ const refreshedMembers=jest.fn(async()=>{mockQueries['creator-members']={...result([{status:'active'}]),refetch:refreshedMembers};});
+ mockQueries['creator-members'].refetch=refreshedMembers;
+ expect(await render()).toContain('2 members so far');
+ await act(async()=>mockOnFocus());
+ await act(async()=>tree.update(<Screen/>));
+ expect(refreshedMembers).toHaveBeenCalledTimes(1);
+ expect(visibleText(tree.toJSON())).toContain('1 member so far');
+});
+it('does not refresh member details before creator access is available',async()=>{
+ mockQueries['creator-access']={...result(undefined),isLoading:true};
+ await render();await act(async()=>mockOnFocus());expect(mockRefetch).not.toHaveBeenCalled();
 });
