@@ -26,3 +26,15 @@ export function comparePreviewTimes(left: string | null | undefined, right: stri
   const a = previewTime(left), b = previewTime(right);
   return a === b ? 0 : a > b ? 1 : -1;
 }
+
+type PreviewMessage = { last_message: string | null; last_message_at: string | null; unread_count: number };
+
+/** Only pass live changes received during this read. The fetched row still
+ * owns membership, title and other metadata. Never add a missing row here.
+ * Counts overlap, so retain the larger known count rather than adding them;
+ * the next authoritative refresh can reconcile read receipts normally. */
+export function reconcilePreviewSnapshot<T extends PreviewMessage>(snapshot: T, live?: PreviewMessage): T {
+  if (!live || comparePreviewTimes(live.last_message_at, snapshot.last_message_at) <= 0) return snapshot;
+  return { ...snapshot, last_message: live.last_message, last_message_at: live.last_message_at,
+    unread_count: Math.max(snapshot.unread_count, live.unread_count) };
+}
