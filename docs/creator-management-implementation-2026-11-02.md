@@ -435,3 +435,32 @@ After the clean Metro restart and native Reload, the ordinary Plans feed loaded 
 Liz approved the specific production repair by replying “continue” to the explicit apply request. Applied the tested guarded acceptance function through Supabase's SQL editor, then independently verified its exact expected MD5 (900fdec93c21b0677654e8bacd036e5c). Preview/audience/eligibility routines and their grants/configuration stayed unchanged; the eligibility trigger is enabled. All seven final catalog/permission checks passed. This supersedes the earlier not-deployed status **only for the acceptance-guard SQL**. The app fixes remain local, the rollback remains unapplied, and no OTA, live invitation/member test, notification or age/audience policy change occurred.
 
 See [deployment evidence](database/direct-apply-evidence-20261103-member-invite-guards.md) and [machine-readable verification](database/member-invite-guards-production-20261103.json). The remaining real invitation flow requires approval to use the documented App Review account in a separate private QA community; ordinary members and Sunset's actual membership will not be used as test data.
+
+### Approved real invitation QA — November 3, completed
+
+Liz explicitly approved using the documented App Review account and a separate private QA community, with no invitations or messages sent to ordinary members. This supersedes the preceding approval-needed/live-flow-pending note for this bounded test only. Used the actual local client on iPhone 17 Pro Max / iOS 26.4 / Metro8872 against the deployed backend; no fictional acceptance adapter.
+
+Created **WashedUp Invitation QA** through the native community form as Liz. It remained draft/unpublished and was explicitly made undiscoverable before invitation testing. The exact community is `2ad969c0-3e9a-46e1-8440-07e2616001d6`; creator `ae8006dc-5bca-42b8-975a-e11ad14b796f`; approved App Review recipient `34900c70-6339-40c5-b294-6b0a01310175`. Native handle lookup required giving App Review a temporary `washedup_review_qa` handle because its original handle was NULL. That is a real limitation of the current handle-only picker; selecting accepted People and in-app delivery remain separate work. No public directory was added.
+
+Created exactly one recipient-bound invitation, `d66133ef-92fb-4c4a-8aba-90a82b14718d`, using the real sender selection and confirmation. Verified native Share opens, cancel returns to the same ready link, and Copy works without sending to another app/person. The production link uses `washedupapp://`; only the scheme was adapted in memory to `exp+washedup-local:///` to open this checkout's installed development client. Therefore this is **not** proof of the released app's OS handoff, universal links, install/auth return, or delivery through Messages/email. No raw token was saved in the QA artifacts.
+
+Observed outcomes:
+
+- Opening as Liz displayed the actual community invitation. Join returned the explicit different-account error. Independent SQL showed the invitation remained viewed, `accepted_by_user_id` NULL, and only the original leader membership active.
+- Switched to the already authenticated App Review session using a temporary isolated SDK storage key. Its own Profile showed App Review before acceptance. The real viewed invitation remained joinable, Join showed **You're in**, and Open community reached WashedUp Invitation QA.
+- SQL confirmed exactly one accepted invitation bound to App Review, one active member role for App Review, and the original active leader role/joined_at for Liz. App Review joined at `2026-11-04 01:38:00.252948+00` (November 3 Pacific).
+- The actual member page exposed community chat and Leave, without creator management controls. Chat opened with its empty state and composer; no message or attachment was sent.
+- Reopening the same link displayed **This invitation was already accepted**, with no Join button. The test account then left through the normal Leave confirmation.
+
+Cleanup is complete for live fixtures: conditionally restored the exact test profile's original NULL handle, archived only the named QA community while retaining `discoverable=false`, and verified the recipient has no active QA membership. Retained the archived community and accepted invitation as reversible test history; nothing was permanently deleted. Five independent SQL checks passed: archived/hidden fixture, restored handle, recipient departure, preserved creator role, and exactly one invitation accepted by the intended recipient. Normal automatic test-account activity/QA history may remain; no ordinary member was invited or messaged, and Sunset's membership/content were not changed.
+
+The temporary `lib/supabase.ts` storage-key override was removed and the file matches HEAD. Liz's original session was preserved throughout and restored; Profile showed Liz and the preview was returned to **Manage Sunset LA Club**, Text Size 3, inspector closed, Capture Keyboard off. The unused isolated App Review SDK session cache was not read/exported or globally signed out. Switching SDK configuration through Fast Refresh stalled once; closing only `com.washedup.localdev` and reopening the existing 8872 server recovered it. No auth/configuration change from that test is committed. Other simulator devices, release builds and Metro ports were untouched.
+
+Evidence under `/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02`:
+
+- `native-invite-live-qa-accepted-2026-11-03.png` — real acceptance receipt, no token.
+- `native-invite-live-qa-member-destination-2026-11-03.png` — actual member destination.
+- `member-invite-live-qa-membership-2026-11-03.csv` — independently exported accepted membership roles/times.
+- `member-invite-live-qa-cleanup-2026-11-03.csv` — all five cleanup checks true.
+
+No product source change was needed during this live check; the earlier 65-test/six-suite, TypeScript and isolated PostgreSQL results remain the relevant code validation. This pass adds actual native sender/recipient/backend evidence, not whole-app certification. The community age/gender coverage limitations documented above still apply. Maximum accessibility size, narrow/physical devices, Android, newcomer return links, accepted-People selection and in-app invitation delivery remain unverified or unimplemented as specified above. No OTA or native build was published.
