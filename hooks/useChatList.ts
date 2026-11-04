@@ -7,7 +7,7 @@ import { seedSender } from '../lib/chatEngine/senderCache';
 import { getPlanChatTiming } from '../lib/planChatExpiry';
 import { getBlockedWith } from '../lib/blocking';
 import { chatListMemoryCache, subscribeChatListPrivacy } from '../lib/chatListCache';
-import { comparePreviewTimes, formatChatPreview } from '../lib/chatPreview';
+import { comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot } from '../lib/chatPreview';
 
 export interface ChatPreview {
   // A conversation row is either a plan (event) chat or a circle chat.
@@ -250,6 +250,7 @@ export function useChatList(knownUserId: string | null | undefined) {
   }, []);
   const requestVersion = useRef(0);
   const removals = useRef({ sequence: 0, at: new Map<string, number>() });
+  const livePreviews = useRef({ sequence: 0, at: new Map<string, number>() });
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; }; }, []);
   // Sender name cache (user_id -> first_name_display), populated from the roster
@@ -265,6 +266,7 @@ export function useChatList(knownUserId: string | null | undefined) {
     }
     const version = ++requestVersion.current;
     const removalSequence = removals.current.sequence;
+    const previewSequence = livePreviews.current.sequence;
     const current = () => mounted.current && currentViewer.current === knownUserId && requestVersion.current === version;
     const read = async <T,>(work: PromiseLike<T>): Promise<T> => {
       const result = await requestWithDeadline(work, 12_000);
@@ -285,8 +287,14 @@ export function useChatList(knownUserId: string | null | undefined) {
     const publish = (kind: ChatPreview['kind'], rows: ChatPreview[] | null, complete: boolean, error = false) => {
       if (!current()) return;
       latest = chatListMemoryCache.get(userId) ?? latest;
-      if (rows !== null) latest = [...latest.filter(chat => chat.kind !== kind), ...rows.filter(chat =>
-        (removals.current.at.get(chat.conversationId) ?? 0) <= removalSequence)];
+      if (rows !== null) {
+        const currentRows = new Map(latest.filter(chat => chat.kind === kind).map(chat => [chat.conversationId, chat]));
+        latest = [...latest.filter(chat => chat.kind !== kind), ...rows
+          .filter(chat => (removals.current.at.get(chat.conversationId) ?? 0) <= removalSequence)
+          .map(chat => reconcilePreviewSnapshot(chat,
+            (livePreviews.current.at.get(`${kind}:${chat.conversationId}`) ?? 0) > previewSequence
+              ? currentRows.get(chat.conversationId) : undefined))];
+      }
       if (complete) pending[kind] = false;
       failed[kind] = error;
       const sorted = sortChatPreviews(latest);
@@ -500,6 +508,7 @@ export function useChatList(knownUserId: string | null | undefined) {
     requestVersion.current++;
     userIdRef.current = knownUserId ?? null;
     removals.current = { sequence: 0, at: new Map() };
+    livePreviews.current = { sequence: 0, at: new Map() };
     senderNameCacheRef.current = new Map();
     setLoadError(false);
     // A block may have changed on another device while this observer was gone.
@@ -603,6 +612,7 @@ export function useChatList(knownUserId: string | null | undefined) {
                 // Sender hydration can finish out of order. Keep the newest
                 // text/time, but still count each incoming message as unread.
                 const replacePreview = order > 0 || (order === 0 && latestArrival.get(convId) === sequence);
+                if (replacePreview) livePreviews.current.at.set(`${c.kind}:${convId}`, ++livePreviews.current.sequence);
                 return {
                   ...c,
                   last_message: replacePreview ? preview : c.last_message,

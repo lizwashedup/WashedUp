@@ -1,4 +1,4 @@
-import { comparePreviewTimes, formatChatPreview } from '../chatPreview';
+import { comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot } from '../chatPreview';
 
 it('orders microseconds that Date.parse rounds to the same millisecond', () => {
   expect(comparePreviewTimes('2026-10-07T21:00:00.000002Z', '2026-10-07T21:00:00.000001+00:00')).toBe(1);
@@ -19,4 +19,19 @@ it.each([
   [{ message_type: 'audio' }, null, 'sent a voice message'],
 ] as const)('formats text and attachments consistently: %j', (message, sender, expected) => {
   expect(formatChatPreview(message, sender)).toBe(expected);
+});
+
+it('preserves a newer live preview without losing fetched metadata or summing overlapping unread counts', () => {
+  const fetched = { title: 'Renamed plan', member_count: 4, last_message: 'Earlier', last_message_at: '2026-10-07T21:00:00Z', unread_count: 7 };
+  const live = { last_message: 'Newest', last_message_at: '2026-10-07T21:00:00.000001+00:00', unread_count: 3 };
+  expect(reconcilePreviewSnapshot(fetched, live)).toEqual({ ...fetched, ...live, unread_count: 7 });
+  expect(reconcilePreviewSnapshot({ ...fetched, unread_count: 0 }, live).unread_count).toBe(3);
+  expect(fetched.last_message).toBe('Earlier');
+});
+
+it('keeps authoritative equal/newer snapshots and normal refreshes without a concurrent live change', () => {
+  const fetched = { last_message: 'Edited message', last_message_at: '2026-10-07T21:00:00Z', unread_count: 0 };
+  expect(reconcilePreviewSnapshot(fetched)).toBe(fetched);
+  expect(reconcilePreviewSnapshot(fetched, { ...fetched, last_message: 'Unedited', unread_count: 2 })).toBe(fetched);
+  expect(reconcilePreviewSnapshot(fetched, { ...fetched, last_message_at: '2026-10-07T20:00:00Z', unread_count: 2 })).toBe(fetched);
 });
