@@ -1,62 +1,86 @@
-# First-install store refresh — release candidate, not published
+# First-install store refresh — draft, not published
 
-New App Store installations currently start from the source embedded in iOS
-1.0.7 (51), before a downloaded Expo update applies on a later launch. Publishing
-an OTA does not change that embedded source. This candidate reserves 1.0.8 (52)
-for a local native build containing the reviewed current app fixes.
+New App Store installations start from the source embedded in iOS 1.0.7 (51),
+before a downloaded Expo update applies on a later launch. OTA publication does
+not replace that embedded source. This candidate prepares 1.0.8 (52) with the
+reviewed current app fixes and a pinned iOS navigation cleanup correction.
 
 On November 3, App Store Connect showed 1.0.7 (51) as the live version and latest
-completed upload, with no later version listed. The proposed numbers are therefore
-available at that checkpoint; recheck before upload. The shared app version changes
-to 1.0.8, but Android versionCode stays 18 and no Android release is prepared here.
+completed upload, with no later version listed. Recheck before upload. The shared
+app version becomes 1.0.8; Android versionCode stays 18. No Android binary is
+prepared. Liz accepted Apple agreement 7MJ4WNXK5F; acceptance persisted after
+reload. This account prerequisite is cleared.
 
-## Verified preparation
+## Source and native changes
 
-- Source baseline: main `974525a5d38d3f42c228b0e291175a0131859ccb`.
-  Its full regression run, GitHub Actions `41736949518`, passed. This is source
-  regression evidence, not acceptance of a new native artifact.
-- An isolated Release simulator build with the two version fields above compiled.
-  Source-map contents matched 754 tracked source files, including recent signup
-  and profile photo fixes. Generated binary-asset modules were excluded from
-  raw source-file hashing. Existing Build 51 scene protections were preserved.
-- A newly created iPhone 13 / iOS 26.4 simulator reached phone welcome and alternate
-  email sign-in without authentication. Its first Expo loader record matched the
-  embedded manifest, with one successful and zero failed launches. No remote
-  replacement update was available or downloaded.
-- Native transition probes on iOS 26.4 and 27.0 have not reproduced the recorded
-  teardown crash. Passing those probes does not establish a repair.
+Source baseline is main `974525a5d38d3f42c228b0e291175a0131859ccb`. Its full gate
+41736949518 passed; version-reservation commit b374892 also passed gate
+41753519079. Those runs exclude the later native patch and are not final acceptance.
 
-Local evidence, build inputs and logs:
+The recorded Build 51 REACT-NATIVE-4X exception points to resetting navigation
+controllers during Fabric recycling. The patch opts this controller-owning view
+out of recycling and explicitly handles its own Delete notification in WillMount,
+when the hierarchy is still attached. It flushes pending UIKit layout before
+Fabric removes children, waits for active transition completion, cancels pending
+interactive transitions, dismisses owned modals, clears delegates/parents and
+child references, and rejects late callbacks that could reopen retired screens.
+The pre-context interactive case only resets controllers when no coordinator
+exists. Active transitions are not reset. Normal live-stack animations remain.
+
+The exact react-native-screens 4.16.0 source and patch payload/output are hashed.
+The native prebuild plugin refuses shared/out-of-project dependency symlinks and
+unknown source/version drift. Loading Expo config for OTA does not mutate native
+files. Patch/config inputs participate in Expo fingerprinting. Do not override a
+native build's runtime with an OTA target. Build 51 scene protections remain.
+
+## Verification and limits
+
+- The initial baseline Release simulator build embedded current source: 754
+  tracked source-map files matched. A fresh iPhone 13 / iOS 26.4 install reached
+  welcome and email sign-in; the first loader record used the embedded manifest,
+  with no downloaded update. This predates the final native patch/config and is
+  not final artifact provenance.
+- Native candidate 7 passed all 12 checks on iOS 17.5, 26.4 and 27.0. The actual
+  full-Fabric shutdown case also passed independently on each runtime. Tests
+  cover requested-but-not-started and active transitions, custom push,
+  interactive pop, modal presentation/dismissal, late callbacks, parent/delegate
+  cleanup, weak-reference release and ordinary modal open/close/reopen.
+- A controlled comparison using the same corrected WillMount ordering failed
+  two early-transition cases on candidate 5; candidate 7 passes both. Earlier
+  fixtures had startup-window races, fixed-duration assumptions and an incorrect
+  cleanup ordering. All earlier failure logs are retained. The tests now wait
+  for native appearance/completion in settled states and assert real transitions
+  in interruption tests.
+- An investigated missing-custom-animation-completion path was not exercised by
+  the failing trace. Its experimental subclass is excluded from this candidate.
+- Seven native patch application guards pass. The checked-in native XCTest
+  sources and preparation command are under `qa/native/screen-stack` and
+  `scripts/native/prepare-screen-stack-tests.py`.
+- The original production exception has **not** been reproduced. These results
+  establish candidate cleanup behavior, not exact reproduction or fleet repair.
+  The reported iOS 17 featured swipe issue remains unreproduced and unresolved.
+
+Evidence and immutable test-app copies:
 `/Users/liz/Desktop/WashedUp/Implementation/first-install-store-refresh-20261103/`.
-These are simulator artifacts, not a signed device archive or submitted build.
 
-## Release holds
+## Remaining release gates
 
-1. Resolve and validate the Build 51 `REACT-NATIVE-4X` navigation teardown issue
-   recorded in `/Users/liz/Desktop/WashedUp/NEXT-NATIVE-BUILD.md`. No native patch
-   or dependency upgrade is included in this version reservation. A standalone
-   recycling opt-out skips controller/modal cleanup and is not an accepted fix.
-2. Complete fresh-install signup, first Plans visit, horizontal featured swipes,
-   vertical scrolling, detail/back, subsequent launches and slow/offline update
-   checks on supported phone/tablet environments. Reported iOS 17 swipe behavior
-   remains unverified; newer-simulator results are not iOS 17 coverage.
-3. Apple currently requires the account holder to review and accept the updated
-   Developer Program License Agreement before submission. Acceptance must be
-   verified in the account; opening the agreement is not acceptance.
-4. Run the full final-source release gate; build locally with production environment
-   parity; verify signatures, provisioning, exact source maps/dSYMs and the runtime
-   derived from the final device artifact. Never apply an OTA runtime override to
-   a native build. Preserve scene lifecycle and offline embedded fallback.
-5. Register and verify the new signed artifact's OTA target without weakening the
-   existing iOS 51 / Android 18 guards. Complete physical-device acceptance and
-   the existing rollback, backend canary and post-release verification process.
+1. Full regression at the final source commit, exact source/config/dependency
+   verification, and a local signed device archive with production environment.
+2. Exact embedded source map and native dSYM processing; artifact-derived runtime,
+   provisioning, signatures and new OTA target registration without weakening
+   existing iOS 51 / Android 18 guards.
+3. Native physical-device acceptance. Simulator tests do not substitute for it.
+4. Clean-install signup → first Plans visit, featured horizontal swipes, vertical
+   scroll, detail/back, subsequent launches, and slow/offline update checks on
+   supported phone/tablet environments. Preserve embedded offline startup.
+5. Existing rollback, backend canary, store submission and post-release checks.
 
-Do not merge or submit this candidate merely because the version reservation or
-simulator build passes. Unmerged broad refactor/moderation work and the private
-redesign are excluded. No OTA publication, production data changes, cloud build,
-upload or App Review submission is part of this preparation.
+Do not merge or submit merely because simulator checks pass. Unmerged broad
+refactor/moderation work and the private redesign are excluded. No cloud build,
+upload, App Review submission, OTA publication or production data change has
+occurred in this preparation.
 
-Future release reports must distinguish OTA availability, confirmed device
-adoption and the code available on a fresh store installation. A store refresh
-fixes the confirmed delivery gap; it is not a demonstrated fix for the reported
-featured-card swipe failure.
+Future reports must distinguish OTA availability, confirmed device adoption and
+code available on a fresh store installation. The store refresh addresses the
+confirmed delivery gap; it is not a demonstrated featured-swipe repair.

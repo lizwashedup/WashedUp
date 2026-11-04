@@ -1,0 +1,242 @@
+--- a/node_modules/react-native-screens/ios/RNSScreenStack.mm
++++ b/node_modules/react-native-screens/ios/RNSScreenStack.mm
+@@ -43,6 +43,37 @@
+ namespace react = facebook::react;
+ #endif // RCT_NEW_ARCH_ENABLED
+ 
++// UIKit may ask an interactive transition to
++// start after the owning Fabric stack has already been deleted. Remember a
++// cancellation until UIKit has supplied its transition context.
++@interface WURetirableInteractiveTransition : RNSPercentDrivenInteractiveTransition
++- (void)cancelForRetiredStack;
++@property (nonatomic, readonly) BOOL started;
++@end
++@implementation WURetirableInteractiveTransition {
++  BOOL _started;
++  BOOL _retirementCancellationRequested;
++}
++- (void)startInteractiveTransition:(id<UIViewControllerContextTransitioning>)context
++{
++  [super startInteractiveTransition:context];
++  _started = YES;
++  if (_retirementCancellationRequested) {
++    // UIKit finishes installing its context after this method returns.
++    dispatch_async(dispatch_get_main_queue(), ^{
++      [self cancelInteractiveTransition];
++    });
++  }
++}
++- (void)cancelForRetiredStack
++{
++  _retirementCancellationRequested = YES;
++  if (_started) {
++    dispatch_async(dispatch_get_main_queue(), ^{ [self cancelInteractiveTransition]; });
++  }
++}
++@end
++
+ @interface RNSScreenStackView () <
+     UINavigationControllerDelegate,
+     UIAdaptivePresentationControllerDelegate,
+@@ -327,8 +358,9 @@
+   UINavigationController *_controller;
+   NSMutableArray<RNSScreenView *> *_reactSubviews;
+   BOOL _invalidated;
++  BOOL _retirementCleanupCompleted;
+   BOOL _isFullWidthSwiping;
+-  RNSPercentDrivenInteractiveTransition *_interactionController;
++  WURetirableInteractiveTransition *_interactionController;
+   __weak RNSScreenStackManager *_manager;
+   BOOL _updateScheduled;
+ #ifdef RCT_NEW_ARCH_ENABLED
+@@ -405,6 +437,9 @@
+ 
+ - (void)emitOnFinishTransitioningEvent
+ {
++  if (_invalidated) {
++    return;
++  }
+ #ifdef RCT_NEW_ARCH_ENABLED
+   if (_eventEmitter != nullptr) {
+     std::dynamic_pointer_cast<const react::RNSScreenStackEventEmitter>(_eventEmitter)
+@@ -488,6 +523,9 @@
+ 
+ - (void)maybeAddToParentAndUpdateContainer
+ {
++  if (_invalidated) {
++    return;
++  }
+   BOOL wasScreenMounted = _controller.parentViewController != nil;
+   if (!self.window && !wasScreenMounted) {
+     // We wait with adding to parent controller until the stack is mounted.
+@@ -642,6 +680,10 @@
+   };
+ 
+   void (^finish)(void) = ^{
++    RNSScreenStackView *activeStack = weakSelf;
++    if (activeStack == nil || activeStack->_invalidated) {
++      return;
++    }
+     NSUInteger oldCount = weakSelf.presentedModals.count;
+     if (changeRootIndex < oldCount) {
+       [weakSelf.presentedModals removeObjectsInRange:NSMakeRange(changeRootIndex, oldCount - changeRootIndex)];
+@@ -682,6 +724,13 @@
+       [previous presentViewController:next
+                              animated:shouldAnimate
+                            completion:^{
++                             RNSScreenStackView *activeStack = weakSelf;
++                             if (activeStack == nil || activeStack->_invalidated) {
++                               if (next.presentingViewController != nil && !next.isBeingDismissed) {
++                                 [next dismissViewControllerAnimated:NO completion:nil];
++                               }
++                               return;
++                             }
+                              [weakSelf.presentedModals addObject:next];
+                              if (lastModal) {
+                                afterTransitions();
+@@ -871,6 +920,9 @@
+ 
+ - (void)updateContainer
+ {
++  if (_invalidated) {
++    return;
++  }
+   NSMutableArray<UIViewController *> *pushControllers = [NSMutableArray new];
+   NSMutableArray<UIViewController *> *modalControllers = [NSMutableArray new];
+   for (RNSScreenView *screen in _reactSubviews) {
+@@ -1063,8 +1115,8 @@
+ 
+   switch (gestureRecognizer.state) {
+     case UIGestureRecognizerStateBegan: {
+-      _interactionController = [RNSPercentDrivenInteractiveTransition new];
+-      [_controller popViewControllerAnimated:YES];
++      _interactionController = [WURetirableInteractiveTransition new];
++      if ([_controller popViewControllerAnimated:YES] == nil) _interactionController = nil;
+       break;
+     }
+ 
+@@ -1110,7 +1162,7 @@
+   if (_interactionController == nil && fromView.reactSuperview) {
+     BOOL shouldCancelDismiss = [self shouldCancelDismissFromView:fromView toView:toView];
+     if (shouldCancelDismiss) {
+-      _interactionController = [RNSPercentDrivenInteractiveTransition new];
++      _interactionController = [WURetirableInteractiveTransition new];
+       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+         [self->_interactionController cancelInteractiveTransition];
+         self->_interactionController = nil;
+@@ -1339,8 +1391,8 @@
+ {
+   if (_interactionController == nil) {
+     _customAnimation = YES;
+-    _interactionController = [RNSPercentDrivenInteractiveTransition new];
+-    [_controller popViewControllerAnimated:YES];
++    _interactionController = [WURetirableInteractiveTransition new];
++    if ([_controller popViewControllerAnimated:YES] == nil) _interactionController = nil;
+   }
+ }
+ 
+@@ -1434,6 +1486,9 @@
+ {
+   for (const auto &mutation : transaction.getMutations()) {
+     if (mutation.type == react::ShadowViewMutation::Delete) {
++      if (mutation.oldChildShadowView.tag == self.tag) {
++        [self retireDeletedFabricStack];
++      }
+       RNSScreenView *_Nullable toBeRemovedChild = [self childScreenForTag:mutation.oldChildShadowView.tag];
+       if (toBeRemovedChild != nil) {
+         [toBeRemovedChild willBeUnmountedInUpcomingTransaction];
+@@ -1479,19 +1534,82 @@
+   }
+ }
+ 
+-- (void)prepareForRecycle
+-{
++// Never recycle a controller that can still own a UIKit transition.
+++ (BOOL)shouldBeRecycled
++{
++  return NO;
++}
++
++- (void)retireDeletedFabricStack
++{
++  if (_invalidated) {
++    return;
++  }
++  // WillMount still has the live hierarchy. Flush a requested navigation
++  // transition before Fabric replaces/removes its screen views; otherwise
++  // UIKit can retain a coordinator whose animation never starts.
++  [_controller.view layoutIfNeeded];
++  _invalidated = YES;
++  // A pop requested before the first presentation can be abandoned before
++  // UIKit ever creates its interactive context. Reset only at this synchronous
++  // point with no transition coordinator, before Fabric removes its children.
++  if (_interactionController != nil && !_interactionController.started && _controller.transitionCoordinator == nil) {
++    [_controller setViewControllers:@[ [UIViewController new] ] animated:NO];
++    _interactionController = nil;
++  }
++  // WillMount runs before this stack's Delete unregisters its transaction observer.
++  // Retain the stack until all child-unmount mutations have finished, then perform
++  // the cleanup that the recycling opt-out would otherwise skip.
++  dispatch_async(dispatch_get_main_queue(), ^{
++    [self finishDeletedFabricStackCleanup];
++  });
++}
++
++- (void)finishDeletedFabricStackCleanup
++{
++  id<UIViewControllerTransitionCoordinator> transition = _controller.transitionCoordinator;
++  if (transition != nil) {
++    [transition animateAlongsideTransition:nil
++        completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
++      dispatch_async(dispatch_get_main_queue(), ^{ [self completeDeletedFabricStackCleanup]; });
++    }];
++    [_interactionController cancelForRetiredStack];
++    // The return value describes animation registration, not whether the
++    // completion can run. Do not detach early just because it returns NO.
++    return;
++  }
++  [self completeDeletedFabricStackCleanup];
++}
++
++- (void)completeDeletedFabricStackCleanup
++{
++  // UIKit may invoke the completion even when alongside animations were not queued.
++  if (_retirementCleanupCompleted) return;
++  _retirementCleanupCompleted = YES;
+   [super prepareForRecycle];
+-  _reactSubviews = [NSMutableArray new];
+-
+-  for (UIViewController *controller in _presentedModals) {
+-    [controller dismissViewControllerAnimated:NO completion:nil];
+-  }
+-
+-  [_presentedModals removeAllObjects];
+-  [_controller willMoveToParentViewController:nil];
+-  [_controller removeFromParentViewController];
+-  [_controller setViewControllers:@[ [UIViewController new] ]];
++  [self->_interactionController cancelForRetiredStack];
++  self->_interactionController = nil;
++  self->_controller.delegate = nil;
++  UIViewController *presented = self->_controller.presentedViewController;
++  if (presented != nil && !presented.isBeingDismissed) {
++    [presented dismissViewControllerAnimated:NO completion:nil];
++  }
++  for (UIViewController *modal in [self->_presentedModals reverseObjectEnumerator]) {
++    if (modal.presentingViewController != nil && !modal.isBeingDismissed) {
++      [modal dismissViewControllerAnimated:NO completion:nil];
++    }
++  }
++  [self->_presentedModals removeAllObjects];
++  [self->_controller willMoveToParentViewController:nil];
++  [self->_controller.view removeFromSuperview];
++  [self->_controller removeFromParentViewController];
++  // Deliberately do not reset viewControllers during an in-flight transition.
++  // This stack will never enter Fabric's reuse pool.
++  [self->_reactSubviews removeAllObjects];
++  for (RNSScreenView *screen : self->_toBeDeletedScreens) {
++    [screen invalidate];
++  }
++  self->_toBeDeletedScreens.clear();
+ }
+ 
+ + (react::ComponentDescriptorProvider)componentDescriptorProvider
