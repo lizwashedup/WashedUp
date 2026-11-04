@@ -1,4 +1,4 @@
-import type { ChatPreview } from '../hooks/useChatList';
+import type { ChatPreview } from './chatPreview';
 import { markChatListDirty } from './chatListSignal';
 
 // Process-only previews, partitioned by account. Block confirmation must clear

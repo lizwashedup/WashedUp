@@ -1,3 +1,29 @@
+export interface ChatPreview {
+  // A conversation row is either a plan (event) chat or a circle chat.
+  kind: 'event' | 'circle';
+  // Generic id used for routing + list keys, regardless of kind.
+  conversationId: string;
+  // Event rows only (kept so event-specific call sites keep compiling).
+  eventId?: string;
+  title: string;
+  category: string | null;
+  image_url: string | null;
+  start_time: string;
+  end_time?: string | null;
+  member_count: number;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+  is_past: boolean;
+  ticket_url: string | null;
+  member_avatars: string[];
+  // A DM (unnamed 2-person circle): the row shows the counterpart's face, not a
+  // circle monogram. Undefined for plans and real circles.
+  is_dm?: boolean;
+  /** Identity used only to remove a blocked private conversation from previews. */
+  dm_user_id?: string | null;
+}
+
 /** Shared text for fetched and live chat-list previews. */
 export function formatChatPreview(message: {
   content?: string | null;
