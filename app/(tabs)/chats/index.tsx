@@ -36,6 +36,7 @@ import { hapticSelection } from '../../../lib/haptics';
 import { isObsoleteCircleLeave, useLeaveCircle } from '../../../hooks/useLeaveCircle';
 import { useCommunityChatPreference } from '../../../hooks/useCommunityChatPreference';
 import { useObservedUser } from '../../../hooks/useObservedUser';
+import { useChatResumeRefresh } from '../../../hooks/useChatResumeRefresh';
 import { BrandedAlert } from '../../../components/BrandedAlert';
 import { type CommunityChatRowData } from '../../../lib/communityChat';
 import { useCommunityChatRows } from '../../../hooks/useCommunityChatRows';
@@ -291,7 +292,12 @@ export default function ChatsScreen() {
   const communityInbox = useMemo(() => projectCommunityChatInbox(communityRows), [communityRows]);
   const selectedCommunity = communityInbox.communities.find(group => group.row.communityId === communityId);
   const [notificationsFocused, setNotificationsFocused] = React.useState(false);
-  useFocusEffect(useCallback(() => { setNotificationsFocused(true); return () => setNotificationsFocused(false); }, []));
+  const inboxFocused = React.useRef(false);
+  useFocusEffect(useCallback(() => {
+    inboxFocused.current = true;
+    setNotificationsFocused(true);
+    return () => { inboxFocused.current = false; setNotificationsFocused(false); };
+  }, []));
   const hubNotifications = useCommunityChatPreference(communityId ?? '', leaveViewer,
     COMMUNITY_CHAT_GROUPING_ENABLED && CREATOR_PAGES_ENABLED && notificationsFocused && !!selectedCommunity && communityViewerId === leaveViewer.viewerId);
 
@@ -308,6 +314,25 @@ export default function ChatsScreen() {
   // Still refreshes when you open Chats, just not on rapid tab-switching.
   const lastChatsFocusFetchRef = React.useRef(0);
   const hasFocusedChatsRef = React.useRef(false);
+  const resumeOwner = useMemo(() => ({}), [authUserId, leaveViewer.epoch]);
+  const resumePending = React.useRef<{ owner: object; work: Promise<void> } | null>(null);
+  const refreshOnResume = useCallback(async () => {
+    if (!authUserId || !leaveViewer.isCurrent() || !inboxFocused.current) return;
+    if (resumePending.current?.owner === resumeOwner) return resumePending.current.work;
+    lastChatsFocusFetchRef.current = Date.now();
+    // Resume is read-only: preserve visible rows, and refresh each inbox source
+    // independently. It must not replay the tab-focus notification mutations.
+    const work = Promise.allSettled([
+      refetch(true),
+      ...(COMMUNITIES_ENABLED && communityViewerId === authUserId ? [refreshCommunityRows()] : []),
+    ]).then(() => undefined);
+    const attempt = { owner: resumeOwner, work };
+    resumePending.current = attempt;
+    try { await work; }
+    finally { if (resumePending.current === attempt) resumePending.current = null; }
+  }, [authUserId, leaveViewer.isCurrent, resumeOwner, refetch, communityViewerId, refreshCommunityRows]);
+  useChatResumeRefresh(refreshOnResume, leaveViewer.isCurrent, inboxFocused);
+
 
   useFocusEffect(
     React.useCallback(() => {
