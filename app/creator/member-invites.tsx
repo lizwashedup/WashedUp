@@ -1,12 +1,13 @@
 /** Existing-profile invitation links. Creating a link does not send a message. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { Redirect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ScaledText as Text } from '../../components/ScaledText';
 import { PageAction, PageFrame } from '../../components/creator/pages/PageFrame';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
+import { MemberInviteRecipientPicker } from '../../components/creator/MemberInviteRecipientPicker';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
 import Colors from '../../constants/Colors';
 import { FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
@@ -15,7 +16,6 @@ import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
 import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
-import { useMemberInviteSearch } from '../../hooks/useMemberInviteSearch';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import type { CreatorPageScope } from '../../lib/creatorPageReview';
 import type { LedCommunity } from '../../lib/creatorMode';
@@ -59,11 +59,9 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
   const canInvite = ['leader', 'co_leader'].includes(community.role) && community.status !== 'archived';
   const readHistory = useCallback(() => requestWithDeadline(listCommunityMemberInvites(community.id), 12_000), [community.id]);
   const history = useCreatorPageRead(scope, readHistory);
-  const [query, setQuery] = useState('');
   const [composer, setComposer] = useState(false);
   const [selected, setSelected] = useState<ProfileSearchResult | null>(null);
   const [message, setMessage] = useState('');
-  const search = useMemberInviteSearch(query, scope, composer && !selected && canInvite);
   const [readyLink, setReadyLink] = useState<{ profile: ProfileSearchResult; link: string; expiresAt: string } | null>(null);
   const [notice, setNotice] = useState<string>();
   const [uncertain, setUncertain] = useState(false);
@@ -82,7 +80,7 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
     if (!scope.isCurrent()) return;
     try { const result = await history.refresh(); if (result && scope.isCurrent()) { setUncertain(false); setNow(Date.now()); } } catch { /* The read hook displays the failure. */ }
   };
-  const clearComposer = () => { setComposer(false); setQuery(''); setSelected(null); setMessage(''); };
+  const clearComposer = () => { setComposer(false); setSelected(null); setMessage(''); };
   const createLink = async (profile: ProfileSearchResult, note: string) => {
     if (!latest.current.ready || !scope.isCurrent() || lock.current) return;
     lock.current = true; setBusy(true); setNotice(undefined); setReadyLink(null);
@@ -142,7 +140,7 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
   </View>;
   return <View style={s.section}>
     <Text accessibilityRole="header" style={s.title}>Invite members</Text>
-    <Text style={s.body}>Find someone already on WashedUp, then create a personal link to share with them.</Text>
+    <Text style={s.body}>Choose from your people or use a handle they’ve shared. Then create a personal invitation link.</Text>
     {!canInvite && <Text style={s.meta}>{community.status === 'archived' ? 'This community is archived and closed to new members.' : 'Only this community’s leader or co-leader can create invitation links.'}</Text>}
     {notice && <Text accessibilityRole="alert" style={s.body}>{notice}</Text>}
     {readyLink && <View style={s.panel}>
@@ -153,20 +151,8 @@ function MemberInvites({ community, scope }: { community: LedCommunity; scope: C
       <PageAction quiet compact title="Done" disabled={busy} onPress={() => setReadyLink(null)} />
     </View>}
     {canInvite && !readyLink && (!composer ? <PageAction primary singleLine title="Invite someone" disabled={!ready} onPress={() => { if (ready) setComposer(true); }} /> : <View style={s.panel}>
-      {!selected ? <>
-        <Text style={s.label}>Who would you like to invite?</Text>
-        <TextInput value={query} onChangeText={setQuery} editable={!busy} placeholder="Enter their handle" accessibilityLabel="Search by handle"
-          autoCapitalize="none" autoCorrect={false} style={[s.input, inputType]} allowFontScaling={Platform.OS === 'ios' ? false : undefined}
-          placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
-        <Text style={s.meta}>Use a handle they’ve shared with you.</Text>
-        {search.loading && <ActivityIndicator accessibilityLabel="Searching profiles" color={Colors.terracotta} />}
-        {search.error && <><Text accessibilityRole="alert" style={s.meta}>Couldn’t search right now.</Text><PageAction quiet compact title="Try again" onPress={search.retry} /></>}
-        {search.results.map(profile => <Pressable key={profile.id} accessibilityRole="button" accessibilityLabel={`Select ${profile.name}`} style={s.person}
-          onPress={() => { if (scope.isCurrent() && !lock.current) setSelected(profile); }}>
-          <Avatar name={profile.name} photo={profile.photo} /><Text style={[s.label, s.personText]}>{profile.name}</Text><Text style={s.link}>Select</Text>
-        </Pressable>)}
-        {query.trim().length >= 2 && !search.loading && !search.error && !search.results.length && <Text style={s.meta}>No match. Check their handle and try again.</Text>}
-      </> : <>
+      {!selected ? <MemberInviteRecipientPicker communityId={community.id} scope={scope} disabled={!ready}
+        onSelect={profile => { if (latest.current.ready && scope.isCurrent() && !lock.current) setSelected(profile); }} /> : <>
         <View style={s.person}><Avatar name={selected.name} photo={selected.photo} /><Text style={[s.label, s.personText]}>{selected.name}</Text></View>
         <TextInput value={message} onChangeText={setMessage} editable={!busy} multiline maxLength={300} style={[s.input, s.note, inputType]} allowFontScaling={Platform.OS === 'ios' ? false : undefined} placeholder="Add a note (optional)"
           placeholderTextColor={Colors.inkSoft} accessibilityLabel="Invitation note" inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
@@ -200,7 +186,6 @@ const styles = (fonts: AfterglowFontFamilies) => StyleSheet.create({
   body: { fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
   meta: { fontFamily: fonts.regular, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
   label: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
-  link: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   panel: { backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.border, borderRadius: 16, padding: 16, gap: 12 },
   input: { backgroundColor: Colors.inputBg, borderRadius: 8, minHeight: 48, padding: 12, fontFamily: fonts.regular, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
   note: { minHeight: 80, textAlignVertical: 'top' },
