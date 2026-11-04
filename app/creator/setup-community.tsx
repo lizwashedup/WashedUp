@@ -1,533 +1,155 @@
-import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
-import { ScaledText as Text } from '../../components/ScaledText';
-import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
-import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
-/**
- * Stage 2: name your community. The one client caller of create_community
- * (grant-gated definer RPC, born draft, seats the leader, seeds the five
- * starter blocks). An approved leader with zero led communities lands here
- * from the shell entry state; everyone else bounces to the shell. The page
- * stays a DRAFT only the leader sees until the existing publish-your-page
- * flow opens it.
- */
-
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, router } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator } from 'react-native';
+import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDoneBar';
-import Colors from '../../constants/Colors';
-import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
-import {
-  getCreatorAccess,
-  isLeaderAccess,
-  createCommunity,
-  suggestHandle,
-  findLedCommunityByHandle,
-  HANDLE_SHAPE,
-  type RestrictedGender,
-  type JoinPolicy,
-} from '../../lib/creatorMode';
+import { ScaledText as Text } from '../../components/ScaledText';
+import { PageAction, PageFrame, pageStyles as s } from '../../components/creator/pages/PageFrame';
+import { Field } from '../../components/creator/ApplyFormKit';
+import { CommunityJoiningChoice, type CommunityJoiningMethod } from '../../components/creator/CommunityJoiningChoice';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { suggestHandle, HANDLE_SHAPE } from '../../lib/creatorMode';
 import { isHouseCommunity } from '../../lib/houseCommunity';
+import { getCommunityJoiningOptions } from '../../lib/communityJoiningOptions';
+import { checkCommunityCreation, createCommunityWithJoining, finishCommunityCreation, readCommunityCreationAttempt,
+  type CommunityCreationAttempt } from '../../lib/communityCreation';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
 import { setSelectedCommunityId } from '../../lib/selectedCommunity';
-import { hapticSuccess, hapticError } from '../../lib/haptics';
+import { setWorkspace } from '../../lib/workspaceContext';
+import { hapticSuccess } from '../../lib/haptics';
+import Colors from '../../constants/Colors';
 import { supabase } from '../../lib/supabase';
-import {
-  GENDER_RESTRICTED_COMMUNITIES_ENABLED,
-  COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED,
-} from '../../constants/FeatureFlags';
-
-const NAME_MIN = 2;
-const NAME_MAX = 60;
-const HANDLE_MAX = 40;
-const CITY_MAX = 60;
-const PURPOSE_MIN = 10;
-const PURPOSE_MAX = 140;
-
-// Liz 2026-09-01: symmetric women-only/men-only, creator's choice at
-// creation, never editable after (see the migration's own column comment).
-// `null` is "everyone" -- today's only behavior, and the default here.
-const RESTRICTION_CHOICES: { value: RestrictedGender | null; label: string }[] = [
-  { value: null, label: 'everyone' },
-  { value: 'woman', label: 'women only' },
-  { value: 'man', label: 'men only' },
-];
-
-// Josh 2026-09-02: explicit choice at creation, never editable after (same
-// "set once at create" pattern as the restriction choice above) until
-// set_community_join_policy() exists for a real after-the-fact edit surface.
-const JOIN_POLICY_CHOICES: { value: JoinPolicy; label: string }[] = [
-  { value: 'open', label: 'open' },
-  { value: 'approval_required', label: 'approval required' },
-];
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 
 export default function SetupCommunityScreen() {
-  const { fonts } = useAfterglowFonts(true, 'creator');
-  const styles = useMemo(() => createStyles(fonts), [fonts]);
-  const queryClient = useQueryClient();
-  const { data: access } = useCreatorAccessRead();
-
-  const [name, setName] = useState('');
-  const [handle, setHandle] = useState('');
-  const [handleTouched, setHandleTouched] = useState(false);
-  const [city, setCity] = useState('');
-  const [purpose, setPurpose] = useState('');
-  const [restrictedGender, setRestrictedGender] = useState<RestrictedGender | null>(null);
-  const [joinPolicy, setJoinPolicyChoice] = useState<JoinPolicy>('open');
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  // Screen 48: availability checked live, before submit, instead of only
-  // surfacing via the 23505 unique-violation once they've already tapped
-  // create.
-  const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
-  const [checkingHandle, setCheckingHandle] = useState(false);
-  // Screen 21: the explicit success state (not just an immediate redirect)
-  // with its three named onward actions. Holding the just-created community
-  // here is enough -- createCommunity() already returns its id, and the
-  // handle/name are exactly what was just submitted.
-  const [createdCommunity, setCreatedCommunity] = useState<{ id: string; handle: string; name: string } | null>(null);
-
-  const onNameChange = (v: string) => {
-    setName(v);
-    if (!handleTouched) setHandle(suggestHandle(v));
-  };
-
-  const handleValid = HANDLE_SHAPE.test(handle) && !isHouseCommunity(handle);
-  // inventory C-04: city required before a community is publicly
-  // discoverable (doc says "required before public discovery"); gating it
-  // here, at creation, trivially satisfies that -- discovery can only ever
-  // happen after creation and publish.
-  const nameValid = name.trim().length >= NAME_MIN;
-  const cityValid = city.trim().length > 0;
-  // inventory C-04: a real, specific pitch, not the longer freeform
-  // description -- required before create, same as name/city/handle.
-  const purposeValid = purpose.trim().length >= PURPOSE_MIN;
-  // handleAvailable !== false (not === true): an in-flight or failed check
-  // reads as unknown/null and must never block submit -- the 23505 catch
-  // below is still the real backstop either way. Only a CONFIRMED taken
-  // handle disables the button early.
-  const canCreate = nameValid && handleValid && cityValid && purposeValid && handleAvailable !== false && !busy;
-
-  // Screen 48: debounced (500ms, same shape as the personal-handle check in
-  // app/(tabs)/profile.tsx) live availability check. A dedicated
-  // SECURITY DEFINER RPC is required rather than a plain client select:
-  // communities_select RLS only surfaces active/member/admin rows, so a
-  // draft community someone else just created would otherwise read back as
-  // falsely "available".
-  useEffect(() => {
-    if (!handleValid) { setHandleAvailable(null); return; }
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      setCheckingHandle(true);
-      try {
-        const { data, error } = await supabase.rpc('community_handle_available', { p_handle: handle });
-        if (error) throw error;
-        if (!cancelled) setHandleAvailable(data as boolean);
-      } catch {
-        // inconclusive -- never block submit on a check failure, the create
-        // call's own 23505 handling is still the real backstop
-        if (!cancelled) setHandleAvailable(null);
-      } finally {
-        if (!cancelled) setCheckingHandle(false);
-      }
-    }, 500);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [handle, handleValid]);
-
-  const handleCreate = async () => {
-    if (!canCreate) return;
-    setBusy(true);
-    setProblem(null);
-    try {
-      // Flag off -> undefined -> createCommunity never sends p_restricted_gender
-      // at all, so this call is byte-identical to before this feature existed.
-      const id = await createCommunity(
-        handle,
-        name.trim(),
-        city.trim(),
-        purpose.trim(),
-        GENDER_RESTRICTED_COMMUNITIES_ENABLED ? restrictedGender : undefined,
-        COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED ? joinPolicy : undefined,
-      );
-      hapticSuccess();
-      await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
-      // Screen 21: land on the explicit success state, not an immediate
-      // redirect -- today.tsx (11), edit-page (33), and member-invites (56)
-      // are all real onward destinations from here now.
-      setCreatedCommunity({ id, handle, name: name.trim() });
-      setBusy(false);
-    } catch (e: unknown) {
-      // Screen 48: a network retry must never create a second Community.
-      // Before showing retry-eligible copy, check whether this exact create
-      // already landed (the request succeeded but the response was lost) --
-      // see findLedCommunityByHandle's own comment for why this re-check,
-      // not a server-side idempotency key, is the right-sized fix here.
-      try {
-        const freshAccess = await getCreatorAccess();
-        const already = findLedCommunityByHandle(freshAccess, handle);
-        if (already) {
-          await queryClient.invalidateQueries({ queryKey: ['creator-access'] });
-          hapticSuccess();
-          setCreatedCommunity({ id: already.id, handle: already.handle, name: already.name });
-          setBusy(false);
-          return;
-        }
-      } catch {
-        // inconclusive -- fall through to the normal error copy below
-      }
-      hapticError();
-      const code = (e as { code?: string })?.code;
-      // LIZ COPY (both)
-      setProblem(
-        code === '23505'
-          ? 'that handle is taken. try another.'
-          : 'that did not go through. give it another try.',
-      );
-      setBusy(false);
-    }
-  };
-
-  // Screen 21: the explicit success state, reached only after a real create
-  // (or a retry that discovered one already landed, see the catch block
-  // above). Forward-only on purpose -- no back arrow into the now-stale
-  // empty form, just the three real onward destinations.
-  if (createdCommunity) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <CreatorScreenHeader title="Community created" />
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.kicker}>Community</Text>
-          <Text style={styles.title}>you're set.</Text>
-          <Text style={styles.subtext}>
-            {createdCommunity.name} is up. your page starts as a draft only you can see. you choose when it opens.
-          </Text>
-          <TouchableOpacity
-            style={styles.createBtn}
-            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.dismissTo('/(tabs)/friends/manage/(tools)/today'); }}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.createBtnText}>view community</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.secondaryBtn}
-            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.push('/creator/edit-page'); }}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.secondaryBtnText}>edit page</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.secondaryBtn}
-            onPress={() => { setSelectedCommunityId(createdCommunity.id); router.push('/creator/member-invites' as never); }}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.secondaryBtnText}>invite members</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <CreatorScreenHeader title="Create community" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {/* LIZ COPY */}
-        <Text style={styles.kicker}>Community</Text>
-        {/* LIZ COPY */}
-        <Text style={styles.title}>name your community</Text>
-        {/* LIZ COPY */}
-        <Text style={styles.subtext}>
-          you can change the name any time. the handle is your page's address and sticks around.
-        </Text>
-
-        {access != null && !isLeaderAccess(access) ? (
-          /* LIZ COPY: reachable only by stale links; leaders never see it */
-          <Text style={styles.subtext}>this space belongs to approved community creators.</Text>
-        ) : (
-          <>
-            {/* LIZ COPY */}
-            <Text style={styles.fieldLabel}>community name</Text>
-            <TextInput
-              style={styles.input}
-              accessibilityLabel="Community name"
-              value={name}
-              onChangeText={onNameChange}
-              maxLength={NAME_MAX}
-              autoCapitalize="words"
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            {!!name && !nameValid && (
-              /* LIZ COPY */
-              <Text style={styles.problem}>needs at least {NAME_MIN} characters.</Text>
-            )}
-
-            {/* LIZ COPY */}
-            <Text style={styles.fieldLabel}>city</Text>
-            <TextInput
-              style={styles.input}
-              accessibilityLabel="City"
-              value={city}
-              onChangeText={setCity}
-              maxLength={CITY_MAX}
-              autoCapitalize="words"
-              placeholder="where your people find you"
-              placeholderTextColor={Colors.inkSoft}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-
-            {/* LIZ COPY */}
-            <Text style={styles.fieldLabel}>what's it for</Text>
-            <TextInput
-              style={[styles.input, styles.inputMultiline]}
-              accessibilityLabel="Community purpose"
-              value={purpose}
-              onChangeText={setPurpose}
-              maxLength={PURPOSE_MAX}
-              multiline
-              placeholder="one real sentence on why someone should join"
-              placeholderTextColor={Colors.inkSoft}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            {!!purpose && !purposeValid && (
-              /* LIZ COPY */
-              <Text style={styles.problem}>needs at least {PURPOSE_MIN} characters.</Text>
-            )}
-
-            {GENDER_RESTRICTED_COMMUNITIES_ENABLED && (
-              <>
-                {/* LIZ COPY */}
-                <Text style={styles.fieldLabel}>who's it for</Text>
-                <View style={styles.restrictionRow}>
-                  {RESTRICTION_CHOICES.map((choice) => {
-                    const selected = restrictedGender === choice.value;
-                    return (
-                      <TouchableOpacity
-                        key={choice.label}
-                        accessibilityRole="radio" accessibilityState={{ selected }}
-                        style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
-                        onPress={() => setRestrictedGender(choice.value)}
-                      >
-                        <Text style={[styles.restrictionPillText, selected && styles.restrictionPillTextSelected]}>
-                          {choice.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {restrictedGender != null && (
-                  /* LIZ COPY */
-                  <Text style={styles.quietNote}>
-                    this can't be changed later. people who aren't {restrictedGender === 'woman' ? 'women' : 'men'} won't be able to find or join this community.
-                  </Text>
-                )}
-              </>
-            )}
-
-            {COMMUNITY_JOIN_POLICY_AT_CREATION_ENABLED && (
-              <>
-                {/* LIZ COPY */}
-                <Text style={styles.fieldLabel}>who gets in</Text>
-                <View style={styles.restrictionRow}>
-                  {JOIN_POLICY_CHOICES.map((choice) => {
-                    const selected = joinPolicy === choice.value;
-                    return (
-                      <TouchableOpacity
-                        key={choice.value}
-                        accessibilityRole="radio" accessibilityState={{ selected }}
-                        style={[styles.restrictionPill, selected && styles.restrictionPillSelected]}
-                        onPress={() => setJoinPolicyChoice(choice.value)}
-                      >
-                        <Text style={[styles.restrictionPillText, selected && styles.restrictionPillTextSelected]}>
-                          {choice.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                {/* LIZ COPY */}
-                <Text style={styles.quietNote}>
-                  open lets anyone join instantly. approval required means you review each request before they're in.
-                </Text>
-              </>
-            )}
-
-            {/* LIZ COPY */}
-            <Text style={styles.fieldLabel}>handle</Text>
-            <TextInput
-              style={styles.input}
-              accessibilityLabel="Community handle"
-              value={handle}
-              onChangeText={(v) => { setHandleTouched(true); setHandle(v.toLowerCase()); }}
-              maxLength={HANDLE_MAX}
-              autoCapitalize="none"
-              autoCorrect={false}
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            />
-            <Text style={styles.handlePreview}>washedup.app/c/{handle || 'your-handle'}</Text>
-            {!!handle && !handleValid && (
-              /* LIZ COPY */
-              <Text style={styles.problem}>
-                handles are 3 to 40 characters: lowercase letters, numbers, and hyphens.
-              </Text>
-            )}
-            {/* Screen 48: caught before submit now, not just via the 23505 at
-                create time -- same copy as that existing catch below, so the
-                two paths never say two different things about the same fact. */}
-            {handleValid && !checkingHandle && handleAvailable === false && (
-              /* LIZ COPY (reused) */
-              <Text style={styles.problem}>that handle is taken. try another.</Text>
-            )}
-
-            {!!problem && <Text style={styles.problem}>{problem}</Text>}
-
-            <TouchableOpacity
-              style={[styles.createBtn, !canCreate && styles.createBtnOff]}
-              onPress={handleCreate}
-              disabled={!canCreate}
-            >
-              {busy ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                /* LIZ COPY: the locked vocabulary, "start a community" */
-                <Text style={styles.createBtnText}>start your community</Text>
-              )}
-            </TouchableOpacity>
-            {/* LIZ COPY */}
-            <Text style={styles.quietNote}>
-              your page starts as a draft only you can see. you choose when it opens.
-            </Text>
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
+  const { scope, account } = useCreatorPageScope('create-community');
+  return scope && !account.error && !account.isLoading
+    ? <CommunitySetup key={`${scope.userId}:${account.epoch}`} scope={scope} />
+    : <PageFrame title="Start a community"><Text style={s.body}>{account.isLoading ? 'Checking your account…' : account.error ? 'Couldn’t check your account. Try again to continue.' : 'Sign in to start a community.'}</Text>
+      {!!account.error && <PageAction quiet singleLine title="Try again" onPress={() => { void account.retry(); }} />}</PageFrame>;
 }
 
-function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8 },
-  content: { padding: 20 },
-  kicker: {
-    fontFamily: fonts.semibold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.5,
-  },
-  title: {
-    fontFamily: fonts.display,
-    fontSize: FontSizes.displayLG,
-    lineHeight: LineHeights.displayLG,
-    color: Colors.darkWarm,
-    marginBottom: 6,
-  },
-  subtext: {
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.bodyMD,
-    lineHeight: 20,
-    color: Colors.secondary,
-    marginBottom: 18,
-  },
-  fieldLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.5,
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: Colors.inputBg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.darkWarm,
-    marginBottom: 8,
-  },
-  inputMultiline: {
-    minHeight: 64,
-    textAlignVertical: 'top',
-  },
-  restrictionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  restrictionPill: {
-    backgroundColor: Colors.inputBg,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  restrictionPillSelected: {
-    backgroundColor: Colors.brandSoft,
-    borderColor: Colors.terracotta,
-  },
-  restrictionPillText: {
-    fontFamily: fonts.medium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-  },
-  restrictionPillTextSelected: {
-    fontFamily: fonts.semibold,
-    color: Colors.terracotta,
-  },
-  handlePreview: {
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-    marginBottom: 14,
-  },
-  problem: {
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.bodySM,
-    color: Colors.errorRed,
-    marginBottom: 10,
-  },
-  createBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  createBtnOff: { opacity: 0.45 },
-  createBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  // Screen 21: the two secondary onward actions on the success state. Same
-  // bordered/terracotta-text secondary pattern as today.tsx's quickActionSecondary.
-  secondaryBtn: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.terracotta,
-    paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-  },
-  secondaryBtnText: { fontFamily: fonts.semibold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  quietNote: {
-    fontFamily: fonts.regular,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-    textAlign: 'center',
-    marginTop: 10,
-  },
-});
+function CommunitySetup({ scope }: { scope: CreatorPageScope }) {
+  const { fonts } = useAfterglowFonts(true, 'creator'), queryClient = useQueryClient();
+  const access = useCreatorAccessRead();
+  const [step, setStep] = useState<'details' | 'joining'>('details');
+  const [name, setName] = useState(''), [handle, setHandle] = useState(''), [handleTouched, setHandleTouched] = useState(false);
+  const [city, setCity] = useState('Los Angeles'), [purpose, setPurpose] = useState('');
+  const [method, setMethod] = useState<CommunityJoiningMethod | null>(null);
+  const [attempt, setAttempt] = useState<CommunityCreationAttempt | null>(null);
+  const [created, setCreated] = useState<string | null>(null), [available, setAvailable] = useState(false);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [message, setMessage] = useState<string>();
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [handleAvailable, setHandleAvailable] = useState<boolean | null>(null);
+  const reload = useRef<(() => Promise<void>) | null>(null);
+  const lock = useRef(false), latest = useRef(scope);
+  latest.current = scope;
+  const current = () => latest.current === scope && scope.isCurrent();
+  const allowed = !!access.data && access.data.hasLeaderGrant && !access.isError && !access.isLoading;
+  const editable = allowed && available && !loading && !busy && !attempt;
+  const body = (copy: string) => <Text style={[s.body, { fontFamily: fonts.regular }]}>{copy}</Text>;
+  const details = () => ({ handle, name: name.trim(), city: city.trim(), purpose: purpose.trim(), method: method! });
+  const restore = (saved: CommunityCreationAttempt) => {
+    setAttempt(saved); setName(saved.details.name); setHandle(saved.details.handle); setHandleTouched(true);
+    setCity(saved.details.city); setPurpose(saved.details.purpose); setMethod(saved.details.method); setStep('joining');
+  };
+  const load = async () => {
+    if (!current() || lock.current) return;
+    lock.current = true; setLoading(true); setAvailable(false); setMessage(undefined);
+    try {
+      const saved = await readCommunityCreationAttempt(scope);
+      if (!current()) return;
+      if (saved) restore(saved);
+      const capability = await getCommunityJoiningOptions(null);
+      if (!current()) return;
+      setAvailable(!!capability);
+      if (!capability) setMessage('Community setup is temporarily unavailable. Please try again.');
+      if (saved && capability) {
+        const id = await checkCommunityCreation(saved, scope);
+        if (current()) { setCreated(id); if (!id) setMessage('This request is still unconfirmed. Check again or retry the same request.'); }
+      }
+    } catch { if (current()) setMessage('Couldn’t check community setup. Your saved request is kept. Try again.'); }
+    finally { lock.current = false; if (current()) setLoading(false); else if (latest.current !== scope && latest.current.isCurrent()) void reload.current?.(); }
+  };
+  reload.current = load;
+  useEffect(() => { void load(); }, [scope]);
+  useEffect(() => {
+    if (!editable || !HANDLE_SHAPE.test(handle) || isHouseCommunity(handle)) { setHandleAvailable(null); return; }
+    let active = true; setHandleAvailable(null);
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error } = await requestWithDeadline(supabase.rpc('community_handle_available', { p_handle: handle }), 8_000);
+        if (active && current()) setHandleAvailable(!error && typeof data === 'boolean' ? data : null);
+      } catch { if (active && current()) setHandleAvailable(null); }
+    }, 500);
+    return () => { active = false; clearTimeout(timer); };
+  }, [handle, editable, scope]);
+  const continueToJoining = () => {
+    if (!current() || !editable) return;
+    const problems: Record<string, string> = {};
+    if (name.trim().length < 2 || name.trim().length > 60) problems.name = 'Add a name, 2–60 characters.';
+    if (!city.trim() || city.trim().length > 60) problems.city = 'Add your city.';
+    if (purpose.trim().length < 10 || purpose.trim().length > 140) problems.purpose = 'Describe what brings people together, 10–140 characters.';
+    if (!HANDLE_SHAPE.test(handle) || isHouseCommunity(handle)) problems.handle = 'Use 3–40 lowercase letters, numbers or hyphens.';
+    else if (handleAvailable === false) problems.handle = 'That address is taken. Try another.';
+    setErrors(problems); if (!Object.keys(problems).length) setStep('joining');
+  };
+  const create = async () => {
+    if (!current() || lock.current || !allowed || !available || !method) return;
+    lock.current = true; setBusy(true); setMessage(undefined);
+    try {
+      const result = await createCommunityWithJoining(attempt?.details ?? details(), scope);
+      if (!current()) return;
+      setAttempt(result.attempt); setCreated(result.id); hapticSuccess();
+      void queryClient.invalidateQueries({ queryKey: ['creator-access'] });
+    } catch (failure) {
+      if (!current()) return;
+      try { const saved = await readCommunityCreationAttempt(scope); if (current() && saved) restore(saved); }
+      catch { if (current()) setAvailable(false); }
+      if (current()) setMessage((failure as { code?: string })?.code === '23505' ? 'That address is taken. Go back and choose another.' : 'Couldn’t confirm this request. Check its status before starting another.');
+    } finally { lock.current = false; if (current()) setBusy(false); else if (latest.current !== scope && latest.current.isCurrent()) { setBusy(false); void reload.current?.(); } }
+  };
+  const open = async (route: string) => {
+    if (!current() || lock.current || !attempt || !created) return;
+    lock.current = true; setBusy(true);
+    try {
+      const id = await finishCommunityCreation(attempt, scope);
+      if (!current()) return;
+      setWorkspace('community'); setSelectedCommunityId(id); router.dismissTo(route as never);
+    } catch { if (current()) setMessage('Your community is saved. Check its status to reopen it.'); }
+    finally { lock.current = false; if (current()) setBusy(false); else if (latest.current !== scope && latest.current.isCurrent()) { setBusy(false); void reload.current?.(); } }
+  };
+  return <PageFrame title={created ? 'Community created' : 'Start a community'}>
+    <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.display }]}>{created ? `${name} is ready.` : step === 'details' ? 'Bring your people together.' : name}</Text>
+    {loading && <ActivityIndicator accessibilityLabel="Checking community setup" color={Colors.terracotta} />}
+    {!!message && <Text accessibilityRole="alert" style={[s.body, { fontFamily: fonts.regular }]}>{message}</Text>}
+    {created ? <>
+      {body('Your page is a private draft. Finish its details, then publish when you’re ready.')}
+      <PageAction primary singleLine title="View community" disabled={busy} onPress={() => { void open('/(tabs)/friends/manage/(tools)/today'); }} />
+      <PageAction quiet singleLine title="Edit page" disabled={busy} onPress={() => { void open('/creator/edit-page'); }} />
+      <PageAction quiet singleLine title="Invite people" disabled={busy} onPress={() => { void open('/creator/member-invites'); }} />
+    </> : <>
+      {access.isError && body('Couldn’t check your creator access. Try again before continuing.')}
+      {access.data && !allowed && body('Community creation is available after your creator application is approved.')}
+      {step === 'details' ? <>
+        {body('Step 1 of 2 · About your community')}
+        <Field label="Community name" value={name} onChange={value => { setName(value); if (!handleTouched) setHandle(suggestHandle(value)); }} maxLength={60} editable={editable} />
+        {errors.name && body(errors.name)}
+        <Field label="What brings people together?" value={purpose} onChange={setPurpose} maxLength={140} multiline editable={editable} />
+        {errors.purpose && body(errors.purpose)}
+        <Field label="City" value={city} onChange={setCity} maxLength={60} editable={editable} />{errors.city && body(errors.city)}
+        <Field label="Community address" value={handle} onChange={value => { setHandleTouched(true); setHandle(value.toLowerCase()); }} maxLength={40} autoCapitalize="none" editable={editable} />
+        {body(`washedup.app/c/${handle || 'your-community'}`)}{errors.handle && body(errors.handle)}
+        <PageAction primary singleLine title="Continue" disabled={!editable} onPress={continueToJoining} />
+      </> : <>
+        {body('Step 2 of 2 · Joining')}
+        <CommunityJoiningChoice value={method} onChange={setMethod} disabled={!editable} />
+        {body('Your page starts as a private draft. You choose when to publish it.')}
+        <PageAction primary singleLine title={attempt ? 'Retry same request' : 'Create community'} disabled={busy || loading || !available || !allowed || !method} onPress={() => { void create(); }} />
+        {!attempt && <PageAction quiet singleLine title="Back to details" disabled={busy} onPress={() => setStep('details')} />}
+      </>}
+    </>}
+    {(!!attempt && !created || !!message || !available && !loading) && <PageAction quiet singleLine title={attempt ? 'Check status' : 'Try again'} disabled={busy || loading} onPress={() => { void load(); void access.refetch(); }} />}
+  </PageFrame>;
 }

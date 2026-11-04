@@ -29,7 +29,7 @@ export const pageAudienceOptions = (gender: string | null | undefined) => [
   ...(gender === 'woman' ? [{ key: 'women_only', label: 'Women only' }] : gender === 'man' ? [{ key: 'men_only', label: 'Men only' }]
     : gender === 'non_binary' ? [{ key: 'nonbinary_only', label: 'Non-binary only' }] : []),
 ];
-export function pageDraftProblems(record: PageEditorRecord, gender: string | null) {
+export function pageDraftProblems(record: PageEditorRecord, gender: string | null, published = false) {
   const errors: Record<string, string> = {};
   const check = (field: string, min: number, max: number, label: string) => {
     const value = pageValue(record.pageData, field).trim();
@@ -37,6 +37,7 @@ export function pageDraftProblems(record: PageEditorRecord, gender: string | nul
   };
   check('name', 2, 60, 'Page name'); check('purpose', 10, 140, 'Purpose'); check('city', 2, 60, 'City');
   if (record.kind === 'community') Object.assign(errors, communityClassificationProblems(record.pageData));
+  if (record.kind === 'community' && !published && !['open', 'approval_required'].includes(pageValue(record.pageData, 'join_policy'))) errors.join_policy = 'Choose Open or Review requests.';
   const audience = pageValue(record.pageData, 'audience') || 'everyone';
   if (record.kind === 'organization' ? audience !== 'everyone' : !pageAudienceOptions(gender).some(o => o.key === audience)) errors.audience = 'Choose an audience available for your profile.';
   return errors;

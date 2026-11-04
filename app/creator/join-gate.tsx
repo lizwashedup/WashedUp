@@ -51,7 +51,8 @@ import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { JOIN_GATE_ENABLED, CONFIGURABLE_JOIN_QUESTIONS_ENABLED } from '../../constants/FeatureFlags';
 import { JoinCommunityPopup } from '../../components/communities/JoinCommunityPopup';
-import { changeCommunityJoiningMethod, checkCommunityJoiningSave, readCommunityJoiningMethod, readCommunityOpenJoining,
+import { CommunityJoiningChoice } from '../../components/creator/CommunityJoiningChoice';
+import { changeCommunityJoiningMethod, checkCommunityJoiningSave, readCommunityJoiningAttempt, readCommunityJoiningMethod, readCommunityOpenJoining,
   saveCommunityJoiningDetails, JoiningSettingsOutcomeUnknown, type JoiningAttempt } from '../../lib/communityJoiningSettings';
 
 export default function JoinGateScreen() {
@@ -122,12 +123,40 @@ function JoinGateEditor({ community, scope }: {
   const [uncertain, setUncertain] = useState<JoiningAttempt | null>(null);
   const uncertainRef = useRef<JoiningAttempt | null>(null);
   const rememberUncertain = (attempt: JoiningAttempt | null) => { uncertainRef.current = attempt; setUncertain(attempt); };
+  const [journal, setJournal] = useState<{ scope: CreatorPageScope; ready: boolean; error: boolean } | null>(null);
+  const journalReady = journal?.scope === scope && journal.ready;
+  const journalError = journal?.scope === scope && journal.error;
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const latestScope = useRef(scope), mounted = useRef(false), actionLock = useRef(false);
   useLayoutEffect(() => { latestScope.current = scope; }, [scope]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const current = () => mounted.current && latestScope.current === scope && scope.isCurrent();
+  const restoreAttempt = (attempt: JoiningAttempt | null) => {
+    rememberUncertain(attempt);
+    if (attempt?.kind === 'details') {
+      setWelcome(attempt.details.settings.join_welcome_message ?? '');
+      setQuestion(attempt.details.settings.join_intro_question ?? '');
+      setGuidelines(attempt.details.settings.guidelines_url ?? ''); setSeeded(true);
+      if (attempt.details.questions) {
+        setAskReason(attempt.details.questions.askReason); setAskSource(attempt.details.questions.askSource);
+        setAskRulesConfirm(attempt.details.questions.askRulesConfirm); setOpenQuestion(attempt.details.questions.openQuestion ?? ''); setQuestionsSeeded(true);
+      }
+    }
+  };
+  const loadAttempt = async () => {
+    if (!current()) return;
+    setJournal({ scope, ready: false, error: false });
+    try {
+      const saved = await readCommunityJoiningAttempt(community.id, scope);
+      if (!current()) return;
+      // A currently visible unconfirmed save remains held even if its journal
+      // could not be written; no new remote write happens during this read.
+      if (saved) restoreAttempt(saved);
+      setJournal({ scope, ready: true, error: false });
+    } catch { if (current()) setJournal({ scope, ready: false, error: true }); }
+  };
+  useEffect(() => { void loadAttempt(); }, [scope, community.id]);
   const settingsKey = ['join-gate', community.id, scope.userId];
   const { data: settings, isLoading, isError: settingsError, isFetching, isFetchedAfterMount, refetch } = useQuery({
     queryKey: settingsKey,
@@ -186,7 +215,7 @@ function JoinGateEditor({ community, scope }: {
   });
 
   const commitJoinPolicy = async (policy: 'open' | 'approval_required') => {
-    if (!current() || actionLock.current || uncertainRef.current || !seeded || settingsError || policyRead.isFetching || policyRead.isError || policy === 'open' && !supportsOpen) return;
+    if (!current() || !journalReady || actionLock.current || uncertainRef.current || !seeded || settingsError || policyRead.isFetching || policyRead.isError || policy === 'open' && !supportsOpen) return;
     actionLock.current = true; setSaving(true);
     try {
       await changeCommunityJoiningMethod(community.id, policy, scope);
@@ -195,7 +224,7 @@ function JoinGateEditor({ community, scope }: {
       queryClient.setQueryData(['join-policy', community.id, scope.userId], policy);
     } catch (error) {
       if (!current()) return;
-      if (error instanceof JoiningSettingsOutcomeUnknown) rememberUncertain({ kind: 'method', method: policy });
+      if (error instanceof JoiningSettingsOutcomeUnknown) restoreAttempt(error.attempt ?? { kind: 'method', method: policy });
       setAlertInfo({ title: error instanceof JoiningSettingsOutcomeUnknown ? 'Check this save' : 'That did not save', message: friendlyError(error, 'Your joining method could not be saved.') });
     } finally { actionLock.current = false; if (mounted.current) setSaving(false); }
   };
@@ -206,7 +235,7 @@ function JoinGateEditor({ community, scope }: {
   // confirm step, not an instant optimistic flip, whenever people are
   // actually waiting right now.
   const setJoinPolicyLocal = (policy: 'open' | 'approval_required') => {
-    if (!current() || actionLock.current || uncertainRef.current || !seeded || settingsError || policy === joinPolicy) return;
+    if (!current() || !journalReady || actionLock.current || uncertainRef.current || !seeded || settingsError || policy === joinPolicy) return;
     const pendingCount = counts?.pending ?? 0;
     if (joinPolicy === 'approval_required') {
       setAlertInfo({
@@ -242,7 +271,7 @@ function JoinGateEditor({ community, scope }: {
   }, [questionsConfig, questionsSeeded, scope]);
 
   const handleSave = async () => {
-    if (!current() || actionLock.current || uncertainRef.current || !seeded || !settings || settingsError || isLoading || isFetching) return;
+    if (!current() || !journalReady || actionLock.current || uncertainRef.current || !seeded || !settings || settingsError || isLoading || isFetching) return;
     const url = guidelines.trim();
     if (url && !/^https?:\/\//i.test(url)) {
       setAlertInfo({ title: 'Check the link', message: 'The guidelines link needs to start with https://' });
@@ -264,7 +293,7 @@ function JoinGateEditor({ community, scope }: {
       setAlertInfo({ title: 'Saved', message: 'Your joining settings have been updated.' });
     } catch (e) {
       if (!current()) return;
-      if (e instanceof JoiningSettingsOutcomeUnknown) rememberUncertain(attempt);
+      if (e instanceof JoiningSettingsOutcomeUnknown) restoreAttempt(e.attempt ?? attempt);
       setAlertInfo({ title: e instanceof JoiningSettingsOutcomeUnknown ? 'Check this save' : 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
       actionLock.current = false;
@@ -290,17 +319,36 @@ function JoinGateEditor({ community, scope }: {
     finally { actionLock.current = false; if (mounted.current) setSaving(false); }
   };
 
+  const retrySave = async () => {
+    const attempt = uncertainRef.current;
+    if (!current() || !journalReady || actionLock.current || !attempt) return;
+    actionLock.current = true; setSaving(true);
+    try {
+      if (attempt.kind === 'method') await changeCommunityJoiningMethod(community.id, attempt.method, scope);
+      else await saveCommunityJoiningDetails(community.id, attempt.details, scope);
+      if (!current()) return;
+      if (attempt.kind === 'method') setJoinPolicyState(attempt.method);
+      rememberUncertain(null);
+      setAlertInfo({ title: 'Saved', message: 'Your joining settings have been updated.' });
+      void queryClient.invalidateQueries({ queryKey: settingsKey });
+      void policyRead.refetch();
+    } catch (error) { if (current()) setAlertInfo({ title: 'Still unconfirmed', message: friendlyError(error, 'Try checking again.') }); }
+    finally { actionLock.current = false; if (mounted.current) setSaving(false); }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <CreatorScreenHeader title="Joining settings" onBack={() => { if (current()) router.back(); }} />
 
+        {journalError && <View style={styles.recovery}><Text style={styles.hint} accessibilityRole="alert">Couldn’t check your last save. Try again before editing.</Text><TouchableOpacity style={styles.previewBtn} accessibilityRole="button" onPress={() => void loadAttempt()}><Text style={styles.previewBtnText}>Retry check</Text></TouchableOpacity></View>}
         {uncertain && <View style={styles.recovery}>
           <Text style={styles.hint} accessibilityRole="alert">This save is unconfirmed. Check the saved settings before making another change.</Text>
           <TouchableOpacity style={styles.previewBtn} accessibilityRole="button" onPress={() => void checkSave()} disabled={saving}>
             <Text style={styles.previewBtnText}>{saving ? 'Checking…' : 'Check save'}</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.previewBtn} accessibilityRole="button" onPress={() => void retrySave()} disabled={saving || !journalReady}><Text style={styles.previewBtnText}>Retry same save</Text></TouchableOpacity>
         </View>}
 
         {settingsError ? (
@@ -310,7 +358,7 @@ function JoinGateEditor({ community, scope }: {
               <Text style={styles.previewBtnText}>{isFetching ? 'Checking…' : 'Retry'}</Text>
             </TouchableOpacity>
           </View>
-        ) : isLoading || !settings || !seeded ? (
+        ) : isLoading || !settings || !seeded || !journalReady ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={Colors.terracotta} />
           </View>
@@ -339,42 +387,11 @@ function JoinGateEditor({ community, scope }: {
             </View>}
             {JOIN_GATE_ENABLED && joinPolicy !== null && supportsOpen && (
               <>
-                <Text style={styles.fieldLabel}>How should people join?</Text>
-                <Text style={styles.fieldHint}>
-                  Open lets eligible people join right away. Review requests lets you approve each person. You can change this here later. Eligibility restrictions stay the same.
-                </Text>
-                {counts && (
-                  <Text style={styles.policyPreview}>
-                    {counts.active} in the community
-                    {counts.pending > 0 ? ` · ${counts.pending} waiting for review` : ''}
-                  </Text>
-                )}
-                <View style={styles.policyRow}>
-                  <TouchableOpacity
-                    style={[styles.policyPill, joinPolicy === 'open' && styles.policyPillOn]}
-                    disabled={saving || !!uncertain || policyRead.isFetching || policyRead.isError}
-                    accessibilityRole="radio" accessibilityState={{ selected: joinPolicy === 'open', disabled: saving || !!uncertain || policyRead.isFetching || policyRead.isError }}
-                    onPress={() => { hapticLight(); setJoinPolicyLocal('open'); }}
-                    activeOpacity={0.85}
-                  >
-                    {/* copy to the taste gate */}
-                    <Text style={[styles.policyText, joinPolicy === 'open' && styles.policyTextOn]}>
-                      Open
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.policyPill, joinPolicy === 'approval_required' && styles.policyPillOn]}
-                    disabled={saving || !!uncertain || policyRead.isFetching || policyRead.isError}
-                    accessibilityRole="radio" accessibilityState={{ selected: joinPolicy === 'approval_required', disabled: saving || !!uncertain || policyRead.isFetching || policyRead.isError }}
-                    onPress={() => { hapticLight(); setJoinPolicyLocal('approval_required'); }}
-                    activeOpacity={0.85}
-                  >
-                    {/* copy to the taste gate */}
-                    <Text style={[styles.policyText, joinPolicy === 'approval_required' && styles.policyTextOn]}>
-                      Review requests
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <CommunityJoiningChoice value={joinPolicy}
+                  onChange={policy => { hapticLight(); setJoinPolicyLocal(policy); }}
+                  disabled={saving || !!uncertain || policyRead.isFetching || policyRead.isError || openJoining.isFetching}
+                  hint="Your eligibility rules stay the same. People already waiting still need your review." />
+                {counts && <Text style={styles.policyPreview}>{counts.active} in the community{counts.pending > 0 ? ` · ${counts.pending} waiting for review` : ''}</Text>}
                 {joinPolicy === 'invite_only' && (
                   <Text style={styles.policyNote}>
                     This community has an older Invite only setting. It currently uses request review. Choose Open or Review requests to change it.
@@ -390,7 +407,7 @@ function JoinGateEditor({ community, scope }: {
               accessibilityLabel="Welcome message"
               value={welcome}
               editable={!saving && !uncertain}
-              onChangeText={(value) => { if (current() && !actionLock.current && !uncertainRef.current) setWelcome(value); }}
+              onChangeText={(value) => { if (current() && journalReady && !actionLock.current && !uncertainRef.current) setWelcome(value); }}
               multiline
               maxLength={1000}
               placeholder="hey, glad you found us."
@@ -407,7 +424,7 @@ function JoinGateEditor({ community, scope }: {
               accessibilityLabel="Introduction question"
               value={question}
               editable={!saving && !uncertain}
-              onChangeText={(value) => { if (current() && !actionLock.current && !uncertainRef.current) setQuestion(value); }}
+              onChangeText={(value) => { if (current() && journalReady && !actionLock.current && !uncertainRef.current) setQuestion(value); }}
               maxLength={200}
               placeholder="what's your go-to taco spot?"
               placeholderTextColor={Colors.inkSoft}
@@ -429,7 +446,7 @@ function JoinGateEditor({ community, scope }: {
                   style={[styles.policyPill, styles.policyPillWide, askReason && styles.policyPillOn]}
                   accessibilityRole="checkbox" accessibilityState={{ checked: askReason }}
                   disabled={saving || !!uncertain}
-                  onPress={() => { if (!current() || actionLock.current || uncertainRef.current) return; hapticLight(); setAskReason((v) => !v); }}
+                  onPress={() => { if (!current() || !journalReady || actionLock.current || uncertainRef.current) return; hapticLight(); setAskReason((v) => !v); }}
                   activeOpacity={0.85}
                 >
                   <Text style={[styles.policyText, askReason && styles.policyTextOn]}>
@@ -441,7 +458,7 @@ function JoinGateEditor({ community, scope }: {
                   style={[styles.policyPill, styles.policyPillWide, askSource && styles.policyPillOn]}
                   accessibilityRole="checkbox" accessibilityState={{ checked: askSource }}
                   disabled={saving || !!uncertain}
-                  onPress={() => { if (!current() || actionLock.current || uncertainRef.current) return; hapticLight(); setAskSource((v) => !v); }}
+                  onPress={() => { if (!current() || !journalReady || actionLock.current || uncertainRef.current) return; hapticLight(); setAskSource((v) => !v); }}
                   activeOpacity={0.85}
                 >
                   <Text style={[styles.policyText, askSource && styles.policyTextOn]}>
@@ -456,7 +473,7 @@ function JoinGateEditor({ community, scope }: {
                     style={[styles.policyPill, styles.policyPillWide, askRulesConfirm && styles.policyPillOn]}
                     accessibilityRole="checkbox" accessibilityState={{ checked: askRulesConfirm }}
                   disabled={saving || !!uncertain}
-                  onPress={() => { if (!current() || actionLock.current || uncertainRef.current) return; hapticLight(); setAskRulesConfirm((v) => !v); }}
+                  onPress={() => { if (!current() || !journalReady || actionLock.current || uncertainRef.current) return; hapticLight(); setAskRulesConfirm((v) => !v); }}
                     activeOpacity={0.85}
                   >
                     <Text style={[styles.policyText, askRulesConfirm && styles.policyTextOn]}>
@@ -472,7 +489,7 @@ function JoinGateEditor({ community, scope }: {
                   accessibilityLabel="Additional question"
               value={openQuestion}
                   editable={!saving && !uncertain}
-                  onChangeText={(value) => { if (current() && !actionLock.current && !uncertainRef.current) setOpenQuestion(value); }}
+                  onChangeText={(value) => { if (current() && journalReady && !actionLock.current && !uncertainRef.current) setOpenQuestion(value); }}
                   maxLength={200}
                   placeholder="ask anything else you want to know"
                   placeholderTextColor={Colors.inkSoft}
@@ -490,7 +507,7 @@ function JoinGateEditor({ community, scope }: {
               accessibilityLabel="Guidelines link"
               value={guidelines}
               editable={!saving && !uncertain}
-              onChangeText={(value) => { if (current() && !actionLock.current && !uncertainRef.current) setGuidelines(value); }}
+              onChangeText={(value) => { if (current() && journalReady && !actionLock.current && !uncertainRef.current) setGuidelines(value); }}
               autoCapitalize="none"
               keyboardType="url"
               placeholder="https://"
@@ -498,15 +515,16 @@ function JoinGateEditor({ community, scope }: {
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
 
-            <TouchableOpacity style={styles.previewBtn} onPress={() => { if (current() && seeded && !settingsError) { hapticLight(); setPreviewVisible(true); } }}>
-              <Text style={styles.previewBtnText}>preview</Text>
+            <TouchableOpacity style={styles.previewBtn} accessibilityRole="button" accessibilityLabel="Preview joining form" onPress={() => { if (current() && seeded && !settingsError) { hapticLight(); setPreviewVisible(true); } }}>
+              <Text style={styles.previewBtnText}>Preview</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.saveBtn, (saving || !!uncertain) && styles.saveBtnBusy]} onPress={handleSave} disabled={saving || !!uncertain}>
+            <TouchableOpacity style={[styles.saveBtn, (saving || !!uncertain) && styles.saveBtnBusy]} accessibilityRole="button" accessibilityLabel="Save joining settings"
+              accessibilityState={{ disabled: saving || !!uncertain, busy: saving }} onPress={handleSave} disabled={saving || !!uncertain}>
               {saving ? (
                 <ActivityIndicator size="small" color={Colors.white} />
               ) : (
-                <Text style={styles.saveBtnText}>save</Text>
+                <Text style={styles.saveBtnText}>Save</Text>
               )}
             </TouchableOpacity>
           </ScrollView>

@@ -1,3 +1,4 @@
+import { getCommunityJoiningOptions, hasPublishedCommunityJoining } from './communityJoiningOptions';
 /**
  * Creator mode data layer (phase 4 logic).
  *
@@ -683,21 +684,17 @@ export interface JoinGateSettings {
 // column can hold; do not build a UI path that cannot actually work yet.
 export type JoinPolicy = 'approval_required' | 'open' | 'invite_only';
 
-/**
- * The community's join gate (proposal 91, at Cowork's gate). SELF-FLIPPING:
- * until 91 adds communities.join_policy, the select errors with 42703 and
- * this returns null, so the leader toggle stays hidden - no dead control.
- * The moment 91 applies, the real value flows and the toggle wakes.
- */
+/** Read the effective joining method, including legacy communities that still require review. */
 export async function getJoinPolicy(communityId: string): Promise<JoinPolicy | null> {
-  const { data, error } = await supabase
-    .from('communities')
-    .select('join_policy')
-    .eq('id', communityId)
-    .single();
-  if (error || !data) return null; // column absent (42703) or unreadable = dormant
-  const v = (data as { join_policy?: string }).join_policy;
-  return v === 'open' || v === 'approval_required' ? v : null;
+  const options = await getCommunityJoiningOptions(communityId);
+  if (options) return options.method;
+  const { data, error } = await requestWithDeadline(supabase.from('communities').select('join_policy').eq('id', communityId).single(), 12_000);
+  if (error?.code === '42703') return null;
+  if (error) throw error;
+  const value = data?.join_policy;
+  if (value === 'approval_required') return value;
+  if (value !== 'open') return null;
+  return await hasPublishedCommunityJoining(communityId) ? 'open' : 'approval_required';
 }
 
 /**

@@ -94,11 +94,9 @@ export default function CommunityPageScreen() {
     queryFn: () => getCommunityPage(id!),
     enabled: !!id,
   });
-  // proposal 91: null while the column is absent, which is today's server
-  // behavior (every join is reviewed), so the door keeps saying "ask to
-  // join" until the migration lands and then tells the truth on its own
+  // Read effective admission; older raw Open settings still require review.
   const { data: joinPolicy = null } = useQuery({
-    queryKey: ['community-join-policy', id],
+    queryKey: ['community-join-policy', id, viewer.viewerId],
     queryFn: () => getJoinPolicy(id!),
     enabled: !!id,
     staleTime: 60_000,

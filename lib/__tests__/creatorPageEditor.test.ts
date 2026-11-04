@@ -9,7 +9,7 @@ jest.mock('../creatorPageReview',()=>({ ...jest.requireActual('../creatorPageRev
 import { startPageEditor, persistPageEditor, readPageEditor, listLocalPageEditors, pageDraftProblems, pageCreatorProblems,
   attachPageCover, buildPageCreatorInformation, pageAudienceOptions, samePageData, savePageEditing, submitPageEditing, loadPageEditing, type PageEditorRecord } from '../creatorPageEditor';
 const scope={userId:'creator',isCurrent:()=>true};
-const complete=():PageEditorRecord=>({id:'page',kind:'community',version:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only'},creator:{name:'Aster',email:'aster@example.invalid',motivation:'Look after the space',guidelines:true}});
+const complete=():PageEditorRecord=>({id:'page',kind:'community',version:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only',join_policy:'approval_required'},creator:{name:'Aster',email:'aster@example.invalid',motivation:'Look after the space',guidelines:true}});
 function query(data:unknown){const q:any={};for(const fn of ['select','eq','maybeSingle'])q[fn]=()=>q;q.then=(resolve:any)=>Promise.resolve({data,error:null}).then(resolve);return q;}
 beforeEach(async()=>{jest.clearAllMocks();mockSequence=0;await AsyncStorage.clear();mockFrom.mockImplementation(table=>query(table==='profiles'?{id:'creator',gender:'woman'}:null));});
 it('keeps brief creator answers separate from public page fields and does not invent assent',()=>{
@@ -145,4 +145,12 @@ it('retains the intended organization kind without reusing a community reservati
  expect(community.kind).toBe('community');expect(organization.kind).toBe('organization');expect(organization.id).not.toBe(community.id);
  expect((await readPageEditor(organization.id,scope))?.kind).toBe('organization');
  expect((await startPageEditor(scope,undefined,'organization')).id).toBe(organization.id);
+});
+
+it('requires an explicit joining choice for a new community, while organization and published-page edits stay separate',()=>{
+ const record=complete();delete record.pageData.join_policy;
+ expect(pageDraftProblems(record,'woman')).toHaveProperty('join_policy');
+ for(const method of ['open','approval_required'])expect(pageDraftProblems({...record,pageData:{...record.pageData,join_policy:method}},'woman')).toEqual({});
+ expect(pageDraftProblems(record,'woman',true)).toEqual({});
+ expect(pageDraftProblems({...record,kind:'organization',pageData:{...record.pageData,audience:'everyone'}},'woman')).toEqual({});
 });
