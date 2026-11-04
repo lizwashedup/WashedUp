@@ -132,3 +132,50 @@ it('does not restore a cached private row when the next visit cannot reach the s
   expect(value.chats).toEqual([]);
   expect(value.loadError).toBe(true);
 });
+
+
+it('keeps the newest preview when an older sender lookup finishes last', async () => {
+  await mount();
+  const older = deferred<any>(); mockProfile.mockReturnValueOnce(older.promise);
+  let receiveOlder!: Promise<void>;
+  act(() => { receiveOlder = mockIncoming({ new: { id: 'older-message', circle_id: 'dm', user_id: 'uncached-sender', content: 'Earlier message', created_at: '2026-10-07T21:00:00Z' } }); });
+  await act(async () => { await mockIncoming({ new: { id: 'newer-message', circle_id: 'dm', user_id: 'peer', content: 'Latest message', created_at: '2026-10-07T21:01:00Z' } }); });
+  expect(value.chats[0].last_message).toBe('Synthetic person: Latest message');
+  await act(async () => { older.resolve({ data: { first_name_display: 'Slow sender' }, error: null }); await receiveOlder; });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Synthetic person: Latest message', last_message_at: '2026-10-07T21:01:00Z', unread_count: 2 }));
+});
+
+it('compares message times rather than ISO timezone spellings', async () => {
+  await mount();
+  await act(async () => { await mockIncoming({ new: { id: 'newer-message', circle_id: 'dm', user_id: 'peer', content: 'Latest message', created_at: '2026-10-07T21:00:00.100+00:00' } }); });
+  await act(async () => { await mockIncoming({ new: { id: 'older-message', circle_id: 'dm', user_id: 'peer', content: 'Earlier message', created_at: '2026-10-07T21:00:00Z' } }); });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Synthetic person: Latest message', last_message_at: '2026-10-07T21:00:00.100+00:00', unread_count: 2 }));
+});
+
+
+it.each(['2026-10-07T21:00:00Z', '2026-10-07T21:00:00.000001Z'])('keeps the later arrival when sender lookups race at the same timestamp %s', async time => {
+  await mount();
+  const older = deferred<any>(); mockProfile.mockReturnValueOnce(older.promise);
+  let pending!: Promise<void>;
+  act(() => { pending = mockIncoming({ new: { circle_id: 'dm', user_id: 'uncached-sender', content: 'First arrival', created_at: time } }); });
+  await act(async () => { await mockIncoming({ new: { circle_id: 'dm', user_id: 'peer', content: 'Second arrival', created_at: time } }); });
+  await act(async () => { older.resolve({ data: { first_name_display: 'Slow sender' }, error: null }); await pending; });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Synthetic person: Second arrival', unread_count: 2 }));
+});
+
+it('does not let a pending sender lookup enter a different account', async () => {
+  await mount();
+  const older = deferred<any>(); mockProfile.mockReturnValueOnce(older.promise);
+  let pending!: Promise<void>;
+  act(() => { pending = mockIncoming({ new: { circle_id: 'dm', user_id: 'uncached-sender', content: 'Old account text', created_at: '2026-10-07T21:00:00Z' } }); });
+  await act(async () => tree.update(<Probe viewer="next-viewer"/>));
+  await act(async () => { older.resolve({ data: { first_name_display: 'Slow sender' }, error: null }); await pending; });
+  expect(value.chats).toEqual([]);
+});
+
+it('does not count an own message as unread even when a newer preview is already present', async () => {
+  await mount();
+  await act(async () => { await mockIncoming({ new: { circle_id: 'dm', user_id: 'peer', content: 'Latest', created_at: '2026-10-07T21:01:00Z' } }); });
+  await act(async () => { await mockIncoming({ new: { circle_id: 'dm', user_id: 'viewer', content: 'My earlier message', created_at: '2026-10-07T21:00:00Z' } }); });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Synthetic person: Latest', unread_count: 1 }));
+});
