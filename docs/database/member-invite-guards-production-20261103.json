@@ -1,0 +1,46 @@
+{
+  "project": "upstjumasqblszevlgik",
+  "environment": "main Production",
+  "applied_date_local": "2026-11-03",
+  "timezone": "America/Los_Angeles",
+  "method": "Supabase SQL editor; guarded standalone transaction",
+  "source_commit": "f5c6416",
+  "sql_file": "docs/database/review-only/20261103_member_invite_acceptance_guards.sql",
+  "sql_sha256": "a0eb76113a4bf3b33b42b8a81fd877b2c221e4cc6ddfc0ac81005e4d8f78cbb3",
+  "before_definition_md5": "6cb89d74e00358b966e9a6e7cb50f40b",
+  "after_definition_md5": "900fdec93c21b0677654e8bacd036e5c",
+  "checks": [
+    {
+      "check_name": "Reviewed acceptance function",
+      "passed": true
+    },
+    {
+      "check_name": "Preview unchanged",
+      "passed": true
+    },
+    {
+      "check_name": "Audience helper unchanged",
+      "passed": true
+    },
+    {
+      "check_name": "Eligibility guard unchanged",
+      "passed": true
+    },
+    {
+      "check_name": "Eligibility trigger enabled",
+      "passed": true
+    },
+    {
+      "check_name": "Anonymous acceptance denied",
+      "passed": true
+    },
+    {
+      "check_name": "Signed-in acceptance retained",
+      "passed": true
+    }
+  ],
+  "migration_ledger_changed": false,
+  "ota_published": false,
+  "live_recipient_flow_tested": false,
+  "evidence": "docs/database/direct-apply-evidence-20261103-member-invite-guards.md"
+}
