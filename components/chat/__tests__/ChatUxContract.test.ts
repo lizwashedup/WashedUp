@@ -33,6 +33,7 @@ describe('chat and event-form UX contracts', () => {
   it('does not block first paint on secondary chat enrichment', () => {
     const chat = source('hooks/useChat.ts');
     const list = source('hooks/useChatList.ts');
+    const eventReads = source('lib/eventChatListReads.ts');
 
     expect(chat).toContain('setLoading(false);');
     expect(chat).toContain("void (async () => {");
@@ -40,7 +41,8 @@ describe('chat and event-form UX contracts', () => {
     expect(chat).not.toContain("logError(err, 'useChat.getUser')");
     expect(list).toContain('chatListMemoryCache');
     expect(list).toContain('await Promise.all([loadEvents(), loadCircles()]);');
-    expect(list).toContain("publish('event', firstPaint.map(chat => {");
+    expect(list).toContain("publish: rows => publish('event', rows, false)");
+    expect(eventReads).toContain('firstPaint.publish(initialRows.map(chat => {');
     expect(list).toContain("publish('circle', rows, true);");
     expect(list).not.toContain('supabase.auth.getUser');
   });
