@@ -245,6 +245,24 @@ it('ignores an old account removal callback after switching accounts', async () 
   expect(value.chats).toHaveLength(1);
 });
 
+it('does not restore a confirmed circle departure from a refresh that started before leaving', async () => {
+  mockCircles = async () => circleMembership(); useDetailedEnrichment();
+  await mount('removed-circle-pending-read');
+  const stale = deferred(); mockCircles = () => stale.promise;
+  let refresh!: Promise<void>;
+  act(() => { refresh = value.refetch(true); });
+  act(() => value.removeChat('circle-independent'));
+  expect(value.chats.some(chat => chat.kind === 'circle')).toBe(false);
+  await act(async () => { stale.resolve(circleMembership()); await refresh; });
+  expect(value.chats.some(chat => chat.kind === 'circle')).toBe(false);
+  expect(value.chats.some(chat => chat.kind === 'event')).toBe(true);
+  expect(value.loading).toBe(false); expect(value.loadError).toBe(false);
+  // A later explicit read may reflect a real rejoin; removal is not a lifetime ban.
+  mockCircles = async () => circleMembership('Rejoined circle');
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats.find(chat => chat.kind === 'circle')?.title).toBe('Rejoined circle');
+});
+
 it('retains a live ordinary preview on remount when the server is offline', async () => {
   useDetailedEnrichment('Initial preview');
   await mount('live-preview-remount');
