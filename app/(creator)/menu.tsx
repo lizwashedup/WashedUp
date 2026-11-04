@@ -256,7 +256,7 @@ export default function CreatorMenuScreen() {
             hitSlop={8}
           >
             {/* LIZ COPY (admin-only) */}
-            <Text style={styles.adminViewAsText}>view as an event host</Text>
+            <Text style={styles.adminViewAsText}>Preview event tools</Text>
           </TouchableOpacity>
         )}
       </ScrollView>

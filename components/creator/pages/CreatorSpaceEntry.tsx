@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View, Pressable, ActivityIndicator, StyleSheet, useWindowDimensions } from 'react-native';
 import { ScaledText as Text } from '../../ScaledText';
-import { ChevronRight } from 'lucide-react-native';
+import { Building2, ChevronDown, ChevronRight, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 import Colors, { AfterglowColors as C, CreatorSurfaceColors as G } from '../../../constants/Colors';
 import { AfterglowType as T } from '../../../constants/Typography';
@@ -11,8 +11,11 @@ import { useCreatorPageScope } from '../../../hooks/useCreatorPageScope';
 import { useCreatorPageRead } from '../../../hooks/useCreatorPageRead';
 import type { CreatorPageScope } from '../../../lib/creatorPageReview';
 import { loadManagedSpaces, loadManagedApplications, managedSpaceStatus, prepareCreatorSpace } from '../../../lib/creatorManagement';
+import { managementRoute } from '../../../lib/managementNavigation';
+import type { CreatorSpaceLink } from '../../../lib/creatorSpaceEntry';
 
-type Entry = { key: string; title: string; subtitle: string; action: string; open: () => Promise<void> };
+type Entry = { key: string; title: string; subtitle: string; action: string; open: () => Promise<void>;
+  kind?: 'community' | 'organization'; archived?: boolean; shortcuts?: Entry[] };
 
 /** Named destinations in Yours; the same list is available from Profile. */
 export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string; expanded?: boolean }) {
@@ -28,6 +31,7 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
   const lock = useRef<CreatorPageScope | null>(null);
   const [opening, setOpening] = useState<{ scope: CreatorPageScope; key: string }>();
   const [notice, setNotice] = useState<{ scope: CreatorPageScope; text: string }>();
+  const [archiveScope, setArchiveScope] = useState<CreatorPageScope | null>(null);
   const current = () => latestOwned.current === owned && !!owned?.isCurrent() && !account.isLoading && !account.error;
   const go = (route: string) => { if (current()) router.push(route as never); };
   const run = async (entry: Entry) => {
@@ -39,17 +43,25 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
     finally { if (lock.current === initiating) lock.current = null; if (initiating.isCurrent()) setOpening(undefined); }
   };
   const changed = () => { if (owned?.isCurrent()) setNotice({ scope: owned, text: 'Your access has changed. Choose an available item below.' }); };
+  const openSpace = async (space: CreatorSpaceLink, screen?: 'events' | 'menu') => {
+    const fresh = await spaces.refresh();
+    if (!current()) return;
+    const actual = fresh?.spaces.find(item => item.id === space.id && item.kind === space.kind);
+    // Organization shortcuts belong to this verified identity, never a community
+    // left selected by an earlier visit or a new page with different permissions.
+    if (!actual || (screen && actual.legacy?.workspace !== 'organization')) { changed(); return; }
+    prepareCreatorSpace(actual, owned!);
+    go(screen ? managementRoute(screen) + '?fromManagementDirectory=1' : actual.route);
+  };
   const entries: Entry[] = [];
   if (!spaces.error) {
     for (const space of spaces.data?.spaces ?? []) entries.push({
       key: 'space:' + space.id, title: space.name, subtitle: managedSpaceStatus(space), action: 'Manage ' + space.name,
-      open: async () => {
-        const fresh = await spaces.refresh();
-        if (!current()) return;
-        const actual = fresh?.spaces.find(item => item.id === space.id && item.kind === space.kind);
-        if (!actual) { changed(); return; }
-        prepareCreatorSpace(actual, owned!); go(actual.route);
-      },
+      kind: space.kind, archived: space.legacy?.status === 'archived', open: () => openSpace(space),
+      shortcuts: space.legacy?.workspace === 'organization' ? [
+        { key: 'events:' + space.id, title: 'Events', subtitle: 'Create an event or manage an existing one', action: 'Events for ' + space.name, open: () => openSpace(space, 'events') },
+        { key: 'settings:' + space.id, title: 'Settings', subtitle: 'Edit your organization and manage payouts', action: 'Organization settings for ' + space.name, open: () => openSpace(space, 'menu') },
+      ] : undefined,
     });
     for (const invitation of spaces.data?.invitations ?? []) entries.push({
       key: 'invitation:' + invitation.invitationId, title: invitation.pageName, subtitle: 'Team invitation · Review invitation',
@@ -79,17 +91,61 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
   const loading = spaces.loading || applications.loading || account.isLoading;
   const failed = !!(account.error || spaces.error || applications.error);
   if (!expanded && !entries.length && !loading && !failed) return null;
-  const visible = expanded ? entries : entries.slice(0, height < 700 || fontScale > 1.2 ? 1 : 2);
+  const active = entries.filter(entry => !entry.archived);
+  const archived = entries.filter(entry => entry.archived);
+  const hasCommunity = (spaces.data?.spaces ?? []).some(space => space.kind === 'community' && (!space.legacy || !!space.legacy.communityId));
+  const visible = active.slice(0, height < 700 || fontScale > 1.2 ? 1 : 2);
+  const disabled = busy || loading || !current();
+  const renderEntry = (entry: Entry) => <View key={entry.key} style={s.card}>
+    <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel={entry.action} accessibilityHint={entry.subtitle}
+      disabled={disabled} accessibilityState={{ disabled }} onPress={() => { void run(entry); }}
+      style={({ pressed }) => [s.entry, pressed && s.pressed]}>
+      {expanded && entry.kind && <View style={s.identity} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        {entry.kind === 'community' ? <Users size={22} color={Colors.terracotta} /> : <Building2 size={22} color={Colors.terracotta} />}
+      </View>}
+      <View style={s.copy}><Text style={[s.title, { fontFamily: fonts.medium }]}>{entry.title}</Text>
+        <Text style={[s.subtitle, { fontFamily: fonts.regular }]}>{expanded && entry.kind ? entry.subtitle.replace(/^(Community|Organization) · /, '') : entry.subtitle}</Text></View>
+      {busy && opening.key === entry.key ? <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} /> : <ChevronRight size={18} color={C.muted} />}
+    </Pressable>
+    {expanded && entry.shortcuts && <View style={s.shortcuts}>
+      {entry.shortcuts.map(shortcut => <Pressable cssInterop={false} key={shortcut.key} accessibilityRole="button" accessibilityLabel={shortcut.action}
+        accessibilityHint={shortcut.subtitle} disabled={disabled} accessibilityState={{ disabled }}
+        onPress={() => { void run(shortcut); }} style={({ pressed }) => [s.shortcut, pressed && s.pressed]}>
+        <Text numberOfLines={1} style={[s.link, { fontFamily: fonts.medium }]}>{shortcut.title}</Text>
+        {busy && opening.key === shortcut.key && <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} />}
+      </Pressable>)}
+    </View>}
+  </View>;
+  const createLink = (kind: 'community' | 'event', title: string) => <Pressable cssInterop={false} accessibilityRole="button"
+    accessibilityLabel={title} disabled={disabled} accessibilityState={{ disabled }} style={({ pressed }) => [s.linkTarget, pressed && s.pressed]}
+    onPress={() => go('/creator/start?kind=' + kind)}><Text style={[s.link, { fontFamily: fonts.medium }]}>{title}</Text></Pressable>;
   return <View style={[s.wrap, expanded && s.expanded]}>
     {!expanded && <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.semibold }]}>You manage</Text>}
-    {expanded && <Text style={[s.intro, { fontFamily: fonts.regular }]}>Your communities, organizations and unfinished setup.</Text>}
-    {visible.map(entry => <Pressable cssInterop={false} key={entry.key} accessibilityRole="button" accessibilityLabel={entry.action} accessibilityHint={entry.subtitle}
-      disabled={busy || loading || !current()} accessibilityState={{ disabled: busy || loading || !current() }}
-      onPress={() => { void run(entry); }} style={({ pressed }) => [s.entry, pressed && s.pressed]}>
-      <View style={s.copy}><Text style={[s.title, { fontFamily: fonts.medium }]}>{entry.title}</Text>
-        <Text style={[s.subtitle, { fontFamily: fonts.regular }]}>{entry.subtitle}</Text></View>
-      {busy && opening.key === entry.key ? <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} /> : <ChevronRight size={18} color={C.muted} />}
-    </Pressable>)}
+    {expanded && <Text style={[s.intro, { fontFamily: fonts.regular }]}>Choose what you want to manage.</Text>}
+    {!expanded && visible.map(renderEntry)}
+    {expanded && (['community', 'organization'] as const).map(kind => {
+      const group = active.filter(entry => entry.kind === kind);
+      if (!group.length) return null;
+      return <View key={kind} style={s.section}>
+        <Text accessibilityRole="header" style={[s.sectionTitle, { fontFamily: fonts.display }]}>{kind === 'community' ? 'Communities' : 'Organizations'}</Text>
+        <Text style={[s.sectionHint, { fontFamily: fonts.regular }]}>{kind === 'community' ? 'Your groups, members and conversations.' : 'Your organization’s events and settings.'}</Text>
+        {group.map(renderEntry)}
+        {kind === 'community' && createLink('community', hasCommunity ? 'Start another community' : 'Start a community')}
+      </View>;
+    })}
+    {expanded && archived.length > 0 && <View style={s.secondary}>
+      <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel="Archived communities" accessibilityState={{ expanded: archiveScope === owned }}
+        onPress={() => setArchiveScope(archiveScope === owned ? null : owned)} style={s.archiveToggle}>
+        <Text style={[s.subtitle, { fontFamily: fonts.medium }]}>Archived ({archived.length})</Text>
+        {archiveScope === owned ? <ChevronDown size={18} color={C.muted} /> : <ChevronRight size={18} color={C.muted} />}
+      </Pressable>
+      {archiveScope === owned && <><Text style={[s.subtitle, { fontFamily: fonts.regular }]}>These communities are archived. Open one to view its management tools.</Text>{archived.map(renderEntry)}
+        {!active.some(entry => entry.kind === 'community') && createLink('community', 'Start another community')}</>}
+    </View>}
+    {expanded && active.some(entry => !entry.kind) && <View style={s.secondary}>
+      <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.semibold }]}>Invitations & applications</Text>
+      {active.filter(entry => !entry.kind).map(renderEntry)}
+    </View>}
     {loading && !entries.length && <ActivityIndicator accessibilityLabel="Loading your management tools" color={Colors.terracotta} />}
     {failed && <View><Text style={[s.subtitle, { fontFamily: fonts.regular }]}>Some management details couldn’t load.</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Retry management details" style={s.linkTarget} disabled={loading || busy}
@@ -100,18 +156,23 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
     {!expanded && entries.length > visible.length && <Pressable accessibilityRole="button" accessibilityLabel="See everything you manage" style={s.linkTarget} onPress={() => go('/(tabs)/friends/manage')}>
       <Text style={[s.link, { fontFamily: fonts.medium }]}>See all ({entries.length})</Text></Pressable>}
     {expanded && !loading && !failed && !entries.length && <Text style={[s.intro, { fontFamily: fonts.regular }]}>Start a community or create an event. Your setup and management tools will stay here.</Text>}
-    {expanded && <View style={s.create}>
-      {(['community', 'event'] as const).map(kind => <Pressable key={kind} accessibilityRole="button" style={s.linkTarget} onPress={() => go('/creator/start?kind=' + kind)}>
-        <Text style={[s.link, { fontFamily: fonts.medium }]}>{kind === 'community' ? 'Start a community' : 'Create an event'}</Text>
-      </Pressable>)}
+    {expanded && !loading && !failed && !entries.length && <View style={s.secondary}>
+      {createLink('community', 'Start a community')}{createLink('event', 'Create an event')}
     </View>}
   </View>;
 }
 const s = StyleSheet.create({
   wrap: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 }, expanded: { paddingHorizontal: 0 },
   heading: { ...T.caption, color: C.ink }, intro: { ...T.body, color: C.muted, marginBottom: 8 },
-  entry: { padding: 14, borderRadius: 16, backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: G.goldEdge, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
+  card: { borderRadius: 16, backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: G.goldEdge, overflow: 'hidden' },
+  entry: { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72 },
+  identity: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.inputBg },
+  section: { gap: 10, marginTop: 8, marginBottom: 8 }, sectionTitle: { ...T.pageSection, color: C.ink }, sectionHint: { ...T.caption, color: C.muted, marginBottom: 2 },
+  secondary: { marginTop: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line, paddingTop: 8 },
+  shortcuts: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
+  shortcut: { flex: 1, minHeight: 48, paddingHorizontal: 12, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 },
+  archiveToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   copy: { flex: 1, minWidth: 0, gap: 4 }, title: { ...T.title, color: C.ink }, subtitle: { ...T.caption, color: C.muted },
   pressed: { opacity: 0.8 }, linkTarget: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-  link: { ...T.caption, color: Colors.terracotta }, create: { marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line, paddingTop: 8 },
+  link: { ...T.caption, color: Colors.terracotta },
 });

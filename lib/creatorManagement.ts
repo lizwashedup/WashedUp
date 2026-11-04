@@ -8,6 +8,16 @@ import { setSelectedCommunityId } from './selectedCommunity';
 
 const current = (scope: CreatorPageScope) => { if (!scope.isCurrent()) throw new CreatorPageScopeExpired(); };
 
+/** Optional identity text must belong to the same account as its management tools. */
+export async function loadManagedOrganizationName(scope: CreatorPageScope): Promise<string | null> {
+  current(scope);
+  try {
+    const profile = await requestWithDeadline(getMyOrganizerProfile(), 3_000);
+    current(scope);
+    return profile?.user_id === scope.userId && profile.display_name.trim() ? profile.display_name.trim() : null;
+  } catch { current(scope); return null; }
+}
+
 /** Existing creators do not need the new page backend to find their tools. */
 export async function loadManagedSpaces(scope: CreatorPageScope, pagesEnabled: boolean) {
   current(scope);
@@ -16,14 +26,8 @@ export async function loadManagedSpaces(scope: CreatorPageScope, pagesEnabled: b
   current(scope);
   if (entry.spaces.some(space => space.legacy?.workspace === 'organization')) {
     // A missing optional display name must not hide confirmed management access.
-    try {
-      const profile = await requestWithDeadline(getMyOrganizerProfile(), 3_000);
-      current(scope);
-      if (profile?.user_id === scope.userId && profile.display_name.trim()) {
-        entry.spaces = entry.spaces.map(space => space.legacy?.workspace === 'organization'
-          ? { ...space, name: profile.display_name } : space);
-      }
-    } catch { current(scope); }
+    const name = await loadManagedOrganizationName(scope);
+    if (name) entry.spaces = entry.spaces.map(space => space.legacy?.workspace === 'organization' ? { ...space, name } : space);
   }
   return entry;
 }

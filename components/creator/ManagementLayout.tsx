@@ -13,6 +13,9 @@ import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { CreatorScreenHeader } from './CreatorScreenHeader';
 import { MANAGEMENT_HOME, managementAccess, type ManagementScreen } from '../../lib/managementNavigation';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
+import { loadManagedOrganizationName } from '../../lib/creatorManagement';
 
 /** Existing tools, nested inside Yours rather than a second bottom-tab mode. */
 export default function ManagementLayout() {
@@ -22,8 +25,10 @@ export default function ManagementLayout() {
   const { data: access, isLoading, isError, refetch, isFetching } = useCreatorAccessRead();
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
+  const { scope } = useCreatorPageScope('management-organization-name');
+  const organizationName = useCreatorPageRead(workspace === 'organization' && access?.hasEventHostGrant ? scope : null, loadManagedOrganizationName);
   const segments = useSegments();
-  const { fromCommunityId } = useGlobalSearchParams<{ fromCommunityId?: string }>();
+  const { fromCommunityId, fromManagementDirectory } = useGlobalSearchParams<{ fromCommunityId?: string; fromManagementDirectory?: string }>();
   const screen = segments[segments.length - 1] as ManagementScreen;
   useEffect(() => { void hydrateSelectedCommunity(); void hydrateWorkspace(); }, []);
 
@@ -39,12 +44,13 @@ export default function ManagementLayout() {
   // a focused editor must never pull the person back into management.
   if (focused && !permitted.screens.includes(screen)) return <Redirect href={permitted.home} />;
   const home = permitted.home.endsWith('/' + screen);
-  const identity = workspace === 'community' ? community?.name ?? 'Your community' : 'Your organization';
-  const homeTitle = workspace === 'organization' ? 'Manage organization' : community ? `Manage ${community.name}` : 'Manage community';
+  const identity = workspace === 'community' ? community?.name ?? 'Your community' : organizationName.data ?? 'Your organization';
+  const homeTitle = workspace === 'organization' ? organizationName.data ? `Manage ${organizationName.data}` : 'Manage organization' : community ? `Manage ${community.name}` : 'Manage community';
+  const returnToDirectory = fromManagementDirectory === '1' || home;
   return <SafeAreaView style={styles.shell} edges={['top']}>
     {screen !== 'organizer-broadcast' && <CreatorScreenHeader title={home ? homeTitle : identity}
-      backLabel={returnToCommunity ? 'Back to ' + identity : home ? 'Back to everything you manage' : 'Back to managing ' + identity}
-      onBack={() => returnToCommunity ? router.dismissTo(`/community/${fromCommunityId}` as never) : router.navigate((home ? MANAGEMENT_HOME : permitted.home) as never)} />}
+      backLabel={returnToCommunity ? 'Back to ' + identity : returnToDirectory ? 'Back to everything you manage' : 'Back to managing ' + identity}
+      onBack={() => returnToCommunity ? router.dismissTo(`/community/${fromCommunityId}` as never) : router.navigate((returnToDirectory ? MANAGEMENT_HOME : permitted.home) as never)} />}
     <Stack screenOptions={{ headerShown: false, freezeOnBlur: false }} />
     {viewingAsEventHost && <View style={styles.viewAs}>
       <Text style={styles.viewAsText}>Previewing event creator tools</Text>
