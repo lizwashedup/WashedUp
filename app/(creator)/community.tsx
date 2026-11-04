@@ -3,7 +3,7 @@
  * remain on the selected community's management home.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScaledText as Text } from '../../components/ScaledText';
 import {
   View,
@@ -15,20 +15,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
 import { useIsFocused } from '@react-navigation/native';
 import { ChevronRight, CircleDollarSign, HelpCircle } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
-import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticWarning } from '../../lib/haptics';
-import { isAdminTierRole, type LedCommunity, publishCommunity, archiveCommunity, buildCommunityPublicLink } from '../../lib/creatorMode';
+import { isAdminTierRole, type LedCommunity, buildCommunityPublicLink } from '../../lib/creatorMode';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { PUBLIC_PAGE_CONTROL_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
+import { useCommunityPublication } from '../../hooks/useCommunityPublication';
+import { CommunityPublicationFeedback } from '../../components/creator/CommunityPublicationFeedback';
 
 export default function CreatorCommunityScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
@@ -50,68 +50,35 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const publication = useCommunityPublication(community.id);
+  const status = publication.state?.status ?? community.status;
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  const [publishing, setPublishing] = useState(false);
-  const [archiving, setArchiving] = useState(false);
+  useEffect(() => { setAlertInfo(null); }, [publication.scope]);
+  const publishing = publication.activeAction === 'publish';
+  const archiving = publication.activeAction === 'archive';
+  const canArchive = ['leader', 'co_leader'].includes(community.role);
   const handlePublish = () => {
-    if (!community || publishing) return;
-    // LIZ COPY
+    if (!publication.ready || status !== 'draft') return;
     setAlertInfo({
       title: 'Publish this page?',
-      message: 'Your page will be published with its current visibility and joining settings. Review those settings before continuing.',
+      message: publication.state?.discoverable
+        ? 'Your community will appear in discovery. Your joining and eligibility settings still apply.'
+        : 'Your community will be available through its link and hidden from discovery. Your joining and eligibility settings still apply.',
       buttons: [
         { text: 'Not yet', style: 'cancel' },
-        {
-          text: 'Publish page',
-          onPress: async () => {
-            setPublishing(true);
-            try {
-              await publishCommunity(community.id);
-              hapticSuccess();
-              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
-            } catch (e) {
-              setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
-            } finally {
-              setPublishing(false);
-            }
-          },
-        },
+        { text: 'Publish page', onPress: async () => { if (await publication.run('publish')) hapticSuccess(); } },
       ],
     });
   };
-
-  // leader/admin tier only (isAdminTierRole), scoped to THIS led community's
-  // own role, not "admin-tier of any led community" -- a person who is only
-  // events/member_care/finance here must never see this, even if they lead
-  // a different community elsewhere as admin.
-  const canArchive = !!community && isAdminTierRole(community.role);
-
   const handleArchive = () => {
-    if (!community || archiving) return;
-    // LIZ COPY
+    if (!publication.ready || !canArchive || status === 'archived') return;
     setAlertInfo({
       title: 'Archive this community?',
       message: 'This hides your page from discovery and closes it to new members. Existing members keep their chat and access. You can’t undo this from here.',
       buttons: [
         { text: 'Not yet', style: 'cancel' },
-        {
-          text: 'Archive community',
-          style: 'destructive',
-          onPress: async () => {
-            setArchiving(true);
-            try {
-              await archiveCommunity(community.id);
-              hapticWarning();
-              queryClient.invalidateQueries({ queryKey: ['creator-access'] });
-            } catch (e) {
-              setAlertInfo({ title: 'That did not save', message: friendlyError(e, 'Try again in a moment.') });
-            } finally {
-              setArchiving(false);
-            }
-          },
-        },
+        { text: 'Archive community', style: 'destructive', onPress: async () => { if (await publication.run('archive')) hapticWarning(); } },
       ],
     });
   };
@@ -126,6 +93,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
           <Text accessibilityRole="header" style={styles.title}>Community settings</Text>
           <Text style={styles.intro}>Edit your page and choose how people join.</Text>
 
+          <CommunityPublicationFeedback publication={publication} />
           <View style={styles.hubStack}>
             <TouchableOpacity
               style={styles.editPageCard}
@@ -158,9 +126,17 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
+            {PUBLIC_PAGE_CONTROL_ENABLED && <TouchableOpacity style={styles.editPageCard}
+              onPress={() => router.push('/creator/public-page' as never)} accessibilityRole="button"
+              accessibilityLabel="Visibility and link" accessibilityHint="Choose where people can find your community and manage its page status.">
+              <View style={styles.editPageTextWrap}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.editPageTitle}>Visibility &amp; link</Text>
+                <Text style={styles.editPageHint}>Choose where people can find your community and manage its page status.</Text>
+              </View><ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
+            </TouchableOpacity>}
           </View>
 
-          {community?.status === 'draft' && (
+          {status === 'draft' && (
             <View style={styles.draftBanner}>
               {/* LIZ COPY */}
               <Text style={styles.draftBannerTitle}>Draft community</Text>
@@ -170,10 +146,10 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
               <TouchableOpacity
                 style={[styles.publishBtn, publishing && { opacity: 0.6 }]}
                 onPress={handlePublish}
-                disabled={publishing}
+                disabled={!publication.ready}
                 accessibilityRole="button"
                 accessibilityLabel="Publish your page"
-                accessibilityState={{ disabled: publishing, busy: publishing }}
+                accessibilityState={{ disabled: !publication.ready, busy: publishing }}
               >
                 <CreatorActionFill />
                 <View style={styles.actionContent}>
@@ -192,7 +168,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
               persistent published counterpart instead of just disappearing
               once a page goes live -- otherwise this tab goes quiet exactly
               when a creator most needs to find their link. */}
-          {community?.status === 'active' && (
+          {status === 'active' && (
             <View style={styles.liveBanner}>
               {/* LIZ COPY */}
               <Text style={styles.liveBannerTitle}>Published community</Text>
@@ -200,17 +176,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
                 {buildCommunityPublicLink(community.handle).replace('https://', '')}.{' '}
                 Your visibility and joining settings still apply.
               </Text>
-              {PUBLIC_PAGE_CONTROL_ENABLED && (
-                <TouchableOpacity
-                  style={styles.inlineAction}
-                  onPress={() => router.push('/creator/public-page' as never)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Visibility and link"
-                >
-                  <Text style={styles.liveBannerLink}>Visibility &amp; link &rarr;</Text>
-                </TouchableOpacity>
-              )}
+
             </View>
           )}
 
@@ -247,7 +213,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
 
           {canArchive && (
             <View style={styles.archiveSection}>
-              {community?.status === 'archived' ? (
+              {status === 'archived' ? (
                 <View style={styles.archivedBanner}>
                   {/* LIZ COPY */}
                   <Text style={styles.archivedBannerTitle}>Archived community</Text>
@@ -263,10 +229,10 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
                   <TouchableOpacity
                     style={[styles.archiveBtn, archiving && styles.archiveBtnBusy]}
                     onPress={handleArchive}
-                    disabled={archiving}
+                    disabled={!publication.ready}
                     accessibilityRole="button"
                     accessibilityLabel="Archive this community"
-                    accessibilityState={{ disabled: archiving, busy: archiving }}
+                    accessibilityState={{ disabled: !publication.ready, busy: archiving }}
                   >
                     {archiving ? (
                       <ActivityIndicator size="small" color={Colors.errorRed} />

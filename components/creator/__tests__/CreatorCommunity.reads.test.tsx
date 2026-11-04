@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch=jest.fn(async()=>({})), mockPush=jest.fn(), mockPublish=jest.fn(), mockArchive=jest.fn();
-let mockAccess: any, mockCommunity: any, mockPublicPage: boolean, mockFocused: boolean;
+let mockAccess: any, mockCommunity: any, mockPublicPage: boolean, mockFocused: boolean, mockPublication: any;
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:jest.fn()})}));
 jest.mock('../../../hooks/useCreatorAccessRead',()=>({useCreatorAccessRead:()=>mockAccess}));
@@ -13,6 +13,8 @@ jest.mock('../../../lib/haptics',()=>({hapticSuccess:jest.fn(),hapticWarning:jes
 jest.mock('../CreatorActionFill',()=>({CreatorActionFill:()=>null}));
 jest.mock('../../BrandedAlert',()=>({BrandedAlert:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
+jest.mock('../../../hooks/useCommunityPublication',()=>({useCommunityPublication:()=>mockPublication}));
+jest.mock('../CommunityPublicationFeedback',()=>({CommunityPublicationFeedback:()=>null}));
 import Screen from '../../../app/(creator)/community';
 import { BrandedAlert } from '../../BrandedAlert';
 import { Redirect } from 'expo-router';
@@ -20,7 +22,7 @@ let tree:ReactTestRenderer;
 const text=(node:any):string=>typeof node==='string'?node:Array.isArray(node)?node.map(text).join(''):(node?.children??[]).map(text).join('');
 const control=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
 const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return text(tree.toJSON());};
-beforeEach(()=>{jest.clearAllMocks();mockPublicPage=true;mockFocused=true;mockAccess={data:{},isLoading:false,isError:false,isFetching:false,refetch:mockRefetch};mockCommunity={id:'community',name:'Our Sunday Table',status:'active',role:'leader'};});
+beforeEach(()=>{jest.clearAllMocks();mockPublicPage=true;mockFocused=true;mockAccess={data:{},isLoading:false,isError:false,isFetching:false,refetch:mockRefetch};mockCommunity={id:'community',name:'Our Sunday Table',status:'active',role:'leader'};mockPublication={state:undefined,ready:true,busy:false,run:jest.fn(async(action:string)=>{if(action==='publish')mockPublish();else mockArchive();return true;})};});
 afterEach(()=>act(()=>tree?.unmount()));
 it('waits for account-owned settings before showing any tools or publication actions',async()=>{
  mockAccess.isLoading=true;await render();expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Loading community settings').length).toBeGreaterThan(0);expect(control('Edit community')).toBeUndefined();expect(control('Archive this community')).toBeUndefined();
@@ -55,3 +57,7 @@ it('does not pull another app tab back into management after access changes',asy
  mockCommunity.role='events';mockFocused=false;await render();expect(tree.root.findAllByType(Redirect)).toHaveLength(0);
  mockFocused=true;await act(async()=>tree.update(<Screen/>));expect(tree.root.findByType(Redirect).props.href).toBe('/(tabs)/friends/manage');
 });
+
+it('makes visibility settings reachable before a community is published',async()=>{mockCommunity.status='draft';await render();act(()=>control('Visibility and link').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/public-page');});
+it('disables publication and archive while an earlier change is unconfirmed',async()=>{mockCommunity.status='draft';mockPublication.ready=false;await render();expect(control('Publish your page').props.disabled).toBe(true);expect(control('Archive this community').props.disabled).toBe(true);act(()=>control('Publish your page').props.onPress());expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);});
+it('explains the actual discovery choice in the publication confirmation',async()=>{mockCommunity.status='draft';mockPublication.state={status:'draft',discoverable:false};await render();act(()=>control('Publish your page').props.onPress());expect(tree.root.findByType(BrandedAlert).props.message).toContain('hidden from discovery');});

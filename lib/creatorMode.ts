@@ -1,3 +1,4 @@
+import { changeCommunityPublication, publicationAttempt, readCommunityPublication, type CommunityPublicationAction } from './communityPublication';
 import { getCommunityJoiningOptions, hasPublishedCommunityJoining } from './communityJoiningOptions';
 /**
  * Creator mode data layer (phase 4 logic).
@@ -227,20 +228,11 @@ export async function getCreatorAccess(expectedUserId?: unknown): Promise<Creato
 
 // -- members ------------------------------------------------------------------
 
-/**
- * Publish a draft community: status draft -> active through the leader-scoped
- * communities_update RLS policy. Only active communities are world-readable
- * (lock view, discovery, member pages); this is the one-way door that opens
- * the page. archiveCommunity (below) is the matching leader-gated closing
- * door.
+/** Publish a draft with current creator authority and an exact conditional receipt.
+ * Existing visibility, joining policy, RLS and publication triggers still apply.
  */
-export async function publishCommunity(communityId: string): Promise<void> {
-  const { error } = await supabase
-    .from('communities')
-    .update({ status: 'active' })
-    .eq('id', communityId)
-    .eq('status', 'draft');
-  if (error) throw error;
+export async function publishCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'publish'), scope);
 }
 
 /**
@@ -256,14 +248,8 @@ export async function publishCommunity(communityId: string): Promise<void> {
  * away a stale draft they never published. Guarded against re-archiving an
  * already-archived row.
  */
-export async function archiveCommunity(communityId: string): Promise<void> {
-  const { error, count } = await supabase
-    .from('communities')
-    .update({ status: 'archived' }, { count: 'exact' })
-    .eq('id', communityId)
-    .neq('status', 'archived');
-  if (error) throw error;
-  if (!count) throw new Error('Could not archive that community.');
+export async function archiveCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'archive'), scope);
 }
 
 /**
@@ -277,13 +263,8 @@ export async function archiveCommunity(communityId: string): Promise<void> {
  * get_discoverable_communities() via status alone, see
  * getCommunityDiscoverable() below.
  */
-export async function unpublishCommunity(communityId: string): Promise<void> {
-  const { error } = await supabase
-    .from('communities')
-    .update({ status: 'draft' })
-    .eq('id', communityId)
-    .eq('status', 'active');
-  if (error) throw error;
+export async function unpublishCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'unpublish'), scope);
 }
 
 /**
@@ -297,14 +278,8 @@ export function buildCommunityPublicLink(handle: string): string {
   return `https://washedup.app/c/${handle}`;
 }
 
-/**
- * Whether the community appears in general browse/search (Screen 14's
- * discovery toggle), backed by communities.discoverable
- * (supabase/migrations/20260901030000, DRAFT -- not applied). SELF-FLIPPING,
- * same mechanism as getJoinPolicy: until that migration applies, the select
- * errors with 42703 and this returns null, so the toggle stays hidden -- no
- * dead control. The moment it applies, the real value flows and the toggle
- * wakes.
+/** Legacy read helper. A readable discovery value does not imply write access.
+ * The creator editor uses the scoped publication service and capability check.
  */
 export async function getCommunityDiscoverable(communityId: string): Promise<boolean | null> {
   const { data, error } = await supabase
@@ -317,24 +292,13 @@ export async function getCommunityDiscoverable(communityId: string): Promise<boo
   return typeof v === 'boolean' ? v : null;
 }
 
-/**
- * Leader-only by the existing communities_update RLS policy. No dedicated
- * RPC -- unlike join_policy, flipping discoverable carries no side effect to
- * guard (nothing else reads or reacts to it), so a plain update is the
- * conservative choice, the same shape publishCommunity() already uses.
- * Checks {count:'exact'} the same way archiveCommunity() and
- * updateJoinGateSettings() do, so a denied write (not a leader) cannot
- * silently report success while changing zero rows.
+/** Change discovery through the supported creator-scoped RPC, preserving status
+ * and admission. A missing backend capability prevents dispatch.
  */
-export async function setCommunityDiscoverable(
-  communityId: string,
-  discoverable: boolean,
-): Promise<boolean> {
-  const { error, count } = await supabase
-    .from('communities')
-    .update({ discoverable }, { count: 'exact' })
-    .eq('id', communityId);
-  return !error && !!count;
+export async function setCommunityDiscoverable(communityId: string, discoverable: boolean, scope: CreatorPageScope): Promise<boolean> {
+  const action: CommunityPublicationAction = discoverable ? 'show' : 'hide';
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), action), scope);
+  return true;
 }
 
 /**
