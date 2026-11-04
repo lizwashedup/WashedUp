@@ -13,7 +13,7 @@ beforeEach(()=>{jest.clearAllMocks();mockCurrent=true;mockScope={userId:'creator
 afterEach(()=>act(()=>tree?.unmount()));
 it('requires an explicit personal choice and preserves buyer confirmation explanation',async()=>{
  await act(async()=>{tree=create(render());});expect(mockSave).not.toHaveBeenCalled();expect(control().props.value).toBe(false);
- await act(async()=>control().props.onValueChange(true));expect(mockSave).toHaveBeenCalledWith(saved,true,mockScope);expect(control().props.value).toBe(true);
+ await act(async()=>control().props.onValueChange(true));expect(mockSave).toHaveBeenCalledWith(saved,true,expect.objectContaining({userId:mockScope.userId,isCurrent:expect.any(Function)}));expect(control().props.value).toBe(true);
  expect(JSON.stringify(tree.toJSON())).toContain('Buyer confirmations stay on');expect(JSON.stringify(tree.toJSON())).toContain('Sale emails are not active yet');
 });
 it('read failure is recoverable without showing a fabricated default',async()=>{
