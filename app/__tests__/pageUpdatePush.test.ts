@@ -12,10 +12,17 @@ import {organizationPageUpdatePushRoute} from '../../lib/organizationPageUpdate'
 // Execute the actual root click-handler body with navigation captured. This
 // proves branch continuity, not SDK registration or cold-start/auth lifecycle.
 const source=fs.readFileSync(path.join(__dirname,'../_layout.tsx'),'utf8');
-const start=source.indexOf('    const onClick = (event: any) => {');
-const end=source.indexOf('\n    let cancelled = false;',start);
-if(start<0||end<0)throw Error('Root click handler boundary changed');
-const code=ts.transpileModule(source.slice(start,end)+'\nglobalThis.handler=onClick;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const parsed=ts.createSourceFile('_layout.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const handlers: ts.VariableDeclaration[]=[];
+function visit(node:ts.Node){
+  if(ts.isVariableDeclaration(node)&&ts.isIdentifier(node.name)&&node.name.text==='onClick')handlers.push(node);
+  ts.forEachChild(node,visit);
+}
+visit(parsed);
+if(handlers.length!==1||!handlers[0].initializer)throw Error('Expected one root click handler');
+// Branch tests exercise an active subscription. Full-root lifecycle tests cover
+// retirement; extract the declaration itself rather than a later local variable.
+const code=ts.transpileModule('const cancelled=false; const '+handlers[0].getText(parsed)+';\nglobalThis.handler=onClick;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 function click(data:any,enabled=true){const push=jest.fn();const context:any={safePush:push,communityJoinPushRoute,attendeeMessagePushRoute,organizationPageUpdatePushRoute,communityChatPushRoute,pageInvitationPushRoute,memberReactionPushRoute,CREATOR_PAGES_ENABLED:enabled,COMMUNITIES_ENABLED:true,YOURS_PAGE_ENABLED:true,COMMUNITY_CHAT_GROUPING_ENABLED:false};vm.runInNewContext(code,context);context.handler({notification:{additionalData:data}});return push;}
 const page='22222222-2222-4222-8222-222222222222',update='33333333-3333-4333-8333-333333333333';
 it('root click opens exact organization/update before an unrelated chat fallback',()=>{const push=click({type:'creator_page_update',creatorPageId:page,creatorPageBroadcastId:update,eventId:'wrong-chat'});expect(push).toHaveBeenCalledWith(`/organization/${page}?identity=page&update=${update}`);expect(push).toHaveBeenCalledTimes(1);});
