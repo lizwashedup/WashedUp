@@ -1,3 +1,4 @@
+import { formatLocalPlanDateTime as formatEventDate } from '../../lib/planDateLabels';
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
@@ -24,19 +25,6 @@ function formatTime(dateString: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function formatEventDate(dateString: string): string {
-  const d = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  if (dateStart.getTime() === todayStart.getTime()) return `Today at ${timeStr}`;
-  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow at ${timeStr}`;
-  const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  return `${dayStr} at ${timeStr}`;
-}
 
 export const ChatRow = React.memo(function ChatRow({
   chat,
