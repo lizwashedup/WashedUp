@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, View, ScrollView, StyleSheet } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -71,18 +72,18 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
       {loaded && list.length > 0 ? <ReadyInvitation key={owner} planId={planId} userId={viewer.viewerId!} people={list} operationScope={{ userId: viewer.viewerId!, isCurrent: () => !closing && !done.current && !pending.current && mounted.current && viewer.isCurrent() }} onDone={finish} onBusyChange={value => {
         if (busy.current.owner === owner && viewer.isCurrent()) busy.current.value = value;
       }} /> : <SafeAreaView style={styles.container}>
-        <View style={styles.state}>
+        <ScrollView style={styles.stateScroll} contentContainerStyle={styles.state}>
           <Text style={styles.title}>{empty ? 'You’re all set' : loading ? 'Finding your people' : 'Your people couldn’t load'}</Text>
           {loading || empty ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading your people" /> : <>
             <Text style={styles.description}>You can try again or continue to your plan.</Text>
             <Pressable style={styles.retry} onPress={retry} accessibilityRole="button" accessibilityLabel="Retry loading your people">
-              <Text style={styles.retryText}>Try again</Text>
+              <Text style={styles.retryText} numberOfLines={1} adjustsFontSizeToFit>Try again</Text>
             </Pressable>
           </>}
-          <Pressable style={styles.skip} onPress={finish} accessibilityRole="button" accessibilityLabel="Continue without inviting">
-            <Text style={styles.skipText}>Not now</Text>
-          </Pressable>
-        </View>
+        </ScrollView>
+        <Pressable style={styles.skip} onPress={finish} accessibilityRole="button" accessibilityLabel="Continue without inviting">
+          <Text style={styles.skipText} numberOfLines={1} adjustsFontSizeToFit>Not now</Text>
+        </Pressable>
       </SafeAreaView>}
     </Modal>
   );
@@ -108,11 +109,12 @@ function ReadyInvitation({ planId, userId, people, operationScope, onDone, onBus
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   center: { flex: 1, justifyContent: 'center' },
-  state: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, gap: 20 },
+  stateScroll: { flex: 1, minHeight: 0 },
+  state: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, gap: 20 },
   title: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   description: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary },
-  retry: { minHeight: 48, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.terracotta, borderRadius: 6 },
+  retry: { minHeight: 48, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.terracotta, borderRadius: 6 },
   retryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
-  skip: { minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  skip: { minHeight: 44, paddingHorizontal: 24, paddingVertical: 12, justifyContent: 'center', alignItems: 'center' },
   skipText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.secondary },
 });
