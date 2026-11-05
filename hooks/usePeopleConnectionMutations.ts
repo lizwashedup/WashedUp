@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { yoursKeys } from '../lib/yours/keys';
 import { INBOX_COUNT_KEY } from '../constants/QueryKeys';
 import { sendOrAcceptPeopleRequest, UnconfirmedPeopleConnectionError } from '../lib/yours/connectionRequests';
@@ -54,7 +55,7 @@ function useConnectionMutation<R, V>(write: (value: V) => Promise<R>, runtime: R
     mutationFn: async call => {
       runtime.requireCurrent(call);
       if (call.scope) {
-        const { data: { user }, error } = await supabase.auth.getUser();
+        const { data: { user }, error } = await requestWithDeadline(supabase.auth.getUser(), 8000);
         runtime.requireCurrent(call);
         if (error) throw error;
         if (!user || user.id !== call.scope.userId) throw new ObsoletePeopleConnectionError();
