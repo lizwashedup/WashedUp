@@ -27,6 +27,7 @@ import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilie
 import { COPY } from '../yours/state/constants';
 import { hapticSelection } from '../../lib/haptics';
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
+import { useActiveSheetClose, type RegisterSheetClose } from '../../hooks/useActiveSheetClose';
 import { usePickerFilter } from '../../hooks/usePickerFilter';
 import { useInviteToCircle, isObsoleteCircleInvite, ObsoleteCircleInviteError, type InviteToCircleScope } from '../../hooks/useInviteToCircle';
 import { supabase } from '../../lib/supabase';
@@ -119,11 +120,13 @@ export default function AddPeopleSheet(props: AddPeopleSheetProps) {
 function OpenAddPeopleSheet(props: AddPeopleSheetProps) {
   const viewer = useObservedUser();
   const visitId = useMemo(() => ++nextAddPeopleVisit, [props.circleId, viewer.viewerId, viewer.epoch, props.scope]);
-  return <AddPeopleVisit key={visitId} {...props} viewer={viewer} visitId={visitId} />;
+  const { registerClose, closeCurrent } = useActiveSheetClose(visitId);
+  return <Modal visible={props.visible} transparent animationType="slide" onRequestClose={closeCurrent} statusBarTranslucent>
+    <AddPeopleVisit key={visitId} {...props} viewer={viewer} visitId={visitId} registerClose={registerClose} />
+  </Modal>;
 }
 
 function AddPeopleVisit({
-  visible,
   circleId,
   existingMemberIds,
   onClose,
@@ -132,7 +135,8 @@ function AddPeopleVisit({
   appearance,
   viewer,
   visitId,
-}: AddPeopleSheetProps & { viewer: ObservedUser; visitId: number }) {
+  registerClose,
+}: AddPeopleSheetProps & { viewer: ObservedUser; visitId: number; registerClose: RegisterSheetClose }) {
   const insets = useSafeAreaInsets();
   const s = useMemo(() => appearance ? { ...styles, ...sheetAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
@@ -211,6 +215,7 @@ function AddPeopleVisit({
     setSelected(new Set());
     onClose();
   };
+  useLayoutEffect(() => registerClose(close));
 
   const confirm = async () => {
     const current = allowance.current;
@@ -247,13 +252,6 @@ function AddPeopleVisit({
     appearance && addError ? 'Try again' : appearance && count === 0 ? 'Add people' : COPY.circleAddConfirm(count);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={close}
-      statusBarTranslucent
-    >
       <View style={s.backdrop}>
         <Pressable style={s.backdropTap} onPress={close} accessibilityRole="button" accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[s.sheet, { paddingBottom: insets.bottom + 12 }]} accessibilityViewIsModal>
@@ -347,7 +345,6 @@ function AddPeopleVisit({
           )}
         </View>
       </View>
-    </Modal>
   );
 }
 

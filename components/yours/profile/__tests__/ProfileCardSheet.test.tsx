@@ -34,6 +34,17 @@ beforeEach(() => {
   mockProfile.mockImplementation(() => result); mockSend.mockResolvedValue('requested'); mockRefetch.mockResolvedValue({}); mockRetryIdentity.mockResolvedValue(undefined);
 });
 afterEach(() => cleanup.splice(0).forEach(fn => fn()));
+it('keeps the native sheet mounted when identity resolves and resets private contents', () => {
+  mockViewerId = null; mockIdentityLoading = true;
+  const f = mount(), sheet = f.sheet();
+  mockViewerId = 'alice'; mockIdentityLoading = false; mockEpoch++; f.update();
+  expect(f.sheet()).toBe(sheet); expect(f.button('Add Amelia')).toBeDefined();
+  const nativeClose = sheet.props.onClose;
+  mockViewerId = 'other'; mockEpoch++; f.update();
+  expect(f.sheet()).toBe(sheet); expect(f.button('Add Amelia')).toBeUndefined();
+  act(() => { nativeClose(); nativeClose(); });
+  expect(f.props.onClose).toHaveBeenCalledTimes(1); expect(mockSend).not.toHaveBeenCalled();
+});
 it('does not mount query or identity work while hidden', () => { mount({ visible: false }); expect(mockProfile).not.toHaveBeenCalled(); });
 it('preserves minimal profile/history only and uses truthful Add instead of Add back', () => {
   const f = mount(); expect(mockProfile).toHaveBeenCalledWith('alice', 'amelia', expect.objectContaining({ userId: 'alice', epoch: 0, isCurrent: expect.any(Function) })); expect(f.button('Add Amelia')).toBeDefined(); expect(f.text()).not.toContain('Add back'); expect(f.text()).toContain('2 shared plans');

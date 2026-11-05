@@ -54,6 +54,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup.splice(0).forEach(fn => fn()); jest.restoreAllMocks(); });
 
+it('keeps one native popup through initial identity loading and account changes', async () => {
+  const f = mount(), popup = f.tree.root.findByType(Modal);
+  await flush(); expect(f.tree.root.findByType(Modal)).toBe(popup);
+  f.choose(); const nativeBack = popup.props.onRequestClose;
+  f.auth('other'); await flush();
+  expect(f.tree.root.findByType(Modal)).toBe(popup);
+  expect(f.confirm().props.disabled).toBe(true);
+  act(() => { nativeBack(); nativeBack(); });
+  expect(f.close).toHaveBeenCalledTimes(1); expect(mockAdd).not.toHaveBeenCalled();
+});
+
 it('preserves accepted-person filtering and direct-add recipients', async () => {
   const f = mount(); await flush(); expect(f.button('Already here')).toBeUndefined(); f.choose();
   act(() => { void f.confirm().props.onPress(); }); await flush();
