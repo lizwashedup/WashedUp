@@ -1,100 +1,82 @@
-/**
- * Referral-link landing for https://washedup.app/r/<code> and
- * washedupapp://r/<code> (S-05 fix, 2026-08-25).
- *
- * Before this screen existed the app CLAIMED /r/ on both platforms
- * (iOS applinks on the whole domain, Android intent filter on /r/) but had
- * no route for it, so a tapped referral link opened the app onto
- * +not-found's spinner and bounced -- dead on iOS entirely, since the OS
- * never even offered the browser. Now the tap lands here:
- *   - signed in  -> claim the inviter's server-side request, then land on the
- *     inviter's profile so the tap visibly DID something. handleReferralUrl
- *     in app/_layout.tsx may fire for the same URL via the Linking listener;
- *     the claim RPC is idempotent, so the double-fire is harmless.
- *   - signed out -> stash the code (consumePendingReferral runs it after
- *     sign-in, unchanged) and continue to the auth gate.
- *   - dead code  -> a real screen with a way onward, mirroring /e/'s
- *     "this one is gone" pattern, never a silent bounce.
- */
-
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+/** Referral entry preserves inviter-to-recipient direction; unknown results stay retryable. */
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScaledText as Text } from '../../components/ScaledText';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
-import { supabase } from '../../lib/supabase';
 import { unauthedRoute } from '../../lib/authRouting';
-import { resolveAndConnect, stashPendingReferral } from '../../lib/yours/referralLink';
+import { stashPendingReferral } from '../../lib/yours/referralLink';
+import { claimReferralForRecipient } from '../../lib/yours/referralClaim';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { useObservedUser } from '../../hooks/useObservedUser';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
 
+type State = 'loading' | 'retry' | 'unavailable' | 'accountChanged';
 export default function ReferralLanding() {
   const { code } = useLocalSearchParams<{ code: string }>();
-  const [dead, setDead] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!code || typeof code !== 'string' || !/^[A-Za-z0-9_-]+$/.test(code)) {
-        if (!cancelled) setDead(true);
+  const account = useObservedUser({ allowSignedOut: true });
+  const [state, setState] = useState<State>('loading');
+  const [attempt, setAttempt] = useState(0);
+  const visit = useRef<object | null>(null);
+  const [renderVisit, setRenderVisit] = useState<object | null>(null);
+  const owner = useMemo(() => ({ identity: null as { id: string | null; epoch: number } | null }), [code]);
+  const busy = useRef(false);
+  useFocusEffect(useCallback(() => {
+    const activeVisit = {}; visit.current = activeVisit; setRenderVisit(activeVisit); busy.current = true;
+    const current = () => visit.current === activeVisit && account.isCurrent();
+    setState('loading');
+    void (async () => {
+      if (!code || typeof code !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(code)) { if (current()) setState('unavailable'); return; }
+      if (account.isLoading) return;
+      if (account.error || account.viewerId === undefined) { if (current()) setState('retry'); return; }
+      if (!owner.identity) owner.identity = { id: account.viewerId, epoch: account.epoch };
+      if (owner.identity.id !== account.viewerId || owner.identity.epoch !== account.epoch) { if (current()) setState('accountChanged'); return; }
+      if (!account.viewerId) {
+        try {
+          await requestWithDeadline(stashPendingReferral(code), 12_000);
+          if (current()) router.replace(unauthedRoute() as never);
+        } catch { if (current()) setState('retry'); }
         return;
       }
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (cancelled) return;
-        if (!data.session?.user) {
-          await stashPendingReferral(code);
-          if (!cancelled) router.replace(unauthedRoute() as never);
-          return;
-        }
-        const inviterId = await resolveAndConnect(code);
-        if (cancelled) return;
-        if (!inviterId) {
-          setDead(true);
-          return;
-        }
-        if (YOURS_PAGE_ENABLED) {
-          router.replace(`/person/${inviterId}` as never);
-        } else {
-          router.replace('/(tabs)/plans' as never);
-        }
-      } catch {
-        if (!cancelled) setDead(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [code]);
+      const result = await claimReferralForRecipient(code, { userId: account.viewerId, isCurrent: current });
+      if (!current() || result.status === 'stale') return;
+      if (result.status === 'connected') router.replace((YOURS_PAGE_ENABLED ? `/person/${result.inviterId}` : '/(tabs)/plans') as never);
+      else setState(result.status);
+    })().finally(() => { if (visit.current === activeVisit) busy.current = false; });
+    return () => { if (visit.current === activeVisit) visit.current = null; };
+  }, [code, account.viewerId, account.epoch, account.isCurrent, account.isLoading, account.error, owner, attempt]));
 
-  if (dead) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={styles.centered}>
-          {/* copy to the taste gate: never a dead end, always a way on */}
-          <Text style={styles.title}>this invite is gone</Text>
-          <Text style={styles.body}>the link may be old, or whoever sent it made a new one.</Text>
-          <TouchableOpacity
-            style={styles.cta}
-            onPress={() => router.replace('/(tabs)/plans' as never)}
-            accessibilityRole="button"
-          >
-            <Text style={styles.ctaText}>see what's on</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
+  const canAct = () => !!renderVisit && visit.current === renderVisit && account.isCurrent();
+  const retry = () => {
+    if (!canAct() || busy.current) return;
+    busy.current = true;
+    if (account.error) void account.retry();
+    else setAttempt(value => value + 1);
+  };
+  if (state === 'loading') return <View style={styles.loading}><ActivityIndicator size="large" color={Colors.terracotta} /></View>;
+  const unavailable = state === 'unavailable', changed = state === 'accountChanged';
   return (
-    <View style={styles.loading}>
-      <ActivityIndicator size="large" color={Colors.terracotta} />
-    </View>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.centered}>
+        <Text style={styles.title}>{unavailable ? 'this invite is unavailable' : changed ? 'your account changed' : 'couldn’t open this invite'}</Text>
+        <Text style={styles.body}>{unavailable ? 'This invite can’t be used right now. You can still explore plans.' : changed ? 'Open the invite again to use it with your current account.' : 'We couldn’t confirm the connection. Please try again.'}</Text>
+        {state === 'retry' && <TouchableOpacity style={styles.cta} onPress={retry} accessibilityRole="button" accessibilityLabel="Try invite again">
+          <Text style={styles.ctaText}>try again</Text>
+        </TouchableOpacity>}
+        <TouchableOpacity style={styles.cta} onPress={() => { if (canAct()) { visit.current = null; router.replace('/(tabs)/plans' as never); } }} accessibilityRole="button" accessibilityLabel="See plans">
+          <Text style={styles.ctaText}>see what's on</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.parchment },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.parchment },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 10 },
+  centered: { flexGrow: 1, paddingVertical: 24, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 10 },
   title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center' },
   cta: {
