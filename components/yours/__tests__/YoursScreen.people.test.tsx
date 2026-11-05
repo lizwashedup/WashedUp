@@ -30,6 +30,7 @@ let mockRequestsError: Error | null = null, mockRequestsFetching = false;
 const mockRefetchRequests = jest.fn();
 let mockGridLoading = false, mockGridError: Error | null = null, mockBacklogError: Error | null = null;
 const mockRefetchPeople = jest.fn(), mockRefetchBacklog = jest.fn();
+const mockGridScope = jest.fn(), mockBacklogScope = jest.fn();
 const mockGetUser = jest.fn(), mockRetryIdentity = jest.fn();
 let mockUseRealIdentity = false;
 let mockIdentityError: Error | null = null;
@@ -50,9 +51,9 @@ jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => mock
   ? jest.requireActual('../../../hooks/useObservedUser').useObservedUser()
   : { viewerId: mockUid, epoch: 0, error: mockIdentityError, isLoading: mockLoading, isCurrent: () => true, retry: mockRetryIdentity },
 }));
-jest.mock('../../../hooks/useYoursGrid', () => ({ useYoursGrid: (userId: string | null | undefined) => ({ data: mockUseRealIdentity ? (mockPeopleByAccount[userId ?? ''] ?? []) : mockPeople, isLoading: mockGridLoading, error: mockGridError, refetch: mockRefetchPeople }) }));
+jest.mock('../../../hooks/useYoursGrid', () => ({ useYoursGrid: (userId: string | null | undefined, scope: unknown) => { mockGridScope(userId, scope); return ({ data: mockUseRealIdentity ? (mockPeopleByAccount[userId ?? ''] ?? []) : mockPeople, isLoading: mockGridLoading, error: mockGridError, refetch: mockRefetchPeople }); } }));
 jest.mock('../../../hooks/useIncomingRequests', () => ({ useIncomingRequests: () => ({ data: mockRequests, error: mockRequestsError, isFetching: mockRequestsFetching, refetch: mockRefetchRequests }) }));
-jest.mock('../../../hooks/usePlanHistoryBacklog', () => ({ usePlanHistoryBacklog: () => ({ data: mockBacklog, error: mockBacklogError, refetch: mockRefetchBacklog }) }));
+jest.mock('../../../hooks/usePlanHistoryBacklog', () => ({ usePlanHistoryBacklog: (userId: string | null | undefined, scope: unknown) => { mockBacklogScope(userId, scope); return { data: mockBacklog, error: mockBacklogError, refetch: mockRefetchBacklog }; } }));
 jest.mock('../../../hooks/useReferral', () => ({ useReferral: () => ({ ensureReferralCode: jest.fn() }) }));
 jest.mock('../../../hooks/useGetOrCreateDm', () => ({ isObsoleteDmOperation: (error: any) => error?.code === 'obsolete-dm-fixture', useGetOrCreateDm: () => ({ mutateAsync: (...args: unknown[]) => mockDm(...args), isPending: false }) }));
 jest.mock('../../../lib/yours/invite', () => ({ openInviteComposer: jest.fn() }));
@@ -549,4 +550,16 @@ it('does not let an old retry block the new account or settle its busy feedback'
   await act(async () => next.resolve({isSuccess:false}));
   expect(tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.disabled).toBe(false);
   expect(tree!.root.findAllByType(RequestStack)).toHaveLength(0);
+});
+
+it('passes the observed account lifetime to both People reads across an auth roundtrip', async () => {
+  mockUseRealIdentity = true; mount(); await flush();
+  const [user, before] = mockGridScope.mock.calls.at(-1)!;
+  expect(user).toBe('viewer'); expect(before.userId).toBe('viewer'); expect(before.isCurrent()).toBe(true);
+  expect(mockBacklogScope.mock.calls.at(-1)).toEqual([user, before]);
+  emit('other'); expect(before.isCurrent()).toBe(false);
+  emit('viewer'); await flush();
+  const [nextUser, after] = mockGridScope.mock.calls.at(-1)!;
+  expect(nextUser).toBe('viewer'); expect(after.epoch).toBeGreaterThan(before.epoch); expect(after.isCurrent()).toBe(true);
+  expect(before.isCurrent()).toBe(false); expect(mockBacklogScope.mock.calls.at(-1)).toEqual([nextUser, after]);
 });
