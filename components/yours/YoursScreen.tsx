@@ -4,7 +4,8 @@
  * Only mounted when YOURS_PAGE_ENABLED is true.
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert, ScrollView, useWindowDimensions } from 'react-native';
+import { ScaledText } from '../ScaledText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -83,6 +84,7 @@ export default function YoursScreen() {
   const userLoading = viewer.isLoading;
   const userId = userLoading || viewer.error ? undefined : (viewer.viewerId ?? undefined);
   const uid = userId ?? '';
+  const { height } = useWindowDimensions();
   const identityRetryRef = useRef(false);
   const retryIdentity = async () => {
     if (identityRetryRef.current || viewer.isLoading || !viewer.isCurrent()) return;
@@ -92,7 +94,8 @@ export default function YoursScreen() {
   };
   const peopleRead = useYoursGrid(userId);
   const { data: people = [], isLoading: gridLoading } = peopleRead;
-  const { data: requests = [] } = useIncomingRequests(userId);
+  const requestsRead = useIncomingRequests(userId, { userId: uid, epoch: viewer.epoch, isCurrent: viewer.isCurrent });
+  const { data: requests = [] } = requestsRead;
   const backlogRead = usePlanHistoryBacklog(userId);
   const { data: backlog = [] } = backlogRead;
   const { ensureReferralCode } = useReferral();
@@ -194,6 +197,21 @@ export default function YoursScreen() {
     }
   };
   const openPaths = () => { if (isCurrentSection(scope)) setPathsOpen(true); };
+  const requestsRetryRef = useRef<{ scope: typeof scope } | null>(null);
+  const [requestsRetry, setRequestsRetry] = useState<typeof scope | null>(null);
+  const retryRequests = async () => {
+    if (!isCurrentSection(scope) || requestsRetryRef.current?.scope === scope || requestsRead.isFetching) return;
+    const attempt = { scope };
+    requestsRetryRef.current = attempt;
+    setRequestsRetry(scope);
+    try { await requestsRead.refetch(); }
+    finally {
+      if (requestsRetryRef.current === attempt) {
+        requestsRetryRef.current = null;
+        if (isCurrentSection(scope)) setRequestsRetry(null);
+      }
+    }
+  };
   const openRequestsSheet = () => { if (isCurrentSection(scope)) setRequestsOpen(true); };
   const openAcceptedPerson = (id: string) => {
     if (isCurrent(scope) && peopleRef.current.some(person => person.user_id === id)) router.push(`/person/${id}` as never);
@@ -286,7 +304,7 @@ export default function YoursScreen() {
       autoOpenedRequestsRef.current = false;
       return;
     }
-    if (autoOpenedRequestsRef.current) return;
+    if (autoOpenedRequestsRef.current || !uid || !focused || !viewer.isCurrent()) return;
     if (requests.length > 0) {
       autoOpenedRequestsRef.current = true;
       // Capture the notification's target before clearing the URL, so the list
@@ -298,7 +316,7 @@ export default function YoursScreen() {
       // revisit (the ref only guards within a single mount).
       router.setParams({ openRequests: undefined, requesterId: undefined } as never);
     }
-  }, [openRequests, requests.length, requesterId]);
+  }, [openRequests, requests.length, requesterId, uid, focused, viewer.epoch, viewer.isCurrent]);
 
   const invite = async () => {
     if (!isCurrent(scope)) return;
@@ -427,6 +445,14 @@ export default function YoursScreen() {
               In the fresh/empty states PeopleScreen never mounts, so the global
               banner must still cover People; a zero-connection user is exactly
               who has a pending incoming request. */}
+          {!!requestsRead.error && <ScrollView style={[styles.requestsRecovery, { maxHeight: height * 0.3 }]}
+            contentContainerStyle={styles.requestsRecoveryContent} keyboardShouldPersistTaps="handled">
+            <ScaledText accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
+              {requests.length ? 'Connection requests couldn’t refresh. Your saved requests are still here.' : 'Connection requests couldn’t load.'}
+            </ScaledText>
+            <PageAction quiet compact title={requestsRead.isFetching || requestsRetry === scope ? 'Retrying requests…' : 'Retry requests'}
+              disabled={requestsRead.isFetching || requestsRetry === scope} onPress={() => { void retryRequests(); }} />
+          </ScrollView>}
           {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
             <RequestBanner
               appearance={appearance}
@@ -595,6 +621,8 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   tabRow: { flexShrink: 0 },
   peopleRecovery: { marginHorizontal: 20, marginTop: 12, marginBottom: 4, padding: 12, gap: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
+  requestsRecovery: { flexGrow: 0, flexShrink: 0, marginHorizontal: 20, marginTop: 12, marginBottom: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
+  requestsRecoveryContent: { padding: 12, gap: 4 },
   recoveryText: { ...AfterglowType.body, fontFamily: Fonts.sans, color: AfterglowColors.ink },
   addPill: {
     flexDirection: 'row',
