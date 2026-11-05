@@ -666,4 +666,3 @@ export function SurveyOutcomeOverlay({
     </Pressable>
   );
 }
-
