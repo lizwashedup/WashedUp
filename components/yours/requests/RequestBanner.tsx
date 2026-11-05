@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, Text, View, StyleSheet } from 'react-native';
+import { Pressable, View, StyleSheet } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { ChevronRight } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType } from '../../../constants/Typography';

@@ -498,7 +498,7 @@ it('makes failed incoming requests visible and retryable without replacing Plans
   mockRequestsError = new Error('offline'); mount(false);
   expect(JSON.stringify(tree!.toJSON())).toContain('Connection requests couldn’t load.');
   expect(tree!.root.findAllByType(MyPlansView)).toHaveLength(1);
-  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.onPress;
+  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.onPress;
   await act(async () => { retry(); retry(); });
   expect(mockRefetchRequests).toHaveBeenCalledTimes(1);
   expect(tree!.root.findAllByType(RequestStack)).toHaveLength(0);
@@ -507,7 +507,7 @@ it('retains existing requests on a failed refresh and never accepts one by retry
   mockRequests = [{requester_user_id:'jamie'}]; mockRequestsError = new Error('offline'); mount(false);
   expect(JSON.stringify(tree!.toJSON())).toContain('Connection requests couldn’t refresh.');
   expect(tree!.root.findByType(RequestBanner).props.count).toBe(1);
-  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.onPress;
+  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.onPress;
   await act(async () => retry());
   expect(tree!.root.findByType(RequestBanner).props.count).toBe(1);
   expect(tree!.root.findAllByType(RequestStack)).toHaveLength(0);
@@ -516,7 +516,7 @@ it('retains a request notification through read failure and opens only after suc
   mockRequestsError = new Error('offline'); mockParams = {tab:'people',openRequests:'1',requesterId:'jamie'}; mount(false);
   expect(tree!.root.findAllByType(RequestStack)).toHaveLength(0);
   expect(mockSetParams.mock.calls.some(([params]) => Object.prototype.hasOwnProperty.call(params, 'openRequests'))).toBe(false);
-  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.onPress;
+  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.onPress;
   await act(async () => retry());
   mockRequestsError = null; mockRequests = [{requester_user_id:'jamie'}]; update();
   expect(tree!.root.findByType(RequestStack).props.highlightRequesterId).toBe('jamie');
@@ -524,7 +524,7 @@ it('retains a request notification through read failure and opens only after suc
 });
 it.each(['account', 'auth-roundtrip', 'blur', 'tab', 'unmount'])('retires a retained requests retry after %s', mode => {
   mockRequestsError = new Error('offline'); mount(false);
-  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.onPress;
+  const retry = tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.onPress;
   if (mode === 'account') { mockUid = 'other'; update(); }
   if (mode === 'auth-roundtrip') { emit('other'); emit('viewer'); }
   if (mode === 'blur') { mockFocused = false; update(); }
@@ -541,12 +541,12 @@ it('does not open a notification request sheet while Yours is unfocused', () => 
 it('does not let an old retry block the new account or settle its busy feedback', async () => {
   mockRequestsError = new Error('offline'); const old = deferred(), next = deferred();
   mockRefetchRequests.mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise); mount(false);
-  const retry = () => tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.onPress();
+  const retry = () => tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.onPress();
   await act(async () => retry()); mockUid = 'other'; update(); await act(async () => retry());
   expect(mockRefetchRequests).toHaveBeenCalledTimes(2);
   await act(async () => old.resolve({isSuccess:true}));
-  expect(tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retrying requests…')!.props.disabled).toBe(true);
+  expect(tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retrying…')!.props.disabled).toBe(true);
   await act(async () => next.resolve({isSuccess:false}));
-  expect(tree!.root.findAllByType(PageAction).find(node => node.props.title === 'Retry requests')!.props.disabled).toBe(false);
+  expect(tree!.root.findAllByType(PageAction).find(node => node.props.accessibilityLabel === 'Retry requests')!.props.disabled).toBe(false);
   expect(tree!.root.findAllByType(RequestStack)).toHaveLength(0);
 });

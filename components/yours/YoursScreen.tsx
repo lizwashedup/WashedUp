@@ -417,7 +417,10 @@ export default function YoursScreen() {
   return (
     <SafeAreaView style={[styles.container, appearance && { backgroundColor: AfterglowColors.paper }]} edges={['top']}>
       <YoursHeader appearance={appearance} />
-      {!!uid && <CreatorSpaceEntry userId={uid} />}
+      {!!uid && <ScrollView style={[styles.managementOverview, { maxHeight: height * 0.22 }]}
+        keyboardShouldPersistTaps="handled">
+        <CreatorSpaceEntry userId={uid} />
+      </ScrollView>}
 
       <View style={styles.tabRow}>
         <YoursTabs appearance={appearance} active={tab} onChange={selectTab} />
@@ -450,17 +453,16 @@ export default function YoursScreen() {
             <ScaledText accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
               {requests.length ? 'Connection requests couldn’t refresh. Your saved requests are still here.' : 'Connection requests couldn’t load.'}
             </ScaledText>
-            <PageAction quiet compact title={requestsRead.isFetching || requestsRetry === scope ? 'Retrying requests…' : 'Retry requests'}
+            <PageAction quiet compact accessibilityLabel="Retry requests" title={requestsRead.isFetching || requestsRetry === scope ? 'Retrying…' : 'Retry'}
               disabled={requestsRead.isFetching || requestsRetry === scope} onPress={() => { void retryRequests(); }} />
           </ScrollView>}
           {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
-            <RequestBanner
-              appearance={appearance}
-              count={requests.length}
-              onPress={openRequestsSheet}
-            />
+            <ScrollView style={[styles.requestBannerArea, { maxHeight: height * 0.3 }]} keyboardShouldPersistTaps="handled">
+              <RequestBanner appearance={appearance} count={requests.length} onPress={openRequestsSheet} />
+            </ScrollView>
           )}
 
+          <View style={[styles.fill, { minHeight: height * 0.22 }]}>
           {tab === 'people' && <>
             {peopleFailure && <View style={styles.peopleRecovery}>
               <Text accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
@@ -502,6 +504,7 @@ export default function YoursScreen() {
               />
             </View>
           )}
+          </View>
         </>}
 
       {!!uid && (
@@ -620,8 +623,12 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fill: { flex: 1 },
   tabRow: { flexShrink: 0 },
+  // Keep the profile header, section tabs and body reachable when management
+  // titles wrap at accessibility sizes. The entry's routes/state stay mounted.
+  managementOverview: { flexGrow: 0, flexShrink: 1 },
+  requestBannerArea: { flexGrow: 0, flexShrink: 1 },
   peopleRecovery: { marginHorizontal: 20, marginTop: 12, marginBottom: 4, padding: 12, gap: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
-  requestsRecovery: { flexGrow: 0, flexShrink: 0, marginHorizontal: 20, marginTop: 12, marginBottom: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
+  requestsRecovery: { flexGrow: 0, flexShrink: 1, marginHorizontal: 20, marginTop: 12, marginBottom: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
   requestsRecoveryContent: { padding: 12, gap: 4 },
   recoveryText: { ...AfterglowType.body, fontFamily: Fonts.sans, color: AfterglowColors.ink },
   addPill: {

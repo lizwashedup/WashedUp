@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { ChevronDown, ChevronRight, X } from 'lucide-react-native';
