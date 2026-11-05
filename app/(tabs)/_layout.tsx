@@ -249,6 +249,9 @@ export default function TabLayout() {
     {/* Hidden routes remain navigable but are not visible tabs. Explicit labels
         keep iOS from announcing those routes in the five-tab count. */}
     <Tabs
+      // Profile and conversations are hidden tab routes. Back must return to
+      // the screen that opened them, including its existing conversation ID.
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         lazy: true,
