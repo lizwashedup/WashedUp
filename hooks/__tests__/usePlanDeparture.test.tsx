@@ -46,3 +46,32 @@ it('never attempts to post as a departed member or turns successful leaving into
  expect(mockMessage).not.toHaveBeenCalled();
  expect(f.onSuccess).toHaveBeenCalledWith({action:'leave'}); expect(f.onError).not.toHaveBeenCalled();
 });
+
+
+it.each(['leave', 'cancel'] as const)('recovers stalled %s account preflight before dispatch', async action => {
+ const auth=deferred();mockAuth.mockReturnValueOnce(auth.promise);const f=await mount();jest.useFakeTimers();
+ try {
+  f.start(action);await act(async()=>jest.advanceTimersByTimeAsync(0));
+  await act(async()=>jest.advanceTimersByTimeAsync(8001));
+  expect(f.current.isPending).toBe(false);expect(f.current.unknownAction).toBeNull();
+  expect(mockWrite).not.toHaveBeenCalled();expect(mockMessage).not.toHaveBeenCalled();expect(f.onError).toHaveBeenCalledWith('Couldn’t check your account. Try again.',action);
+  await act(async()=>auth.resolve({data:{user:{id:'alice'}},error:null}));await act(async()=>jest.advanceTimersByTimeAsync(1));expect(mockWrite).not.toHaveBeenCalled();
+  f.start(action);await act(async()=>jest.advanceTimersByTimeAsync(1));expect(mockWrite).toHaveBeenCalledTimes(1);expect(f.onSuccess).toHaveBeenCalledWith({action});
+ } finally {jest.useRealTimers();}
+});
+it.each(['auth','receipt'] as const)('recovers a stalled %s reconciliation read while keeping the uncertain write locked', async stage => {
+ mockWrite.mockRejectedValueOnce(Error('lost response'));const f=await mount();f.start('leave');await flush();expect(f.current.unknownAction).toBe('leave');
+ const read=deferred();if(stage==='auth')mockAuth.mockReturnValueOnce(read.promise);else mockRead.mockReturnValueOnce(read.promise);
+ jest.useFakeTimers();
+ try {
+  act(()=>{void f.current.checkResult()});await act(async()=>jest.advanceTimersByTimeAsync(0));expect(f.current.isChecking).toBe(true);
+  await act(async()=>jest.advanceTimersByTimeAsync(stage==='auth'?8001:12001));expect(f.current.isChecking).toBe(false);expect(f.current.unknownAction).toBe('leave');
+  f.start('leave');await act(async()=>jest.advanceTimersByTimeAsync(1));expect(mockWrite).toHaveBeenCalledTimes(1);
+  await act(async()=>read.resolve(stage==='auth'?{data:{user:{id:'alice'}},error:null}:left));await act(async()=>jest.advanceTimersByTimeAsync(1));expect(f.onSuccess).not.toHaveBeenCalled();
+  act(()=>{void f.current.checkResult()});await act(async()=>jest.advanceTimersByTimeAsync(1));expect(f.onSuccess).toHaveBeenCalledWith({action:'leave',reconciled:true});expect(mockWrite).toHaveBeenCalledTimes(1);expect(mockMessage).not.toHaveBeenCalled();
+ } finally {jest.useRealTimers();}
+});
+it('does not expire a submitted departure write or permit another write',async()=>{
+ const receipt=deferred();mockWrite.mockReturnValueOnce(receipt.promise);const f=await mount();jest.useFakeTimers();
+ try {f.start('leave');await act(async()=>jest.advanceTimersByTimeAsync(30000));expect(f.current.isPending).toBe(true);expect(f.onError).not.toHaveBeenCalled();f.start('leave');expect(mockWrite).toHaveBeenCalledTimes(1);await act(async()=>receipt.resolve(left));await act(async()=>jest.advanceTimersByTimeAsync(1));expect(f.onSuccess).toHaveBeenCalledWith({action:'leave'});}finally{jest.useRealTimers();}
+});

@@ -3,6 +3,7 @@ import { useFocusEffect } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { logError } from '../lib/logger';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 
 export type PlanDepartureAction = 'leave' | 'cancel';
 export type PlanDepartureResult = {
@@ -98,7 +99,7 @@ export function usePlanDeparture(options: Options) {
     retry: false,
     mutationFn: async (call: Call): Promise<PlanDepartureResult | false> => {
       if (!mayDispatch(call)) return false;
-      const auth = await supabase.auth.getUser();
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!mayDispatch(call)) return false;
       if (auth.error || auth.data.user?.id !== call.viewerId) throw new Error('Account could not be checked');
       let response;
@@ -170,12 +171,14 @@ export function usePlanDeparture(options: Options) {
     const call: Call = { eventId: o.eventId, viewerId: o.viewerId, action: state.action, hasOwnChat: false, state, isCurrent, dispatched: false };
     state.checking = call; publish(state);
     try {
-      const auth = await supabase.auth.getUser();
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!call.isCurrent()) return;
       if (auth.error || auth.data.user?.id !== call.viewerId) throw new Error('Account could not be checked');
+      // A read timeout releases only the checking spinner. The uncertain
+      // departure stays locked until a later owned read confirms its receipt.
       const response = call.action === 'leave'
-        ? await supabase.from('event_members').select('event_id,user_id,status').eq('event_id', call.eventId).eq('user_id', call.viewerId).maybeSingle()
-        : await supabase.from('events').select('id,creator_user_id,status').eq('id', call.eventId).eq('creator_user_id', call.viewerId).maybeSingle();
+        ? await requestWithDeadline(supabase.from('event_members').select('event_id,user_id,status').eq('event_id', call.eventId).eq('user_id', call.viewerId).maybeSingle(), 12000)
+        : await requestWithDeadline(supabase.from('events').select('id,creator_user_id,status').eq('id', call.eventId).eq('creator_user_id', call.viewerId).maybeSingle(), 12000);
       if (response?.error !== null || !confirmsDeparture(response.data, call)) throw new Error('Departure not confirmed');
       state.outcome = 'confirmed';
       invalidate(call);
