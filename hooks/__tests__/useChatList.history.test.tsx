@@ -5,6 +5,7 @@ import { useChatList } from '../useChatList';
 let mockKind: 'event' | 'circle';
 let mockParents: any[];
 let mockMessages: any[];
+let mockReads: any[];
 const mockRequests: any[] = [];
 jest.mock('../../constants/FeatureFlags', () => ({ GROUPS_ENABLED: true, CHAT_ENGINE_ENABLED: false }));
 jest.mock('../../lib/chatEngine/senderCache', () => ({ seedSender: jest.fn() }));
@@ -27,6 +28,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
         else if (columns.includes('circles (')) data = mockKind === 'circle' ? mockParents.map(circles => ({ circles })) : [];
         else if (table === 'events' || table === 'circles') data = mockParents.filter(p => ids.includes(p.id)).map(parent => ({ id: parent.id,
           latest_message: mockMessages.filter(m => m[`${mockKind}_id`] === parent.id).slice(0, embeddedCap) })).slice(0, cap);
+        else if (table === 'chat_reads') data = mockReads;
         else if (table === 'messages') data = mockMessages.filter(m => ids.includes(m[`${mockKind}_id`])).slice(0, cap);
         else if (table === `${mockKind}_members` && columns === `${mockKind}_id`) data = mockParents.flatMap(parent =>
           Array.from({ length: parent.member_count }, () => ({ [`${mockKind}_id`]: parent.id })));
@@ -47,7 +49,7 @@ function parent(id: string, count = 2) {
 function message(id: string, content: string, created_at: string) {
   return { [`${mockKind}_id`]: id, content, created_at, user_id: 'synthetic-peer', image_url: null, audio_url: null, message_type: 'text' };
 }
-beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date('2026-09-25T20:00:00Z')); mockRequests.length = 0; });
+beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date('2026-09-25T20:00:00Z')); mockRequests.length = 0; mockReads = []; });
 afterEach(() => { act(() => tree?.unmount()); jest.useRealTimers(); });
 
 it.each(['event', 'circle'] as const)('keeps an older %s preview when another conversation has more than the entire global message window', async kind => {
@@ -72,4 +74,26 @@ it('retains joined plan history after others leave while excluding an unused sin
   await act(async () => { tree = create(<Probe viewer="retained-single-member-history" />); });
   expect(value.chats).toEqual([expect.objectContaining({ conversationId: 'history', is_past: true, member_count: 1,
     last_message: 'Still here to look back on' })]);
+});
+
+const unreadCases = [
+  ['newer offset message', '2026-09-24T21:00:00Z', '2026-09-24T13:00:00.100-08:00', 1],
+  ['older offset message', '2026-09-24T13:00:00.100-08:00', '2026-09-24T21:00:00Z', 0],
+  ['same instant, different offset', '2026-09-24T13:00:00-08:00', '2026-09-24T21:00:00Z', 0],
+  ['same instant, fractional padding', '2026-09-24T21:00:00.100000+00:00', '2026-09-24T21:00:00.100Z', 0],
+  ['newer microsecond', '2026-09-24T21:00:00.123Z', '2026-09-24T21:00:00.123001+00:00', 1],
+  ['older microsecond', '2026-09-24T21:00:00.123001+00:00', '2026-09-24T21:00:00.123Z', 0],
+  ['never read', null, '2026-09-24T21:00:00Z', 1],
+  ['exactly read', '2026-09-24T21:00:00Z', '2026-09-24T21:00:00Z', 0],
+] as const;
+describe.each(['event', 'circle'] as const)('%s unread timestamps', kind => {
+  it.each(unreadCases)('%s', async (label, readAt, sentAt, expected) => {
+    mockKind = kind; mockParents = [parent('timestamp-check')];
+    mockReads = readAt ? [{ [`${kind}_id`]: 'timestamp-check', last_read_at: readAt }] : [];
+    mockMessages = [message('timestamp-check', 'Fictional message', sentAt)];
+    await act(async () => { tree = create(<Probe viewer={`unread-${kind}-${label}`} />); });
+    expect(value.loadError).toBe(false);
+    expect(value.chats).toHaveLength(1);
+    expect(value.chats[0].unread_count).toBe(expected);
+  });
 });
