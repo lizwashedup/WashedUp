@@ -100,7 +100,7 @@ export default function PeopleStep({
           accessibilityRole="button"
           accessibilityLabel={COPY.circleNoPeopleCta}
         >
-          <Text numberOfLines={1} style={styled.emptyCtaLabel}>{COPY.circleNoPeopleCta}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit style={styled.emptyCtaLabel}>{COPY.circleNoPeopleCta}</Text>
         </Pressable>
       </ScrollView>
     );
