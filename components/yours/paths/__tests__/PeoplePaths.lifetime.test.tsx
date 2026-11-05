@@ -211,12 +211,12 @@ it.each([true, false])('preserves the Past Plans search and pending request thro
   const original = mockRpc.getMockImplementation()!;
   mockRpc.mockImplementation((name, args) => name === 'add_or_accept_person' ? pending.promise : original(name, args));
   const f = mount('backlog', undefined, legacy); await flush(); f.type('Bea');
-  const add = f.rows()[0].props.onAdd; act(() => add()); await flush();
+  const input = f.input(), add = f.rows()[0].props.onAdd; act(() => add()); await flush();
   expect(writes()).toHaveLength(1); expect(f.rows()[0].props.isAdding).toBe(true);
   try {
     for (const fontScale of [3.12, 1]) {
       act(() => Dimensions.set({ window: { ...previous, width: 375, fontScale } })); await flush();
-      expect(f.input().props.value).toBe('Bea'); expect(f.rows()).toHaveLength(1);
+      expect(f.input()).toBe(input); expect(f.input().props.value).toBe('Bea'); expect(f.rows()).toHaveLength(1);
       expect(f.rows()[0].props.name).toBe('Bea'); expect(f.rows()[0].props.isAdding).toBe(true);
       act(() => add()); await flush(); expect(writes()).toHaveLength(1); expect(f.open).not.toHaveBeenCalled();
     }
