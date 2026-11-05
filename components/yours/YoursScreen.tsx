@@ -92,11 +92,12 @@ export default function YoursScreen() {
     try { await viewer.retry(); }
     finally { identityRetryRef.current = false; }
   };
-  const peopleRead = useYoursGrid(userId);
+  const peopleScope = { userId: uid, epoch: viewer.epoch, isCurrent: viewer.isCurrent };
+  const peopleRead = useYoursGrid(userId, peopleScope);
   const { data: people = [], isLoading: gridLoading } = peopleRead;
   const requestsRead = useIncomingRequests(userId, { userId: uid, epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const { data: requests = [] } = requestsRead;
-  const backlogRead = usePlanHistoryBacklog(userId);
+  const backlogRead = usePlanHistoryBacklog(userId, peopleScope);
   const { data: backlog = [] } = backlogRead;
   const { ensureReferralCode } = useReferral();
   const getOrCreateDm = useGetOrCreateDm();
