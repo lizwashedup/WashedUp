@@ -22,9 +22,8 @@ import { planCardAppearance } from './planCardStyles';
 import { hapticLight, hapticMedium, hapticSelection } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import { planAgeLabel, type PlanAgeParameters } from '../../lib/planAgeLabel';
-import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
+import { usePlanCardDuplicate } from '../../hooks/usePlanCardDuplicate';
 import { isOptimisticPlanId } from '../../lib/optimisticPlans';
-import { supabase } from '../../lib/supabase';
 import MarkIcon from '../marks/MarkIcons';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
 import Animated, {
@@ -202,36 +201,20 @@ export const PlanCard = React.memo<PlanCardProps>(({ plan, isMember = false, isW
     router.push(`/plan/${plan.id}`);
   }, [plan.id, plan.creator?.profile_photo_url, router]);
 
-  // "Post your own" — same destination + pre-fill as the duplicate sheet's
-  // primary button in app/plan/[id].tsx. The feed Plan is slim, so fetch the
-  // full event row by id first to guarantee an identical pre-fill, then push
-  // to the post screen via the shared param builder.
-  const [duplicating, setDuplicating] = useState(false);
-  const handlePostYourOwn = useCallback(
-    async (e?: any) => {
-      e?.stopPropagation?.();
-      if (isMember || isClosed || getPlanLifecycle({ status: plan.status, startTime: plan.start_time, endTime: plan.end_time }).isClosed || duplicating || plan.circle_id || plan.circle_metadata_known === false) return;
-      hapticLight();
-      setDuplicating(true);
-      try {
-        const { data, error } = await supabase
-          .from('events')
-          .select(
-            'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood, explore_event_id',
-          )
-          .eq('id', plan.id)
-          .single();
-        if (error || !data) return;
-        router.push({
-          pathname: '/(tabs)/post',
-          params: buildDuplicatePostParams(data as any, plan.id),
-        });
-      } finally {
-        setDuplicating(false);
-      }
-    },
-    [isMember, isClosed, duplicating, plan.id, plan.status, plan.start_time, plan.end_time, plan.circle_id, plan.circle_metadata_known, router],
-  );
+  const duplicate = usePlanCardDuplicate({
+    eventId: plan.id,
+    enabled: !isMember && !isClosed && plan.allow_duplicate === true && !plan.circle_id && plan.circle_metadata_known !== false,
+    startTime: plan.start_time, endTime: plan.end_time, status: plan.status,
+    onError: () => setCardAlert({
+      title: 'Couldn’t open a draft',
+      message: 'This plan may have changed, or the connection is unavailable. Try “Post your own” again from the card.',
+    }),
+  });
+  const duplicating = duplicate.busy;
+  const handlePostYourOwn = (event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.();
+    return duplicate.open();
+  };
 
   // Creator always counts as 1 — member_count should never display as 0
   const isFeatured = plan.is_featured ?? false;
