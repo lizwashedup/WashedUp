@@ -49,7 +49,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup.splice(0).forEach(fn => fn()); jest.restoreAllMocks(); });
 it('preserves both faces, original counts and relationship data with optional appearance', () => {
-  const f = mount(); expect(mockProfile).toHaveBeenCalledWith('alice', 'amelia'); expect(mockMyFace).toHaveBeenCalledWith('alice');
+  const f = mount(); expect(mockProfile).toHaveBeenCalledWith('alice', 'amelia', expect.objectContaining({ userId: 'alice', epoch: 0, isCurrent: expect.any(Function) })); expect(mockMyFace).toHaveBeenCalledWith('alice');
   expect(f.hero()).toMatchObject({ myName: 'Liz', myPhoto: 'https://example.invalid/liz.jpg', theirName: 'Amelia', plansCount: 3, albumsCount: 1, comingUpCount: 1, sinceDate: '2026-01-01', appearance: { fonts: AfterglowFallbackFonts } });
   expect(f.text()).toContain('Amelia’s upcoming plans'); expect(f.text()).not.toContain('together');
 });
@@ -66,7 +66,7 @@ it('profile failures keep Back and explicit retry reachable', async () => {
   await act(async () => f.button('Try again to load shared plans').props.onPress()); expect(mockRefetch).toHaveBeenCalledTimes(1);
 });
 it('failed identity never queries another account and offers retry', async () => {
-  mockIdentityError = new Error('offline'); const f = mount(); expect(mockProfile).toHaveBeenCalledWith(null, null); expect(mockMyFace).toHaveBeenCalledWith(null);
+  mockIdentityError = new Error('offline'); const f = mount(); expect(mockProfile).toHaveBeenCalledWith(null, null, expect.objectContaining({ userId: 'alice', epoch: 0, isCurrent: expect.any(Function) })); expect(mockMyFace).toHaveBeenCalledWith(null);
   await act(async () => f.button('Try again to check account').props.onPress()); expect(mockRetry).toHaveBeenCalledTimes(1);
 });
 it('failed own photo lookup falls back without hiding the other person or pretending a new photo', () => {

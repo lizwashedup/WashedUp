@@ -19,6 +19,7 @@ import { useGetOrCreateDm, isObsoleteDmOperation } from '../../../hooks/useGetOr
 import { usePeopleConnectionMutations, friendlyConnectionError, isObsoletePeopleConnection } from '../../../hooks/usePeopleConnectionMutations';
 import { BrandedAlert } from '../../BrandedAlert';
 import ProfileButton from '../../ProfileButton';
+import { ScaledText as StatusText } from '../../ScaledText';
 import KeepHero from './KeepHero';
 import StoryTimeline from './StoryTimeline';
 
@@ -57,7 +58,8 @@ function KeepVisit({ userId, targetId, appearance, viewer }: KeepPageProps & { v
   const identityReady = !!userId && viewer.viewerId === userId && !viewer.error && !viewer.isLoading && viewer.isCurrent();
   const identity = useRef(identityReady); identity.current = identityReady;
   const isCurrent = () => mounted.current && identity.current && viewer.isCurrent() && visit.current === capturedVisit && capturedVisit.focused && !capturedVisit.retired;
-  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null);
+  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null,
+    { userId, epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const { data: rawCard, isLoading, isFetching, isError, refetch } = profile;
   const card = identityReady && !isError && rawCard?.user_id === targetId ? rawCard : null;
   const currentCard = useRef(card); currentCard.current = card;
@@ -158,13 +160,13 @@ function KeepVisit({ userId, targetId, appearance, viewer }: KeepPageProps & { v
         </View>
       </View>
       {waiting ? (
-        <View style={styles.center}><ActivityIndicator color={fonts ? AfterglowColors.clay : Colors.terracotta} accessibilityLabel="Loading your shared plans" /><Text style={styles.statusText}>Loading your shared plans…</Text></View>
+        <ScrollView style={styles.statusScroll} contentContainerStyle={styles.statusContent}><ActivityIndicator color={fonts ? AfterglowColors.clay : Colors.terracotta} accessibilityLabel="Loading your shared plans" /><StatusText style={styles.statusText}>Loading your shared plans…</StatusText></ScrollView>
       ) : viewer.error ? (
-        <View style={styles.center}><Text style={styles.statusTitle}>Couldn’t check your account.</Text><Pressable style={styles.retry} onPress={() => { if (mounted.current && visit.current === capturedVisit && !capturedVisit.retired) void viewer.retry(); }} accessibilityRole="button" accessibilityLabel="Try again to check account"><Text style={styles.retryText} numberOfLines={1}>Try again</Text></Pressable></View>
+        <ScrollView style={styles.statusScroll} contentContainerStyle={styles.statusContent}><StatusText style={styles.statusTitle}>Couldn’t check your account.</StatusText><Pressable style={styles.retry} onPress={() => { if (mounted.current && visit.current === capturedVisit && !capturedVisit.retired) void viewer.retry(); }} accessibilityRole="button" accessibilityLabel="Try again to check account"><StatusText style={styles.retryText}>Try again</StatusText></Pressable></ScrollView>
       ) : isError && identityReady ? (
-        <View style={styles.center}><Text style={styles.statusTitle}>Couldn’t load this page.</Text><Pressable style={styles.retry} onPress={retry} accessibilityRole="button" accessibilityLabel="Try again to load shared plans"><Text style={styles.retryText} numberOfLines={1}>Try again</Text></Pressable></View>
+        <ScrollView style={styles.statusScroll} contentContainerStyle={styles.statusContent}><StatusText style={styles.statusTitle}>Couldn’t load this page.</StatusText><Pressable style={styles.retry} onPress={retry} accessibilityRole="button" accessibilityLabel="Try again to load shared plans"><StatusText style={styles.retryText}>Try again</StatusText></Pressable></ScrollView>
       ) : !card ? (
-        <View style={styles.center}><Text style={styles.statusTitle}>This page isn’t available.</Text><Text style={styles.statusText}>Go back to your people to keep looking.</Text></View>
+        <ScrollView style={styles.statusScroll} contentContainerStyle={styles.statusContent}><StatusText style={styles.statusTitle}>This page isn’t available.</StatusText><StatusText style={styles.statusText}>Go back to your people to keep looking.</StatusText></ScrollView>
       ) : (
         <ScrollView showsVerticalScrollIndicator contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <KeepHero myName={myFace?.first_name_display ?? 'You'} myPhoto={myFace?.profile_photo_url ?? null}
@@ -334,6 +336,8 @@ const baseStyles = StyleSheet.create({
 });
 
 const statusStyles = StyleSheet.create({
+  statusScroll: { flex: 1 },
+  statusContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   statusText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center', marginTop: 12 },
   statusTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt, textAlign: 'center' },
   retry: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', marginTop: 16 },
