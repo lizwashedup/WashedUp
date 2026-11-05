@@ -320,3 +320,39 @@ it('a post-dispatch status refresh cannot reinterpret an authoritative join rece
   expect(f.onJoined).toHaveBeenCalledTimes(1); expect(f.onError).not.toHaveBeenCalled(); expect(f.current.unconfirmed).toBe(false);
   f.join('Again'); await flush(); expect(joins()).toHaveLength(1);
 });
+
+
+it.each([['auth', 8000], ['eligibility', 12000]] as const)('recovers a stalled %s read without a late join or automatic retry', async (stage, deadline) => {
+  const pending = deferred<any>();
+  if (stage === 'auth') mockGetUser.mockReturnValueOnce(pending.promise);
+  else mockRpc.mockReturnValueOnce(pending.promise);
+  const f = await mount(); const invalidate = jest.spyOn(f.client, 'invalidateQueries');
+  jest.useFakeTimers();
+  try {
+    f.join('See you there'); await act(async () => jest.advanceTimersByTimeAsync(0));
+    expect(f.current.isPending).toBe(true);
+    await act(async () => jest.advanceTimersByTimeAsync(deadline + 1));
+    expect(f.current.isPending).toBe(false); expect(f.current.unconfirmed).toBe(false);
+    expect(f.onError).toHaveBeenCalledTimes(1); expect(joins()).toHaveLength(0);
+    expect(mockInsert).not.toHaveBeenCalled(); expect(invalidate).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(stage === 'auth' ? { data: { user: { id: 'alice' } }, error: null } : { data: true, error: null }));
+    await act(async () => jest.advanceTimersByTimeAsync(0));
+    expect(joins()).toHaveLength(0); expect(f.onJoined).not.toHaveBeenCalled();
+    f.join('See you there'); await act(async () => jest.advanceTimersByTimeAsync(1));
+    expect(joins()).toHaveLength(1); expect(f.onJoined).toHaveBeenCalledTimes(1);
+  } finally { jest.useRealTimers(); }
+});
+
+it('keeps a dispatched membership write locked beyond the read deadlines', async () => {
+  const receipt = deferred<RpcResult>();
+  mockRpc.mockImplementation((name: string) => name === 'can_join_event_gender' ? Promise.resolve({ data: true }) : receipt.promise);
+  const f = await mount(); jest.useFakeTimers();
+  try {
+    f.join(); await act(async () => jest.advanceTimersByTimeAsync(0));
+    await act(async () => jest.advanceTimersByTimeAsync(30000));
+    expect(f.current.isPending).toBe(true); expect(f.onError).not.toHaveBeenCalled();
+    f.join(); await act(async () => jest.advanceTimersByTimeAsync(1)); expect(joins()).toHaveLength(1);
+    await act(async () => receipt.resolve({ data: 'joined' })); await act(async () => jest.advanceTimersByTimeAsync(1));
+    expect(f.onJoined).toHaveBeenCalledTimes(1); expect(f.current.isPending).toBe(false);
+  } finally { jest.useRealTimers(); }
+});
