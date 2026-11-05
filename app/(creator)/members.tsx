@@ -5,14 +5,14 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View, ScrollView, TouchableOpacity, TextInput, StyleSheet, RefreshControl, ActivityIndicator, Share } from 'react-native';
+import { View, ScrollView, TouchableOpacity, TextInput, StyleSheet, RefreshControl, ActivityIndicator, Share, useWindowDimensions, Platform } from 'react-native';
 import { ScaledText as Text } from '../../components/ScaledText';
 import { PageAction } from '../../components/creator/pages/PageFrame';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
-import { Check, X, ChevronRight, Search } from 'lucide-react-native';
+import { Check, X, ChevronRight, Search, UserRound } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
 import { CO_CREATOR_INVITES_ENABLED, MEMBER_INVITES_ENABLED, MEMBER_REMOVAL_REASON_ENABLED } from '../../constants/FeatureFlags';
@@ -41,6 +41,14 @@ import {
 } from '../../lib/creatorMode';
 
 export default function CreatorMembersScreen() {
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > 1.2;
+  // Match the conversation input's Fabric workaround: apply the full system
+  // scale once on iOS without remounting the input or losing typed search.
+  const searchType = Platform.OS === 'ios' ? {
+    fontSize: FontSizes.bodyMD * fontScale,
+    lineHeight: LineHeights.bodyMD * fontScale,
+  } : undefined;
   const router = useRouter();
   const queryClient = useQueryClient();
   const [actingId, setActingId] = useState<string | null>(null);
@@ -217,7 +225,7 @@ export default function CreatorMembersScreen() {
           refreshControl={<RefreshControl refreshing={rosterQuery.isRefetching || removedQuery.isRefetching || answersQuery.isRefetching} onRefresh={refreshAll} tintColor={Colors.terracotta} />}
         >
 
-          <Text style={styles.title}>Members</Text>
+          <Text accessibilityRole="header" style={[styles.title, stacked && styles.compactTitle]}>Members</Text>
           {rosterQuery.isError && <MemberReadError title="Members didn’t load"
             message={hasRoster ? 'Showing previously loaded members. Refresh before making changes.' : 'Check your connection and try again to see members and join requests.'}
             retryLabel="Retry members" busy={rosterQuery.isFetching} retry={() => void rosterQuery.refetch()} />}
@@ -270,7 +278,8 @@ export default function CreatorMembersScreen() {
             <View style={styles.searchRow}>
               <Search size={16} color={Colors.tertiary} strokeWidth={2.25} />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, searchType]}
+                allowFontScaling={Platform.OS === 'ios' ? false : undefined}
                 value={query}
                 onChangeText={setQuery}
                 placeholder="search members"
@@ -290,9 +299,9 @@ export default function CreatorMembersScreen() {
                 const expanded = expandedId === m.id;
                 return (
                   <View key={m.id} style={[styles.row, styles.rowPending, styles.rowColumn]}>
-                    <View style={styles.rowTop}>
+                    <View style={[styles.rowTop, stacked && styles.stackedRow]}>
                       <TouchableOpacity
-                        style={styles.rowTopTap}
+                        style={[styles.rowTopTap, stacked && styles.fullRow]}
                         onPress={() => { hapticLight(); setExpandedId(expanded ? null : m.id); }}
                         accessibilityRole="button"
                         accessibilityLabel={`${m.name ?? 'Someone'}, asked ${formatEventDateLA(m.created_at)}`}
@@ -394,7 +403,7 @@ export default function CreatorMembersScreen() {
             </>
           )}
 
-          {hasRoster && <View style={styles.sectionHeaderRow}>
+          {hasRoster && <View style={[styles.sectionHeaderRow, stacked && styles.stackedRow]}>
             <Text style={[styles.sectionLabel, { marginTop: pending.length ? 20 : 0 }]}>
               in the community ({active.length})
             </Text>
@@ -413,9 +422,9 @@ export default function CreatorMembersScreen() {
             )}
           </View>}
           {visibleActive.map((m) => (
-            <View key={m.id} style={styles.row}>
+            <View key={m.id} style={[styles.row, stacked && styles.stackedRow]}>
               <TouchableOpacity
-                style={styles.rowTopTap}
+                style={[styles.rowTopTap, stacked && styles.fullRow]}
                 onPress={() => { hapticLight(); router.push(`/creator/member/${m.id}` as never); }}
                 accessibilityRole="button"
                 accessibilityLabel={`View ${m.name ?? 'member'}'s details`}
@@ -460,7 +469,7 @@ export default function CreatorMembersScreen() {
                 <Text style={styles.removedToggleText}>{showRemoved ? 'hide' : 'show'} removed ({removed.length})</Text>
               </TouchableOpacity>
               {showRemoved && removed.map((m) => (
-                <View key={m.id} style={[styles.row, styles.rowRemoved]}>
+                <View key={m.id} style={[styles.row, styles.rowRemoved, stacked && styles.stackedRow]}>
                   <MemberFace m={m} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowName}>{m.name ?? 'someone'}</Text>
@@ -529,7 +538,7 @@ function MemberFace({ m }: { m: CommunityMemberRow }) {
     <Image source={{ uri: m.photo_url }} style={styles.face} contentFit="cover" />
   ) : (
     <View style={[styles.face, styles.facePlaceholder]}>
-      <Text style={styles.faceInitial}>{(m.name ?? '?').slice(0, 1).toLowerCase()}</Text>
+      <UserRound size={20} color={Colors.terracotta} accessible={false} />
     </View>
   );
 }
@@ -546,6 +555,9 @@ const styles = StyleSheet.create({
     color: Colors.darkWarm,
     marginBottom: 8,
   },
+  compactTitle: { fontSize: FontSizes.displayMD, lineHeight: LineHeights.displayMD },
+  stackedRow: { flexDirection: 'column', alignItems: 'stretch', gap: 12 },
+  fullRow: { flex: 0, width: '100%' },
   sectionLabel: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.caption,
@@ -582,7 +594,6 @@ const styles = StyleSheet.create({
   answerLine: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   face: { width: 40, height: 40, borderRadius: 20 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
-  faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   rowName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   roleTag: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.caption, color: Colors.terracotta },
   rowMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Dimensions, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 let mockRoster: any, mockRemoved: any, mockAnswers: any, mockAlert: any;
@@ -117,4 +118,25 @@ it('does not dispatch the same confirmed member decision twice', async () => {
   await act(async () => { first = confirm(); await confirm(); });
   expect(mockReview).toHaveBeenCalledTimes(1);
   await act(async () => { finish(); await first; });
+});
+
+it('keeps a typed search, current roster and input mounted through system text-size changes', async () => {
+  const previous = Dimensions.get('window');
+  try {
+    act(() => Dimensions.set({ window: { ...previous, width: 320, fontScale: 1 } }));
+    mockRoster.data = [member()]; await render();
+    const input = tree.root.findByType(TextInput), scroll = tree.root.findByType(ScrollView);
+    act(() => input.props.onChangeText('Jam'));
+    for (const fontScale of [3.2, 1]) {
+      act(() => Dimensions.set({ window: { ...previous, width: 320, fontScale } }));
+      expect(tree.root.findByType(TextInput)).toBe(input);
+      expect(tree.root.findByType(ScrollView)).toBe(scroll);
+      expect(input.props.value).toBe('Jam');
+      expect(StyleSheet.flatten(input.props.style).fontSize).toBe(14 * fontScale);
+      expect(button('View Jamie\'s details')).toBeDefined();
+      expect(button('Remove Jamie').props.disabled).toBe(false);
+    }
+    expect(mockRoster.refetch).not.toHaveBeenCalled();
+    expect(mockRemove).not.toHaveBeenCalled();
+  } finally { act(() => Dimensions.set({ window: previous })); }
 });
