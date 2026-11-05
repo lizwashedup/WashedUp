@@ -6,7 +6,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  StyleSheet,
   Linking,
   ActivityIndicator,
   TextInput,
@@ -35,17 +34,15 @@ import { readOwnProfile, saveOwnProfile, deleteOwnProfile, verifyProfileOwner, r
 import { pushRegistrationFeedback } from '../../components/notifications/pushRegistrationFeedback';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { friendlyError } from '../../lib/friendlyError';
-import { withDeadline } from '../../lib/withTimeout';
 import { logError } from '../../lib/logger';
 import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { SkeletonProfile } from '../../components/SkeletonCard';
-import { Fonts, FontSizes, displaySmall, bodySmall, bodyMedium, labelSmall, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
+import { Fonts, type AfterglowFontFamilies } from '../../constants/Typography';
 import { isAdmin } from '../../constants/Admin';
 import { COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
-import { getCreatorAccess, hasCreatorAccess, type CreatorAccess } from '../../lib/creatorMode';
-import { getMyOrganizerProfile } from '../../lib/organizerProfile';
-import { fetchMyGrants, type OperatorGrant } from '../../lib/operatorApplications';
+import { baseStyles, profileSettingsAppearance } from '../../components/yours/profile/settings/profileSettingsStyles';
+import { useProfileCreatorEntries } from '../../components/yours/profile/settings/useProfileCreatorEntries';
 import { setSelectedCommunityId } from '../../lib/selectedCommunity';
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
@@ -69,7 +66,6 @@ export default function ProfileScreen() {
 type ProfileAppearance = { fonts: AfterglowFontFamilies };
 type PhotoSelection = { scope: ProfileOperationScope; kind: 'camera' | 'library' | null | undefined; started: boolean; alert: ProfileAlert | null };
 type ProfileAlert = { title: string; message?: string; buttons?: BrandedAlertButton[] };
-const CREATOR_READ_TIMEOUT_MS = 12_000;
 function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUser; appearance?: ProfileAppearance }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -81,11 +77,6 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   const profileRef = useRef(profile); profileRef.current = profile;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [creatorAccess, setCreatorAccess] = useState<CreatorAccess | null>(null);
-  const [organizerName, setOrganizerName] = useState<string | null>(null);
-  const [pendingGrants, setPendingGrants] = useState<OperatorGrant[]>([]);
-  const [creatorError, setCreatorError] = useState(false);
-  const [loadingCreators, setLoadingCreators] = useState(false);
   const [alertInfo, setAlertState] = useState<ProfileAlert | null>(null);
   const alertRef = useRef<ProfileAlert | null>(null);
   const setAlertInfo = useCallback((value: React.SetStateAction<ProfileAlert | null>) => {
@@ -114,7 +105,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   useFocusEffect(useCallback(() => {
     const visit = {}; pushFocus.current = visit; retiredVisit.current = null; setScreenVisit(visit);
     pushAttempt.current = null; setEnablingPush(false);
-    photoLock.current = null; setPhotoSelection(null); readAttempt.current = null; creatorsAttempt.current = null;
+    photoLock.current = null; setPhotoSelection(null); readAttempt.current = null; resetCreatorAttempt();
     setSaving(!!saveLock.current); setPhotoBusy(false); setDeleting(!!deleteLock.current);
     return () => {
       if (pushFocus.current !== visit) return;
@@ -124,6 +115,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   const pageCurrent = useCallback(() => accountCurrent() && !!screenVisit && pushFocus.current === screenVisit && retiredVisit.current !== screenVisit, [accountCurrent, screenVisit]);
   const canUseProfile = () => pageCurrent() && profileRef.current?.id === userId;
   const pageScope = useMemo(() => ({ userId, isCurrent: pageCurrent }), [userId, pageCurrent]);
+  const { creatorAccess, organizerName, pendingGrants, creatorError, loadingCreators, creatorsNeedRefresh, fetchCreatorEntries, resetCreatorAttempt } = useProfileCreatorEntries(pageScope);
   const back = () => { if (!mounted.current || !screenVisit || pushFocus.current !== screenVisit || retiredVisit.current === screenVisit) return; retiredVisit.current = screenVisit; router.back(); };
   const navigate = (href: string, replace = false) => { if (!canUseProfile()) return; retiredVisit.current = screenVisit; if (replace) router.replace(href as never); else router.push(href as never); };
 
@@ -163,8 +155,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     editEntryRef.current = null; setEditEntry(null); setShowEditFlow(false); setShowNeighborhoodPicker(false);
     saveLock.current = null; photoLock.current = null; setPhotoSelection(null); setSaving(false); setPhotoBusy(false); setAlertInfo(null);
   };
-  const readAttempt = useRef<object | null>(null), creatorsAttempt = useRef<object | null>(null);
-  const creatorsNeedRefresh = useRef(true);
+  const readAttempt = useRef<object | null>(null);
   const lastProfileFocusFetchRef = useRef(0);
   const profileNeedsRefresh = useRef(false);
   const refreshCurrentProfile = useRef<(() => Promise<void>) | null>(null);
@@ -179,41 +170,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   // A refocus read may have started before the pending write settled. Retire
   // that read so its old snapshot cannot clear the reconciliation marker.
   refreshCurrentProfile.current = () => fetchProfile(true);
-  const fetchCreatorEntries = async () => {
-    if (!pageScope.isCurrent() || creatorsAttempt.current) return;
-    creatorsNeedRefresh.current = true;
-    const attempt = {}; creatorsAttempt.current = attempt; setLoadingCreators(true); setCreatorError(false);
-    const scope = { userId, isCurrent: () => pageScope.isCurrent() && creatorsAttempt.current === attempt };
-    try {
-      await verifyProfileOwner(scope);
-      const [accessResult, grantsResult] = await Promise.allSettled([
-        withDeadline(getCreatorAccess(), CREATOR_READ_TIMEOUT_MS, 'Creator access'),
-        withDeadline(fetchMyGrants(), CREATOR_READ_TIMEOUT_MS, 'Creator applications'),
-      ]);
-      await verifyProfileOwner(scope);
-      requireProfileScope(scope);
-      let failed = accessResult.status === 'rejected' || grantsResult.status === 'rejected';
-      // These are independent original settings destinations. A failed
-      // application or optional name lookup must not hide confirmed access.
-      if (grantsResult.status === 'fulfilled') setPendingGrants(grantsResult.value.filter(g => g.status === 'applied' || g.status === 'in_review' || g.status === 'needs_more_info'));
-      if (accessResult.status === 'fulfilled') {
-        const access = accessResult.value;
-        setCreatorAccess(hasCreatorAccess(access) ? access : null);
-        if (access?.hasEventHostGrant) {
-          try {
-            const organizer = await withDeadline(getMyOrganizerProfile(), CREATOR_READ_TIMEOUT_MS, 'Organizer name');
-            await verifyProfileOwner(scope);
-            requireProfileScope(scope);
-            setOrganizerName(organizer?.display_name ?? null);
-          } catch (error) { requireProfileScope(scope); if (isObsoleteProfileOperation(error)) throw error; failed = true; }
-        } else setOrganizerName(null);
-      }
-      requireProfileScope(scope);
-      creatorsNeedRefresh.current = failed;
-      setCreatorError(failed);
-    } catch (error) { if (scope.isCurrent() && !isObsoleteProfileOperation(error)) setCreatorError(true); }
-    finally { if (scope.isCurrent()) { setLoadingCreators(false); creatorsAttempt.current = null; } }
-  };
+
   useEffect(() => {
     if (!identityReady) { setLoading(pushViewer.isLoading); return; }
     if (!screenVisit) return;
@@ -1141,562 +1098,4 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
       />
     </>
   );
-}
-
-const baseStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  statusTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
-  statusText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray, paddingVertical: 8 },
-  retryButton: { minHeight: 44, paddingVertical: 12, justifyContent: 'center' },
-  retryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  scroll: { paddingBottom: 48 },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 20,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: FontSizes.displayLG,
-    fontWeight: '700',
-    color: Colors.darkWarm,
-  },
-
-  // Profile section — avatar 100px, display name displaySmall, handle bodySmall
-  profileSection: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-    gap: 8,
-  },
-  avatarContainer: {},
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 2,
-    borderColor: Colors.warmGray,
-  },
-  avatarFallback: {
-    backgroundColor: Colors.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontWeight: '700',
-    fontSize: FontSizes.displayLG,
-    color: Colors.terracotta,
-  },
-  profileName: {
-    ...displaySmall,
-    color: Colors.asphalt,
-    marginTop: 4,
-  },
-  handleShareRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 2,
-  },
-  profileHandle: {
-    ...bodySmall,
-    color: Colors.warmGray,
-  },
-  profileHandleLink: {
-    ...bodySmall,
-    fontFamily: Fonts.sansMedium,
-    color: Colors.terracotta,
-    marginTop: 2,
-  },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { ...bodySmall, color: Colors.warmGray },
-  bio: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.textMedium,
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 24,
-  },
-
-  // Settings list — section headers labelSmall, rows with terracotta icon, bodyMedium label, warmGray chevron
-  sectionHeader: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
-  sectionTitle: {
-    ...labelSmall,
-    color: Colors.warmGray,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  settingsGroup: {
-    backgroundColor: Colors.cardBg,
-    marginHorizontal: 20,
-    borderRadius: 16,
-    marginBottom: 24,
-    overflow: 'hidden',
-  },
-  // the tickets group sits right under the profile header, no section title
-  ticketsGroup: { marginTop: 8 },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
-  },
-  settingsRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.parchment,
-  },
-  settingsLabel: {
-    ...bodyMedium,
-    flex: 1,
-    color: Colors.asphalt,
-  },
-  // inventory C-01: label + lifecycle-state line, stacked, for the Creators
-  // entity rows (draft/archived communities, pending applications).
-  settingsLabelStack: {
-    flex: 1,
-    gap: 2,
-  },
-  creatorLifecycleBadge: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.warmGray,
-    textTransform: 'capitalize',
-  },
-  creatorRowMark: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: Colors.accentSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  creatorRowMarkLetter: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.terracotta,
-  },
-  deleteAccountLink: {
-    ...bodyMedium,
-    flex: 1,
-    color: Colors.cancelRed,
-  },
-  logOutWrap: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 32,
-  },
-  logOutBtn: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: Colors.terracotta,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logOutBtnText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.terracotta,
-  },
-
-  // Delete flow
-  deleteHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  deleteHeaderTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displaySM, color: Colors.asphalt },
-  deleteContent: { padding: 24, alignItems: 'center', gap: 16 },
-  deleteWarningIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  deleteTitle: { fontWeight: '700', fontSize: FontSizes.displayMD, color: Colors.darkWarm, textAlign: 'center' },
-  deleteBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, textAlign: 'center', lineHeight: 22 },
-  deleteListRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    alignSelf: 'stretch',
-  },
-  deleteListText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.textMedium, flex: 1 },
-  deleteInput: {
-    alignSelf: 'stretch',
-    backgroundColor: Colors.white,
-    borderWidth: 1.5,
-    borderColor: Colors.inputBg,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'center',
-    letterSpacing: 2,
-  },
-  deleteNextBtn: {
-    alignSelf: 'stretch',
-    backgroundColor: Colors.terracotta,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  deleteNextBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
-  deleteCancelBtn: { paddingVertical: 12 },
-  deleteCancelBtnText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.warmGray },
-  deleteFinalBtn: {
-    alignSelf: 'stretch',
-    backgroundColor: Colors.cancelRed,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  deleteFinalBtnDisabled: { backgroundColor: Colors.inputBg },
-  deleteFinalBtnText: { color: Colors.white, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD },
-
-  // Edit Profile button on main profile
-  editProfileBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: Colors.terracotta,
-  },
-  editProfileBtnText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
-  },
-
-  // Edit Profile flow
-  editContent: {
-    padding: 24,
-    alignItems: 'center',
-    gap: 4,
-  },
-  editAvatarWrap: {
-    position: 'relative',
-    marginBottom: 4,
-  },
-  editAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 2,
-    borderColor: Colors.warmGray,
-  },
-  editAvatarBadge: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.terracotta,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.parchment,
-  },
-  editPhotoHint: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.warmGray,
-    marginBottom: 20,
-  },
-  editFieldGroup: {
-    alignSelf: 'stretch',
-    marginBottom: 20,
-  },
-  editLabel: {
-    ...labelSmall,
-    color: Colors.warmGray,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  editInput: {
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingLeft: 16,
-    paddingRight: 16,
-    paddingVertical: 14,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'left',
-  },
-  handleInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.cardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-  },
-  neighborhoodRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  neighborhoodValue: {
-    flex: 1,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  neighborhoodPlaceholder: {
-    flex: 1,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.textLight,
-  },
-  neighborhoodSheetOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlayDark,
-    justifyContent: 'flex-end',
-  },
-  neighborhoodSheet: {
-    backgroundColor: Colors.parchment,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 16,
-    paddingBottom: 32,
-    maxHeight: '80%',
-  },
-  neighborhoodSheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  neighborhoodSheetTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  neighborhoodSheetList: {
-    paddingHorizontal: 12,
-  },
-  neighborhoodOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    borderRadius: 10,
-  },
-  neighborhoodOptionText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  neighborhoodOptionTextSelected: {
-    fontFamily: Fonts.sansBold,
-    color: Colors.terracotta,
-  },
-  handlePrefix: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.textLight, marginLeft: 16 },
-  handleInput: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingLeft: 8,
-    paddingRight: 16,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-    textAlign: 'left',
-  },
-  editBioInput: {
-    minHeight: 90,
-    paddingTop: 14,
-  },
-  editCharCount: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.textLight,
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  travelOptions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  travelOption: {
-    flex: 1,
-    backgroundColor: Colors.white,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  travelOptionActive: {
-    backgroundColor: Colors.terracotta,
-    borderColor: Colors.terracotta,
-  },
-  travelOptionText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-  },
-  travelOptionTextActive: {
-    color: Colors.white,
-  },
-  editReadOnly: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.inputBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  editReadOnlyText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.warmGray,
-  },
-  handleAvailability: { marginTop: 6, marginBottom: 4 },
-  handleAvailable: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.gold, marginTop: 6, marginBottom: 4 },
-  handleTaken: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorRed, marginTop: 6, marginBottom: 4 },
-  editHelp: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.textLight,
-    marginTop: 4,
-  },
-  editSaveBtn: {
-    alignSelf: 'stretch',
-    backgroundColor: Colors.terracotta,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  editSaveBtnText: {
-    color: Colors.white,
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-  },
-
-  // Footer
-  footer: { textAlign: 'center', fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.textLight, marginTop: 8 },
-});
-
-function profileSettingsAppearance(fonts: AfterglowFontFamilies) {
-  const body = { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted };
-  const title = { ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink };
-  const caption = { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted };
-  const button = { minHeight: 46, borderRadius: 4, justifyContent: 'center' as const, paddingVertical: 12 };
-  const input = { ...baseStyles.editInput, ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.ink, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderWidth: 1, borderRadius: 4, minHeight: 48 };
-  return StyleSheet.create({
-    container: { ...baseStyles.container, backgroundColor: AfterglowColors.paper },
-    centered: { ...baseStyles.centered, padding: 24, gap: 12 },
-    header: { ...baseStyles.header, paddingBottom: 12 },
-    backButton: { ...baseStyles.backButton, width: 44, height: 44 },
-    headerTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
-    profileSection: { ...baseStyles.profileSection, paddingBottom: 24, gap: 6 },
-    avatar: { ...baseStyles.avatar, width: 80, height: 80, borderRadius: 40, borderWidth: 0 },
-    avatarFallback: { ...baseStyles.avatarFallback, backgroundColor: AfterglowColors.avatar },
-    avatarInitial: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.clay },
-    profileName: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, marginTop: 8, textAlign: 'center' },
-    handleShareRow: { ...baseStyles.handleShareRow, minHeight: 44 },
-    profileHandle: body,
-    profileHandleLink: { ...body, color: AfterglowColors.clay, minHeight: 44, paddingVertical: 12 },
-    locationText: body,
-    bio: { ...baseStyles.bio, ...body, color: AfterglowColors.ink },
-    sectionTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
-    settingsGroup: { ...baseStyles.settingsGroup, backgroundColor: AfterglowColors.paper, borderRadius: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: AfterglowColors.line, marginBottom: 20 },
-    settingsRow: { ...baseStyles.settingsRow, minHeight: 56, paddingHorizontal: 0, paddingVertical: 14 },
-    settingsRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.subtleLine },
-    settingsLabel: { ...title, fontFamily: fonts.regular, flex: 1 },
-    creatorLifecycleBadge: caption,
-    creatorRowMark: { ...baseStyles.creatorRowMark, backgroundColor: AfterglowColors.avatar, borderRadius: 4 },
-    creatorRowMarkLetter: { ...title, color: AfterglowColors.clay },
-    deleteAccountLink: { ...title, fontFamily: fonts.regular, color: Colors.cancelRed, flex: 1 },
-    logOutBtn: { ...baseStyles.logOutBtn, ...button, borderWidth: 1, borderColor: AfterglowColors.clay },
-    logOutBtnText: { ...title, color: AfterglowColors.clay },
-    deleteHeader: { ...baseStyles.deleteHeader, paddingVertical: 6, paddingHorizontal: 16, borderBottomColor: AfterglowColors.line },
-    deleteHeaderTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
-    deleteWarningIcon: { ...baseStyles.deleteWarningIcon, backgroundColor: AfterglowColors.avatar },
-    deleteTitle: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, textAlign: 'center' },
-    deleteBody: { ...body, textAlign: 'center' },
-    deleteListText: { ...body, flex: 1 },
-    deleteInput: { ...input, alignSelf: 'stretch', textAlign: 'center' },
-    deleteNextBtn: { ...baseStyles.deleteNextBtn, ...button, backgroundColor: AfterglowColors.clay },
-    deleteNextBtnText: { ...title, color: AfterglowColors.white },
-    deleteCancelBtn: { ...baseStyles.deleteCancelBtn, minHeight: 44, justifyContent: 'center' },
-    deleteCancelBtnText: body,
-    deleteFinalBtn: { ...baseStyles.deleteFinalBtn, ...button },
-    deleteFinalBtnText: { ...title, color: AfterglowColors.white },
-    editProfileBtn: { ...baseStyles.editProfileBtn, ...button, borderColor: AfterglowColors.clay, paddingHorizontal: 20 },
-    editProfileBtnText: { ...title, color: AfterglowColors.clay },
-    editContent: { ...baseStyles.editContent, padding: 20 },
-    editAvatar: { ...baseStyles.editAvatar, width: 80, height: 80, borderRadius: 40, borderWidth: 0 },
-    editAvatarBadge: { ...baseStyles.editAvatarBadge, backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.paper },
-    editPhotoHint: { ...body, marginBottom: 20 },
-    editLabel: { ...title, ...AfterglowType.body, marginBottom: 8 },
-    editInput: input,
-    handleInputRow: { ...baseStyles.handleInputRow, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderWidth: 1, borderRadius: 4 },
-    handlePrefix: { ...title, fontFamily: fonts.regular, color: AfterglowColors.muted, marginLeft: 16 },
-    handleInput: { ...baseStyles.handleInput, ...AfterglowType.title, fontFamily: fonts.regular, color: AfterglowColors.ink, minWidth: 0 },
-    neighborhoodValue: { ...title, fontFamily: fonts.regular, flex: 1 },
-    neighborhoodPlaceholder: { ...body, flex: 1 },
-    neighborhoodSheet: { ...baseStyles.neighborhoodSheet, backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-    neighborhoodSheetHeader: { ...baseStyles.neighborhoodSheetHeader, borderBottomColor: AfterglowColors.line },
-    neighborhoodSheetTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink },
-    neighborhoodOption: { ...baseStyles.neighborhoodOption, minHeight: 48, borderRadius: 4 },
-    neighborhoodOptionText: { ...title, fontFamily: fonts.regular, flexShrink: 1 },
-    neighborhoodOptionTextSelected: { fontFamily: fonts.semibold, color: AfterglowColors.clay },
-    editCharCount: { ...caption, textAlign: 'right', marginTop: 4 },
-    travelOption: { ...baseStyles.travelOption, ...button, backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderWidth: 1 },
-    travelOptionActive: { backgroundColor: AfterglowColors.clay, borderColor: AfterglowColors.clay },
-    travelOptionText: { ...body, fontFamily: fonts.medium, color: AfterglowColors.ink },
-    travelOptionTextActive: { color: AfterglowColors.white },
-    editReadOnly: { ...baseStyles.editReadOnly, backgroundColor: AfterglowColors.avatar, borderColor: AfterglowColors.line, borderRadius: 4 },
-    editReadOnlyText: body,
-    handleAvailable: { ...body, fontFamily: fonts.medium, color: AfterglowColors.ink, marginTop: 6 },
-    handleTaken: { ...body, color: Colors.errorRed, marginTop: 6 },
-    editHelp: { ...caption, marginTop: 6 },
-    editSaveBtn: { ...baseStyles.editSaveBtn, ...button, backgroundColor: AfterglowColors.clay },
-    editSaveBtnText: { ...title, color: AfterglowColors.white },
-    footer: { ...baseStyles.footer, ...caption },
-    statusTitle: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, textAlign: 'center' },
-    statusText: { ...body, paddingVertical: 8 },
-    retryText: { ...title, color: AfterglowColors.clay },
-  });
 }
