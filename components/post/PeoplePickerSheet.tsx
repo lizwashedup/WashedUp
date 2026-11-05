@@ -7,7 +7,7 @@
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Modal, Pressable, SectionList, ScrollView, ActivityIndicator, StyleSheet,
+  View, Modal, Pressable, SectionList, ScrollView, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { ScaledText as Text } from '../ScaledText';
@@ -246,7 +246,7 @@ function PeoplePickerContents({
   };
 
   return (
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={styles.backdropTap} onPress={close} accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} accessibilityViewIsModal>
           <View style={styles.headerRow}>
@@ -288,6 +288,7 @@ function PeoplePickerContents({
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
               />
             </>
           )}
@@ -306,7 +307,7 @@ function PeoplePickerContents({
             </Pressable>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
   );
 }
 
