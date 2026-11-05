@@ -880,6 +880,58 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autosaveSignature, isDraft, id, saving, seeded, pagePublicationUncertain, pageSettingsSeeded, pageSave.ready, pageStatusWritable]);
+  // Explicit draft saving, preview and first-time media share this contract. The
+  // legacy API writes fields and settings separately; keep a confirmed ID on
+  // partial success and never continue to preview/media with unchecked settings.
+  const persistDraft = async (fields: OperatorEventFields): Promise<string | null> => {
+    if (!pageContext && (!offerTypeColumnOpen || !ticketCapacityRpcOpen)) {
+      // Retry capability without reseeding over the creator's current choices.
+      const [offer, capacity] = await withPageScope(() => requestWithDeadline(
+        Promise.all([probeOfferType(editing ? id : null), probeTicketCapacityRpc()]), 12_000), true);
+      setOfferTypeColumnOpen(offer.open);
+      setTicketCapacityRpcOpen(capacity);
+      if (!offer.open || !capacity) {
+        setAutosaveState('problem');
+        showError('Settings aren’t ready', 'Your edits are still here. Check your connection and try saving again.');
+        return null;
+      }
+    }
+    let savedEventId: string | undefined;
+    try {
+      await autosaveInFlightRef.current?.catch(() => undefined);
+      if (editing && id) {
+        await saveEventFields(id, fields);
+        savedEventId = id;
+      } else {
+        const communityId = fromCommunity && community ? community.id : null;
+        savedEventId = await createOperatorEvent(fields, communityId, false);
+      }
+      await syncCoords(savedEventId);
+      await saveDraftSettings(savedEventId);
+      assertPageVisit();
+      setDraftSettingsNeedReview(false);
+      lastSavedRef.current = autosaveSignature;
+      afterSave();
+      return savedEventId;
+    } catch (e) {
+      assertPageVisit();
+      if (!pageContext && savedEventId) {
+        setAutosaveState('problem');
+        afterSave();
+        if (editing) {
+          // Retain typed settings for a deliberate retry on the same draft.
+          setDraftSettingsNeedReview(true);
+          showError('Review draft settings', 'Your event details are saved, but its event type or capacity could not be confirmed. Check those settings and save the draft again.');
+        } else {
+          // The creation latch prevents another create before replacement mounts.
+          router.replace(`/creator/event-form?id=${savedEventId}&draftSettings=check` as never);
+        }
+        return null;
+      }
+      throw e;
+    }
+  };
+
   const handleSaveDraft = async () => {
     if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields();
@@ -887,45 +939,12 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     explicitSaveRef.current = true;
     if (pageContext) Keyboard.dismiss();
     setSaving(true);
-    let savedEventId: string | undefined;
     try {
-      if (!pageContext && (!offerTypeColumnOpen || !ticketCapacityRpcOpen)) {
-        // An unavailable mount-time check must be retryable without discarding
-        // the form. Recheck capability only; never reseed over typed choices.
-        const [offer, capacity] = await withPageScope(() => requestWithDeadline(
-          Promise.all([probeOfferType(editing ? id : null), probeTicketCapacityRpc()]), 12_000), true);
-        setOfferTypeColumnOpen(offer.open);
-        setTicketCapacityRpcOpen(capacity);
-        if (!offer.open || !capacity) {
-          showError('Settings aren’t ready', 'Your edits are still here. Check your connection and try saving again.');
-          return;
-        }
-      }
-      if (editing && id) {
-        await autosaveInFlightRef.current?.catch(() => undefined);
-        await saveEventFields(id, fields);
-        savedEventId = id;
-        await syncCoords(id);
-      } else {
-        const communityId = fromCommunity && community ? community.id : null;
-        const newId = await createOperatorEvent(fields, communityId, false);
-        savedEventId = newId;
-        await syncCoords(newId);
-      }
-      await saveDraftSettings(savedEventId);
-      setDraftSettingsNeedReview(false);
+      if (!await persistDraft(fields)) return;
       hapticSuccess();
-      afterSave();
       if (creationContext) router.dismissTo('/(tabs)/friends/manage/(tools)/events?section=drafts'); else leaveEditor();
     } catch (e) {
       if (operationScope && !operationScope.isCurrent()) return;
-      if (!pageContext && savedEventId) {
-        // Continue with the already-created ID. The creation latch also blocks
-        // another create tap before this replacement screen finishes mounting.
-        afterSave();
-        router.replace(`/creator/event-form?id=${savedEventId}&draftSettings=check` as never);
-        return;
-      }
       showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       explicitSaveRef.current = false;
@@ -1282,91 +1301,64 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     }
   };
 
-  // 7-27 ship ruling item 2: media needs a saved event id (the folder pin),
-  // so the photos/video pills on a NEW form run this instead of sitting
-  // disabled: a VISIBLE draft-create through the same createOperatorEvent
-  // as "save as a draft", then the replace makes this screen the draft
-  // editor with openPhotos=1 re-opening the picker. Missing title/category
-  // surfaces as the RPC's own message, which names exactly what is needed.
+  // Photos and video need the saved event's ID. Save the complete draft first;
+  // only photos reopens the picker automatically on the saved draft screen.
   const handleUnlockMedia = async (kind: 'photos' | 'video') => {
-    if (saving || previewing || unlockingMedia) return;
+    if (id || saving || previewing || unlockingMedia || explicitSaveRef.current || coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields();
     if (!fields) return;
+    explicitSaveRef.current = true;
     hapticLight();
     setUnlockingMedia(true);
     try {
       setAutosaveState('saving');
-      const communityId = fromCommunity && community ? community.id : null;
-      const newId = await createOperatorEvent(fields, communityId, false);
-      await syncCoords(newId);
+      const savedId = await persistDraft(fields);
+      if (!savedId) return;
       setAutosaveState('saved');
-      // openPhotos only for the photos tap: the video uploader is its own
-      // multi-stage flow, so it is re-tapped rather than auto-launched
       const suffix = kind === 'photos' ? '&openPhotos=1' : '';
-      router.replace(`/creator/event-form?id=${newId}${suffix}` as never);
+      router.replace(`/creator/event-form?id=${savedId}${suffix}` as never);
     } catch (e) {
+      if (operationScope && !operationScope.isCurrent()) return;
       setAutosaveState('problem');
       showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
+      explicitSaveRef.current = false;
       setUnlockingMedia(false);
     }
   };
 
-  // §3.0 phone: "preview as guest" opens the real public renderer at
-  // /event/[id]?preview=guest (organizer-gated there). The event needs an id to
-  // navigate to, and the save must be VISIBLE (autosave's savedLine), never
-  // silent - a row made on the user's behalf without them seeing it is the same
-  // failure class as a defaulted policy they never chose.
+  // Preview uses the real public renderer. Drafts save the current fields and
+  // settings first; live events preview only their already-published state.
   const handlePreview = async () => {
-    if (coverInProgress() || pageTemplateBlocked()) return;
-    // re-entry guard: a double-tap on a brand-new create must not fire two
-    // draft-creates (a duplicate). previewing is dedicated so the main CTA's
-    // spinner is left alone.
-    if (saving || previewing) return;
-    // draft-legal field set; a missing title/category surfaces here so we never
-    // preview an event the public renderer cannot load
+    if (coverInProgress() || pageTemplateBlocked() || saving || previewing || explicitSaveRef.current) return;
     const fields = collectFields();
     if (!fields) return;
+    // Share the synchronous lock with Save draft and media, including rapid taps
+    // before React has rendered a disabled button or the create has returned.
+    explicitSaveRef.current = true;
     hapticLight();
     setPreviewing(true);
     try {
-    if (id) {
-      // an existing DRAFT is safe to flush so the preview is current; a LIVE
-      // event must never be mutated by a preview tap, so it previews its saved
-      // (published) state as-is (the accepted saved-state fidelity call)
-      if (isDraft) {
-        try {
-          setAutosaveState('saving');
-          await saveEventFields(id, fields);
-          await syncCoords(id);
-          setAutosaveState('saved');
-        } catch {
-          setAutosaveState('problem');
-          showError('Preview is not ready', 'We couldn’t confirm your latest save. Your edits are still here. Check the save status, then try preview again.');
-          return;
-        }
+      let previewId = id;
+      if (!id || isDraft) {
+        setAutosaveState('saving');
+        const savedId = await persistDraft(fields);
+        if (!savedId) return;
+        previewId = savedId;
+        setAutosaveState('saved');
       }
-      router.push(`/event/${id}?preview=guest${pageContext ? `&pageId=${pageContext.pageId}${pageContext.entry === 'team' ? '&team=1' : ''}` : ''}` as never);
-      return;
-    }
-    // NEW CREATE: no autosave runs until a draft exists, so there is nothing to
-    // flush here - this is a VISIBLE first draft-create through the SAME
-    // createOperatorEvent that "save as a draft" uses (not a new writer). The
-    // replace then makes this screen the draft editor, so a later publish
-    // updates that draft instead of creating a duplicate.
-    const communityId = fromCommunity && community ? community.id : null;
-    try {
-      setAutosaveState('saving');
-      const newId = await createOperatorEvent(fields, communityId, false);
-      await syncCoords(newId);
-      setAutosaveState('saved');
-      router.replace(`/creator/event-form?id=${newId}` as never);
-      router.push(`/event/${newId}?preview=guest` as never);
+      assertPageVisit();
+      // Replacing the create screen intentionally retires its visit. Verify
+      // ownership before the two synchronous navigation actions, not between.
+      if (!id) router.replace(`/creator/event-form?id=${previewId}` as never);
+      router.push(`/event/${previewId}?preview=guest${pageContext ? `&pageId=${pageContext.pageId}${pageContext.entry === 'team' ? '&team=1' : ''}` : ''}` as never);
     } catch (e) {
+      if (operationScope && !operationScope.isCurrent()) return;
       setAutosaveState('problem');
-      showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
-    }
+      if (id) showError('Preview is not ready', 'We couldn’t confirm your latest save. Your edits are still here. Check the save status, then try preview again.');
+      else showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
+      explicitSaveRef.current = false;
       setPreviewing(false);
     }
   };
