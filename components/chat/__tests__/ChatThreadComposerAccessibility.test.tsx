@@ -7,6 +7,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Alert, Animated as NativeAnimated, FlatList, Keyboard, Platform, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import ChatThread from '../ChatThread';
+import MessageBubble from '../ChatMessageBubble';
+import { AfterglowFallbackFonts } from '../../../constants/Typography';
 import AttachmentPanel from '../AttachmentSheet';
 import MediaPanel from '../MediaPanel';
 import VoiceRecorder from '../VoiceRecorder';
@@ -154,6 +156,41 @@ it('exposes a labeled 44-point reply cancel that preserves the typed draft', asy
   expect(size.minWidth).toBeGreaterThanOrEqual(44); expect(size.minHeight).toBeGreaterThanOrEqual(44);
   act(() => cancel.props.onPress());
   expect(control('Cancel reply')).toBeUndefined(); expect(input().props.value).toBe('My draft');
+});
+
+it('advertises direct reply only while the conversation permits replies', async () => {
+  mockChat.messages = [message('reply')];
+  await mount();
+  const bubble = () => tree!.root.findAll(node =>
+    node.props.accessibilityActions?.some((action: { name: string }) => action.name === 'messageActions'))[0];
+  expect(bubble().props.accessibilityHint).toBe('Starts a reply to this message');
+  act(() => bubble().props.onPress());
+  expect(control('Cancel reply')).toBeDefined();
+  act(() => control('Cancel reply').props.onPress());
+
+  readOnly = { text: 'This chat is closed' };
+  await update();
+  expect(bubble().props.accessibilityHint).toBe('Shows message actions');
+  expect(bubble().props.onPress).toBeUndefined();
+  act(() => bubble().props.onAccessibilityAction({ nativeEvent: { actionName: 'messageActions' } }));
+  expect(tree!.root.findByType(MessageActionsMenu).props.menu?.preview).toBe('Original message');
+  expect(control('Cancel reply')).toBeUndefined();
+  expect(mockSend).not.toHaveBeenCalled();
+});
+
+it.each(['user', 'system'] as const)('keeps message rendering valid when a %s row changes kind', async initialKind => {
+  const row = (kind: 'user' | 'system') => <MessageBubble
+    message={{ ...message('same-row'), message_type: kind, content: kind === 'system' ? 'joined the plan' : 'Hello again' } as any}
+    isOwn={false} showAvatar={false} showName={false} isGrouped={false}
+    currentUserId="account-a" contextTitle="A walk" photoMaxWidth={240}
+    conversationFonts={AfterglowFallbackFonts}
+  />;
+  await act(async () => { tree = create(row(initialKind)); });
+  const nextKind = initialKind === 'user' ? 'system' : 'user';
+  await act(async () => { tree!.update(row(nextKind)); });
+  expect(JSON.stringify(tree!.toJSON())).toContain(nextKind === 'system' ? 'Alex joined A walk' : 'Hello again');
+  await act(async () => { tree!.update(row(initialKind)); });
+  expect(JSON.stringify(tree!.toJSON())).toContain(initialKind === 'system' ? 'Alex joined A walk' : 'Hello again');
 });
 
 it('exposes a labeled 44-point edit cancel with the existing clear behavior', async () => {
