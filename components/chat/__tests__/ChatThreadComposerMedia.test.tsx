@@ -5,11 +5,12 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import ChatThread from '../ChatThread';
 import AttachmentPanel from '../AttachmentSheet';
 import MediaPanel from '../MediaPanel';
+import { ChatPhotoViewer } from '../ChatPhotoViewer';
 import ReactionEmojiPicker from '../ReactionEmojiPicker';
 
 const mockSend = jest.fn().mockResolvedValue(undefined), mockTyping = jest.fn();
 const mockRead = jest.fn(), mockBlock = jest.fn();
-const mockChat = { messages: [], loading: false, currentUserId: 'account-a', sendMessage: mockSend, sendLocation: jest.fn(), sendAudio: jest.fn(), deleteMessage: jest.fn(), editMessage: jest.fn(), toggleReaction: jest.fn(), loadOlder: jest.fn(), refetch: mockRead };
+const mockChat = { messages: [] as any[], loading: false, currentUserId: 'account-a', sendMessage: mockSend, sendLocation: jest.fn(), sendAudio: jest.fn(), deleteMessage: jest.fn(), editMessage: jest.fn(), toggleReaction: jest.fn(), loadOlder: jest.fn(), refetch: mockRead };
 const mockRecorder = { status: 'idle', durationMillis: 0, meterings: [], start: jest.fn(), stop: jest.fn(), cancel: jest.fn() };
 let mockGifAvailable = true;
 
@@ -37,7 +38,7 @@ jest.mock('react-native-reanimated', () => {
     useAnimatedReaction: () => {}, runOnJS: (fn: unknown) => fn };
 });
 jest.mock('react-native-gesture-handler', () => {
-  const chain = () => { const value: any = {}; for (const name of ['onEnd', 'enabled', 'activateAfterLongPress', 'onStart', 'activeOffsetX', 'failOffsetY', 'onUpdate']) value[name] = () => value; return value; };
+  const chain = () => { const value: any = {}; for (const name of ['onEnd', 'onBegin', 'onFinalize', 'enabled', 'activateAfterLongPress', 'onStart', 'activeOffsetX', 'failOffsetY', 'onUpdate']) value[name] = () => value; return value; };
   return { Gesture: { Tap: chain, Pan: chain, Exclusive: () => ({}) }, GestureDetector: ({ children }: any) => children };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
@@ -63,7 +64,7 @@ const keyboardEvents = new Map<string, (event: any) => void>();
 const baseProps = { kind: 'event' as const, id: 'plan-one', title: 'A walk', subtitle: null, members: [], viewContextLabel: 'View Plan', onViewContext: jest.fn(), headerMenu: { type: 'report' as const } };
 beforeEach(() => {
   jest.useFakeTimers();
-  jest.clearAllMocks(); mockGifAvailable = true; keyboardEvents.clear();
+  jest.clearAllMocks(); mockChat.messages = []; mockGifAvailable = true; keyboardEvents.clear();
   jest.requireMock('../../../constants/FeatureFlags').COMMUNITY_CHAT_GROUPING_ENABLED = true;
   jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
   jest.spyOn(Keyboard, 'addListener').mockImplementation(((name: string, callback: (event: any) => void) => { keyboardEvents.set(name, callback); return { remove: jest.fn() }; }) as any);
@@ -159,4 +160,23 @@ it.each(['cancelled', 'blurred'] as const)('keeps the iOS attachment reservation
   act(() => keyboardEvents.get('keyboardDidShow')!({ endCoordinates: { height: 300 } }));
   expect(tree!.root.findByType(AttachmentPanel).props.height).toBe(height);
   expect(mockSend).not.toHaveBeenCalled();
+});
+
+
+describe('photo browsing chronology', () => {
+  const formats = [
+    ['offset', '2026-11-04T13:00:00.100-08:00', '2026-11-04T21:00:00Z', ['z', 'a']],
+    ['microseconds', '2026-11-04T21:00:00.123001+00:00', '2026-11-04T21:00:00.123Z', ['z', 'a']],
+    ['equal instants', '2026-11-04T21:00:00Z', '2026-11-04T13:00:00-08:00', ['a', 'z']],
+  ] as const;
+  it.each(formats)('passes %s order to the actual photo viewer without changing messages', async (_label, a, z, expected) => {
+    const photo = (id: string, created_at: string) => ({ id, created_at, content: `Caption ${id}`, image_url: `https://example.test/${id}.jpg`, message_type: 'user', user_id: 'account-a', sender: { first_name: 'Amelia' } });
+    mockChat.messages = [photo('a', a), photo('z', z), { ...photo('system', a), message_type: 'system' }, { ...photo('text', z), image_url: null }];
+    const original = [...mockChat.messages];
+    await mount('ios');
+    const photos = tree!.root.findByType(ChatPhotoViewer).props.photos;
+    expect(photos.map((item: any) => item.id)).toEqual(expected);
+    expect(photos).toEqual(expected.map(id => ({ id, uri: `https://example.test/${id}.jpg`, senderName: 'Amelia', caption: `Caption ${id}` })));
+    expect(mockChat.messages).toEqual(original);
+  });
 });
