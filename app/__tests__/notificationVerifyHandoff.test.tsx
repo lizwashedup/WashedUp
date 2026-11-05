@@ -673,3 +673,17 @@ describe('root link-delivery lifetime', () => {
     expect(await AsyncStorage.getItem('pendingLinkDestination')).toBe('/plan/initial-plan?invitation=kept');
   });
 });
+
+
+it('ignores a buffered OneSignal callback retained after root cleanup', async () => {
+  await mount(); await verify(); await tick(600);
+  const callback = Array.from(mockClickListeners)[0]; expect(callback).toBeDefined();
+  // Prove this callback can route while its subscription is alive.
+  act(() => callback({ notification: { additionalData: { type: 'new_message', topicId: '22222222-2222-4222-8222-222222222222' } } })); await flush();
+  expect(mockRoutes.some(route => route.href === '/community-topic/22222222-2222-4222-8222-222222222222')).toBe(true);
+  await act(async () => tree!.unmount()); tree = undefined;
+  expect(mockClickListeners.size).toBe(0);
+  const count = mockRoutes.length;
+  act(() => callback({ notification: { additionalData: { type: 'new_message', topicId: '33333333-3333-4333-8333-333333333333' } } })); await flush();
+  expect(mockRoutes).toHaveLength(count);
+});
