@@ -1,51 +1,47 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { act } from 'react-test-renderer';
+import {
+  resetSetup, cleanupSetup, mountSetup, fillAndCreate, press, action, deferred,
+  retireSetup, mockCreate, mockFinish, mockInvalidate, mockSelect, mockWorkspace,
+  mockDismissTo, mockPush, mockReplace, savedAttempt,
+} from '../../app/creator/__tests__/setupCommunityHarness';
 
-// AC-CRT-002 ("a qualified account without a community, creating a
-// community lands in the Creator Space with that community selected")
-// automated gap.
-//
-// The SELECTION mechanism itself (useLedCommunity's `led.find(id) ?? led[0]
-// ?? null` fallback) is already proven, real and passing, by
-// workspaceContext.test.ts's "defaults to the first (oldest-led) community
-// when nothing is selected" case -- that exercises the exact branch a
-// brand-new, previously-community-less account hits (an empty selection
-// falling through to led[0]); a second fixture sized to exactly one
-// community would not exercise any code path that one doesn't already.
-// Restating it here would be a duplicate, not new coverage.
-//
-// What NO test anywhere previously covered: app/creator/setup-community.tsx
-// itself, the one caller of createCommunity() (lib/creatorMode.ts). Its
-// success handler's SEQUENCE is the real remaining, checkable gap --
-// invalidate creator-access BEFORE navigating, never after -- checked below
-// via the same static source-contract technique creatorShellRedirects.test.ts
-// already established for a screen that renders real native UI and isn't
-// meaningfully unit-testable without a full RN harness. Getting this order
-// backwards (navigate first) would land the creator on /today before their
-// new community ever shows up in ledCommunities -- the exact "setup loop"
-// failure class b99e369 (lib/__tests__/creatorAccess.test.ts) already fixed
-// once for a different root cause.
+// AC-CRT-002: exercise the real setup screen's handoff, including pending results.
+// Navigation must follow verified creation and exact identity selection.
+beforeEach(resetSetup);
+afterEach(cleanupSetup);
 
-describe('app/creator/setup-community.tsx static contract (source assertions, same technique as creatorShellRedirects.test.ts)', () => {
-  const source = readFileSync(resolve(__dirname, '../../app/creator/setup-community.tsx'), 'utf8');
+it('refreshes creator access only after confirmed creation and before the chosen destination', async () => {
+  const creation = deferred<{ id: string; attempt: typeof savedAttempt }>();
+  mockCreate.mockReturnValue(creation.promise);
+  await mountSetup(); await fillAndCreate();
+  expect(mockInvalidate).not.toHaveBeenCalled(); expect(mockSelect).not.toHaveBeenCalled();
+  expect(mockDismissTo).not.toHaveBeenCalled(); expect(action('View community')).toBeUndefined();
+  await act(async () => creation.resolve({ id: 'new-community-id', attempt: savedAttempt }));
+  expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['creator-access'] });
+  expect(mockDismissTo).not.toHaveBeenCalled();
+  await press('View community');
+  expect(mockInvalidate.mock.invocationCallOrder[0]).toBeLessThan(mockDismissTo.mock.invocationCallOrder[0]);
+  expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/today');
+});
 
-  it('invalidates creator-access before navigating away, never after', () => {
-    const invalidateIdx = source.indexOf("invalidateQueries({ queryKey: ['creator-access'] })");
-    const navigateIdx = source.indexOf("router.dismissTo('/(tabs)/friends/manage/(tools)/today')");
-    expect(invalidateIdx).toBeGreaterThan(-1);
-    expect(navigateIdx).toBeGreaterThan(-1);
-    expect(invalidateIdx).toBeLessThan(navigateIdx);
-  });
+it('awaits receipt rechecking before selecting the community and dismissing setup, without pushing another workspace', async () => {
+  const finish = deferred<string>(); mockFinish.mockReturnValue(finish.promise);
+  await mountSetup(); await fillAndCreate();
+  const open = action('View community')!.props.onPress;
+  await act(async () => { open(); open(); });
+  expect(mockFinish).toHaveBeenCalledTimes(1); expect(mockSelect).not.toHaveBeenCalled();
+  expect(mockDismissTo).not.toHaveBeenCalled();
+  await act(async () => finish.resolve('new-community-id'));
+  expect(mockSelect).toHaveBeenCalledWith('new-community-id');
+  expect(mockSelect.mock.invocationCallOrder[0]).toBeLessThan(mockDismissTo.mock.invocationCallOrder[0]);
+  expect(mockDismissTo).toHaveBeenCalledTimes(1);
+  expect(mockPush).not.toHaveBeenCalled(); expect(mockReplace).not.toHaveBeenCalled();
+});
 
-  it('both the invalidate and the navigate are awaited on the createCommunity call succeeding, not fired eagerly', () => {
-    const createIdx = source.indexOf('await createCommunity(');
-    const invalidateIdx = source.indexOf("await queryClient.invalidateQueries({ queryKey: ['creator-access'] })");
-    expect(createIdx).toBeGreaterThan(-1);
-    expect(invalidateIdx).toBeGreaterThan(createIdx);
-  });
-
-  it('dismisses to the existing creator screen, rather than pushes, so a successful creation never leaves the setup screen on the back stack', () => {
-    expect(source).toMatch(/router\.dismissTo\('\/\(tabs\)\/friends\/manage\/\(tools\)\/today'\)/);
-    expect(source).not.toMatch(/router\.push\('\/\(tabs\)\/friends\/manage\/\(tools\)\/today'\)/);
-  });
+it('does not select or navigate when the receipt returns after the setup visit retires', async () => {
+  const finish = deferred<string>(); mockFinish.mockReturnValue(finish.promise);
+  await mountSetup(); await fillAndCreate(); await press('View community');
+  retireSetup(); await act(async () => finish.resolve('new-community-id'));
+  expect(mockWorkspace).not.toHaveBeenCalled(); expect(mockSelect).not.toHaveBeenCalled();
+  expect(mockDismissTo).not.toHaveBeenCalled(); expect(mockPush).not.toHaveBeenCalled();
 });

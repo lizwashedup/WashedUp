@@ -22,7 +22,7 @@ describe('call-critical creator UX contracts', () => {
   });
 
   it('names the audience in both community conversation types', () => {
-    expect(read('app/community-thread/[id].tsx')).toContain('everyone in this community');
+    expect(read('app/community-thread/[id].tsx')).toContain("coreLayout?.name ?? card?.name ?? 'Everyone in this community'");
     expect(read('app/community-topic/[id].tsx')).toContain('people going to this event');
   });
 

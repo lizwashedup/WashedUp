@@ -5,7 +5,13 @@ const mockRead=jest.fn(),mockRedirect=jest.fn(),mockDismiss=jest.fn();
 let mockReturnId:string|undefined;
 let mockAccount='cedar',mockEpoch=1,mockAccountError:Error|null=null,mockScreen='today',mockFocused=true;
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
-jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{const id=mockAccount,epoch=mockEpoch;return{viewerId:id,epoch,isLoading:false,error:mockAccountError,retry:async()=>{},isCurrent:()=>id===mockAccount&&epoch===mockEpoch};}}));
+jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
+ const id=mockAccount,epoch=mockEpoch;
+ // Match the real observer: ordinary renders keep the identity callback stable.
+ // A new callback every render would manufacture a new page scope and read loop.
+ const isCurrent=require('react').useCallback(()=>id===mockAccount&&epoch===mockEpoch,[id,epoch]);
+ return{viewerId:id,epoch,isLoading:false,error:mockAccountError,retry:async()=>{},isCurrent};
+}}));
 jest.mock('expo-router',()=>{const element=require('react')['createElement'];const Stack=({children}:any)=>element('ManagementStack',null,children);Stack.Screen=()=>null;return{Stack,useGlobalSearchParams:()=>({fromCommunityId:mockReturnId}),useSegments:()=>['(tabs)','friends','manage','(tools)',mockScreen],Redirect:({href}:any)=>{mockRedirect(href);return null;},router:{replace:jest.fn(),navigate:jest.fn(),dismissTo:(...args:unknown[])=>mockDismiss(...args)}};});
 jest.mock('../../../lib/creatorMode',()=>({...jest.requireActual('../../../lib/creatorMode'),getCreatorAccess:(...args:any[])=>mockRead(...args)}));
 jest.mock('../../../lib/supabase',()=>({supabase:{}}));
