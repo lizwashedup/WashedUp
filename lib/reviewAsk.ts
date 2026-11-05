@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { supabase } from './supabase';
 import { logError } from './logger';
+import { requestWithDeadline } from './requestWithDeadline';
+import { loadStoreReview } from './loadStoreReview';
 
 // expo-store-review is a NATIVE module. It is imported lazily (only when we are
 // actually about to ask) so a JS bundle that lands on a binary WITHOUT the
@@ -41,19 +43,21 @@ function appVersion(): string {
  * swallowed so it can never trap the user. MUST be called only after the survey
  * Modal has fully dismissed (inside the modal handoff window).
  */
-export async function maybeRequestReviewAfterTopRating(): Promise<void> {
+export async function maybeRequestReviewAfterTopRating(isCurrent: () => boolean = () => true): Promise<void> {
   try {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || !isCurrent()) return;
 
     // Permanent hard stops carried over from the old flow.
-    if ((await AsyncStorage.getItem(LEGACY_COMPLETED_KEY)) === 'true') return;
-    if ((await AsyncStorage.getItem(LEGACY_ASKED_KEY)) === 'true') return;
+    if ((await requestWithDeadline(AsyncStorage.getItem(LEGACY_COMPLETED_KEY), 12_000)) === 'true' || !isCurrent()) return;
+    if ((await requestWithDeadline(AsyncStorage.getItem(LEGACY_ASKED_KEY), 12_000)) === 'true' || !isCurrent()) return;
 
     // Cooldown: re-ask only after 90 days OR an app-version bump.
-    const lastAtRaw = await AsyncStorage.getItem(LAST_AT_KEY);
+    const lastAtRaw = await requestWithDeadline(AsyncStorage.getItem(LAST_AT_KEY), 12_000);
+    if (!isCurrent()) return;
     if (lastAtRaw) {
       const lastAt = Number(lastAtRaw) || 0;
-      const lastVersion = await AsyncStorage.getItem(LAST_VERSION_KEY);
+      const lastVersion = await requestWithDeadline(AsyncStorage.getItem(LAST_VERSION_KEY), 12_000);
+      if (!isCurrent()) return;
       const versionBumped = lastVersion != null && lastVersion !== appVersion();
       if (!versionBumped && Date.now() - lastAt < COOLDOWN_MS) return;
     }
@@ -61,7 +65,8 @@ export async function maybeRequestReviewAfterTopRating(): Promise<void> {
     // Server-side eligibility (a real thumbs_up, OR no real feedback yet;
     // sentinel rows excluded). The positive survey tap is the soft-ask; this is
     // the final gate before the OS sheet.
-    const { data: eligible, error } = await supabase.rpc('get_review_ask_eligibility');
+    const { data: eligible, error } = await requestWithDeadline(supabase.rpc('get_review_ask_eligibility'), 12_000);
+    if (!isCurrent()) return;
     if (error) {
       console.warn('[WashedUp] review eligibility RPC failed:', error.message);
       return;
@@ -70,12 +75,15 @@ export async function maybeRequestReviewAfterTopRating(): Promise<void> {
 
     // Lazy native import (see note at top): throws on a binary without the
     // module, which the surrounding try/catch swallows.
-    const StoreReview = await import('expo-store-review');
-    if (!(await StoreReview.isAvailableAsync())) return;
+    const StoreReview = await requestWithDeadline(loadStoreReview(), 12_000);
+    if (!isCurrent()) return;
+    if (!(await requestWithDeadline(StoreReview.isAvailableAsync(), 12_000)) || !isCurrent()) return;
 
     // Record BEFORE presenting so a crash mid-present can't re-arm next launch.
     await AsyncStorage.setItem(LAST_AT_KEY, String(Date.now())).catch(() => {});
+    if (!isCurrent()) return;
     await AsyncStorage.setItem(LAST_VERSION_KEY, appVersion()).catch(() => {});
+    if (!isCurrent()) return;
 
     await StoreReview.requestReview();
   } catch (e) {

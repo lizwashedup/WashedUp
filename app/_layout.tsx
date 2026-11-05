@@ -75,7 +75,7 @@ import { clearPendingDestination, consumePendingDestination, peekPendingCheckout
 import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
-import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
+import { useRootModalHandoff, ROOT_MODAL_HANDOFF_MS as MODAL_HANDOFF_MS } from '../hooks/useRootModalHandoff';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import PushPrimerModal from '../components/PushPrimerModal';
 import VideoSplash from '../components/VideoSplash';
@@ -389,7 +389,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const surveyCheckedRef = useRef(false);
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
   const [reviewCheckDone, setReviewCheckDone] = useState(false);
-  const [reviewSheetPending, setReviewSheetPending] = useState(false);
   const reviewCheckIdentityRef = useRef<typeof authIdentityRef.current | null>(null);
   const [showPushPrimer, setShowPushPrimer] = useState(false);
   const pushPrimerCheckedRef = useRef(false);
@@ -402,6 +401,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const pushPrimerAttemptRef = useRef<object | null>(null);
   const pushPrimerAnalyticsVisitRef = useRef<typeof pushPrimerVisitRef.current>(null);
   const primerIdentity = authIdentityRef.current;
+  const { modalLocked, reviewSheetPending, handoffModal, requestReview, reset: resetModalHandoff } = useRootModalHandoff(
+    primerIdentity, () => mountedRef.current && authIdentityRef.current === primerIdentity,
+  );
   const { fonts: primerFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
 
   const retirePushPrimer = () => {
@@ -424,8 +426,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setReviewCheckDone(false);
     reviewCheckIdentityRef.current = null;
     setSurveyPlan(null);
-    setReviewSheetPending(false);
-  }, []);
+    resetModalHandoff();
+  }, [resetModalHandoff]);
   useEffect(() => resetAccountOwnedUi(), [primerIdentity, resetAccountOwnedUi]);
 
   // ── Root-modal sequencer ──────────────────────────────────────────────────
@@ -438,13 +440,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // handoff window after a close, so the closing modal fully unmounts before
   // the next mounts. Precedence (explicit): survey > review > mark >
   // pushPrimer, enforced by the render gates below. One modal at a time, ever.
-  const MODAL_HANDOFF_MS = 400;
-  const [modalLocked, setModalLocked] = useState(false);
-  const handoffModal = (close: () => void) => {
-    close();
-    setModalLocked(true);
-    setTimeout(() => setModalLocked(false), MODAL_HANDOFF_MS);
-  };
+  // Timer ownership and retirement live in useRootModalHandoff.
 
   useEffect(() => {
     // authIdentityRef advances synchronously inside the Supabase callback,
@@ -543,12 +539,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setPlanPrimerRequest(null);
     pushPrimerCheckedRef.current = true;
     retirePushPrimer();
-    setReviewSheetPending(true);
-    setTimeout(() => {
-      void maybeRequestReviewAfterTopRating().finally(() =>
-        setReviewSheetPending(false),
-      );
-    }, MODAL_HANDOFF_MS + 60);
+    requestReview();
   };
 
   // Pre-permission primer gate. Native only. Fires once per cold launch
@@ -1467,6 +1458,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           members={surveyMembers}
           userId={authedUserId}
           onComplete={(topRated) => {
+            if (!mountedRef.current || authIdentityRef.current !== primerIdentity || primerIdentity.userId !== authedUserId) return;
             handoffModal(() => setSurveyPlan(null));
             // TOP rating: fire the native review ask after this modal unmounts.
             if (topRated) fireReviewAfterSurvey();
