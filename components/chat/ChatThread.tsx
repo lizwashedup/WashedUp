@@ -13,6 +13,7 @@ import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
 import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
+import { useChatGifSend } from '../../hooks/useChatGifSend';
 import { ChatMentionPicker } from './ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { mentionQueryAt, insertMentionAt } from '../../lib/communityChatUi';
@@ -259,7 +260,7 @@ function ChatThread(props: ChatThreadProps) {
   useLayoutEffect(() => {
     activeWritableVisit.current = writableVisit;
     sendingRef.current = null; photoSendingRef.current = null; photoPickerAttempt.current = null;
-    gifAttempt.current = null; locationAttempt.current = null;
+    locationAttempt.current = null;
     return () => { if (activeWritableVisit.current === writableVisit) activeWritableVisit.current = null; };
   }, [writableVisit]);
   const photos = useMemo(() => messages.filter(message => message.message_type !== 'system' && message.image_url)
@@ -297,8 +298,6 @@ function ChatThread(props: ChatThreadProps) {
   const photoCaptionSentRef = useRef(false);
   const photoSendingRef = useRef<object | null>(null);
   const photoPickerAttempt = useRef<object | null>(null);
-  const gifAttempt = useRef<object | null>(null);
-  const gifPendingIds = useRef(new Map<string, string>());
   const locationAttempt = useRef<object | null>(null);
   const locationSession = useRef<{ pin: string; sendId: string } | null>(null);
   const photoSendSessionRef = useRef(new PhotoSendSession(() => Crypto.randomUUID()));
@@ -1026,38 +1025,19 @@ function ChatThread(props: ChatThreadProps) {
     });
   }, [canWrite]);
 
-  // Send a GIF: the Giphy URL goes straight in as the image_url (no upload), and
-  // the existing image bubble renders + autoplays it via expo-image. A dedicated
-  // 'gif' message_type (for chat-list preview text) is deferred to the pre-flip
-  // migration batch.
-  const sendGif = useCallback(async (url: string) => {
-    if (!canWrite() || gifAttempt.current) return;
-    const attempt = {}; gifAttempt.current = attempt;
-    const isCurrent = () => canWrite() && gifAttempt.current === attempt;
-    const sendScope = { ...entryScope, isCurrent };
-    let sendId = gifPendingIds.current.get(url);
-    if (!sendId) { sendId = Crypto.randomUUID(); gifPendingIds.current.set(url, sendId); }
-    setActivePanel(null); setAlertInfo(null);
-    const scrollIntentIsCurrent = captureScrollIntent();
-    try {
-      const sent = await requestWithDeadline(sendMessage('', url, undefined, sendId, sendScope), 25_000);
-      if (!isCurrent()) return;
-      if (!sent) throw Error('GIF delivery is unconfirmed.');
-      gifPendingIds.current.delete(url);
-      if (scrollIntentIsCurrent()) scrollToBottom();
-    } catch {
-      if (isCurrent()) setAlertInfo({
-        title: 'GIF not confirmed',
-        message: 'Your selection is kept. Retry sends the same GIF without adding a second message.',
-        buttons: [
-          { text: 'Try again', onPress: () => { if (canWrite()) void sendGif(url); } },
-          { text: 'Close', style: 'cancel' },
-        ],
-      });
-    } finally {
-      if (gifAttempt.current === attempt) gifAttempt.current = null;
-    }
-  }, [canWrite, sendMessage, scrollToBottom, captureScrollIntent, entryScope]);
+  const beginGifSend = useCallback(() => { setActivePanel(null); setAlertInfo(null); }, []);
+  const showGifRetry = useCallback((retry: () => void) => setAlertInfo({
+    title: 'GIF not confirmed',
+    message: 'Your selection is kept. Retry sends the same GIF without adding a second message.',
+    buttons: [
+      { text: 'Try again', onPress: retry },
+      { text: 'Close', style: 'cancel' },
+    ],
+  }), []);
+  const sendGif = useChatGifSend({
+    entry, writableVisit, scope: entryScope, sendMessage, captureScrollIntent,
+    onStart: beginGifSend, onConfirmed: scrollToBottom, onUnconfirmed: showGifRetry,
+  });
 
   // Pick first, then preserve the selected batch/caption through explicit retry.
   const doPhotoAction = useCallback(async (choice: 'camera' | 'library') => {
@@ -1218,7 +1198,7 @@ function ChatThread(props: ChatThreadProps) {
     setMentionQuery(null); setCheckingDraft(false); setSendingText(false);
     selectionRef.current = { start: 0, end: 0 };
     sendingRef.current = null; photoSendingRef.current = null;
-    photoPickerAttempt.current = null; gifAttempt.current = null; locationAttempt.current = null; locationSession.current = null; gifPendingIds.current.clear();
+    photoPickerAttempt.current = null; locationAttempt.current = null; locationSession.current = null;
     photoSendSessionRef.current = new PhotoSendSession(() => Crypto.randomUUID());
     photoCaptionSentRef.current = false;
     setUploading(false); setPendingPhotos([]); setPhotoPreviewOpen(false);
