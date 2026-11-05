@@ -1269,8 +1269,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           // Best-effort: consume a referral code captured while signed out
           // (QR/link scanned before auth). Fire-and-forget; fully self-
           // contained and error-swallowed so it cannot affect routing below.
-          if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
-            consumePendingReferral();
+          if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN' && userId) {
+            void consumePendingReferral({ userId, isCurrent });
           }
 
           // A ticket-transfer code stashed while signed out (item 15, draft,
