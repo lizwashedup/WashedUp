@@ -125,11 +125,16 @@ function SurveySession({
     peoplePool.length > 0;
   const whoMadeItList = peoplePool;
 
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  // Fixed headings and summaries can consume the entire list viewport on
+  // small screens or with larger text. Keep those sections in the scroll flow.
+  const scrollSections = windowHeight < 740 || fontScale > 1.3;
   const [step, setStep] = useState<Step>('how');
   const [rating, setRating] = useState<Rating | null>(null);
   const [comment, setComment] = useState('');
   const [showComment, setShowComment] = useState(false);
   const bodyScroll = useRef<ScrollView>(null);
+  useEffect(() => { bodyScroll.current?.scrollTo({ y: 0, animated: false }); }, [step]);
   const commentFocused = useRef(false);
   const revealFocusedComment = () => {
     if (step === 'how' && commentFocused.current) bodyScroll.current?.scrollToEnd({ animated: false });
@@ -443,6 +448,26 @@ function SurveySession({
   const headerTitle =
     step === 'how' ? COPY.surveyHow : step === 'who' ? COPY.surveyWhoMadeIt : null;
 
+  const header = (
+    <SheetHeader
+      eyebrow={plan.title}
+      title={headerTitle}
+      current={stepIndex[step]}
+      total={totalSteps}
+    />
+  );
+  const attendanceSummary = step === 'who' && (
+    <View style={styles.attendanceSummary}>
+      <Text accessibilityLiveRegion="polite" style={styles.whoHelper}>
+        {noShows.size === 1 ? '1 person marked ‘Didn’t show up.’' : `${noShows.size} people marked ‘Didn’t show up.’`}
+      </Text>
+      {attendanceError && <Text accessibilityRole="alert" style={styles.attendanceError}>{attendanceError}</Text>}
+      <Pressable accessibilityRole="button" accessibilityLabel={attendanceStarted ? 'Skip remaining attendance reports' : 'Skip attendance'} style={styles.skipAttendance} onPress={skipAttendance}>
+        <Text style={styles.escapeText}>{attendanceStarted ? 'Skip remaining' : 'Skip'}</Text>
+      </Pressable>
+    </View>
+  );
+
   return (
     <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={exit}>
       <SafeAreaProvider>
@@ -469,78 +494,73 @@ function SurveySession({
             ]}
           >
             <View style={styles.handle} />
-            <SheetHeader
-              eyebrow={plan.title}
-              title={headerTitle}
-              current={stepIndex[step]}
-              total={totalSteps}
-            />
+            {!scrollSections && header}
 
             {/* Bodies land in checkpoints 2-4. */}
             <Animated.ScrollView
               ref={bodyScroll}
               style={styles.body}
-              contentContainerStyle={styles.bodyContent}
+              contentContainerStyle={scrollSections ? styles.scrollingSections : styles.bodyContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               onLayout={revealFocusedComment}
+              onContentSizeChange={() => {
+                if (scrollSections && attendanceError) bodyScroll.current?.scrollToEnd({ animated: false });
+                else revealFocusedComment();
+              }}
             >
-              {step === 'how' && (
-                <StepHow
-                  selected={rating}
-                  onPick={(r) => {
-                    hapticSelection();
-                    setRating(r);
-                    setShowComment(r === 'thumbs_down');
-                    if (r !== 'thumbs_down') Keyboard.dismiss();
-                  }}
-                  comment={comment}
-                  setComment={setComment}
-                  showComment={showComment}
-                  onCommentFocus={() => { commentFocused.current = true; revealFocusedComment(); }}
-                  onCommentBlur={() => { commentFocused.current = false; }}
-                />
-              )}
-              {step === 'who' && (
-                <StepWho
-                  list={whoMadeItList}
-                  answers={answers}
-                  disabled={attendanceStarted}
-                  onAnswer={(id, answer) => {
-                    if (!isCurrent() || attendanceFrozen.current || attendanceAttempt.current) return;
-                    hapticSelection();
-                    setAnswers(current => ({ ...current, [id]: answer }));
-                  }}
-                />
-              )}
-              {step === 'keep' && (
-                <StepKeep
-                  candidates={keepCandidates}
-                  selected={addSel}
-                  disabled={busy || !!result}
-                  onToggle={(id) => {
-                    if (!isCurrent() || keepAttempt.current) return;
-                    hapticSelection();
-                    setAddSel((s) => {
-                      const n = new Set(s);
-                      if (n.has(id)) n.delete(id);
-                      else n.add(id);
-                      return n;
-                    });
-                  }}
-                />
-              )}
+              {scrollSections && header}
+              <View style={scrollSections ? styles.bodyContent : undefined}>
+                {step === 'how' && (
+                  <StepHow
+                    selected={rating}
+                    onPick={(r) => {
+                      hapticSelection();
+                      setRating(r);
+                      setShowComment(r === 'thumbs_down');
+                      if (r !== 'thumbs_down') Keyboard.dismiss();
+                    }}
+                    comment={comment}
+                    setComment={setComment}
+                    showComment={showComment}
+                    onCommentFocus={() => { commentFocused.current = true; revealFocusedComment(); }}
+                    onCommentBlur={() => { commentFocused.current = false; }}
+                  />
+                )}
+                {step === 'who' && (
+                  <StepWho
+                    list={whoMadeItList}
+                    answers={answers}
+                    disabled={attendanceStarted}
+                    onAnswer={(id, answer) => {
+                      if (!isCurrent() || attendanceFrozen.current || attendanceAttempt.current) return;
+                      hapticSelection();
+                      setAnswers(current => ({ ...current, [id]: answer }));
+                    }}
+                  />
+                )}
+                {step === 'keep' && (
+                  <StepKeep
+                    candidates={keepCandidates}
+                    selected={addSel}
+                    disabled={busy || !!result}
+                    onToggle={(id) => {
+                      if (!isCurrent() || keepAttempt.current) return;
+                      hapticSelection();
+                      setAddSel((s) => {
+                        const n = new Set(s);
+                        if (n.has(id)) n.delete(id);
+                        else n.add(id);
+                        return n;
+                      });
+                    }}
+                  />
+                )}
+              </View>
+              {scrollSections && attendanceSummary}
             </Animated.ScrollView>
 
-            {step === 'who' && <View style={styles.attendanceSummary}>
-              <Text accessibilityLiveRegion="polite" style={styles.whoHelper}>
-                {noShows.size === 1 ? '1 person marked ‘Didn’t show up.’' : `${noShows.size} people marked ‘Didn’t show up.’`}
-              </Text>
-              {attendanceError && <Text accessibilityRole="alert" style={styles.attendanceError}>{attendanceError}</Text>}
-              <Pressable accessibilityRole="button" accessibilityLabel={attendanceStarted ? 'Skip remaining attendance reports' : 'Skip attendance'} style={styles.skipAttendance} onPress={skipAttendance}>
-                <Text style={styles.escapeText}>{attendanceStarted ? 'Skip remaining' : 'Skip'}</Text>
-              </Pressable>
-            </View>}
+            {!scrollSections && attendanceSummary}
 
             {/* Footer. Steps 1-2: a single Continue. Step 3: equal-weight Add /
                 Skip (fill vs ghost only). "Not now" stays present on all steps. */}
