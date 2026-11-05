@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, SectionList, Text } from 'react-native';
+import { ActivityIndicator, Modal, SectionList, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { AfterglowFallbackFonts } from '../../../constants/Typography';
 import PeopleSearchBar from '../../yours/search/PeopleSearchBar';
@@ -55,6 +55,25 @@ it('keeps identity loading distinct from an empty people list', () => {
   expect(fixture.tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
   expect(action(fixture.tree.root, 'Add 1 person')).toBeUndefined();
   expect(fixture.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps one native popup mounted while account loading resolves and the account changes', () => {
+  identity = { ...identity, viewerId: undefined, isLoading: true };
+  const fixture = mount(), popup = fixture.tree.root.findByType(Modal);
+  identity = account(); fixture.update();
+  expect(fixture.tree.root.findByType(Modal)).toBe(popup);
+  select(fixture.tree.root, 'alice');
+  currentEpoch++; identity = account('other'); fixture.update();
+  expect(fixture.tree.root.findByType(Modal)).toBe(popup);
+  expect(action(fixture.tree.root, 'alice').props['aria-checked']).toBe(false);
+});
+
+it('native Back retires confirmation and closes the current account contents once', () => {
+  const fixture = mount(); select(fixture.tree.root, 'alice');
+  const confirm = action(fixture.tree.root, 'Add 1 person').props.onPress;
+  const back = fixture.tree.root.findByType(Modal).props.onRequestClose;
+  act(() => { back(); confirm(); back(); });
+  expect(fixture.onClose).toHaveBeenCalledTimes(1); expect(fixture.onConfirm).not.toHaveBeenCalled();
 });
 
 it.each(['identity', 'people'])('shows a retry for %s failure and does not report a successful empty list', async kind => {
