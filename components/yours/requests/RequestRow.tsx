@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useLayoutEffect, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
+import { ScaledText as Text } from '../../ScaledText';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { hapticSelection } from '../../../lib/haptics';
@@ -28,6 +29,8 @@ function RequestPhoto({ req, fonts }: { req: IncomingRequest; fonts: AfterglowFo
 /** Explicit Add; decline retains its per-person inline confirmation. Pending
  * and errors are supplied by the account/visit-scoped RequestStack. */
 export default function RequestRow({ req, onAdd, onDecline, highlighted, disabled, appearance, pendingAction, error, retryAction, unavailable: withdrawn }: RequestRowProps) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
   const identity = `${req.connection_id}:${req.requester_user_id}:${req.requested_at}`;
   const [confirmingFor, setConfirmingFor] = useState<string | null>(null);
   const confirming = confirmingFor === identity;
@@ -55,21 +58,21 @@ export default function RequestRow({ req, onAdd, onDecline, highlighted, disable
       {withdrawn ? null : confirming && !busy ? (
         <View style={s.confirmation}>
           <Text style={s.confirmTitle}>{COPY.requestDeclineConfirmTitle(name)}</Text>
-          <View style={s.confirmBtns}>
-            <Pressable style={s.declineConfirm} disabled={unavailable} onPress={confirmDecline} accessibilityRole="button" accessibilityLabel={`Confirm decline ${name}`} accessibilityState={{ disabled: unavailable }}>
+          <View style={[s.confirmBtns, largeText && styles.stackedActions]}>
+            <Pressable style={[s.declineConfirm, largeText && styles.stackedAction]} disabled={unavailable} onPress={confirmDecline} accessibilityRole="button" accessibilityLabel={`Confirm decline ${name}`} accessibilityState={{ disabled: unavailable }}>
               <Text numberOfLines={1} style={s.declineConfirmText}>{COPY.requestDeclineConfirmYes}</Text>
             </Pressable>
-            <Pressable style={s.keep} disabled={unavailable} onPress={() => setConfirmingFor(null)} accessibilityRole="button" accessibilityLabel={`Keep request from ${name}`} accessibilityState={{ disabled: unavailable }}>
+            <Pressable style={[s.keep, largeText && styles.stackedAction]} disabled={unavailable} onPress={() => setConfirmingFor(null)} accessibilityRole="button" accessibilityLabel={`Keep request from ${name}`} accessibilityState={{ disabled: unavailable }}>
               <Text numberOfLines={1} style={s.keepText}>{COPY.requestDeclineConfirmNo}</Text>
             </Pressable>
           </View>
         </View>
       ) : (
-        <View style={s.actions}>
-          <Pressable style={[s.add, unavailable && s.disabled]} onPress={add} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'accept' ? `Try again to add ${name}` : `${addLabel} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
+        <View style={[s.actions, largeText && styles.stackedActions]}>
+          <Pressable style={[s.add, largeText && styles.stackedAction, unavailable && s.disabled]} onPress={add} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'accept' ? `Try again to add ${name}` : `${addLabel} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
             <Text numberOfLines={1} style={s.addText}>{error && retryAction === 'accept' ? 'Try again' : addLabel}</Text>
           </Pressable>
-          <Pressable style={[s.decline, unavailable && s.disabled]} onPress={askDecline} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'decline' ? `Try again to decline ${name}` : `${COPY.requestDecline} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
+          <Pressable style={[s.decline, largeText && styles.stackedAction, unavailable && s.disabled]} onPress={askDecline} disabled={unavailable} accessibilityRole="button" accessibilityLabel={error && retryAction === 'decline' ? `Try again to decline ${name}` : `${COPY.requestDecline} ${name}`}  accessibilityState={{ disabled: unavailable, busy }}>
             <Text numberOfLines={1} style={s.declineText}>{error && retryAction === 'decline' ? 'Try again' : COPY.requestDecline}</Text>
           </Pressable>
         </View>
@@ -79,6 +82,8 @@ export default function RequestRow({ req, onAdd, onDecline, highlighted, disable
 }
 
 const styles = StyleSheet.create({
+  stackedActions: { flexDirection: 'column', alignItems: 'stretch' },
+  stackedAction: { flex: 0, width: '100%' },
   row: {
     backgroundColor: Colors.surface,
     borderRadius: 18,
