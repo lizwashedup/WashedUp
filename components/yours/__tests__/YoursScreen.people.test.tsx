@@ -28,6 +28,7 @@ const mockNever = new Promise(() => {});
 let mockUid = 'viewer', mockFocused = true, mockLoading = false, mockRequests: unknown[] = [], mockBacklog: unknown[] = [];
 let mockRequestsError: Error | null = null, mockRequestsFetching = false;
 const mockRefetchRequests = jest.fn();
+const mockMarkRequestsSeen = jest.fn();
 let mockGridLoading = false, mockGridError: Error | null = null, mockBacklogError: Error | null = null;
 const mockRefetchPeople = jest.fn(), mockRefetchBacklog = jest.fn();
 const mockGridScope = jest.fn(), mockBacklogScope = jest.fn();
@@ -58,7 +59,7 @@ jest.mock('../../../hooks/useReferral', () => ({ useReferral: () => ({ ensureRef
 jest.mock('../../../hooks/useGetOrCreateDm', () => ({ isObsoleteDmOperation: (error: any) => error?.code === 'obsolete-dm-fixture', useGetOrCreateDm: () => ({ mutateAsync: (...args: unknown[]) => mockDm(...args), isPending: false }) }));
 jest.mock('../../../lib/yours/invite', () => ({ openInviteComposer: jest.fn() }));
 jest.mock('../../../lib/haptics', () => ({ hapticSelection: jest.fn() }));
-jest.mock('../../../lib/yours/requestsSeen', () => ({ markRequestsSeen: jest.fn(), REQUESTS_BADGE_KEY: ['requests'] }));
+jest.mock('../../../lib/yours/requestsSeen', () => ({ markRequestsSeen: (...args: unknown[]) => mockMarkRequestsSeen(...args), REQUESTS_BADGE_KEY: ['requests'] }));
 jest.mock('../../../lib/yours/tabsIntroSeen', () => ({ resolveYoursIntroVariant: () => null, hasSeenYoursIntro: jest.fn(), markYoursIntroSeen: jest.fn() }));
 jest.mock('../../creator/pages/CreatorSpaceEntry', () => ({ CreatorSpaceEntry: () => null }));
 jest.mock('../header/YoursHeader', () => () => null);
@@ -93,7 +94,7 @@ const flush = async () => { await act(async () => { for (let i = 0; i < 5; i++) 
 function deferred() { let resolve!: (value: unknown) => void, reject!: (error: Error) => void; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function mount(people = true) { act(() => { tree = create(<YoursScreen />); }); if (people) tab('people'); }
 beforeEach(() => {
-  jest.clearAllMocks(); mockListeners.clear(); mockSuspendCircles = false; mockUid = 'viewer'; mockFocused = true; mockLoading = false;
+  jest.clearAllMocks(); mockMarkRequestsSeen.mockReset().mockResolvedValue(undefined); mockListeners.clear(); mockSuspendCircles = false; mockUid = 'viewer'; mockFocused = true; mockLoading = false;
   mockRequestsError = null; mockRequestsFetching = false; mockRefetchRequests.mockReset().mockResolvedValue({isSuccess:true});
   mockGridLoading = false; mockGridError = null; mockBacklogError = null;
   mockUseRealIdentity = false; mockIdentityError = null; mockPeopleByAccount = {};
@@ -562,4 +563,22 @@ it('passes the observed account lifetime to both People reads across an auth rou
   const [nextUser, after] = mockGridScope.mock.calls.at(-1)!;
   expect(nextUser).toBe('viewer'); expect(after.epoch).toBeGreaterThan(before.epoch); expect(after.isCurrent()).toBe(true);
   expect(before.isCurrent()).toBe(false); expect(mockBacklogScope.mock.calls.at(-1)).toEqual([nextUser, after]);
+});
+
+it('refreshes the account badge only after the seen marker is stored', async () => {
+  const saved = deferred(); mockMarkRequestsSeen.mockReturnValue(saved.promise); mockRequests = [{requester_id:'jamie'}];
+  mount(false); mockInvalidate.mockClear(); act(() => tree!.root.findByType(RequestBanner).props.onPress());
+  expect(mockMarkRequestsSeen).toHaveBeenCalledWith('viewer');
+  expect(mockInvalidate).not.toHaveBeenCalled();
+  await act(async () => saved.resolve(undefined)); await flush();
+  expect(mockInvalidate).toHaveBeenCalledWith({queryKey:['requests','viewer']});
+});
+it('a late seen-marker completion refreshes only its original account', async () => {
+  const saved = deferred(); mockMarkRequestsSeen.mockReturnValue(saved.promise); mockRequests = [{requester_id:'jamie'}];
+  mount(false); act(() => tree!.root.findByType(RequestBanner).props.onPress());
+  mockUid='other'; update(); mockInvalidate.mockClear();
+  await act(async () => saved.resolve(undefined)); await flush();
+  const badgeCalls=mockInvalidate.mock.calls.filter(call=>call[0].queryKey[0]==='requests');
+  expect(badgeCalls.length).toBeGreaterThan(0);
+  expect(badgeCalls.every(call=>call[0].queryKey[1]==='viewer')).toBe(true);
 });

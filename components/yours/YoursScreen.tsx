@@ -218,7 +218,10 @@ export default function YoursScreen() {
     if (isCurrent(scope) && peopleRef.current.some(person => person.user_id === id)) router.push(`/person/${id}` as never);
   };
   const [pathsOpen, setPathsOpen] = useState(false);
-  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [requestsOwner, setRequestsOwner] = useState<{ uid: string; epoch: number } | null>(null);
+  const requestsOpen = !!requestsOwner && requestsOwner.uid === uid
+    && requestsOwner.epoch === viewer.epoch && focused && viewer.isCurrent();
+  const setRequestsOpen = (open: boolean) => setRequestsOwner(open ? { uid, epoch: viewer.epoch } : null);
   // The requester to float to the top of the list, captured from a notification
   // deep-link at open time so it survives the URL param being cleared.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -265,10 +268,14 @@ export default function YoursScreen() {
   // count badge (independent of accept/decline) and re-shows only for a request
   // that arrives later. Source of truth for the list stays the server.
   useEffect(() => {
-    if (!requestsOpen) return;
-    markRequestsSeen();
-    queryClient.invalidateQueries({ queryKey: REQUESTS_BADGE_KEY });
-  }, [requestsOpen, queryClient]);
+    if (!requestsOpen || !uid) return;
+    // Capture the owner before storage starts. Even after closing or switching
+    // accounts, refresh only this account's cache after its marker settles.
+    void (async () => {
+      await markRequestsSeen(uid);
+      await queryClient.invalidateQueries({ queryKey: [...REQUESTS_BADGE_KEY, uid] });
+    })().catch(() => {});
+  }, [requestsOpen, queryClient, uid]);
 
   // A people_request notification routes here with ?openRequests=1 so the
   // accept card stack opens directly instead of the user hunting for the
