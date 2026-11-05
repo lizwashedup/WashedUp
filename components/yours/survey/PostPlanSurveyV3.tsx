@@ -46,6 +46,7 @@ import {
 } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
 import { requestWithDeadline } from '../../../lib/requestWithDeadline';
+import { sendOrAcceptPeopleRequest } from '../../../lib/yours/connectionRequests';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useReduceMotion } from '../a11y/useReduceMotion';
@@ -400,13 +401,12 @@ function SurveySession({
     }
     const settled = await Promise.allSettled(
       selected.map(async (m) => {
-        const { data, error } = await requestWithDeadline(supabase.rpc('add_or_accept_person', {
-          p_target: m.id,
-          p_context: 'plan_history',
-          p_context_event_id: plan.id,
+        const outcome = await requestWithDeadline(sendOrAcceptPeopleRequest({
+          recipientId: m.id,
+          context: 'plan_history',
+          contextEventId: plan.id,
         }), 8000);
-        if (error) throw error;
-        return { member: m, outcome: String(data) };
+        return { member: m, outcome };
       }),
     );
     if (!current()) return;
