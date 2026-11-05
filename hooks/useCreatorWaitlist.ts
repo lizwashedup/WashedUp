@@ -6,6 +6,7 @@ import { getWaitlistForCreator, grantWaitlistException, closeWaitlist, reopenWai
 import { WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
 import { getPlanLifecycle } from '../lib/planLifecycle';
 import { logError } from '../lib/logger';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 type Data = WaitlistManagerData & {
     ended: boolean;
 };
@@ -53,12 +54,12 @@ export function useCreatorWaitlist(options: Options) {
     const invalidate = () => { for (const queryKey of [WAITLIST_MANAGER_KEY(options.eventId), ['events', 'detail', options.eventId]])
         void Promise.resolve(client.invalidateQueries({ queryKey })).catch(e => logError(e, 'waitlist.manager.refresh')); };
     const read = async (valid: () => boolean): Promise<Data | null> => {
-        const auth = await supabase.auth.getUser();
+        const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
         if (!valid())
             return null;
         if (auth.error || !options.viewerId || auth.data.user?.id !== options.viewerId)
             throw new Error('not_authenticated');
-        const result = await supabase.from('events').select('id,creator_user_id,status,start_time,end_time,exception_slots_used,waitlist_closed').eq('id', options.eventId).single();
+        const result = await requestWithDeadline(supabase.from('events').select('id,creator_user_id,status,start_time,end_time,exception_slots_used,waitlist_closed').eq('id', options.eventId).single(), 12000);
         if (!valid())
             return null;
         if (result.error)
@@ -70,7 +71,7 @@ export function useCreatorWaitlist(options: Options) {
             throw new Error('not_authorized');
         if (!Number.isInteger(p.exception_slots_used) || p.exception_slots_used < 0 || p.exception_slots_used > 3 || typeof p.waitlist_closed !== 'boolean' || typeof p.start_time !== 'string' || !Number.isFinite(Date.parse(p.start_time)) || (p.end_time !== null && (typeof p.end_time !== 'string' || !Number.isFinite(Date.parse(p.end_time)))))
             throw new Error('Invalid plan data');
-        const rows = await getWaitlistForCreator(options.eventId);
+        const rows = await requestWithDeadline(getWaitlistForCreator(options.eventId), 12000);
         if (!valid())
             return null;
         const identities = new Set<string>();
