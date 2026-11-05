@@ -374,3 +374,20 @@ it('restarts an interrupted creator read on quick refocus without reloading the 
   stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
   expect(button('switch to old club & your events')).toBeUndefined();
 });
+
+
+it.each([false, true])('keeps multiple communities grouped and event access separate with appearance=%s', async appearance => {
+  mockAppearance = appearance;
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'first', name: 'First club', status: 'active' }, { id: 'second', name: 'Second club', status: 'active' }], hasEventHostGrant: true });
+  mockOrganizer.mockResolvedValue({ display_name: 'Local Events' });
+  await mount();
+  expect(button('switch to first club & your events')).toBeUndefined();
+  expect(button('switch to second club & your events')).toBeUndefined();
+  expect(button('switch to local events & your events')).toBeDefined();
+  const grouped = button('go to your communities');
+  await press(grouped);
+  expect(mockSelected).toHaveBeenCalledTimes(1); expect(mockSelected).toHaveBeenCalledWith('first');
+  expect(mockReplace).toHaveBeenCalledWith('/(creator)/today');
+  await press(grouped);
+  expect(mockSelected).toHaveBeenCalledTimes(1); expect(mockReplace).toHaveBeenCalledTimes(1);
+});
