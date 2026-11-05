@@ -33,7 +33,7 @@ function OpenProfileCardSheet(props: ProfileCardSheetProps) {
   const viewer = useObservedUser();
   const visitKey = useMemo(() => JSON.stringify([viewer.viewerId, viewer.epoch]), [viewer.viewerId, viewer.epoch]);
   const { registerClose, closeCurrent } = useActiveSheetClose(visitKey);
-  return <BottomSheet visible onClose={closeCurrent} heightPct={props.appearance?.fonts ? undefined : 0.8} appearance={props.appearance}>
+  return <BottomSheet visible visitKey={visitKey} onClose={closeCurrent} heightPct={props.appearance?.fonts ? undefined : 0.8} appearance={props.appearance}>
     <ProfileCardVisit key={visitKey} {...props} viewer={viewer} registerClose={registerClose} />
   </BottomSheet>;
 }

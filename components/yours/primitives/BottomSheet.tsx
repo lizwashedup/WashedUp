@@ -11,6 +11,8 @@ export interface BottomSheetProps {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  /** Reset animation ownership without replacing the presented native window. */
+  visitKey?: string | number;
   /** Fraction of current screen height (0..1). Omit for content-sized. */
   heightPct?: number;
   /** Opt-in composer spring motion; other callers retain timing. */
@@ -23,7 +25,7 @@ export default function BottomSheet(props: BottomSheetProps) {
   return props.visible ? <VisibleBottomSheet {...props} /> : null;
 }
 
-function VisibleBottomSheet({ onClose, children, heightPct, springMotion = false, appearance }: BottomSheetProps) {
+function VisibleBottomSheet({ onClose, children, heightPct, springMotion = false, appearance, visitKey }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
@@ -36,6 +38,8 @@ function VisibleBottomSheet({ onClose, children, heightPct, springMotion = false
   const dismissal = useRef<object | null>(null);
   const latestClose = useRef(onClose);
   latestClose.current = onClose;
+  const currentVisit = useRef(visitKey); currentVisit.current = visitKey;
+  const presentedVisit = useRef(visitKey);
 
   useLayoutEffect(() => {
     mounted.current = true;
@@ -47,6 +51,10 @@ function VisibleBottomSheet({ onClose, children, heightPct, springMotion = false
     // instead of playing a new entrance or completing an obsolete dismissal.
     dismissal.current = null;
     motion.current?.stop();
+    if (presentedVisit.current !== visitKey) {
+      presentedVisit.current = visitKey;
+      closed.current = false;
+    }
     if (entered.current || reduceMotion) {
       entered.current = true;
       translateY.setValue(0); overlayOpacity.setValue(1);
@@ -62,14 +70,14 @@ function VisibleBottomSheet({ onClose, children, heightPct, springMotion = false
     ]);
     motion.current.start();
     return () => { motion.current?.stop(); };
-  }, [height, reduceMotion, springMotion, translateY, overlayOpacity]);
+  }, [height, reduceMotion, springMotion, translateY, overlayOpacity, visitKey]);
 
   const dismiss = () => {
-    if (!mounted.current || closed.current || dismissal.current) return;
+    if (!mounted.current || currentVisit.current !== visitKey || closed.current || dismissal.current) return;
     const attempt = {}; dismissal.current = attempt;
     motion.current?.stop();
     const finish = () => {
-      if (!mounted.current || closed.current || dismissal.current !== attempt) return;
+      if (!mounted.current || currentVisit.current !== visitKey || closed.current || dismissal.current !== attempt) return;
       closed.current = true;
       latestClose.current();
     };
