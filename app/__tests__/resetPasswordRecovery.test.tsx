@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Text, TextInput, TouchableOpacity, Platform, Dimensions, ScrollView } from 'react-native';
+import { Text, TextInput, TouchableOpacity, Platform, Dimensions, ScrollView, StyleSheet } from 'react-native';
+import { FontSizes } from '../../constants/Typography';
 import ResetPasswordScreen from '../reset-password';
 import { BrandedAlert } from '../../components/BrandedAlert';
 const mockUpdate = jest.fn(), mockSignOut = jest.fn(), mockReplace = jest.fn();
@@ -133,6 +134,12 @@ it('retains secure fields, drafts and the pending write while text resizes on a 
     for (const input of fields()) {
       expect(input.props.value).toBe('fictional-test-only');
       expect(input.props.secureTextEntry).toBe(true);
+      const style = StyleSheet.flatten(input.props.style);
+      // Effective type scales once, in both directions, without remounting the
+      // native editor or losing a pending password update.
+      const effectiveSize = style.fontSize * (input.props.allowFontScaling === false ? 1 : fontScale);
+      expect(effectiveSize).toBeCloseTo(FontSizes.bodyLG * fontScale);
+      expect(style.minHeight).toBeGreaterThanOrEqual(effectiveSize + 24);
     }
     expect(action().props.disabled).toBe(true);
     act(() => { void fields()[1].props.onSubmitEditing(); }); await flush();

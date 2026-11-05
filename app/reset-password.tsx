@@ -31,7 +31,12 @@ const MIN_PASSWORD_LENGTH = 8;
 
 export default function ResetPasswordScreen() {
   const { fontScale } = useWindowDimensions();
-  const inputSize = { minHeight: Math.max(52, FontSizes.bodyLG * fontScale + 24) };
+  // Update the native font explicitly: iOS can retain its old scaled measurement
+  // after a system text-size change. Keep the input mounted to preserve editing.
+  const inputSize = {
+    fontSize: FontSizes.bodyLG * fontScale,
+    minHeight: Math.max(52, FontSizes.bodyLG * fontScale + 24),
+  };
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [newPasswordVisible, setNewPasswordVisible] = useState(false);
@@ -148,6 +153,7 @@ export default function ResetPasswordScreen() {
             <View style={styles.passwordWrap}>
               <TextInput
                 style={[styles.input, inputSize, newPasswordFocused && styles.inputFocused]}
+                allowFontScaling={false}
                 accessibilityLabel="New password"
                 placeholder="New password"
                 placeholderTextColor={Colors.textMedium}
@@ -182,6 +188,7 @@ export default function ResetPasswordScreen() {
               <TextInput
                 ref={confirmInputRef}
                 style={[styles.input, inputSize, confirmPasswordFocused && styles.inputFocused]}
+                allowFontScaling={false}
                 accessibilityLabel="Confirm new password"
                 placeholder="Confirm new password"
                 placeholderTextColor={Colors.textMedium}
