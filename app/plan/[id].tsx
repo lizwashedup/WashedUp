@@ -1,3 +1,4 @@
+import { PlanInterestSection } from '../../components/plans/PlanInterestSection';
 import { ManagePlanEditor } from '../../components/plans/ManagePlanEditor';
 import { usePlanEditDraft } from '../../hooks/usePlanEditDraft';
 import { ageRangesToMinMax, type AgeRange } from '../../lib/planEditDraft';
@@ -1400,81 +1401,10 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         )}
 
         </>}
-        {/* F-2. Next Time! — interest signal button (non-creator, non-member, plan still upcoming) */}
-        {canShowInterestButton && (
-          <View>
-          <Text style={[styles.ctaSub,{marginBottom:10}]}>Can’t make this one? Let {plan?.creator?.first_name_display ?? 'the creator'} know you’d join another time.</Text>
-          <TouchableOpacity
-            style={styles.interestButton}
-            accessibilityRole="button"
-            accessibilityLabel={`Tell ${plan?.creator?.first_name_display ?? 'them'} I would go next time`}
-            onPress={() => {void interest.send();}}
-            activeOpacity={0.8}
-            disabled={interest.busy}
-          >
-            {interest.busy ? (
-              <ActivityIndicator size="small" color={Colors.quoteText} />
-            ) : (
-              <>
-                <Ionicons name="heart-outline" size={18} color={Colors.quoteText} />
-                <Text numberOfLines={1} style={styles.interestButtonText}>Next time</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          </View>
-        )}
-        {(interestAvailable || interest.phase === 'unknown' || interest.busy) && (interest.error || interest.phase) && (
-          <View style={{marginBottom:16}}>
-            <Text accessibilityLiveRegion="polite" style={[styles.ctaSub,{marginBottom:8}]}>{interest.busy ? 'Saving your interest…' : interest.error ?? 'Check your interest before trying again.'}</Text>
-            {!interest.busy && <TouchableOpacity accessibilityRole="button" disabled={interest.loading} onPress={()=>{void interest.retry();}} style={styles.interestButton}>
-              <Text numberOfLines={1} style={styles.interestButtonText}>{interest.loading ? 'Checking…' : interest.phase === 'unknown' ? 'Check interest' : 'Try again'}</Text>
-            </TouchableOpacity>}
-          </View>
-        )}
-        {interestAlreadySent && !isCreator && !isMember && (
-          <View style={styles.interestSent}>
-            <Ionicons name="checkmark-circle" size={18} color={Colors.quoteText} />
-            <Text style={styles.interestSentText}>
-              Interest saved
-            </Text>
-          </View>
-        )}
-
-        {isCreator && creatorInterestQuery.isError && <View style={styles.creatorInterestBlock}>
-          <Text style={styles.ctaSub}>Couldn’t load who would go next time.</Text>
-          <TouchableOpacity accessibilityRole="button" disabled={creatorInterestQuery.isFetching} onPress={()=>{void creatorInterestQuery.refetch();}}>
-            <Text style={styles.interestButtonText}>Try again</Text>
-          </TouchableOpacity>
-        </View>}
-        {/* F-3. Next Time! — creator-only "Would go next time" section */}
-        {isCreator && creatorInterestList.length > 0 && (
-          <View style={styles.creatorInterestBlock}>
-            <Text style={styles.creatorInterestTitle}>Would go next time</Text>
-            <View style={styles.memberAvatarRow}>
-              {creatorInterestList.map((row: any) => (
-                <View key={row.signal_id} style={styles.memberAvatarWrapper}>
-                  {row.interested_photo_url ? (
-                    <Image source={{ uri: row.interested_photo_url }} style={styles.memberAvatar} />
-                  ) : (
-                    <View style={[styles.memberAvatar, styles.memberAvatarPlaceholder]}>
-                      <Text style={styles.memberAvatarInitial}>
-                        {row.interested_name?.[0]?.toUpperCase() ?? '?'}
-                      </Text>
-                    </View>
-                  )}
-                  <Text style={styles.memberAvatarName} numberOfLines={1}>
-                    {row.interested_name ?? 'Someone'}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.creatorInterestSub}>
-              {creatorInterestList.length === 1
-                ? '1 person wants to go next time'
-                : `${creatorInterestList.length} people want to go next time`}
-            </Text>
-          </View>
-        )}
+        <PlanInterestSection styles={styles} creatorName={plan.creator?.first_name_display}
+          canShowInterestButton={canShowInterestButton} interestAvailable={interestAvailable}
+          interestAlreadySent={interestAlreadySent} isCreator={isCreator} isMember={isMember}
+          interest={interest} creatorInterestQuery={creatorInterestQuery} creatorInterestList={creatorInterestList} />
 
         {/* H. CTA hints (button is in sticky bar) */}
         {!isCreator && !isMember && contextReady && isEligible && !isFull && !isCirclePlan && (
