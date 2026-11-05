@@ -1,5 +1,6 @@
+import { ScaledText } from '../../ScaledText';
 import React, { useState, useMemo, useRef } from 'react';
-import { View, TextInput, FlatList, StyleSheet, ActivityIndicator, Text, Pressable } from 'react-native';
+import { View, TextInput, FlatList, StyleSheet, ActivityIndicator, ScrollView, useWindowDimensions, Pressable } from 'react-native';
 import { Search } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
@@ -12,6 +13,7 @@ export type PlanHistoryBacklogProps = { userId: string; readScope: NonNullable<P
 /** Existing completed-plan backlog with a local first-name substring filter.
  * It never performs remote name discovery or expands the received people. */
 export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, operationScope, readScope }: PlanHistoryBacklogProps) {
+  const { fontScale } = useWindowDimensions();
   const [input, setInput] = useState({ userId, value: '' });
   const q = input.userId === userId ? input.value : '', normalized = q.trim().toLowerCase();
   const backlog = usePlanHistoryBacklog(userId, readScope);
@@ -29,18 +31,18 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
     <View style={s.wrap}>
       <View style={s.searchBox}>
         <Search size={18} color={appearance ? AfterglowColors.muted : Colors.tertiary} />
-        <TextInput value={q} onChangeText={value => {
+        <TextInput key={fontScale} value={q} onChangeText={value => {
           const next = value.trim().toLowerCase();
           if (next !== queryRef.current) { queryRef.current = next; visit.retireQuery(); }
           setInput({ userId, value });
         }} placeholder="Search people from your plans" placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
           autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={s.input} />
       </View>
-      {loading ? <View style={s.feedback} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><Text style={s.empty}>Loading people from your plans…</Text></View> : failed ?
-        <View style={s.feedback} accessibilityLiveRegion="polite"><Text style={s.feedbackTitle}>Couldn’t load people from your plans.</Text><Text style={s.empty}>Your search is still here.</Text>
+      {loading ? <ScrollView style={s.recovery} contentContainerStyle={s.feedback} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><ScaledText style={s.empty}>Loading people from your plans…</ScaledText></ScrollView> : failed ?
+        <ScrollView style={s.recovery} contentContainerStyle={s.feedback} keyboardShouldPersistTaps="handled" accessibilityLiveRegion="polite"><ScaledText style={s.feedbackTitle}>Couldn’t load people from your plans.</ScaledText><ScaledText style={s.empty}>Your search is still here.</ScaledText>
           <Pressable style={s.retry} accessibilityRole="button" accessibilityLabel="Try again to load people from your plans" onPress={() => { void visit.refresh(backlog.refetch); }}>
-            <Text numberOfLines={1} style={s.retryText}>Try again</Text>
-          </Pressable></View> : (
+            <ScaledText numberOfLines={1} style={s.retryText}>Try again</ScaledText>
+          </Pressable></ScrollView> : (
         <FlatList data={list} keyExtractor={p => p.user_id} keyboardShouldPersistTaps="handled" contentContainerStyle={s.content}
           extraData={visit.rows} renderItem={({ item }) => {
             const status = visit.rows[item.user_id];
@@ -50,16 +52,16 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
                 state={state} isAdding={status?.phase === 'sending'} appearance={appearance}
                 onAdd={() => { void visit.add(item.user_id, 'plan_history', () => eligible(item.user_id)); }}
                 onPressPerson={() => { if (visit.current() && latest.current.list.some(p => p.user_id === item.user_id)) latest.current.onPressPerson(item.user_id); }} />
-              {status?.phase === 'connected' && <Text style={s.rowFeedback} accessibilityLiveRegion="polite">You’re connected.</Text>}
-              {status?.phase === 'error' && <View accessibilityLiveRegion="polite"><Text style={s.rowFeedback} accessibilityRole="alert">{status.message}</Text>
+              {status?.phase === 'connected' && <ScaledText style={s.rowFeedback} accessibilityLiveRegion="polite">You’re connected.</ScaledText>}
+              {status?.phase === 'error' && <View accessibilityLiveRegion="polite"><ScaledText style={s.rowFeedback} accessibilityRole="alert">{status.message}</ScaledText>
                 {eligible(item.user_id) && <Pressable style={s.retry} accessibilityRole="button" accessibilityLabel={`Try again to add ${item.first_name_display ?? 'this person'}`} onPress={() => { void visit.add(item.user_id, 'plan_history', () => eligible(item.user_id)); }}>
-                  <Text numberOfLines={1} style={s.retryText}>Try again</Text>
+                  <ScaledText numberOfLines={1} style={s.retryText}>Try again</ScaledText>
                 </Pressable>}</View>}
             </View>;
-          }} ListEmptyComponent={<View style={s.feedback}><Text style={s.empty}>{normalized ? 'No matches in your past plans. Try another name.' : 'People from completed plans will appear here. Make a plan and meet someone new.'}</Text>
+          }} ListEmptyComponent={<View style={s.feedback}><ScaledText style={s.empty}>{normalized ? 'No matches in your past plans. Try another name.' : 'People from completed plans will appear here. Make a plan and meet someone new.'}</ScaledText>
             {!!normalized && <Pressable style={s.retry} accessibilityRole="button" accessibilityLabel="Clear name search" onPress={() => {
               if (!visit.current()) return; queryRef.current = ''; visit.retireQuery(); setInput({ userId, value: '' });
-            }}><Text numberOfLines={1} style={s.retryText}>Clear search</Text></Pressable>}
+            }}><ScaledText numberOfLines={1} style={s.retryText}>Clear search</ScaledText></Pressable>}
           </View>} />
       )}
     </View>
@@ -67,8 +69,9 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
 }
 
 const styles = StyleSheet.create({
+  recovery: { flex: 1 },
   content: { paddingBottom: 24 },
-  feedback: { paddingTop: 24, gap: 8 },
+  feedback: { paddingTop: 24, paddingBottom: 24, gap: 8 },
   feedbackTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
   rowFeedback: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 4 },
   retry: { minHeight: 44, alignSelf: 'flex-start', paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1, borderColor: Colors.terracotta, borderRadius: 5, marginTop: 12 },
@@ -81,11 +84,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.inputBg,
     borderRadius: 12,
     paddingHorizontal: 12,
-    height: 44,
+    minHeight: 44,
+    paddingVertical: 6,
     marginBottom: 8,
   },
   input: {
     flex: 1,
+    minWidth: 0,
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
     color: Colors.asphalt,

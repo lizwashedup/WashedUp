@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TextInput, FlatList, ScrollView } from 'react-native';
+import { Text, TextInput, FlatList, ScrollView, Dimensions } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import HandleLookupView from '../HandleLookupView';
@@ -27,11 +27,11 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 async function flush() { for (let i = 0; i < 4; i++) { await act(async () => { for (let j = 0; j < 8; j++) await Promise.resolve(); }); act(() => jest.advanceTimersByTime(0)); } }
 async function settle() { act(() => jest.advanceTimersByTime(300)); await flush(); }
 const writes = () => mockRpc.mock.calls.filter(([name]) => name === 'add_or_accept_person');
-function mount(kind: 'handle' | 'backlog', sharedClient?: QueryClient) {
+function mount(kind: 'handle' | 'backlog', sharedClient?: QueryClient, legacy = false) {
   const client = sharedClient ?? new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false, gcTime: Infinity } } });
   let userId = 'alice', live = true, mounted = true, epoch = 0; const open = jest.fn();
   const scope = { userId, isCurrent: () => live };
-  const render = () => { const openingEpoch = epoch; return <QueryClientProvider client={client}>{kind === 'handle' ? <HandleLookupView userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} /> : <PlanHistoryBacklog readScope={{ userId, epoch, isCurrent: () => live && mounted && epoch === openingEpoch }} userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} />}</QueryClientProvider>; };
+  const render = () => { const openingEpoch = epoch; return <QueryClientProvider client={client}>{kind === 'handle' ? <HandleLookupView userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} /> : <PlanHistoryBacklog readScope={{ userId, epoch, isCurrent: () => live && mounted && epoch === openingEpoch }} userId={userId} onPressPerson={open} appearance={legacy ? undefined : { fonts: AfterglowFonts }} operationScope={scope} />}</QueryClientProvider>; };
   let tree!: ReturnType<typeof create>; act(() => { tree = create(render()); });
   const unmount = () => { if (mounted) act(() => tree.unmount()); mounted = false; }; cleanup.push(() => { unmount(); client.clear(); });
   const update = (id = userId) => { userId = id; scope.userId = id; act(() => tree.update(render())); };
@@ -203,4 +203,24 @@ it.each(['parent', 'roundtrip', 'unmount'])('retires a past-plan account check b
   if (change === 'unmount') f.unmount();
   auth.resolve({ data: { user: { id: 'alice' } }, error: null }); await flush();
   expect(mockRpc).not.toHaveBeenCalled();
+});
+
+
+it.each([true, false])('preserves the Past Plans search and pending request through large-text changes (legacy=%s)', async legacy => {
+  const previous = Dimensions.get('window'), pending = deferred<any>();
+  const original = mockRpc.getMockImplementation()!;
+  mockRpc.mockImplementation((name, args) => name === 'add_or_accept_person' ? pending.promise : original(name, args));
+  const f = mount('backlog', undefined, legacy); await flush(); f.type('Bea');
+  const add = f.rows()[0].props.onAdd; act(() => add()); await flush();
+  expect(writes()).toHaveLength(1); expect(f.rows()[0].props.isAdding).toBe(true);
+  try {
+    for (const fontScale of [3.12, 1]) {
+      act(() => Dimensions.set({ window: { ...previous, width: 375, fontScale } })); await flush();
+      expect(f.input().props.value).toBe('Bea'); expect(f.rows()).toHaveLength(1);
+      expect(f.rows()[0].props.name).toBe('Bea'); expect(f.rows()[0].props.isAdding).toBe(true);
+      act(() => add()); await flush(); expect(writes()).toHaveLength(1); expect(f.open).not.toHaveBeenCalled();
+    }
+    await act(async () => pending.resolve({ data: 'requested', error: null })); await flush();
+    expect(f.rows()[0].props.state).toBe('requested'); expect(f.input().props.value).toBe('Bea');
+  } finally { act(() => Dimensions.set({ window: previous })); }
 });

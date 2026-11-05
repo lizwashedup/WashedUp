@@ -1,6 +1,6 @@
 import { ScaledText } from '../../ScaledText';
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
@@ -91,7 +91,12 @@ export default function PersonRow({
     );
   }
   return (
-    <Pressable style={styles.row} onPress={onPressPerson}>
+    <View style={[styles.row, actionBelow && styles.stackedRow]} onLayout={event => {
+      const available = event.nativeEvent.layout.width;
+      if (Number.isFinite(available) && available > 0) setRowWidth(available);
+    }}>
+      <Pressable style={[styles.person, actionBelow && styles.stackedPerson]} onPress={onPressPerson}
+        accessibilityRole="button" accessibilityLabel={`View ${displayName}`}>
       <YoursAvatar
         name={name}
         photoUrl={photoUrl}
@@ -99,15 +104,15 @@ export default function PersonRow({
         bucket="none"
       />
       <View style={styles.mid}>
-        <Text style={styles.name} numberOfLines={1}>
-          {name ?? 'Someone'}
-        </Text>
+        <ScaledText style={styles.name}>{displayName}</ScaledText>
         {sharedCount > 0 && (
-          <Text style={styles.meta}>
+          <ScaledText style={styles.meta}>
             {COPY.backlogPlansTogether(sharedCount)}
-          </Text>
+          </ScaledText>
         )}
       </View>
+      </Pressable>
+      {state !== 'connected' && <View style={actionBelow ? styles.actionBelow : undefined}>
       {state === 'none' ? (
         <Pressable
           style={styles.addBtn}
@@ -117,12 +122,13 @@ export default function PersonRow({
           accessibilityRole="button"
           accessibilityLabel={`${COPY.addButton} ${name ?? ''}`}
         >
-          <Text style={styles.addText} numberOfLines={1}>{isAdding ? 'Sending…' : COPY.addButton}</Text>
+          <ScaledText style={styles.addText} numberOfLines={1}>{isAdding ? 'Sending…' : COPY.addButton}</ScaledText>
         </Pressable>
       ) : state === 'requested' ? (
-        <Text style={styles.requested}>{COPY.stateRequested}</Text>
+        <ScaledText style={styles.requested} accessibilityLiveRegion="polite">{COPY.stateRequested}</ScaledText>
       ) : null}
-    </Pressable>
+      </View>}
+    </View>
   );
 }
 
@@ -133,7 +139,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 12,
   },
-  mid: { flex: 1 },
+  stackedRow: { flexDirection: 'column', alignItems: 'stretch' },
+  person: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  stackedPerson: { flex: 0 },
+  actionBelow: { marginLeft: 60, alignSelf: 'stretch', alignItems: 'flex-start' },
+  mid: { flex: 1, minWidth: 0 },
   name: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.bodyMD,
