@@ -4,6 +4,7 @@ import { Text, TextInput, TouchableOpacity, Share, Keyboard, Platform } from 're
 import ProfileScreen from '../../../../../app/(tabs)/profile';
 import { BrandedAlert } from '../../../../BrandedAlert';
 import SettingsPortrait from '../SettingsPortrait';
+import { ProfileCreatorSection } from '../ProfileCreatorSection';
 import { Image } from 'expo-image';
 import { deliberateSignOutAt, lastUnauthRedirectAt } from '../../../../../lib/navState';
 
@@ -73,6 +74,7 @@ const button = (label: string) => tree!.root.findAllByType(TouchableOpacity).fin
 const field = (label: string) => tree!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === label)!;
 const text = (value: string) => tree!.root.findAllByType(Text).some(node => node.props.children === value);
 const alert = () => tree!.root.findByType(BrandedAlert).props;
+const creatorState = () => tree!.root.findByType(ProfileCreatorSection).props;
 const press = async (node: any) => { act(() => { node.props.onPress(); }); await flush(); };
 const dismissPhotoChooser = async () => { act(() => { alert().onDismiss?.(); }); await flush(); };
 const edit = async () => { await press(byLabel('Edit profile')); };
@@ -333,14 +335,17 @@ it('recovers a stalled creator access read without losing confirmed pending appl
     await mount();
     await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
     expect(text('Some creator details couldn’t load.')).toBe(true);
-    expect(text('needs more info')).toBe(true);
+    expect(creatorState().pendingGrants).toEqual([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]);
+    expect(byLabel('Open your management tools')).toBeDefined();
     expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
     mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'current', name: 'Current Club', status: 'active' }], hasEventHostGrant: false });
     await press(byLabel('Try again to load creator spaces'));
-    expect(button('switch to current club & your events')).toBeDefined();
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+    expect(byLabel('Open your management tools')).toBeDefined();
     stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
-    expect(button('switch to current club & your events')).toBeDefined();
-    expect(button('switch to old club & your events')).toBeUndefined();
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+    expect(byLabel('Open your management tools')).toBeDefined();
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
   } finally { jest.clearAllTimers(); jest.useRealTimers(); }
 });
 
@@ -353,12 +358,15 @@ it('recovers a stalled optional organizer name while retaining confirmed access'
     await mount();
     await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
     expect(text('Some creator details couldn’t load.')).toBe(true);
-    expect(button('switch to your events')).toBeDefined();
+    expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+    expect(byLabel('Open your management tools')).toBeDefined();
     expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
     await press(byLabel('Try again to load creator spaces'));
     expect(text('Some creator details couldn’t load.')).toBe(false);
     stalled.resolve({ display_name: 'Old organizer name' }); await flush();
-    expect(button('switch to your events')).toBeDefined();
+    expect(creatorState().organizerName).toBeNull();
+    expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+    expect(byLabel('Open your management tools')).toBeDefined();
   } finally { jest.clearAllTimers(); jest.useRealTimers(); }
 });
 
@@ -372,24 +380,29 @@ it('restarts an interrupted creator read on quick refocus without reloading the 
   mockFocused = true; await update();
   expect(mockAccess).toHaveBeenCalledTimes(2);
   expect(mockRead).toHaveBeenCalledTimes(profileReads);
-  expect(button('switch to current club & your events')).toBeDefined();
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+  expect(byLabel('Open your management tools')).toBeDefined();
   stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
-  expect(button('switch to old club & your events')).toBeUndefined();
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
 });
 
 
-it.each([false, true])('keeps multiple communities grouped and event access separate with appearance=%s', async appearance => {
+it.each([false, true])('keeps confirmed community/event access behind one guarded directory entry with appearance=%s', async appearance => {
   mockAppearance = appearance;
   mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'first', name: 'First club', status: 'active' }, { id: 'second', name: 'Second club', status: 'active' }], hasEventHostGrant: true });
   mockOrganizer.mockResolvedValue({ display_name: 'Local Events' });
   await mount();
   expect(button('switch to first club & your events')).toBeUndefined();
   expect(button('switch to second club & your events')).toBeUndefined();
-  expect(button('switch to local events & your events')).toBeDefined();
-  const grouped = button('go to your communities');
+  expect(button('switch to local events & your events')).toBeUndefined();
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['first', 'second']);
+  expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+  expect(creatorState().organizerName).toBe('Local Events');
+  expect(text('You manage')).toBe(true);
+  const grouped = byLabel('Open your management tools');
   await press(grouped);
-  expect(mockSelected).toHaveBeenCalledTimes(1); expect(mockSelected).toHaveBeenCalledWith('first');
-  expect(mockReplace).toHaveBeenCalledWith('/(creator)/today');
+  expect(mockSelected).not.toHaveBeenCalled();
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
   await press(grouped);
-  expect(mockSelected).toHaveBeenCalledTimes(1); expect(mockReplace).toHaveBeenCalledTimes(1);
+  expect(mockSelected).not.toHaveBeenCalled(); expect(mockPush).toHaveBeenCalledTimes(1); expect(mockReplace).not.toHaveBeenCalled();
 });
