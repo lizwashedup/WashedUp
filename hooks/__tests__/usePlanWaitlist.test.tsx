@@ -42,3 +42,29 @@ it('reconciles a duplicate insert with the existing own row',async()=>{const h=a
 it('does not let an old refresh restore waitlist state after confirmed joining',async()=>{const h=await mount(),read=deferred();mockRead.mockReturnValueOnce(read.promise);let work!:Promise<void>;act(()=>{work=h.current.refresh();});act(()=>h.current.clearAfterJoining());await act(async()=>{read.resolve(response({...entry,notified:true,exception_status:'invited'}));await work;});expect(h.current.entry).toBeNull();expect(h.current.loading).toBe(false);});
 it('does not allow a late waitlist write to replace confirmed plan membership',async()=>{const h=await mount(),write=deferred();mockWrite.mockReturnValueOnce(write.promise);let work!:Promise<void>;await act(async()=>{work=h.current.change(true);});act(()=>h.current.clearAfterJoining());await act(async()=>{write.resolve(response(entry));await work;});expect(h.current.entry).toBeNull();expect(h.current.intent).toBeNull();});
 it('retains a lost write receipt across leaving and returning to the same route',async()=>{const h=await mount(),write=deferred();mockWrite.mockReturnValueOnce(write.promise);let work!:Promise<void>;await act(async()=>{work=h.current.change(true);});h.blur();await act(async()=>{write.resolve(response(null));await work;});await h.focus();expect(h.current.intent?.phase).toBe('unknown');expect(mockWrite).toHaveBeenCalledTimes(1);});
+
+
+it.each(['auth','row'] as const)('recovers a stalled initial %s read without treating it as an empty waitlist',async stage=>{
+ const pending=deferred();if(stage==='auth')mockAuth.mockReturnValueOnce(pending.promise);else mockRead.mockReturnValueOnce(pending.promise);
+ jest.useFakeTimers();
+ try {const h=await mount();expect(h.current.loading).toBe(true);await act(async()=>jest.advanceTimersByTimeAsync(stage==='auth'?8001:12001));expect(h.current.loading).toBe(false);expect(h.current.ready).toBe(false);expect(h.current.error).toContain('Couldn’t check');
+ await act(async()=>pending.resolve(stage==='auth'?auth():response(entry)));expect(h.current.entry).toBeNull();expect(h.current.ready).toBe(false);expect(mockWrite).not.toHaveBeenCalled();
+ await act(async()=>h.current.refresh());expect(h.current.ready).toBe(true);expect(h.current.entry).toBeNull();
+ }finally{jest.useRealTimers();}
+});
+it.each([true,false])('recovers stalled write preflight preserving desired=%s without late dispatch',async desired=>{
+ if(!desired)mockRead.mockResolvedValue(response(entry));const h=await mount(),pending=deferred();mockAuth.mockReturnValueOnce(pending.promise);jest.useFakeTimers();
+ try {act(()=>{void h.current.change(desired)});await act(async()=>jest.advanceTimersByTimeAsync(8001));expect(h.current.busy).toBe(false);expect(h.current.intent).toEqual({desired,phase:'failed'});expect(mockWrite).not.toHaveBeenCalled();
+ await act(async()=>pending.resolve(auth()));expect(mockWrite).not.toHaveBeenCalled();await act(async()=>h.current.retry());expect(mockWrite).toHaveBeenCalledTimes(1);expect(mockWrite.mock.calls[0][0]).toBe(desired?'insert':'delete');expect(h.current.intent).toBeNull();
+ }finally{jest.useRealTimers();}
+});
+it('keeps an uncertain waitlist write locked after a reconciliation timeout',async()=>{
+ const h=await mount();mockWrite.mockResolvedValueOnce(response(null));await act(async()=>h.current.change(true));expect(h.current.intent?.phase).toBe('unknown');const pending=deferred();mockRead.mockReturnValueOnce(pending.promise);jest.useFakeTimers();
+ try {act(()=>{void h.current.refresh()});await act(async()=>jest.advanceTimersByTimeAsync(12001));expect(h.current.loading).toBe(false);expect(h.current.intent?.phase).toBe('unknown');await act(async()=>h.current.retry());await act(async()=>h.current.change(true));expect(mockWrite).toHaveBeenCalledTimes(1);
+ await act(async()=>pending.resolve(response(entry)));expect(h.current.intent?.phase).toBe('unknown');mockRead.mockResolvedValueOnce(response(entry));await act(async()=>h.current.refresh());expect(h.current.intent).toBeNull();expect(h.current.entry).toEqual(entry);expect(mockWrite).toHaveBeenCalledTimes(1);
+ }finally{jest.useRealTimers();}
+});
+it('does not time out a dispatched waitlist write',async()=>{
+ const h=await mount(),pending=deferred();mockWrite.mockReturnValueOnce(pending.promise);jest.useFakeTimers();
+ try {act(()=>{void h.current.change(true)});await act(async()=>jest.advanceTimersByTimeAsync(30000));expect(h.current.busy).toBe(true);await act(async()=>h.current.retry());expect(mockWrite).toHaveBeenCalledTimes(1);await act(async()=>pending.resolve(response(entry)));expect(h.current.entry).toEqual(entry);expect(h.current.intent).toBeNull();}finally{jest.useRealTimers();}
+});

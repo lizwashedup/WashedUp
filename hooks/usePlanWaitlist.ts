@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
 import { logError } from '../lib/logger';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 
 type Entry = { id: string; event_id: string; user_id: string; notified?: boolean; exception_status?: string | null; exception_expires_at?: string | null };
 type Intent = { desired: boolean; phase: 'pending' | 'failed' | 'unknown' };
@@ -37,10 +38,10 @@ export function usePlanWaitlist(options: Options) {
     const valid=()=>isCurrent() && version===state.revision;
     state.loading=true; state.error=null; publish();
     try {
-      const auth=await supabase.auth.getUser();
+      const auth=await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!valid()) return;
       if (auth.error || auth.data.user?.id!==options.viewerId) throw new Error('Account unavailable');
-      const response=await supabase.from('event_waitlist').select(fields).eq('event_id',options.eventId).eq('user_id',options.viewerId).maybeSingle();
+      const response=await requestWithDeadline(supabase.from('event_waitlist').select(fields).eq('event_id',options.eventId).eq('user_id',options.viewerId).maybeSingle(), 12000);
       if (!valid()) return;
       if (response.error!==null || (response.data!==null && !ownEntry(response.data,options.eventId,options.viewerId))) throw new Error('Waitlist unavailable');
       state.entry=response.data; state.ready=true;
@@ -64,7 +65,7 @@ export function usePlanWaitlist(options: Options) {
     state.intent=intent;state.pending=token;state.revision++;state.error=null;publish();
     let dispatched=false, duplicate=false;
     try {
-      const auth=await supabase.auth.getUser();
+      const auth=await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!isCurrent() || !latest.current.canChange()) { if(state.intent===intent)state.intent=null;return; }
       if (auth.error || auth.data.user?.id!==options.viewerId) throw new Error('Account unavailable');
       if (!desired && !entry) throw new Error('Missing waitlist entry');
