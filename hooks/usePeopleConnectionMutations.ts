@@ -163,11 +163,9 @@ export function usePeopleConnectionMutations(userId: string | null | undefined) 
       });
       if (error) throw error;
   }, runtime);
-  const ping = useMutation({
-    mutationFn: async (args: { recipientId: string; eventId: string }) => {
-      const { error } = await supabase.rpc('ping_person', { p_recipient: args.recipientId, p_event_id: args.eventId });
-      if (error) throw error;
-    },
-  });
+  const ping = useConnectionMutation(async (args: { recipientId: string; eventId: string }) => {
+    const { error } = await supabase.rpc('ping_person', { p_recipient: args.recipientId, p_event_id: args.eventId });
+    if (error) throw error;
+  }, { ...runtime, invalidate: () => {} });
   return { sendRequest, accept, decline, remove, setVisibility, ping };
 }

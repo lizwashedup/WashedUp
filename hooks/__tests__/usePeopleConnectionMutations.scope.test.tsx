@@ -186,11 +186,11 @@ describe('plan visibility ownership', () => {
 describe('bounded account preflight', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
-  it.each(['sendRequest', 'accept', 'decline', 'remove', 'setVisibility'] as const)('releases stalled %s without a write and permits an explicit retry', async kind => {
+  it.each(['sendRequest', 'accept', 'decline', 'remove', 'setVisibility', 'ping'] as const)('releases stalled %s without a write and permits an explicit retry', async kind => {
     const gate = deferred<any>(); mockGetUser.mockReturnValueOnce(gate.promise);
     const f = mount(), entry = scope(), onError = jest.fn();
     const value = kind === 'sendRequest' ? { recipientId: 'bea', context: 'handle_lookup' }
-      : kind === 'decline' ? { requesterId: 'bea' } : kind === 'setVisibility' ? { global: true } : 'bea';
+      : kind === 'ping' ? { recipientId: 'bea', eventId: 'plan-a' } : kind === 'decline' ? { requesterId: 'bea' } : kind === 'setVisibility' ? { global: true } : 'bea';
     const perform = () => (f.current[kind].mutateAsync as any)(value, { scope: entry, onError });
     let outcome: any;
     act(() => { void observe(perform()).then(result => { outcome = result; }); }); await flush();
@@ -222,4 +222,62 @@ describe('bounded account preflight', () => {
     await act(async () => { await jest.advanceTimersByTimeAsync(8000); });
     expect(mockRpc).toHaveBeenCalledTimes(1); expect(onError).not.toHaveBeenCalled();
   });
+});
+
+describe('plan invitation ownership', () => {
+  const value = { recipientId: 'bea', eventId: 'plan-a' };
+  it('retains the void acknowledgement, exact RPC and no cache invalidation', async () => {
+    const f = mount(), onSuccess = jest.fn(); mockRpc.mockResolvedValue({ data: null, error: null });
+    await act(async () => { await f.current.ping.mutateAsync(value, { scope: scope(), onSuccess }); });
+    expect(mockRpc.mock.calls).toEqual([['ping_person', { p_recipient: 'bea', p_event_id: 'plan-a' }]]);
+    expect(onSuccess.mock.calls[0].slice(0, 2)).toEqual([undefined, value]);
+    expect(f.invalidate).not.toHaveBeenCalled();
+  });
+  it.each(['account', 'roundtrip', 'visit', 'unmount'])('rejects an offline invitation after %s retirement', async kind => {
+    const f = mount(), entry = scope(); onlineManager.setOnline(false); let result!: ReturnType<typeof observe<void>>;
+    act(() => { result = observe(f.current.ping.mutateAsync(value, { scope: entry })); }); await flush();
+    if (kind === 'account') { act(() => auth('bob')); f.update('bob'); }
+    if (kind === 'roundtrip') act(() => { auth('bob'); auth('alice'); });
+    if (kind === 'visit') entry.live = false;
+    if (kind === 'unmount') f.unmount();
+    act(() => onlineManager.setOnline(true)); await act(async () => { await f.client.resumePausedMutations(); });
+    expect(isObsoletePeopleConnection((await result).error)).toBe(true);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+  it('checks the selected recipient again after a delayed account preflight', async () => {
+    const gate = deferred<any>(), f = mount(); mockGetUser.mockReturnValueOnce(gate.promise);
+    let eligible = true; const entry = { ...scope(), canDispatch: () => eligible };
+    let result!: ReturnType<typeof observe<void>>;
+    act(() => { result = observe(f.current.ping.mutateAsync(value, { scope: entry })); }); await flush();
+    eligible = false;
+    await act(async () => gate.resolve({ data: { user: { id: 'alice' } }, error: null }));
+    expect((await result).error).toBeTruthy(); expect(mockRpc).not.toHaveBeenCalled();
+  });
+  it('suppresses late acknowledgements after the invitation closes', async () => {
+    const gate = deferred<any>(), f = mount(), entry = scope(), onSuccess = jest.fn(); mockRpc.mockReturnValueOnce(gate.promise);
+    let result!: ReturnType<typeof observe<void>>;
+    act(() => { result = observe(f.current.ping.mutateAsync(value, { scope: entry, onSuccess })); }); await flush();
+    entry.live = false; await act(async () => gate.resolve({ data: null, error: null }));
+    expect(isObsoletePeopleConnection((await result).error)).toBe(true);
+    expect(onSuccess).not.toHaveBeenCalled(); expect(f.invalidate).not.toHaveBeenCalled();
+  });
+});
+
+
+it('resumes a current offline invitation once without changing People caches', async () => {
+  const f = mount(); onlineManager.setOnline(false); let result!: ReturnType<typeof observe<void>>;
+  act(() => { result = observe(f.current.ping.mutateAsync({ recipientId: 'bea', eventId: 'plan-a' }, { scope: scope() })); }); await flush();
+  expect(mockRpc).not.toHaveBeenCalled(); act(() => onlineManager.setOnline(true)); await flush();
+  expect((await result).error).toBeNull(); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.invalidate).not.toHaveBeenCalled();
+});
+it('does not time out or repeat an invitation once its write has started', async () => {
+  jest.useFakeTimers();
+  try {
+    const gate = deferred<any>(), f = mount(); mockRpc.mockReturnValueOnce(gate.promise); let settled = false;
+    let result!: ReturnType<typeof observe<void>>;
+    act(() => { result = observe(f.current.ping.mutateAsync({ recipientId: 'bea', eventId: 'plan-a' }, { scope: scope() })); void result.then(() => { settled = true; }); });
+    await flush(); await act(async () => { await jest.advanceTimersByTimeAsync(20_000); });
+    expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.current.ping.isPending).toBe(true);
+    await act(async () => gate.resolve({ data: null, error: null })); expect((await result).error).toBeNull();
+  } finally { jest.useRealTimers(); }
 });

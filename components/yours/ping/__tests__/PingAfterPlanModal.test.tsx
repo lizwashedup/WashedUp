@@ -192,3 +192,23 @@ it('ignores a pending dismissal after its invitation session unmounts', () => {
   act(() => dismiss());
   expect(fixture.done).not.toHaveBeenCalled();
 });
+
+
+it('serializes retry taps and handles a rejected retry without completing the step', async () => {
+  people = { ...people, data: undefined, isSuccess: false };
+  let reject!: (error: Error) => void; retryPeople.mockReturnValueOnce(new Promise((_, no) => { reject = no; }));
+  const fixture = mount();
+  const retry = fixture.renderer.root.findAll(node => node.props.accessibilityLabel === 'Retry loading your people' && typeof node.props.onPress === 'function')[0].props.onPress;
+  let first!: Promise<void>; act(() => { first = retry(); void retry(); });
+  expect(retryPeople).toHaveBeenCalledTimes(1);
+  await act(async () => { reject(new Error('read failed')); await first; });
+  expect(fixture.done).not.toHaveBeenCalled();
+  await act(async () => { await retry(); }); expect(retryPeople).toHaveBeenCalledTimes(2);
+});
+it('does not restart an old read after the invitation begins dismissal', async () => {
+  people = { ...people, data: undefined, isSuccess: false };
+  const fixture = mount();
+  const retry = fixture.renderer.root.findAll(node => node.props.accessibilityLabel === 'Retry loading your people' && typeof node.props.onPress === 'function')[0].props.onPress;
+  act(() => fixture.renderer.root.findByType(Modal).props.onRequestClose());
+  await act(async () => { await retry(); }); expect(retryPeople).not.toHaveBeenCalled();
+});
