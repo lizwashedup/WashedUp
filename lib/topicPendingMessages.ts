@@ -1,4 +1,5 @@
 import type { TopicMessage } from './communityChat';
+import { compareChatSequence } from './chatPaging';
 
 /** Server rows win when the same client-generated id appears in a refresh. */
 export function mergeTopicMessagesWithPending(
@@ -8,6 +9,5 @@ export function mergeTopicMessagesWithPending(
   for (const message of pending) {
     if (!byId.has(message.id)) byId.set(message.id, message);
   }
-  return [...byId.values()].sort((a, b) =>
-    a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  return [...byId.values()].sort(compareChatSequence);
 }
