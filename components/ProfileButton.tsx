@@ -12,8 +12,10 @@ import Colors, { SceneDetailColors } from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
 import InboxModal from './InboxModal';
 import { useProfileHeaderData } from '../hooks/useProfileHeaderData';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 
 const PROFILE_PROMPT_KEY = 'has_seen_profile_prompt';
+const PROFILE_PROMPT_READ_MS = 2000;
 
 export default function ProfileButton({ surface = 'light', compact = false, stacked = false }: { surface?: 'light' | 'scene'; compact?: boolean; stacked?: boolean }) {
   const { fonts: promptFonts } = useAfterglowFonts(true, 'creator');
@@ -49,7 +51,11 @@ export default function ProfileButton({ surface = 'light', compact = false, stac
     // A form outside the tab navigator needs a stack entry so Back returns to it.
     if (compact) { router.push(stacked ? '/account' : '/(tabs)/profile'); return; }
     if (!hasCheckedPrompt.current) {
-      const seen = await AsyncStorage.getItem(PROFILE_PROMPT_KEY).catch(() => null);
+      // This optional nudge must not prevent opening Profile. Unknown storage
+      // skips it for this visit only; it does not mark the prompt as seen.
+      const seen = await requestWithDeadline(
+        AsyncStorage.getItem(PROFILE_PROMPT_KEY), PROFILE_PROMPT_READ_MS,
+      ).catch(() => 'skip-this-visit');
       if (!isCurrent()) return;
       hasCheckedPrompt.current = true;
       if (!seen) {

@@ -80,3 +80,43 @@ it('closes the inbox when the header loses focus', () => {
   act(() => tree!.update(<ProfileButton />));
   expect(tree!.root.findByType(InboxModal).props.visible).toBe(false);
 });
+
+describe('optional profile prompt storage recovery', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('opens Profile once when the optional prompt read stalls, ignoring its late result', async () => {
+    let resolve!: (value: null) => void;
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(() => new Promise(r => { resolve = r; }));
+    const press = button('Profile').props.onPress;
+    act(() => { void press(); void press(); });
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/profile');
+    expect(modal().props.visible).toBe(false);
+    await act(async () => resolve(null));
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(modal().props.visible).toBe(false);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('opens Profile without claiming the optional prompt was seen when storage fails', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(new Error('Storage unavailable'));
+    await act(async () => button('Profile').props.onPress());
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/profile');
+    expect(modal().props.visible).toBe(false);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate from a retired visit and can check the prompt on a fresh visit', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockImplementationOnce(() => new Promise(() => {}));
+    act(() => { void button('Profile').props.onPress(); });
+    mockFocused = false; act(() => tree!.update(<ProfileButton />));
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    expect(mockPush).not.toHaveBeenCalled();
+    mockFocused = true; act(() => tree!.update(<ProfileButton />));
+    await act(async () => button('Profile').props.onPress());
+    expect(modal().props.visible).toBe(true);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+});
