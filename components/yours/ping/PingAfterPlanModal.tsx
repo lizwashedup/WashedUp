@@ -6,6 +6,8 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import PingInline from './PingInline';
 import { useObservedUser } from '../../../hooks/useObservedUser';
 import { useYoursGrid } from '../../../hooks/useYoursGrid';
+import type { YoursGridPerson } from '../../../lib/yours/types';
+import type { PeopleConnectionScope } from '../../../hooks/usePeopleConnectionMutations';
 
 /** Keeps the caller's existing completion/navigation behavior after the invitation step. */
 export default function PingAfterPlanModal({ planId, onDone }: { planId: string | null; onDone: () => void }) {
@@ -15,7 +17,9 @@ export default function PingAfterPlanModal({ planId, onDone }: { planId: string 
 
 function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () => void }) {
   const viewer = useObservedUser();
-  const people = useYoursGrid(viewer.error || viewer.isLoading ? undefined : viewer.viewerId);
+  const people = useYoursGrid(viewer.error || viewer.isLoading ? undefined : viewer.viewerId, viewer.viewerId ? {
+    userId: viewer.viewerId, epoch: viewer.epoch, isCurrent: viewer.isCurrent,
+  } : undefined);
   const list = people.data ?? [];
   const loaded = !!viewer.viewerId && !viewer.error && !viewer.isLoading && people.isSuccess;
   const empty = loaded && !people.isFetching && list.length === 0;
@@ -29,6 +33,7 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
   latest.current = { viewer, onDone };
   const owner = `${viewer.viewerId}:${viewer.epoch}`;
   const busy = useRef({ owner, value: false });
+  const retrying = useRef<{ owner: string } | null>(null);
   if (busy.current.owner !== owner) busy.current = { owner, value: false };
   const complete = () => {
     const isCurrent = pending.current;
@@ -53,13 +58,17 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
 
   const loading = viewer.isLoading || (!!viewer.viewerId && !viewer.error && (people.isLoading || (people.isFetching && list.length === 0)));
   const retry = async () => {
-    if (loading) return;
-    if (!viewer.viewerId || viewer.error) await viewer.retry();
-    else await people.refetch();
+    if (loading || closing || pending.current || done.current || !mounted.current || !viewer.isCurrent() || retrying.current?.owner === owner) return;
+    const attempt = { owner }; retrying.current = attempt;
+    try {
+      if (!viewer.viewerId || viewer.error) await viewer.retry();
+      else await people.refetch();
+    } catch { /* The observed read owns its visible error; no unhandled retry rejection. */ }
+    finally { if (retrying.current === attempt) retrying.current = null; }
   };
   return (
     <Modal visible={!closing && !initiallyEmpty.current} animationType="fade" onRequestClose={finish} onDismiss={complete}>
-      {loaded && list.length > 0 ? <ReadyInvitation key={owner} planId={planId} userId={viewer.viewerId!} onDone={finish} onBusyChange={value => {
+      {loaded && list.length > 0 ? <ReadyInvitation key={owner} planId={planId} userId={viewer.viewerId!} people={list} operationScope={{ userId: viewer.viewerId!, isCurrent: () => !closing && !done.current && !pending.current && mounted.current && viewer.isCurrent() }} onDone={finish} onBusyChange={value => {
         if (busy.current.owner === owner && viewer.isCurrent()) busy.current.value = value;
       }} /> : <SafeAreaView style={styles.container}>
         <View style={styles.state}>
@@ -79,14 +88,14 @@ function PlanInvitationSession({ planId, onDone }: { planId: string; onDone: () 
   );
 }
 
-function ReadyInvitation({ planId, userId, onDone, onBusyChange }: { planId: string; userId: string; onDone: () => void; onBusyChange: (busy: boolean) => void }) {
+function ReadyInvitation({ planId, userId, people, operationScope, onDone, onBusyChange }: { planId: string; userId: string; people: YoursGridPerson[]; operationScope: PeopleConnectionScope; onDone: () => void; onBusyChange: (busy: boolean) => void }) {
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const finish = () => { if (!busyRef.current) onDone(); };
   return (
       <SafeAreaView style={styles.container} accessibilityState={{ busy }}>
         <View style={styles.center}>
-          <PingInline userId={userId} planId={planId} onDone={finish} onBusyChange={value => {
+          <PingInline userId={userId} planId={planId} people={people} operationScope={operationScope} onDone={finish} onBusyChange={value => {
             busyRef.current = value;
             onBusyChange(value);
             setBusy(value);

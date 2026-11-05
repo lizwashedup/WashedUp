@@ -11,7 +11,6 @@ import type { YoursGridPerson } from '../../../../lib/yours/types';
 
 const mockPing = jest.fn();
 let mockPeople: YoursGridPerson[];
-jest.mock('../../../../hooks/useYoursGrid', () => ({ useYoursGrid: () => ({ data: mockPeople }) }));
 jest.mock('../../../../hooks/usePeopleConnectionMutations', () => ({ usePeopleConnectionMutations: () => ({ ping: { mutateAsync: mockPing } }) }));
 jest.mock('../../../../lib/haptics', () => ({ hapticSelection: jest.fn(), hapticSuccess: jest.fn() }));
 jest.mock('../../a11y/useReduceMotion', () => ({ useReduceMotion: () => true }));
@@ -36,12 +35,12 @@ const cleanup: Array<() => void> = [];
 function mount() {
   const onDone = jest.fn(), onBusyChange = jest.fn();
   let view!: ReturnType<typeof create>;
-  let stopped = false;
-  const tree = (userId = 'viewer', planId = 'plan') => <PingInline userId={userId} planId={planId} onDone={onDone} onBusyChange={onBusyChange} />;
+  let stopped = false, live = true;
+  const tree = (userId = 'viewer', planId = 'plan') => <PingInline userId={userId} planId={planId} people={mockPeople} operationScope={{ userId, isCurrent: () => live }} onDone={onDone} onBusyChange={onBusyChange} />;
   act(() => { view = create(tree()); });
   const unmount = () => { if (!stopped) act(() => view.unmount()); stopped = true; };
   cleanup.push(unmount);
-  return { onDone, onBusyChange, view, unmount, update: (userId = 'viewer', planId = 'plan') => act(() => view.update(tree(userId, planId))) };
+  return { onDone, onBusyChange, view, unmount, retire: () => { live = false; }, update: (userId = 'viewer', planId = 'plan') => act(() => view.update(tree(userId, planId))) };
 }
 function button(root: ReactTestInstance, label: string) {
   return root.findAll(node => node.props.accessibilityRole === 'button' && typeof node.props.onPress === 'function').find(node => node.findAll(text => text.props.children === label).length > 0)!;
@@ -135,7 +134,7 @@ it('serializes rapid sends, blocks stale exit callbacks while pending, and ackno
   expect(fixture.onBusyChange).toHaveBeenCalledWith(true);
   await flush();
   expect(mockPing).toHaveBeenCalledTimes(1);
-  expect(mockPing).toHaveBeenCalledWith({ recipientId: 'alice', eventId: 'plan' });
+  expect(mockPing).toHaveBeenCalledWith({ recipientId: 'alice', eventId: 'plan' }, { scope: { userId: 'viewer', isCurrent: expect.any(Function), canDispatch: expect.any(Function) } });
   expect(fixture.view.root.findByType(PingSheet).props.visible).toBe(true);
   expect(button(fixture.view.root.findByType(PingSheet), COPY.pingBack).props.disabled).toBe(true);
   act(() => fixture.view.root.findByType(PingSheet).findAll(node => typeof node.props.onRequestClose === 'function')[0].props.onRequestClose());
@@ -259,4 +258,22 @@ it('treats a synchronous transport exception as unconfirmed and releases pending
   expect(fixture.view.root.findByType(PingSheet).props.busy).toBe(false);
   expect(fixture.view.root.findByType(PingSheet).props.selectedIds).toEqual(new Set(['alice']));
   expect(fixture.onDone).not.toHaveBeenCalled();
+});
+
+
+it('retires queued transport eligibility when the invitation closes or its list changes', async () => {
+  const pending = deferred(); mockPing.mockReturnValueOnce(pending.promise);
+  const fixture = mount(); press(checkbox(fixture.view.root, 'Alice')); press(button(fixture.view.root, COPY.pingButton)); await flush();
+  const scope = mockPing.mock.calls[0][1].scope;
+  expect(scope.isCurrent()).toBe(true); expect(scope.canDispatch()).toBe(true);
+  mockPeople = [person('bob', 'Bob')]; fixture.update(); expect(scope.canDispatch()).toBe(false);
+  fixture.retire(); expect(scope.isCurrent()).toBe(false);
+  pending.resolve(); await flush(); expect(fixture.onDone).not.toHaveBeenCalled(); expect(hapticSuccess).not.toHaveBeenCalled();
+});
+it('does not act on a stale skip, selection, or send after its parent retires', async () => {
+  const fixture = mount(); const toggle = checkbox(fixture.view.root, 'Alice').props.onPress;
+  const send = button(fixture.view.root, COPY.pingButton).props.onPress;
+  const skip = button(fixture.view.root, COPY.pingSkip).props.onPress;
+  fixture.retire(); act(() => { toggle(); send(); skip(); }); await flush();
+  expect(mockPing).not.toHaveBeenCalled(); expect(fixture.onDone).not.toHaveBeenCalled();
 });

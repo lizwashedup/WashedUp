@@ -6,20 +6,19 @@ import PingSheet from './PingSheet';
 import InvitationPerson from './InvitationPerson';
 import { COPY, PING_AUTOFADE_MS, ANIM } from '../state/constants';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
-import { useYoursGrid } from '../../../hooks/useYoursGrid';
-import { usePeopleConnectionMutations } from '../../../hooks/usePeopleConnectionMutations';
+import type { YoursGridPerson } from '../../../lib/yours/types';
+import { usePeopleConnectionMutations, type PeopleConnectionScope } from '../../../hooks/usePeopleConnectionMutations';
 import { useReduceMotion } from '../a11y/useReduceMotion';
 
-type Props = { userId: string; planId: string; onDone: () => void; onBusyChange?: (busy: boolean) => void };
+type Props = { userId: string; planId: string; people: YoursGridPerson[]; operationScope: PeopleConnectionScope; onDone: () => void; onBusyChange?: (busy: boolean) => void };
 
 /** Scope selections and in-flight completions to this account and plan. */
 export default function PingInline(props: Props) {
   return <PlanInvitations key={JSON.stringify([props.userId, props.planId])} {...props} />;
 }
 
-function PlanInvitations({ userId, planId, onDone, onBusyChange }: Props) {
+function PlanInvitations({ userId, planId, people, operationScope, onDone, onBusyChange }: Props) {
   const reduceMotion = useReduceMotion();
-  const { data: people = [] } = useYoursGrid(userId);
   const { ping } = usePeopleConnectionMutations(userId);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectedRef = useRef(selected);
@@ -33,11 +32,13 @@ function PlanInvitations({ userId, planId, onDone, onBusyChange }: Props) {
   callbacks.current = { onDone, onBusyChange };
   const opacity = useRef(new Animated.Value(0)).current;
   const doneRef = useRef(false);
+  const latestPeople = useRef(people); latestPeople.current = people;
+  const isCurrent = () => mounted.current && !doneRef.current && operationScope.isCurrent();
   const engagedRef = useRef(false);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const finish = () => {
-    if (!mounted.current || doneRef.current || busyRef.current) return;
+    if (!isCurrent() || busyRef.current) return;
     doneRef.current = true;
     callbacks.current.onDone();
   };
@@ -69,6 +70,7 @@ function PlanInvitations({ userId, planId, onDone, onBusyChange }: Props) {
   }, []);
 
   const toggle = (id: string) => {
+    if (!isCurrent()) return;
     engage();
     if (busyRef.current || confirmed.has(id) || !people.some(person => person.user_id === id)) return;
     hapticSelection();
@@ -79,7 +81,7 @@ function PlanInvitations({ userId, planId, onDone, onBusyChange }: Props) {
   };
 
   const send = async () => {
-    if (!mounted.current || doneRef.current || busyRef.current) return;
+    if (!isCurrent() || busyRef.current) return;
     engage();
     const eligible = new Set(people.map(person => person.user_id));
     const ids = [...selectedRef.current].filter(id => eligible.has(id) && !confirmed.has(id));
@@ -94,9 +96,12 @@ function PlanInvitations({ userId, planId, onDone, onBusyChange }: Props) {
     setStatus(null);
     callbacks.current.onBusyChange?.(true);
     const results = await Promise.allSettled(ids.map(recipientId =>
-      Promise.resolve().then(() => ping.mutateAsync({ recipientId, eventId: planId })),
+      Promise.resolve().then(() => ping.mutateAsync({ recipientId, eventId: planId }, { scope: {
+        userId, isCurrent,
+        canDispatch: () => latestPeople.current.some(person => person.user_id === recipientId),
+      } })),
     ));
-    if (!mounted.current) return;
+    if (!isCurrent()) return;
     const accepted = ids.filter((_, index) => results[index].status === 'fulfilled');
     const unresolved = ids.filter((_, index) => results[index].status === 'rejected');
     // A void RPC acknowledgement may be a 24-hour dedupe no-op. It is not proof
