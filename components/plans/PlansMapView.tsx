@@ -1,3 +1,4 @@
+import { formatLocalPlanDateTime as formatDateShort } from '../../lib/planDateLabels';
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform } from 'react-native';
 import { Image } from 'expo-image';
@@ -34,18 +35,6 @@ const LA_REGION = {
   longitudeDelta: 0.4,
 };
 
-function formatDateShort(dateString: string): string {
-  const d = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  if (dateStart.getTime() === todayStart.getTime()) return `Today at ${time}`;
-  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow at ${time}`;
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` at ${time}`;
-}
 
 interface PlansMapViewProps {
   plans: Plan[];
