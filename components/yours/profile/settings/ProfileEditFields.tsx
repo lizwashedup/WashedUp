@@ -6,10 +6,8 @@ import Colors from '../../../../constants/Colors';
 import { NEIGHBORHOOD_OTHER } from '../../../../constants/Neighborhoods';
 import { KEYBOARD_DONE_ACCESSORY_ID } from '../../../keyboard/KeyboardDoneBar';
 import SettingsPortrait from './SettingsPortrait';
-import type { baseStyles, profileSettingsAppearance } from './profileSettingsStyles';
+import type { ProfileSettingsStyles } from './profileSettingsStyles';
 import type { useProfileHandleAvailability } from './useProfileHandleAvailability';
-
-type ProfileSettingsStyles = typeof baseStyles | (Omit<typeof baseStyles, keyof ReturnType<typeof profileSettingsAppearance>> & ReturnType<typeof profileSettingsAppearance>);
 
 interface ProfileEditFieldsProps {
   styles: ProfileSettingsStyles;

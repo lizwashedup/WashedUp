@@ -559,3 +559,5 @@ export function profileSettingsAppearance(fonts: AfterglowFontFamilies) {
     retryText: { ...title, color: AfterglowColors.clay },
   });
 }
+
+export type ProfileSettingsStyles = typeof baseStyles | (Omit<typeof baseStyles, keyof ReturnType<typeof profileSettingsAppearance>> & ReturnType<typeof profileSettingsAppearance>);
