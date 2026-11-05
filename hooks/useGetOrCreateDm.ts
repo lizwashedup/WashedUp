@@ -3,6 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { markChatListDirty } from '../lib/chatListSignal';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
+
+// Bound identity reads without timing out or replaying the DM mutation.
+const ACCOUNT_READ_TIMEOUT_MS = 8000;
 
 type Owner = { userId: string | null | undefined };
 /** Optional caller visit ownership; existing callers retain account/mount checks. */
@@ -62,7 +66,7 @@ export function useGetOrCreateDm() {
     const readRevision = revision;
     void (async () => {
       try {
-        const result = await supabase.auth.getSession();
+        const result = await requestWithDeadline(supabase.auth.getSession(), ACCOUNT_READ_TIMEOUT_MS);
         if (!active || revision !== readRevision) return;
         if (result.error) throw result.error;
         publish(result.data.session?.user.id ?? null);
@@ -109,7 +113,7 @@ export function useGetOrCreateDm() {
           requireAttempt(attempt);
           if (captured.userId === undefined) {
             // A failed cold-start read is retryable by this explicit action.
-            const session = await supabase.auth.getSession();
+            const session = await requestWithDeadline(supabase.auth.getSession(), ACCOUNT_READ_TIMEOUT_MS);
             requireAttempt(attempt);
             if (session.error) throw session.error;
             const next = session.data.session?.user.id ?? null;
@@ -119,14 +123,14 @@ export function useGetOrCreateDm() {
         }
         requireAttempt(attempt);
         if (!captured.userId) throw new Error('Sign in to open this chat.');
-        const verified = await supabase.auth.getUser();
+        const verified = await requestWithDeadline(supabase.auth.getUser(), ACCOUNT_READ_TIMEOUT_MS);
         requireAttempt(attempt);
         if (verified.error) throw verified.error;
         verifyId(captured, verified.data.user?.id ?? null);
         requireAttempt(attempt);
         const { data, error } = await supabase.rpc('get_or_create_dm', { p_other: attempt.otherUserId });
         requireAttempt(attempt);
-        const session = await supabase.auth.getSession();
+        const session = await requestWithDeadline(supabase.auth.getSession(), ACCOUNT_READ_TIMEOUT_MS);
         requireAttempt(attempt);
         if (session.error) throw session.error;
         verifyId(captured, session.data.session?.user.id ?? null);
