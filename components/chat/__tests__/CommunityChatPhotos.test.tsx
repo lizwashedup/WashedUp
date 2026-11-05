@@ -249,9 +249,9 @@ it.each<Room>(['main', 'topic'])('%s scopes photo selection to the room and acco
   expect(viewer().selectedId).toBeNull();
 });
 
-it.each<Room>(['main', 'topic'])('%s retains the original cover image and long-press path when the development flag is off', async kind => {
+it('topic retains the original cover image and long-press path when the development flag is off', async () => {
   jest.requireMock('../../../constants/FeatureFlags').COMMUNITY_CHAT_GROUPING_ENABLED = false;
-  await mount(kind);
+  await mount('topic');
   expect(attachments()).toHaveLength(0);
   expect(tree!.root.findAllByType(ChatPhotoViewer)).toHaveLength(0);
   const images = tree!.root.findAllByType(Image).filter(node => node.props.source?.uri === mockMessages[0].image_url);
@@ -260,6 +260,24 @@ it.each<Room>(['main', 'topic'])('%s retains the original cover image and long-p
   act(() => bubbles().find(node => node.findAllByType(LinkifiedText).some(text => text.props.text === 'old-photo caption'))!.props.onLongPress());
   expect(alert().title).toBe('Bob');
   expect(menuLabels()).toContain('report');
+});
+
+it('main keeps its shared photo viewer and actions independent of the grouping flag', async () => {
+  jest.requireMock('../../../constants/FeatureFlags').COMMUNITY_CHAT_GROUPING_ENABLED = false;
+  await mount('main');
+  expect(attachments()).toHaveLength(2);
+  expect(viewer().photos.map((photo: ChatPhoto) => photo.id)).toEqual([photoIds['old-photo'], photoIds['new-photo']]);
+  const photo = attachments().find(node => node.props.senderName === 'Bob')!;
+  const open = photo.props.onOpen;
+  act(() => photo.props.onLongPress());
+  expect(menuLabels()).toContain('report');
+  expect(visible()).toBeUndefined();
+  act(() => open());
+  expect(visible().id).toBe(photoIds['old-photo']);
+  mockMembership = 'removed'; await update();
+  expect(viewer().selectedId).toBeNull();
+  act(() => open());
+  expect(visible()).toBeUndefined();
 });
 
 it.each([false, undefined])('topic keeps its viewer closed while the say-hi gate is %s, including after visibility changes', async saidHi => {

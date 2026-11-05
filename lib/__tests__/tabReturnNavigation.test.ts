@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
-import { TabRouter, TabActions, CommonActions } from '@react-navigation/routers';
+import { TabRouter, TabActions, CommonActions, StackRouter, StackActions } from '@react-navigation/routers';
 
 // Read the configured navigator, then exercise the installed router rather
 // than mocking router.back (which cannot expose an incorrect destination).
@@ -34,7 +34,7 @@ const back = (state: ReturnType<typeof initial>) => {
 const active = (state: ReturnType<typeof initial>) => state.routes[state.index];
 
 describe('Profile return navigation', () => {
-  it.each(['plans/index', 'explore/index', 'post/index', 'chats/index', 'friends/index', 'chats/[id]', 'chats/circle/[id]'])(
+  it.each(['plans/index', 'explore/index', 'post/index', 'chats/index', 'friends', 'chats/[id]', 'chats/circle/[id]'])(
     'returns to %s after Profile without discarding source parameters', (origin) => {
       expect(names).toContain(origin);
       const params = { id: 'fictional-conversation', marker: 'retained' };
@@ -45,6 +45,22 @@ describe('Profile return navigation', () => {
       expect(active(returned).params).toEqual(params);
     },
   );
+  it('retains the nested Yours management destination and its own Back history through Profile', () => {
+    const stack = StackRouter({ initialRouteName: 'index' });
+    const stackOptions = { routeNames: ['index', 'manage/index', 'manage/(tools)'], routeParamList: {}, routeGetIdList: {} };
+    let nested = stack.getInitialState(stackOptions);
+    nested = stack.getStateForAction(nested, StackActions.push('manage/index'), stackOptions)!;
+    nested = stack.getStateForAction(nested, StackActions.push('manage/(tools)', { screen: 'community', params: { marker: 'retained' } }), stackOptions)!;
+    const previous = go(initial(), 'friends');
+    previous.routes[previous.index] = { ...active(previous), state: nested };
+    const returned = back(go(previous, 'profile'))!;
+    expect(active(returned)).toEqual(active(previous));
+    expect(active(returned).state).toEqual(nested);
+    const directory = stack.getStateForAction(nested, CommonActions.goBack(), stackOptions)!;
+    expect(directory.routes[directory.index].name).toBe('manage/index');
+    const yours = stack.getStateForAction(directory, CommonActions.goBack(), stackOptions)!;
+    expect(yours.routes[yours.index].name).toBe('index');
+  });
   it('does not create a Profile loop after repeated visits', () => {
     let state = go(initial(), 'chats/index');
     state = go(state, 'chats/[id]', { id: 'first' });
