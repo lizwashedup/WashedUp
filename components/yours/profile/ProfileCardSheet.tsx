@@ -47,7 +47,8 @@ function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer }: Pro
   const identityReady = !!userId && viewer.viewerId === userId && !viewer.isLoading && !viewer.error && viewer.isCurrent();
   const currentIdentity = useRef(identityReady); currentIdentity.current = identityReady;
   const isCurrent = () => mounted.current && !retired.current && currentIdentity.current && viewer.isCurrent();
-  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null);
+  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null,
+    { userId, epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const { data: rawCard, isLoading, isFetching, isError, refetch } = profile;
   const card = rawCard?.user_id === targetId && !isError ? rawCard : null;
   const currentCard = useRef(card); currentCard.current = card;

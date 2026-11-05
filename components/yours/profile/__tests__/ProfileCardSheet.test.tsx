@@ -36,7 +36,7 @@ beforeEach(() => {
 afterEach(() => cleanup.splice(0).forEach(fn => fn()));
 it('does not mount query or identity work while hidden', () => { mount({ visible: false }); expect(mockProfile).not.toHaveBeenCalled(); });
 it('preserves minimal profile/history only and uses truthful Add instead of Add back', () => {
-  const f = mount(); expect(mockProfile).toHaveBeenCalledWith('alice', 'amelia'); expect(f.button('Add Amelia')).toBeDefined(); expect(f.text()).not.toContain('Add back'); expect(f.text()).toContain('2 shared plans');
+  const f = mount(); expect(mockProfile).toHaveBeenCalledWith('alice', 'amelia', expect.objectContaining({ userId: 'alice', epoch: 0, isCurrent: expect.any(Function) })); expect(f.button('Add Amelia')).toBeDefined(); expect(f.text()).not.toContain('Add back'); expect(f.text()).toContain('2 shared plans');
   expect(f.sheet().props.appearance).toEqual({ fonts: AfterglowFallbackFonts });
 });
 it('shows unavailable after a null result, rather than an endless loading spinner', () => {
@@ -105,7 +105,7 @@ it('auth epoch alone retires an operation even when parent account props are unc
   mockEpoch++; await act(async () => pending.resolve('requested')); expect(f.props.onClose).not.toHaveBeenCalled();
 });
 it('account errors offer a retry and never fetch a mismatched account profile', async () => {
-  mockIdentityError = new Error('offline'); const f = mount(); expect(mockProfile).toHaveBeenCalledWith(null, null); expect(f.text()).toContain('Couldn’t check your account');
+  mockIdentityError = new Error('offline'); const f = mount(); expect(mockProfile).toHaveBeenCalledWith(null, null, expect.objectContaining({ userId: 'alice', epoch: 0, isCurrent: expect.any(Function) })); expect(f.text()).toContain('Couldn’t check your account');
   await act(async () => f.button('Try again to check account').props.onPress()); expect(mockRetryIdentity).toHaveBeenCalledTimes(1);
 });
 it('uses the latest close callback in the same visit', async () => {

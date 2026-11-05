@@ -57,7 +57,8 @@ function KeepVisit({ userId, targetId, appearance, viewer }: KeepPageProps & { v
   const identityReady = !!userId && viewer.viewerId === userId && !viewer.error && !viewer.isLoading && viewer.isCurrent();
   const identity = useRef(identityReady); identity.current = identityReady;
   const isCurrent = () => mounted.current && identity.current && viewer.isCurrent() && visit.current === capturedVisit && capturedVisit.focused && !capturedVisit.retired;
-  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null);
+  const profile = useProfileCard(identityReady ? userId : null, identityReady ? targetId : null,
+    { userId, epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const { data: rawCard, isLoading, isFetching, isError, refetch } = profile;
   const card = identityReady && !isError && rawCard?.user_id === targetId ? rawCard : null;
   const currentCard = useRef(card); currentCard.current = card;
