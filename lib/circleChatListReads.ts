@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { circleDisplay, type DisplayMember } from './circles/display';
 import { seedSender } from './chatEngine/senderCache';
 import { getBlockedWith } from './blocking';
-import { formatChatPreview, type ChatPreview } from './chatPreview';
+import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chatPreview';
 
 async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Promise<ChatPreview[]> {
   const blocked = await getBlockedWith(userId, previews.filter(chat => chat.is_dm).map(chat => chat.dm_user_id));
@@ -91,7 +91,7 @@ export async function fetchCircleChats(userId: string, senderCache?: Map<string,
   const unreadMap: Record<string, number> = {};
   (otherMessages ?? []).forEach((msg: any) => {
     const lastRead = readMap[msg.circle_id];
-    if (!lastRead || msg.created_at > lastRead) {
+    if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
       unreadMap[msg.circle_id] = (unreadMap[msg.circle_id] ?? 0) + 1;
     }
   });
