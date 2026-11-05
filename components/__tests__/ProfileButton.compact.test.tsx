@@ -8,6 +8,7 @@ import ProfileButton from '../ProfileButton';
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
 jest.mock('@tanstack/react-query',()=>({useQuery:jest.fn()}));
 jest.mock('expo-router',()=>({router:{push:jest.fn()}}));
+jest.mock('../../hooks/useObservedUser',()=>({useObservedUser:()=>({viewerId:'viewer',epoch:1,isLoading:false,error:null,isCurrent:()=>true})}));
 jest.mock('../../lib/supabase',()=>({supabase:{}}));
 jest.mock('../InboxModal',()=>()=>null);
 jest.mock('../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:jest.requireActual('../../constants/Typography').AfterglowFonts})}));
