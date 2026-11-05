@@ -2,6 +2,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {ActivityIndicator,Pressable,StyleSheet,View} from 'react-native';
 import {ScaledText as Text} from '../ScaledText';
 import {Image} from 'expo-image';
+import {router} from 'expo-router';
 import {useInfiniteQuery,useQuery} from '@tanstack/react-query';
 import {useObservedUser} from '../../hooks/useObservedUser';
 import {useAfterglowFonts} from '../../hooks/useAfterglowFonts';
@@ -19,13 +20,13 @@ function Face({person,size=36}:{person:CommunityPerson;size?:number}){
  const [failed,setFailed]=useState<string>();
  return person.photo&&failed!==person.photo?<Image source={{uri:person.photo}} onError={()=>setFailed(person.photo!)} accessibilityLabel={person.name??'Community member'} style={{width:size,height:size,borderRadius:size/2}} contentFit="cover"/>:<View style={[s.face,{width:size,height:size,borderRadius:size/2}]}><Text style={[T.body,{fontFamily:fonts.medium,color:Colors.asphalt}]}>{(person.name??'?').slice(0,1).toUpperCase()}</Text></View>;
 }
-export function CommunityCreators({pageId,fallback}:{pageId:string;fallback:React.ReactNode}){
+export function CommunityCreators({pageId,fallback,inline=false}:{pageId:string;fallback:React.ReactNode;inline?:boolean}){
  const {scope,key,ready}=useScope(pageId),{fonts}=useAfterglowFonts(true,'creator');
  const q=useQuery({queryKey:['community-public-team',...key],enabled:ready,queryFn:()=>readCommunityCreators(pageId,scope),staleTime:30000});
  if(!ready)return null;
  if(q.error)return <>{fallback}</>;
  if(!q.data?.length)return <>{fallback}</>;
- return <View style={s.creators}>{q.data.map(p=><View key={p.id} style={s.person}><Face person={p}/><View style={s.name}><Text style={[T.body,{fontFamily:fonts.medium,color:S.text}]}>{p.name??'Community creator'}</Text><Text style={[T.caption,{fontFamily:fonts.regular,color:S.supporting}]}>{p.role==='creator'?'Creator':'Co-creator'}</Text></View></View>)}</View>;
+ return <View style={[s.creators,inline&&s.inlineCreators]}>{q.data.map(p=><Pressable cssInterop={false} key={p.id} accessibilityRole="button" accessibilityLabel={`View ${p.name??'community creator'}’s profile`} style={({pressed})=>[s.person,s.creator,pressed&&s.pressed]} onPress={()=>{if(scope.isCurrent())router.push(`/profile/${p.id}` as never);}}><Face person={p}/><View style={s.name}><Text style={[T.body,{fontFamily:fonts.medium,color:S.text}]}>{`${p.role==='creator'?'Created by':'Co-created by'} ${p.name??'Community creator'}`}</Text><Text style={[T.caption,{fontFamily:fonts.regular,color:S.supporting}]}>View profile</Text></View></Pressable>)}</View>;
 }
 export function CommunityMembers({pageId}:{pageId:string}){
  const {scope,key,ready}=useScope(pageId),{fonts}=useAfterglowFonts(true,'creator');
@@ -42,4 +43,4 @@ export function CommunityMembers({pageId}:{pageId:string}){
   {expanded&&q.hasNextPage&&<Pressable accessibilityRole="button" disabled={q.isFetchingNextPage} onPress={()=>void q.fetchNextPage()} style={s.control}><Text style={[T.body,{fontFamily:fonts.medium,color:S.text}]}>{q.isFetchingNextPage?'Loading…':'More members'}</Text></Pressable>}
  </View>;
 }
-const s=StyleSheet.create({creators:{paddingHorizontal:20,paddingVertical:14,gap:12},person:{flexDirection:'row',alignItems:'center',gap:10},name:{flex:1,gap:2},face:{backgroundColor:Colors.parchment,alignItems:'center',justifyContent:'center'},members:{gap:12},preview:{flexDirection:'row',gap:8},expanded:{gap:14},control:{minHeight:44,justifyContent:'center',alignSelf:'flex-start',paddingHorizontal:12,borderWidth:1,borderColor:S.border,borderRadius:14}});
+const s=StyleSheet.create({inlineCreators:{paddingHorizontal:0,paddingTop:10,paddingBottom:6},creator:{minHeight:44},pressed:{opacity:0.65},creators:{paddingHorizontal:20,paddingVertical:14,gap:12},person:{flexDirection:'row',alignItems:'center',gap:10},name:{flex:1,gap:2},face:{backgroundColor:Colors.parchment,alignItems:'center',justifyContent:'center'},members:{gap:12},preview:{flexDirection:'row',gap:8},expanded:{gap:14},control:{minHeight:44,justifyContent:'center',alignSelf:'flex-start',paddingHorizontal:12,borderWidth:1,borderColor:S.border,borderRadius:14}});

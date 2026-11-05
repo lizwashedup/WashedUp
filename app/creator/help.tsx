@@ -1,287 +1,120 @@
-/**
- * Help, support, and permissions (inventory C-30). Reached from the creator
- * Menu/More tab, a stack screen with its own back control (never a dead
- * end, matching organizer-profile.tsx / payouts.tsx precedent). Two halves:
- * a real, live permissions summary built from getCreatorAccess() (never a
- * static claim about what "creator mode" can do in general), and a short
- * grounded FAQ that names the actual screens this codebase ships, plus the
- * same contact-support path used everywhere else in creator mode
- * (mailto:hello@washedup.app, see (creator)/_layout.tsx RevokedScreen and
- * tickets/order/[id].tsx).
- *
- * Functionally minimal per decision 15a: no new schema, no new RPC. Every
- * fact on this screen is read from the same getCreatorAccess() the rest of
- * creator mode already trusts for its own gating, so "what can I do here"
- * can never drift from what the app actually enforces.
- */
-
-import React from 'react';
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, LifeBuoy } from 'lucide-react-native';
+/** Creator help uses the current account’s actual roles and approval records. */
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, View } from 'react-native';
+import { ScaledText as Text } from '../../components/ScaledText';
 import Colors from '../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../constants/Typography';
-import { EventSpacing } from '../../constants/EventDesign';
-import { getCreatorAccess, isLeaderAccess, type CreatorAccess } from '../../lib/creatorMode';
+import { PageAction, PageFrame, pageStyles as s } from '../../components/creator/pages/PageFrame';
+import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
 import { fetchMyGrants, type OperatorGrantStatus } from '../../lib/operatorApplications';
-import { hapticLight } from '../../lib/haptics';
+import type { CommunityMemberRole } from '../../lib/creatorMode';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 
-/** The plain-language role line for the identity a real getCreatorAccess()
-    result describes -- never a hardcoded "you're an admin" style claim. */
-function roleSummary(access: CreatorAccess | undefined): string {
-  if (!access) return 'checking your access...';
-  const leader = isLeaderAccess(access);
-  if (leader && access.hasEventHostGrant) {
-    return 'you lead a community and you are approved to put on standalone events.';
-  }
-  if (leader) {
-    const names = access.ledCommunities.map((c) => c.name).join(', ');
-    return access.ledCommunities.length > 1
-      ? `you lead ${access.ledCommunities.length} communities: ${names}.`
-      : `you lead ${names || 'a community'}.`;
-  }
-  if (access.hasEventHostGrant) {
-    return 'you are approved to put on standalone events. no community, no member room -- that is by design for this track.';
-  }
-  return 'no active creator access found on this account.';
-}
-
-/**
- * Screen 46 gap (delta matrix): "both approval records distinctly". Read
- * straight from fetchMyGrants() rather than getCreatorAccess()'s derived
- * hasLeaderGrant/hasEventHostGrant booleans, which only ever answer
- * approved-or-not -- an applied/in_review/needs_more_info/declined/withdrawn
- * record is real state a creator should be able to review here and is
- * otherwise invisible on this screen.
- */
-function grantStatusLabel(status: OperatorGrantStatus | undefined): string {
-  switch (status) {
-    case 'applied':
-    case 'in_review':
-      return 'a real person is reading it';
-    case 'needs_more_info':
-      return 'needs one more thing from you';
-    case 'approved':
-      return 'approved';
-    case 'declined':
-      return 'not approved, can reapply';
-    case 'withdrawn':
-      return 'withdrawn, can reapply';
-    case 'revoked':
-      return 'closed';
-    default:
-      return 'not applied';
-  }
-}
-
-interface FaqItem {
-  q: string;
-  a: string;
-}
-
-const FAQ: FaqItem[] = [
-  {
-    q: 'who can see my attendee list and refund a ticket',
-    a: 'only you, an active co-leader of your community (if this event belongs to one), or washedup admin support. it is never visible to other members or to the public.',
-  },
-  {
-    q: 'when does payout money actually land',
-    a: 'stripe collects ticket money while the event sells; your payout releases to your bank after the event ends. the 4% commission is all-in, nothing else is taken out. see money > getting paid for your live status.',
-  },
-  {
-    q: 'what is the difference between a community event and a standalone event',
-    a: 'a community event posts from your community and can pin to your community chat. a standalone event is put on by you or your organization alone, with no member room attached.',
-  },
-  {
-    q: 'why can’t I see the "attendees" tab',
-    a: 'it shows once you have an event with at least one order or rsvp. before that, check who’s coming from the events tab on the event itself.',
-  },
-  {
-    q: 'how do followers work',
-    a: 'following is not membership: no chat, no roster, just a quiet way for people to hear when you post something new. message your followers from the menu once you have some.',
-  },
+const roleLabels: Record<CommunityMemberRole, string> = {
+  leader: 'Leader', co_leader: 'Co-leader', admin: 'Admin', events: 'Events',
+  member_care: 'Member care', finance: 'Finance', member: 'Member',
+};
+const approvalLabels: Record<OperatorGrantStatus, string> = {
+  applied: 'Submitted', in_review: 'In review', needs_more_info: 'More information needed',
+  approved: 'Approved', declined: 'Not approved', withdrawn: 'Withdrawn', revoked: 'Access revoked',
+};
+const questions = [
+  { title: 'Where do I manage my community?',
+    answer: 'Open your community and tap Settings. You can also find your communities and organizations in Yours → You manage.' },
+  { title: 'Who changes joining and visibility?',
+    answer: 'A community’s leader or co-leader can change Joining settings and Visibility & link in Community settings. Your role can be different in each community.' },
+  { title: 'Where do I manage an event?',
+    answer: 'Open Events for the community or organization that created it, then choose the event. The available tools depend on your event access.' },
+  { title: 'Is following the same as joining?',
+    answer: 'No. Following an organization does not make someone a community member or give them community chat access.' },
+  { title: 'Where can I check payments?',
+    answer: 'Open Money & payouts to check the payment information available to your account. Review the event’s ticket settings for its fees and payment details.' },
 ];
 
 export default function CreatorHelpScreen() {
-  const { data: access, isLoading } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  // Same queryKey apply.tsx uses for the same read -- shares/dedupes the
-  // React Query cache when both screens are visited in one session.
-  const { data: grants, isLoading: grantsLoading } = useQuery({ queryKey: ['my-operator-grants'], queryFn: fetchMyGrants });
-  const eventHostGrant = grants?.find((g) => g.track === 'event_host');
-  const communityGrant = grants?.find((g) => g.track === 'community_leader');
+  const access = useCreatorAccessRead();
+  const observed = useCreatorPageScope('creator-help');
+  const scope = !observed.account.isLoading && !observed.account.error ? observed.scope : null;
+  const loadGrants = useCallback(async (owned: CreatorPageScope) => {
+    const grants = await requestWithDeadline(fetchMyGrants(owned.userId), 12_000);
+    if (!owned.isCurrent()) throw Error('This account changed.');
+    return grants;
+  }, []);
+  const grants = useCreatorPageRead(scope, loadGrants);
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  const body = [s.small, { fontFamily: fonts.regular }];
+  const heading = [s.rowTitle, { fontFamily: fonts.medium }];
+  const [support, setSupport] = useState<{ scope: CreatorPageScope; busy: boolean; failed: boolean }>();
+  const supportLock = useRef(false);
+  const ownSupport = support?.scope === scope ? support : undefined;
+  const openSupport = async () => {
+    if (!scope?.isCurrent() || supportLock.current) return;
+    const owned = scope;
+    supportLock.current = true;
+    setSupport({ scope: owned, busy: true, failed: false });
+    try {
+      await Linking.openURL('mailto:hello@washedup.app');
+      if (owned.isCurrent()) setSupport({ scope: owned, busy: false, failed: false });
+    } catch {
+      if (owned.isCurrent()) setSupport({ scope: owned, busy: false, failed: true });
+    } finally { supportLock.current = false; }
+  };
+  const approvalsFailed = !!observed.account.error || !!grants.error;
+  const approvalsLoading = observed.account.isLoading || grants.loading;
+  const signedOut = observed.account.viewerId === null;
+  return <PageFrame title="Help & permissions">
+    <Text accessibilityRole="header" style={[s.section, { fontFamily: fonts.display }]}>Your access</Text>
+    {access.isLoading ? <ActivityIndicator accessibilityLabel="Checking creator access" color={Colors.terracotta} />
+      : access.isError ? <View style={s.notice}>
+        <Text accessibilityRole="alert" style={body}>Couldn’t check your creator access.</Text>
+        <PageAction title="Try again" singleLine accessibilityLabel="Retry creator access" disabled={access.isFetching} onPress={() => void access.refetch()} />
+      </View> : <>
+        <Text style={body}>These roles apply to the community named below. Access in one community does not change your role in another.</Text>
+        {access.data?.ledCommunities.map(community => <View key={community.id} style={s.row}>
+          <Text style={heading}>{community.name}</Text>
+          <Text style={body}>{roleLabels[community.role] ?? 'Team member'}</Text>
+        </View>)}
+        {access.data?.hasEventHostGrant && <View style={s.row}>
+          <Text style={heading}>Event creator</Text><Text style={body}>Approved to create events as yourself or an organization.</Text>
+        </View>}
+        {access.data?.hasLeaderGrant && <View style={s.row}>
+          <Text style={heading}>Community creator</Text><Text style={body}>Approved to start a community. Each community keeps its own team roles.</Text>
+        </View>}
+        {access.data && access.data.ledCommunities.length === 0 && !access.data.hasLeaderGrant && !access.data.hasEventHostGrant &&
+          <Text style={body}>{signedOut ? 'Sign in to check your creator access.' : 'No active creator access on this account. Check your application status below.'}</Text>}
+      </>}
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="back">
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>help &amp; permissions</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <Text accessibilityRole="header" style={[s.section, { fontFamily: fonts.display }]}>Application status</Text>
+    {approvalsFailed ? <View style={s.notice}>
+      <Text accessibilityRole="alert" style={body}>Couldn’t load your application status.</Text>
+      <PageAction title="Try again" singleLine accessibilityLabel="Retry application status" disabled={approvalsLoading}
+        onPress={() => void (observed.account.error ? observed.account.retry() : grants.refresh()).catch(() => undefined)} />
+    </View> : approvalsLoading ? <ActivityIndicator accessibilityLabel="Checking application status" color={Colors.terracotta} />
+      : signedOut ? <Text style={body}>Sign in to view your applications.</Text>
+      : grants.data ? <>
+        {([{track:'community_leader', title:'Community creator'}, {track:'event_host', title:'Event creator'}] as const).map(item => {
+          const grant = grants.data?.find(value => value.track === item.track);
+          return <View style={s.row} key={item.track}>
+            <Text style={heading}>{item.title}</Text>
+            <Text style={body}>{grant ? approvalLabels[grant.status] ?? 'Status unavailable' : 'No application'}</Text>
+            {!!grant?.applicant_message && <Text style={body}>{grant.applicant_message}</Text>}
+          </View>;
+        })}
+        <Text style={[body, { marginTop: 12 }]}>These are separate approvals. A team role in an existing community is shown above.</Text>
+      </> : null}
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.permCard}>
-          <Text style={styles.permKicker}>your access, right now</Text>
-          <Text style={styles.permBody}>{isLoading ? 'checking your access...' : roleSummary(access)}</Text>
-          {!isLoading && access && (access.ledCommunities.length > 0 || access.hasEventHostGrant) && (
-            <View style={styles.permList}>
-              {access.ledCommunities.map((c) => (
-                <View key={c.id} style={styles.permRow}>
-                  <Text style={styles.permRowName} numberOfLines={1}>{c.name}</Text>
-                  <Text style={styles.permRowRole}>{c.role === 'leader' ? 'primary leader' : 'co-leader'}</Text>
-                </View>
-              ))}
-              {access.hasEventHostGrant && (
-                <View style={styles.permRow}>
-                  <Text style={styles.permRowName} numberOfLines={1}>organization</Text>
-                  <Text style={styles.permRowRole}>put on events</Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        <Text style={styles.sectionLabel}>your approval records</Text>
-        <View style={styles.approvalCard}>
-          <View style={styles.approvalRow}>
-            <View style={styles.approvalTrackWrap}>
-              <Text style={styles.approvalTrackName}>organization</Text>
-              <Text style={styles.approvalTrackSub}>put on events</Text>
-            </View>
-            <Text style={[styles.approvalStatus, eventHostGrant?.status === 'approved' && styles.approvalStatusApproved]}>
-              {grantsLoading ? 'checking...' : grantStatusLabel(eventHostGrant?.status)}
-            </Text>
-          </View>
-          <View style={[styles.approvalRow, styles.approvalRowLast]}>
-            <View style={styles.approvalTrackWrap}>
-              <Text style={styles.approvalTrackName}>community</Text>
-              <Text style={styles.approvalTrackSub}>start a community</Text>
-            </View>
-            <Text style={[styles.approvalStatus, communityGrant?.status === 'approved' && styles.approvalStatusApproved]}>
-              {grantsLoading ? 'checking...' : grantStatusLabel(communityGrant?.status)}
-            </Text>
-          </View>
-        </View>
-        <Text style={styles.approvalHint}>two separate approvals. being approved for one never approves the other.</Text>
-
-        <Text style={styles.sectionLabel}>common questions</Text>
-        <View style={styles.faqCard}>
-          {FAQ.map((item, i) => (
-            <View key={item.q} style={[styles.faqRow, i === FAQ.length - 1 && styles.faqRowLast]}>
-              <Text style={styles.faqQ}>{item.q}</Text>
-              <Text style={styles.faqA}>{item.a}</Text>
-            </View>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={styles.supportBtn}
-          onPress={() => {
-            hapticLight();
-            Linking.openURL('mailto:hello@washedup.app').catch(() => {});
-          }}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="contact support by email"
-        >
-          <LifeBuoy size={18} color={Colors.white} strokeWidth={2} />
-          <Text style={styles.supportBtnText}>contact support</Text>
-        </TouchableOpacity>
-        <Text style={styles.supportHint}>a real person reads this, not a bot.</Text>
-      </ScrollView>
-    </SafeAreaView>
-  );
+    <Text accessibilityRole="header" style={[s.section, { fontFamily: fonts.display }]}>Common questions</Text>
+    {questions.map(item => <View style={s.row} key={item.title}>
+      <Text style={heading}>{item.title}</Text><Text style={body}>{item.answer}</Text>
+    </View>)}
+    <View style={[s.notice, { marginTop: 24 }]}>
+      <Text style={body}>Need help? Email hello@washedup.app.</Text>
+      <PageAction title={ownSupport?.busy ? 'Opening…' : 'Contact support'} singleLine primary
+        disabled={!scope || !!ownSupport?.busy} onPress={() => void openSupport()} />
+      {ownSupport?.failed && <Text accessibilityRole="alert" selectable style={body}>Email didn’t open. Try again or email hello@washedup.app from your mail app.</Text>}
+    </View>
+  </PageFrame>;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12 },
-  headerTitle: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
-  headerSpacer: { width: 22 },
-  content: { padding: 20, paddingBottom: 48, gap: EventSpacing.md },
-
-  permCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 16,
-  },
-  permKicker: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  permBody: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.darkWarm },
-  permList: { marginTop: 12, gap: 8 },
-  permRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  permRowName: { flex: 1, fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  permRowRole: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
-
-  sectionLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.5,
-    marginTop: 4,
-  },
-
-  approvalCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  approvalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  approvalRowLast: { borderBottomWidth: 0 },
-  approvalTrackWrap: { flex: 1 },
-  approvalTrackName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  approvalTrackSub: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary, marginTop: 2 },
-  approvalStatus: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, textAlign: 'right' },
-  approvalStatusApproved: { fontFamily: Fonts.sansBold, color: Colors.darkWarm },
-  approvalHint: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-    marginTop: -4,
-  },
-
-  faqCard: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  faqRow: { padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.border, gap: 4 },
-  faqRowLast: { borderBottomWidth: 0 },
-  faqQ: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  faqA: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, lineHeight: LineHeights.bodySM, color: Colors.secondary },
-
-  supportBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingVertical: 14,
-    minHeight: 44,
-    marginTop: 8,
-  },
-  supportBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  supportHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.tertiary, textAlign: 'center', marginTop: 6 },
-});

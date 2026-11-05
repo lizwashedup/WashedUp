@@ -68,7 +68,7 @@ it('does not disguise an initial event error as a missing event', async () => {
 });
 it('invalid entries make no event reads and have a real back destination', async () => {
  mockId = ['one', 'two']; await mount(); expect(mockEvent).not.toHaveBeenCalled(); expect(copy()).toContain('Choose an event');
- act(() => button('Back to events').props.onPress()); expect(mockReplace).toHaveBeenCalledWith('/(creator)/events');
+ act(() => button('Back to events').props.onPress()); expect(mockReplace).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/events');
 });
 it('retires old-account navigation synchronously and discards late totals', async () => {
  let resolveGross!: (value: number) => void;

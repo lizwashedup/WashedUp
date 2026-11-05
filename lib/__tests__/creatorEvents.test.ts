@@ -1,9 +1,9 @@
 jest.mock('../supabase', () => ({
-  supabase: { rpc: jest.fn() },
+  supabase: { rpc: jest.fn(), auth: { getSession: jest.fn() } },
 }));
 
 import { supabase } from '../supabase';
-import { probeTicketCapacityRpc, setEventTicketCapacity } from '../creatorEvents';
+import { probeTicketCapacityRpc, setEventTicketCapacity, createOperatorEvent } from '../creatorEvents';
 import fs from 'fs';
 import path from 'path';
 
@@ -70,4 +70,31 @@ describe('setEventTicketCapacity', () => {
     mockRpc.mockResolvedValue({ data: null, error: new Error('boom') });
     await expect(setEventTicketCapacity('event-1', 10)).rejects.toThrow('boom');
   });
+});
+
+
+describe('account-owned event creation',()=>{
+ const fields:any={title:'Ski evening',start_time:null,end_time:null,pin_to_chat:false};
+ let active=true;const scope={userId:'alice',isCurrent:()=>active};
+ beforeEach(()=>{jest.clearAllMocks();active=true;jest.mocked(supabase.auth.getSession).mockResolvedValue({data:{session:{user:{id:'alice'},access_token:'fixture-token'}},error:null} as any);});
+ it('pins dispatch to the account that initiated the form',async()=>{
+  const header=jest.fn().mockResolvedValue({data:'event-id',error:null});mockRpc.mockReturnValue({setHeader:header});
+  await expect(createOperatorEvent(fields,'sunset',false,scope)).resolves.toBe('event-id');
+  expect(header).toHaveBeenCalledWith('Authorization','Bearer fixture-token');expect(mockRpc).toHaveBeenCalledWith('operator_create_explore_event',expect.objectContaining({p_community_id:'sunset',p_publish:false}));
+ });
+ it('does not dispatch for another signed-in account',async()=>{
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({data:{session:{user:{id:'bob'},access_token:'other-fixture'}},error:null} as any);
+  await expect(createOperatorEvent(fields,null,false,scope)).rejects.toThrow('account');expect(mockRpc).not.toHaveBeenCalled();
+ });
+ it('does not dispatch after the visit ends during session lookup',async()=>{
+  jest.mocked(supabase.auth.getSession).mockImplementation(async()=>{active=false;return {data:{session:{user:{id:'alice'},access_token:'fixture-token'}},error:null} as any;});
+  await expect(createOperatorEvent(fields,null,false,scope)).rejects.toThrow();expect(mockRpc).not.toHaveBeenCalled();
+ });
+ it('does not report success or retry a dispatch whose visit has ended',async()=>{
+  const header=jest.fn().mockImplementation(async()=>{active=false;return {data:'event-id',error:null};});mockRpc.mockReturnValue({setHeader:header});
+  await expect(createOperatorEvent(fields,null,false,scope)).rejects.toThrow('Check the saved event');expect(mockRpc).toHaveBeenCalledTimes(1);
+ });
+ it('retains the existing unscoped caller contract',async()=>{
+  mockRpc.mockResolvedValue({data:'existing',error:null});await expect(createOperatorEvent(fields,null,false)).resolves.toBe('existing');expect(supabase.auth.getSession).not.toHaveBeenCalled();
+ });
 });

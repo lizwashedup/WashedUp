@@ -30,7 +30,7 @@ export function CommunityJoinInboxRow({ notice, userId, visible, onClose, onRead
       }
       const target = await loadCommunityJoinNotice(notice.id, notice.type, scope);
       if (!scope.isCurrent()) return;
-      const route = target ? communityJoinNoticeRoute(target) : notice.type === 'community_join_request' ? '/(creator)/members' : null;
+      const route = target ? communityJoinNoticeRoute(target) : notice.type === 'community_join_request' ? '/(tabs)/friends/manage/(tools)/members' : null;
       let read = false;
       try { await markCommunityJoinNoticeRead(notice.id, notice.type, scope, notice.type === 'community_join_request' ? 'acted' : 'read'); read = true; }
       catch (error) { if (error instanceof CommunityJoinNoticeIdentityError || !route) throw error; }

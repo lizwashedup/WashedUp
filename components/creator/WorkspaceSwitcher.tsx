@@ -35,7 +35,7 @@ export function WorkspaceSwitcher({ access, stayOnEvents = false }: Props) {
     hapticLight();
     setWorkspace(next);
     if (!stayOnEvents) {
-      router.replace(next === 'organization' ? '/(creator)/organizer-home' : '/(creator)/today');
+      router.replace(next === 'organization' ? '/(tabs)/friends/manage/(tools)/organizer-home' : '/(tabs)/friends/manage/(tools)/today');
     }
   };
 

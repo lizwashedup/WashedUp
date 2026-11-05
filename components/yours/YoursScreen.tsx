@@ -15,7 +15,7 @@ import { Plus, MessageCircle, CalendarPlus, Users, User } from 'lucide-react-nat
 import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType } from '../../constants/Typography';
 import { SPACING } from '../../constants/YoursDesign';
-import { COMMUNITIES_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
+import { COMMUNITIES_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { COPY } from './state/constants';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
@@ -399,7 +399,7 @@ export default function YoursScreen() {
   return (
     <SafeAreaView style={[styles.container, appearance && { backgroundColor: AfterglowColors.paper }]} edges={['top']}>
       <YoursHeader appearance={appearance} />
-      {CREATOR_PAGES_ENABLED && !!uid && <CreatorSpaceEntry userId={uid} />}
+      {!!uid && <CreatorSpaceEntry userId={uid} />}
 
       <View style={styles.tabRow}>
         <YoursTabs appearance={appearance} active={tab} onChange={selectTab} />

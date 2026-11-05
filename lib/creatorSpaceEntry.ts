@@ -5,7 +5,7 @@ import { listLocalPageEditors } from './creatorPageEditor';
 import { listMyPageTeamInvitations, type PageTeamInvitation } from './creatorPageTeam';
 import { CreatorPageScopeExpired, type CreatorPageScope, type CreatorPageKind } from './creatorPageReview';
 
-export interface CreatorSpaceLink { id: string; kind: CreatorPageKind; name: string; route: string; legacy?: { workspace: 'community' | 'organization'; communityId?: string; status: string }; }
+export interface CreatorSpaceLink { id: string; kind: CreatorPageKind; name: string; route: string; detail?: string; legacy?: { workspace: 'community' | 'organization'; communityId?: string; status: string }; }
 export interface CreatorSpaceEntry { title: string; subtitle: string; route: string; spaces: CreatorSpaceLink[]; invitations: PageTeamInvitation[]; }
 export function creatorSpaceTitle(kinds: CreatorPageKind[]): string {
   if (!kinds.length || new Set(kinds).size > 1) return 'Creator space';
@@ -26,11 +26,11 @@ export function legacyCreatorSpaceLinks(access: CreatorAccess): CreatorSpaceLink
     legacy: { workspace: 'community', communityId: community.id, status: community.status },
   }));
   if (access.hasLeaderGrant && !access.ledCommunities.length) spaces.push({
-    id: 'legacy-community-approval', kind: 'community', name: 'Your community', route: '/(creator)/today',
+    id: 'legacy-community-approval', kind: 'community', name: 'Your community', route: '/(tabs)/friends/manage/(tools)/today',
     legacy: { workspace: 'community', status: 'approved' },
   });
   if (access.hasEventHostGrant) spaces.push({
-    id: 'legacy-organizer-approval', kind: 'organization', name: 'Your events', route: '/(creator)/organizer-home',
+    id: 'legacy-organizer-approval', kind: 'organization', name: 'Your events', route: '/(tabs)/friends/manage/(tools)/organizer-home',
     legacy: { workspace: 'organization', status: 'approved' },
   });
   return spaces;
@@ -49,7 +49,7 @@ export async function loadCreatorSpaceEntry(scope: CreatorPageScope): Promise<Cr
     listCreatorPages(scope), listLocalPageEditors(scope), listMyPageTeamInvitations(scope), loadLegacyCreatorSpaces(scope),
   ]);
   if (!scope.isCurrent()) throw new CreatorPageScopeExpired();
-  const spaces: CreatorSpaceLink[] = saved.map(p => ({ id:p.id, kind:p.page_kind, name:name(p.page_data.name,p.page_kind), route:`/creator/page?id=${p.id}` }));
+  const spaces: CreatorSpaceLink[] = saved.map(p => ({ id:p.id, kind:p.page_kind, name:name(p.published_data?.name ?? p.page_data.name,p.page_kind), detail:p.published_data?'Live':'Private · View status', route:`/creator/page?id=${p.id}` }));
   const seen=new Set(spaces.map(p=>p.id));
   for (const p of invitations) {
     if (!activePageTeam(p) || seen.has(p.pageId)) continue;
@@ -57,7 +57,7 @@ export async function loadCreatorSpaceEntry(scope: CreatorPageScope): Promise<Cr
   }
   for (const p of local) {
     if (seen.has(p.id)) continue;
-    seen.add(p.id);spaces.push({id:p.id,kind:p.kind,name:name(p.pageData.name,p.kind),route:`/creator/page-edit?id=${p.id}`});
+    seen.add(p.id);spaces.push({id:p.id,kind:p.kind,name:name(p.pageData.name,p.kind),detail:'Draft on this device',route:`/creator/page-edit?id=${p.id}`});
   }
   for (const space of legacy) {
     if (seen.has(space.id)) continue;

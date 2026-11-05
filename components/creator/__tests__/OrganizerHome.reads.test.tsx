@@ -1,3 +1,4 @@
+jest.mock('../OrganizationDailyActions',()=>({OrganizationDailyActions:()=>null}));
 import React from 'react';
 import { act,create,type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch=jest.fn(async()=>({}));let mockQueries:Record<string,any>;

@@ -35,7 +35,7 @@ it.each(['lookup error','unavailable'])('keeps %s notices available without mark
  act(()=>press('Check update'));await flush();expect(mockPush).toHaveBeenCalledTimes(1);
 });
 it('preserves legacy request route only after confirmed null source',async()=>{
- load.mockResolvedValue(null);act(()=>press());await flush();expect(mockPush).toHaveBeenCalledWith('/(creator)/members');
+ load.mockResolvedValue(null);act(()=>press());await flush();expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/members');
 });
 it('legacy decision remains read-only without inventing an exact community',async()=>{
  load.mockResolvedValue(null);act(()=>tree.update(render({notice:{...notice,type:'community_join_declined'}})));act(()=>press('View community'));await flush();expect(mockPush).not.toHaveBeenCalled();expect(mockClose).not.toHaveBeenCalled();expect(mockRead).toHaveBeenCalledTimes(1);

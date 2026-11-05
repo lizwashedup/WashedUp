@@ -378,8 +378,8 @@ export default function CoCreatorsScreen() {
     });
   };
 
-  if (!CO_CREATOR_INVITES_ENABLED) return <Redirect href="/(creator)/members" />;
-  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
+  if (!CO_CREATOR_INVITES_ENABLED) return <Redirect href="/(tabs)/friends/manage/(tools)/members" />;
+  if (access && !isLeaderAccess(access)) return <Redirect href="/(tabs)/friends/manage/(tools)/events" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>

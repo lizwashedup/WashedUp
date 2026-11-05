@@ -6,7 +6,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch = jest.fn(async () => ({}));
 let mockQueries: Record<string, any>;
 jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]]}));
-jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null}));
+jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null,useFocusEffect:jest.fn()}));
 jest.mock('../../../lib/creatorMode', () => ({...jest.requireActual('../../../lib/creatorMode')}));
 jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>null}));
 jest.mock('../../../lib/communityChat', () => ({}));

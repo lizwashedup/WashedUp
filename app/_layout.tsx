@@ -834,7 +834,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // this push, and the creator shell itself admits by grant, so a
         // non-creator tapping a stale push still gets redirected out of the
         // shell safely while the flag keeps the surface dark to the public.
-        safePush('/(creator)/members');
+        safePush('/(tabs)/friends/manage/(tools)/members');
       } else if (COMMUNITIES_ENABLED && type === 'community_event') {
         // "just posted <event>" lands on Scene, where the event lives. The
         // payload carries no event id by design (event_id is the plans FK).

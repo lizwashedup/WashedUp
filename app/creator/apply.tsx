@@ -1,5 +1,4 @@
 import { useCreatorApplicationStatus } from '../../hooks/useCreatorApplicationStatus';
-import { CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -168,7 +167,7 @@ export default function CreatorApplyScreen() {
                 {status && (
                   <View style={[styles.statusPanel, grant?.status === 'approved' && styles.statusPanelApproved]}>
                     <Text style={styles.statusText}>{status.label}</Text>
-                    {grant?.status === 'approved' && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Open ${title.toLowerCase()} creator space`} style={styles.withdrawButton} onPress={() => { if (current()) router.push((CREATOR_PAGES_ENABLED ? '/creator/pages' : track === 'community_leader' ? '/(creator)/today' : '/(creator)/organizer-home') as never); }}><Text style={styles.withdrawLink}>Open creator space</Text></TouchableOpacity>}
+                    {grant?.status === 'approved' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open your management tools" style={styles.withdrawButton} onPress={() => { if (current()) router.push('/(tabs)/friends/manage' as never); }}><Text style={styles.withdrawLink}>You manage</Text></TouchableOpacity>}
                     {canWithdraw(grant) && (
                       <TouchableOpacity
                         style={styles.withdrawButton}

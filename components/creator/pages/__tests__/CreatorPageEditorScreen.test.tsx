@@ -27,7 +27,7 @@ let tree:ReactTestRenderer,data:any;
 const action=(title:string)=>tree.root.findAllByType(PageAction).find(a=>a.props.title===title)!;
 const field=(label:string)=>tree.root.findAllByType(Field).find(f=>f.props.label===label)!;
 async function mount(){await act(async()=>{tree=create(<CreatorPageEditorScreen pageId="page"/>);});}
-beforeEach(()=>{jest.clearAllMocks();mockAccountError=null;mockFocused=true;mockEpoch=0;mockScopesByPage=undefined;mockCurrent=true;mockScope={userId:'creator',isCurrent:()=>mockCurrent};data={record:{id:'page',kind:'community',version:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only'},creator:{name:'',email:'',motivation:'',guidelines:false}},saved:null,submissions:[],gender:'woman',published:false,conflict:false};mockLoad.mockImplementation(async()=>data);mockPersist.mockResolvedValue(undefined);mockSave.mockImplementation(async(record:any)=>{const next={...record,version:1};data={...data,record:next,saved:{version:1,page_data:next.pageData}};return next;});mockSubmit.mockResolvedValue({id:'submission'});});
+beforeEach(()=>{jest.clearAllMocks();mockAccountError=null;mockFocused=true;mockEpoch=0;mockScopesByPage=undefined;mockCurrent=true;mockScope={userId:'creator',isCurrent:()=>mockCurrent};data={record:{id:'page',kind:'community',version:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only',join_policy:'approval_required'},creator:{name:'',email:'',motivation:'',guidelines:false}},saved:null,submissions:[],gender:'woman',published:false,conflict:false};mockLoad.mockImplementation(async()=>data);mockPersist.mockResolvedValue(undefined);mockSave.mockImplementation(async(record:any)=>{const next={...record,version:1};data={...data,record:next,saved:{version:1,page_data:next.pageData}};return next;});mockSubmit.mockResolvedValue({id:'submission'});});
 afterEach(()=>{act(()=>tree?.unmount());jest.useRealTimers();});
 it('requires preview and explicit creator information before submitting once',async()=>{
  await mount();expect(mockSubmit).not.toHaveBeenCalled();await act(async()=>{action('Save and continue').props.onPress();});
@@ -209,7 +209,7 @@ it('preserves the captured save identity until a fresh read exposes its exact re
  expect(action('Retry save')).toBeDefined();expect(field('Name').props.editable).toBe(false);
  expect(mockSave).toHaveBeenCalledTimes(1);expect(data.record.pending.expectedVersion).toBe(0);
  await act(async()=>action('Retry save').props.onPress());
- expect(mockSave.mock.calls[1][0].pending).toEqual({kind:'save',expectedVersion:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only'}});
+ expect(mockSave.mock.calls[1][0].pending).toEqual({kind:'save',expectedVersion:0,pageData:{name:'Sunday Table',purpose:'Bring neighbors together',city:'Los Angeles',discovery_area:'Santa Monica',categories:['outdoors'],audience:'women_only',join_policy:'approval_required'}});
 });
 
 it('keeps unsaved current text when checking finds an older device copy at the same version',async()=>{
@@ -410,4 +410,12 @@ it.each(['blur','focus-roundtrip','epoch','synchronous-auth'] as const)('retires
  else if(change==='epoch'){mockEpoch++;await act(async()=>tree.update(<CreatorPageEditorScreen pageId="page"/>));}
  else{mockFocused=false;await act(async()=>tree.update(<CreatorPageEditorScreen pageId="page"/>));if(change==='focus-roundtrip'){mockFocused=true;await act(async()=>tree.update(<CreatorPageEditorScreen pageId="page"/>));}}
  act(()=>back());expect(mockReplace).not.toHaveBeenCalled();
+});
+
+it('asks how people join before preview and saves the explicit choice with the page',async()=>{
+ delete data.record.pageData.join_policy;await mount();await act(async()=>action('Save and continue').props.onPress());
+ expect(mockSave).not.toHaveBeenCalled();expect(JSON.stringify(tree.toJSON())).toContain('Choose Open or Review requests.');
+ act(()=>tree.root.findAllByProps({accessibilityLabel:'Open'}).find(n=>n.props.onPress)!.props.onPress());
+ await act(async()=>action('Save and continue').props.onPress());
+ expect(mockSave.mock.calls[0][0].pageData.join_policy).toBe('open');
 });

@@ -241,14 +241,22 @@ export async function createOperatorEvent(
   fields: OperatorEventFields,
   communityId: string | null,
   publish: boolean = true,
+  scope?: { userId: string; isCurrent(): boolean },
 ): Promise<string> {
+  let authorization: string | undefined;
+  if (scope) {
+    if (!scope.isCurrent()) throw new Error('This event creation visit has ended.');
+    const { data, error } = await supabase.auth.getSession();
+    if (!scope.isCurrent() || error || data.session?.user.id !== scope.userId || !data.session.access_token) throw new Error('Check the account creating this event.');
+    authorization = `Bearer ${data.session.access_token}`;
+  }
   // doc 111: the param rides ONLY when the door probe opened the field
   // (undefined = never sent), so a pre-SQL-96 call is byte-identical to today
   const confirmationMessage =
     fields.confirmation_message !== undefined
       ? { [CONFIRMATION_MESSAGE_RPC_PARAM]: fields.confirmation_message }
       : {};
-  const { data, error } = await supabase.rpc(fields.categories ? 'operator_create_explore_event_with_categories' : 'operator_create_explore_event', {
+  const request = supabase.rpc(fields.categories ? 'operator_create_explore_event_with_categories' : 'operator_create_explore_event', {
     ...(fields.categories?{p_categories:fields.categories}:{}),
     ...confirmationMessage,
     p_title: fields.title,
@@ -268,6 +276,9 @@ export async function createOperatorEvent(
     p_publish: publish,
     p_description_blocks: fields.description_blocks ?? null,
   });
+  if (scope && !scope.isCurrent()) throw new Error('This event creation visit has ended.');
+  const { data, error } = await (authorization ? request.setHeader('Authorization', authorization) : request);
+  if (scope && !scope.isCurrent()) throw new Error('Check the saved event before continuing.');
   if (error) throw error;
   return data as string;
 }

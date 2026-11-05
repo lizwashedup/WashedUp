@@ -9,6 +9,7 @@ import { requestWithDeadline, RequestDeadlineError } from '../../../lib/requestW
 import type { CreatorPageScope } from '../../../lib/creatorPageReview';
 import { loadPageJoinEditor, persistPageJoinDraft, savePageJoinDraft, resolvePageJoinSave, draftFromPageJoinState,
   type PageJoinDraft, type PageJoinSettings } from '../../../lib/creatorPageJoinSettings';
+import { CommunityJoiningChoice } from '../CommunityJoiningChoice';
 import { Field } from '../ApplyFormKit';
 import { PageFrame, PageAction, pageStyles as s } from './PageFrame';
 
@@ -163,7 +164,7 @@ export default function CreatorPageJoinSettingsScreen({ pageId }: { pageId: stri
         }, () => { void saved.refresh().catch(() => undefined); }); }} /></View> : draft.pending && !own?.recovery ? <View style={s.notice}><Text style={[s.body, { fontFamily: fonts.regular }]}>{saved.data.confirmed ? 'Your settings match the saved version. Finish checking to continue editing.' : 'Your last save is unconfirmed. Check its status before making another change.'}</Text>
         <PageAction singleLine title="Check saved status" disabled={busy || saved.loading || !!ownAttempt} onPress={check} />
         {!saved.data.confirmed && <PageAction singleLine title="Retry same save" disabled={busy || saved.loading || !!saved.error || !!ownAttempt} onPress={save} />}</View> : null}
-      {toggle('Request to join', draft.settings.join_policy === 'approval_required', () => change({ join_policy: draft.settings.join_policy === 'open' ? 'approval_required' : 'open' }), 'When on, you approve or decline new requests. When off, eligible people can join without waiting.')}
+      <CommunityJoiningChoice value={draft.settings.join_policy} onChange={join_policy => change({ join_policy })} disabled={!canEdit} hint="Your eligibility rules stay the same. People already waiting still need your review." />
       <Text style={[s.small, styles.settingsHint, { fontFamily: fonts.regular }]}>{saved.data.state.pending_count ? `${saved.data.state.pending_count} pending request${saved.data.state.pending_count === 1 ? '' : 's'} will stay pending until reviewed. ` : ''}Changing this setting keeps existing members and pending requests as they are.</Text>
       {textField('Welcome message', 'join_welcome_message', 1000)}
       {textField('Introduction prompt', 'join_intro_question', 200)}

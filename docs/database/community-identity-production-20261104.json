@@ -1,0 +1,89 @@
+{
+  "date_local": "2026-11-04",
+  "timezone": "America/Los_Angeles",
+  "project": "upstjumasqblszevlgik",
+  "approval": "Apply the repair and run isolated QA",
+  "source_commit": "932b3ce",
+  "source_file": "docs/database/review-only/20261104_community_identity_permission.sql",
+  "sha256": "ce688349eb7a752b4abf30b585ed97b8327b4435e23dee200662d433207ca503",
+  "deployed": true,
+  "ota_published": false,
+  "native_build_published": false,
+  "rollback_applied": false,
+  "deployment_checks": {
+    "community_count": true,
+    "community_digest": true,
+    "other_community_digest": true,
+    "member_count": true,
+    "member_digest": true,
+    "policies_digest": true,
+    "routines_digest": true,
+    "table": true,
+    "qa": true,
+    "authenticated_purpose_permission": true,
+    "anonymous_still_denied": true,
+    "only_purpose_column_grant_added": true
+  },
+  "authenticated_access_qa": {
+    "fixture": "ed31b9f3-2b78-4690-88b2-c05b74265a11",
+    "checks": [
+      {
+        "name": "non-member combined identity write denied",
+        "passed": true
+      },
+      {
+        "name": "non-member description-only write denied",
+        "passed": true
+      },
+      {
+        "name": "anonymous description write denied",
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "native_qa": {
+    "device": "iPhone 17 Pro Max",
+    "os": "iOS 26.4",
+    "metro_port": 8872,
+    "identity_save_confirmed": true,
+    "left_and_reopened_editor": true,
+    "both_values_persisted": true,
+    "baseline_restored_and_reopened": true,
+    "text_size_final": 3,
+    "keyboard_capture_final": false
+  },
+  "final_checks": {
+    "community_count": true,
+    "other_community_digest": true,
+    "member_count": true,
+    "member_digest": true,
+    "policies_digest": true,
+    "routines_digest": true,
+    "table": true,
+    "qa": true,
+    "deployed_permissions_unchanged": true
+  },
+  "baseline_counts": {
+    "communities": 13,
+    "memberships": 95
+  },
+  "final_qa": {
+    "id": "ed31b9f3-2b78-4690-88b2-c05b74265a11",
+    "name": "WashedUp Discovery QA",
+    "status": "archived",
+    "purpose": "Private isolated QA of discovery controls. No ordinary members or invitations.",
+    "join_policy": "approval_required",
+    "discoverable": false,
+    "unchanged_fields_digest": "75ee7308f60b479cacc6978e4b3f8003"
+  },
+  "qa_expected_remaining_difference": "updated_at changed after two verified identity saves",
+  "evidence_directory": "/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02",
+  "limits": [
+    "No OTA or native build",
+    "No physical iPhone or Android walkthrough",
+    "Not full block-editor certification",
+    "Not full legacy age/gender/Ghost certification",
+    "Released invitation handoff and push delivery remain separate"
+  ]
+}

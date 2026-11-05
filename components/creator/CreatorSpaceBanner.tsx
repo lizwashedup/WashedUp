@@ -14,9 +14,8 @@ import { ChevronRight } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { hapticMedium } from '../../lib/haptics';
-import { CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
+import { MANAGEMENT_HOME } from '../../lib/managementNavigation';
 import {
-  creatorLandingRoute,
   getCreatorAccess,
   hasCreatorAccess,
   type CreatorAccess,
@@ -39,17 +38,15 @@ export function CreatorSpaceBanner() {
       style={styles.card}
       onPress={() => {
         hapticMedium();
-        if (CREATOR_PAGES_ENABLED) router.push('/creator/pages');
-        else router.replace(creatorLandingRoute(access));
+        router.push(MANAGEMENT_HOME);
       }}
       accessibilityRole="button"
-      accessibilityLabel="Open your creator pages"
+      accessibilityLabel="Open your management tools"
       activeOpacity={0.85}
     >
       <GoldSurfaceFill radius={16} /><View style={styles.body}>
-        {/* copy to the taste gate */}
-        <Text style={[styles.title,{fontFamily:fonts.medium}]}>your creator space is ready</Text>
-        <Text style={[styles.meta,{fontFamily:fonts.regular}]}>events, tickets, your page. it all lives here.</Text>
+        <Text style={[styles.title,{fontFamily:fonts.medium}]}>Manage your communities and events</Text>
+        <Text style={[styles.meta,{fontFamily:fonts.regular}]}>Find your tools in Yours → You manage.</Text>
       </View>
       <View><ChevronRight size={18} color={Colors.asphalt} strokeWidth={2.5} /></View>
     </TouchableOpacity>

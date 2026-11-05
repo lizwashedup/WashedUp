@@ -299,6 +299,7 @@ export interface ProfileSearchResult {
 export async function searchProfilesForInvite(
   query: string,
   currentUserId: string,
+  options?: { throwOnError?: boolean },
 ): Promise<ProfileSearchResult[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
@@ -306,7 +307,10 @@ export async function searchProfilesForInvite(
     p_query: trimmed,
     p_user_id: currentUserId,
   });
-  if (error) return [];
+  if (error) {
+    if (options?.throwOnError) throw error;
+    return [];
+  }
   return ((data ?? []) as Array<{ id: string; first_name_display: string | null; profile_photo_url: string | null }>).map(
     (r) => ({ id: r.id, name: r.first_name_display ?? 'Someone', photo: r.profile_photo_url ?? null }),
   );

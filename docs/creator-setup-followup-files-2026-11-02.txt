@@ -1,0 +1,18 @@
+Creator setup follow-up — November 2, 2026
+Base revision: 0475b14
+Checkout: /Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102
+
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/app/(creator)/events.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/app/(creator)/today.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/app/community-thread/[id].tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/app/creator/__tests__/start.test.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/app/creator/start.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/components/chat/__tests__/CommunityMainHeader.test.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/components/creator/CommunityDailyActions.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/components/creator/CommunitySetupNotice.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/components/creator/__tests__/CreatorEvents.reads.test.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/components/creator/__tests__/CreatorToday.reads.test.tsx
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-management-implementation-2026-11-02.md
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/docs/creator-setup-followup-files-2026-11-02.txt
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/lib/__tests__/creationEntry.test.ts
+/Users/liz/Desktop/WashedUp_HQ/washedup-create-clarity-20261102/lib/creationEntry.ts

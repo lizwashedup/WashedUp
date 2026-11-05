@@ -31,7 +31,7 @@ describe('app/creator/setup-community.tsx static contract (source assertions, sa
 
   it('invalidates creator-access before navigating away, never after', () => {
     const invalidateIdx = source.indexOf("invalidateQueries({ queryKey: ['creator-access'] })");
-    const navigateIdx = source.indexOf("router.dismissTo('/(creator)/today')");
+    const navigateIdx = source.indexOf("router.dismissTo('/(tabs)/friends/manage/(tools)/today')");
     expect(invalidateIdx).toBeGreaterThan(-1);
     expect(navigateIdx).toBeGreaterThan(-1);
     expect(invalidateIdx).toBeLessThan(navigateIdx);
@@ -45,7 +45,7 @@ describe('app/creator/setup-community.tsx static contract (source assertions, sa
   });
 
   it('dismisses to the existing creator screen, rather than pushes, so a successful creation never leaves the setup screen on the back stack', () => {
-    expect(source).toMatch(/router\.dismissTo\('\/\(creator\)\/today'\)/);
-    expect(source).not.toMatch(/router\.push\('\/\(creator\)\/today'\)/);
+    expect(source).toMatch(/router\.dismissTo\('\/\(tabs\)\/friends\/manage\/\(tools\)\/today'\)/);
+    expect(source).not.toMatch(/router\.push\('\/\(tabs\)\/friends\/manage\/\(tools\)\/today'\)/);
   });
 });

@@ -267,7 +267,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       // "by design" per its own comment there). Mirrors that here so the
       // in-app tap isn't a silent no-op while the push tap already works.
       if (action === 'acted' && notifType === 'community_join_request') {
-        navigateAfterDismiss('/(creator)/members' as any);
+        navigateAfterDismiss('/(tabs)/friends/manage/(tools)/members' as any);
         return;
       }
       if (action === 'acted' && notifType === 'community_event' && COMMUNITIES_ENABLED) {

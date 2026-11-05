@@ -326,3 +326,11 @@ it('remeasures an existing account error while retaining controls and its origin
   expect(mockLoad).not.toHaveBeenCalled();expect(mockPersist).not.toHaveBeenCalled();expect(mockDispatch).not.toHaveBeenCalled();act(()=>back());expect(mockDismissTo).toHaveBeenCalledWith('/creator/page-team?id=page');
  }finally{dimensions.mockRestore();}
 });
+
+it('returns community-page editing to the same community on Back and after explicit publication',async()=>{
+ await mount({returnToCommunity:true});
+ act(()=>tree.root.findByType(PageFrame).props.onBack());
+ expect(mockDismissTo).toHaveBeenLastCalledWith('/community/page');expect(mockDispatch).not.toHaveBeenCalled();
+ await act(async()=>action('Preview changes').props.onPress());await act(async()=>action('Publish changes').props.onPress());
+ expect(mockDismissTo).toHaveBeenLastCalledWith('/community/page');
+});

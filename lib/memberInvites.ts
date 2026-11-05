@@ -1,30 +1,34 @@
 /**
- * Member invites (Build 35 Screen 56). An existing leader/co_leader of a
- * community invites an existing WashedUp profile to join as a plain member.
- * Acceptance grants community_members role='member' directly -- see the
- * migration header for why this activates immediately rather than landing in
- * the join-request review queue.
- *
- * All server-side enforcement lives in
- * supabase/migrations/20260901020000_build35_screen56_member_invites.sql
- * (DRAFT, not yet applied -- create_/preview_/accept_/revoke_member_invite
- * RPCs). This file is the client data layer PLUS a pure, DB-independent
- * re-expression of the exact same binding predicate the SQL enforces -- see
- * decideMemberInviteBindingOutcome() below, mirroring
- * lib/coCreatorInvites.ts' decideInviteBindingOutcome(). Keep the two in
- * lockstep if either changes; lib/__tests__/memberInvites.test.ts unit-tests
- * the pure form directly, since this sandbox has no live Postgres to run the
- * SQL self-test against.
- *
- * V1 SCOPE: existing-profile invites only (searchProfilesForInvite(), reused
- * from lib/coCreatorInvites.ts rather than duplicated here -- it was never
- * co-creator-specific). Phone-contact invites (the PDF's "optionally phone
- * contacts" action) are an explicit open product decision per the Screen 56
- * scope doc, not built here -- see MEMBER_INVITES_ENABLED in
- * constants/FeatureFlags.ts and the migration header for detail.
+ * Recipient-bound invitations for existing WashedUp accounts. Creating a link
+ * does not send it. A replacement revokes earlier pending/viewed links.
+ * Server RPCs enforce authorization; membership triggers enforce additional
+ * eligibility. The pure binding helper below models token binding only, not
+ * the entire admission policy. See the creator-management implementation
+ * record for the November 3 deployed-function inspection and remaining checks.
  */
 
 import { supabase } from './supabase';
+import { CreatorPageScopeExpired, type CreatorPageScope } from './creatorPageReview';
+import { requestWithDeadline } from './requestWithDeadline';
+
+function assertInviteScope(scope: CreatorPageScope) {
+  if (!scope.isCurrent()) throw new CreatorPageScopeExpired();
+}
+async function inviteAuthorization(scope: CreatorPageScope) {
+  assertInviteScope(scope);
+  const { data, error } = await requestWithDeadline(supabase.auth.getSession(), 8_000);
+  assertInviteScope(scope);
+  if (error) throw error;
+  if (data.session?.user.id !== scope.userId || !data.session.access_token) throw new CreatorPageScopeExpired();
+  return `Bearer ${data.session.access_token}`;
+}
+
+export class MemberInviteOutcomeUnknown extends Error {
+  constructor() { super('Couldn’t confirm the invitation. Refresh invite history before making a new link; an earlier link may have been replaced.'); }
+}
+export class MemberInviteAcceptanceUnknown extends Error {
+  constructor() { super('We couldn’t confirm whether you joined. Check the invitation status before trying again.'); }
+}
 
 // -- pure binding logic (mirrors the SQL RPC; DB-independent, unit-tested) ---
 
@@ -61,7 +65,7 @@ export function isMemberInviteBindingMatch(
 }
 
 /**
- * The full acceptance decision: not-found / expired / already-used / bound
+ * The token-binding decision: not-found / expired / already-used / bound
  * check, in the same order accept_member_invite() evaluates them. Pure
  * function, no I/O -- pass in whatever invite row and caller identity you
  * have (real ones from a DB, or synthetic ones from a test).
@@ -106,15 +110,30 @@ export interface CreateMemberInviteResult {
 export async function createMemberInvite(
   communityId: string,
   targetUserId: string,
-  message?: string,
+  message: string | undefined,
+  scope: CreatorPageScope,
 ): Promise<CreateMemberInviteResult> {
   const args: Record<string, unknown> = { p_community_id: communityId, p_target_user_id: targetUserId };
   const trimmed = message?.trim();
   if (trimmed) args.p_message = trimmed;
 
-  const { data, error } = await supabase.rpc('create_member_invite', args).single();
+  const authorization = await inviteAuthorization(scope);
+  assertInviteScope(scope);
+  let response;
+  try {
+    response = await requestWithDeadline(supabase.rpc('create_member_invite', args).single().setHeader('Authorization', authorization), 12_000);
+  } catch {
+    assertInviteScope(scope);
+    throw new MemberInviteOutcomeUnknown();
+  }
+  assertInviteScope(scope);
+  const { data, error } = response;
+  // Database errors are explicit rejections; transport failures can lose a successful receipt.
+  if (error && (!error.code || !/^[0-9A-Z]{5}$/.test(error.code))) throw new MemberInviteOutcomeUnknown();
   if (error) throw error;
   const row = data as { invite_id: string; raw_token: string; expires_at: string };
+  if (!row || typeof row.invite_id !== 'string' || !row.invite_id || typeof row.raw_token !== 'string' || !row.raw_token ||
+    typeof row.expires_at !== 'string' || !Number.isFinite(Date.parse(row.expires_at))) throw new MemberInviteOutcomeUnknown();
   return { inviteId: row.invite_id, rawToken: row.raw_token, expiresAt: row.expires_at };
 }
 
@@ -134,15 +153,20 @@ export interface MemberInvitePreview {
   inviteMessage: string | null;
 }
 
-/** Anon-callable. Read-only: looking a token up never consumes or grants it. */
+/** Preview does not grant membership, but the server may mark the invitation viewed. */
 export async function previewMemberInvite(token: string): Promise<MemberInvitePreview | null> {
-  const { data, error } = await supabase.rpc('preview_member_invite', { p_token: token }).maybeSingle();
+  const { data, error } = await requestWithDeadline(supabase.rpc('preview_member_invite', { p_token: token }).maybeSingle(), 12_000);
   if (error) throw error;
   if (!data) return null;
   const row = data as {
     invite_id: string; community_id: string; community_name: string; community_handle: string;
     invited_by_name: string; status: MemberInviteStatus; expires_at: string; invite_message: string | null;
   };
+  if (!row || typeof row.invite_id !== 'string' || !row.invite_id || typeof row.community_id !== 'string' || !row.community_id ||
+    typeof row.community_name !== 'string' || typeof row.community_handle !== 'string' || typeof row.invited_by_name !== 'string' ||
+    (row.invite_message !== null && typeof row.invite_message !== 'string') ||
+    !['pending', 'viewed', 'accepted', 'revoked', 'expired'].includes(row.status) ||
+    !Number.isFinite(Date.parse(row.expires_at))) throw new Error('Couldn’t load this invitation. Please try again.');
   return {
     inviteId: row.invite_id,
     communityId: row.community_id,
@@ -159,24 +183,40 @@ export interface AcceptMemberInviteResult {
   communityId: string;
 }
 
-/** The binding check happens server-side inside this call, unconditionally -- see the SQL RPC. */
-export async function acceptMemberInviteByToken(token: string): Promise<AcceptMemberInviteResult> {
-  const { data, error } = await supabase.rpc('accept_member_invite', { p_token: token }).single();
+async function acceptMemberInvite(args: { p_token: string } | { p_invite_id: string }, scope: CreatorPageScope, expectedCommunityId: string): Promise<AcceptMemberInviteResult> {
+  const authorization = await inviteAuthorization(scope);
+  assertInviteScope(scope);
+  let response;
+  try {
+    response = await requestWithDeadline(supabase.rpc('accept_member_invite', args).single().setHeader('Authorization', authorization), 12_000);
+  } catch {
+    assertInviteScope(scope);
+    throw new MemberInviteAcceptanceUnknown();
+  }
+  assertInviteScope(scope);
+  const { data, error } = response;
+  if (error && (!error.code || !/^[0-9A-Z]{5}$/.test(error.code))) throw new MemberInviteAcceptanceUnknown();
   if (error) throw error;
-  const row = data as { community_id: string };
+  const row = data as { community_id: string } | null;
+  if (!row || row.community_id !== expectedCommunityId) throw new MemberInviteAcceptanceUnknown();
   return { communityId: row.community_id };
 }
 
-export async function acceptMemberInviteById(inviteId: string): Promise<AcceptMemberInviteResult> {
-  const { data, error } = await supabase.rpc('accept_member_invite', { p_invite_id: inviteId }).single();
-  if (error) throw error;
-  const row = data as { community_id: string };
-  return { communityId: row.community_id };
+/** Server rechecks recipient binding and membership eligibility. No automatic retry. */
+export async function acceptMemberInviteByToken(token: string, scope: CreatorPageScope, expectedCommunityId: string): Promise<AcceptMemberInviteResult> {
+  return acceptMemberInvite({ p_token: token }, scope, expectedCommunityId);
+}
+
+export async function acceptMemberInviteById(inviteId: string, scope: CreatorPageScope, expectedCommunityId: string): Promise<AcceptMemberInviteResult> {
+  return acceptMemberInvite({ p_invite_id: inviteId }, scope, expectedCommunityId);
 }
 
 /** Inviter, any active leader/co_leader of the community, or admin (server-checked). Idempotent. */
-export async function revokeMemberInvite(inviteId: string): Promise<void> {
-  const { error } = await supabase.rpc('revoke_member_invite', { p_invite_id: inviteId });
+export async function revokeMemberInvite(inviteId: string, scope: CreatorPageScope): Promise<void> {
+  const authorization = await inviteAuthorization(scope);
+  assertInviteScope(scope);
+  const { error } = await requestWithDeadline(supabase.rpc('revoke_member_invite', { p_invite_id: inviteId }).setHeader('Authorization', authorization), 12_000);
+  assertInviteScope(scope);
   if (error) throw error;
 }
 

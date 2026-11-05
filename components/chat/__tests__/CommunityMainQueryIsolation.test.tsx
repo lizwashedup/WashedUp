@@ -327,3 +327,20 @@ it('preserves manual main-chat scrolling across layout changes and momentum', as
   act(() => list().props.onContentSizeChange(390, 2100));
   expect(scroll).toHaveBeenCalledWith({ offset: 0, animated: false });
 });
+
+
+it('uses the same conversation UI without enabling grouped history or read markers', async () => {
+  const flags = jest.requireMock('../../../constants/FeatureFlags');
+  flags.COMMUNITY_CHAT_GROUPING_ENABLED = false;
+  flags.CREATOR_PAGES_ENABLED = true;
+  try {
+    await mount();
+    expect(tree.root.findByType(ChatContextHeader).props.title).toBe('alice room');
+    expect(rows().map((row: any) => row.id)).toEqual(['alice-1']);
+    expect(mockReadMessages).toHaveBeenCalled();
+    expect(mockReadMarker).toHaveBeenCalled();
+    expect(mockReadIdentity).not.toHaveBeenCalled();
+    expect(mockReadCore).not.toHaveBeenCalled();
+    expect(mockMarkCore).not.toHaveBeenCalled();
+  } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
+});

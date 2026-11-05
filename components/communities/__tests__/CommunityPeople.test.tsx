@@ -1,6 +1,8 @@
 import {Dimensions,Text,View,StyleSheet} from 'react-native';
 import {Image} from 'expo-image';
 import React from 'react';import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+const mockPush=jest.fn();
+jest.mock('expo-router',()=>({router:{push:(...args:unknown[])=>mockPush(...args)}}));
 const mockMore=jest.fn(),mockRetry=jest.fn(),mockInfinite=jest.fn(),mockQuery=jest.fn(),mockViewer=jest.fn();
 jest.mock('@tanstack/react-query',()=>({useInfiniteQuery:(...a:unknown[])=>mockInfinite(...a),useQuery:(...a:unknown[])=>mockQuery(...a)}));
 jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>mockViewer()}));
@@ -16,7 +18,7 @@ it('starts compact, expands in place and can collapse',()=>{act(()=>{tree=create
 it('expanded list offers real pagination',()=>{act(()=>{tree=create(<CommunityMembers pageId="page"/>);});act(()=>press('See all members').props.onPress());act(()=>press('More members').props.onPress());expect(mockMore).toHaveBeenCalledTimes(1);});
 it('read failure suppresses cached member identities and offers retry',()=>{mockInfinite.mockReturnValue({data:{pages:[{people}]},error:Error('denied'),refetch:mockRetry});act(()=>{tree=create(<CommunityMembers pageId="page"/>);});expect(text()).not.toContain('Person 0');act(()=>press('Couldn’t load members · Try again').props.onPress());expect(mockRetry).toHaveBeenCalled();});
 it('account change closes the prior expanded directory',()=>{act(()=>{tree=create(<CommunityMembers pageId="page"/>);});act(()=>press('See all members').props.onPress());mockViewer.mockReturnValue({viewerId:'account-b',epoch:2,isCurrent:()=>true,isLoading:false,error:null});act(()=>tree.update(<CommunityMembers pageId="page"/>));expect(text()).not.toContain('Person 10');});
-it('labels creator and accepted co-creator distinctly',()=>{mockQuery.mockReturnValue({data:[{id:'a',name:'Maya',photo:null,role:'creator'},{id:'b',name:'Alex',photo:null,role:'co_creator'}]});act(()=>{tree=create(<CommunityCreators pageId="page" fallback={null}/>);});expect(text()).toContain('Creator');expect(text()).toContain('Co-creator');expect(text()).toContain('Maya');});
+it('labels creator and accepted co-creator distinctly',()=>{mockQuery.mockReturnValue({data:[{id:'a',name:'Maya',photo:null,role:'creator'},{id:'b',name:'Alex',photo:null,role:'co_creator'}]});act(()=>{tree=create(<CommunityCreators pageId="page" fallback={null}/>);});expect(text()).toContain('Created by Maya');expect(text()).toContain('Co-created by Alex');expect(text()).toContain('Maya');});
 
 it('remeasures creator names and roles while preserving photo failure fallback and avatar frames',()=>{
  const previous=Dimensions.get('window');act(()=>Dimensions.set({window:{...previous,width:390,fontScale:1}}));
@@ -24,7 +26,7 @@ it('remeasures creator names and roles while preserving photo failure fallback a
   mockQuery.mockReturnValue({data:[{id:'a',name:'Aster',photo:'https://example.invalid/a.jpg',role:'creator'}]});
   act(()=>{tree=create(<CommunityCreators pageId="page" fallback={null}/>);});act(()=>tree.root.findByType(Image).props.onError());
   const component=tree.root.findByType(CommunityCreators),leaf=(v:string)=>tree.root.findAllByType(Text).find(n=>n.props.children===v)!,face=tree.root.findAllByType(View).find(n=>StyleSheet.flatten(n.props.style)?.width===36)!;
-  for(const scale of [1.35,1]){const values=['Aster','Creator','A'],old=values.map(leaf);act(()=>Dimensions.set({window:{...previous,width:390,fontScale:scale}}));values.forEach((v,i)=>expect(leaf(v)).not.toBe(old[i]));expect(tree.root.findByType(CommunityCreators)).toBe(component);expect(tree.root.findAllByType(Image)).toHaveLength(0);expect(tree.root.findAllByType(View).find(n=>StyleSheet.flatten(n.props.style)?.width===36)).toBe(face);expect(StyleSheet.flatten(face.props.style)).toMatchObject({width:36,height:36,borderRadius:18});}
+  for(const scale of [1.35,1]){const values=['Created by Aster','View profile','A'],old=values.map(leaf);act(()=>Dimensions.set({window:{...previous,width:390,fontScale:scale}}));values.forEach((v,i)=>expect(leaf(v)).not.toBe(old[i]));expect(tree.root.findByType(CommunityCreators)).toBe(component);expect(tree.root.findAllByType(Image)).toHaveLength(0);expect(tree.root.findAllByType(View).find(n=>StyleSheet.flatten(n.props.style)?.width===36)).toBe(face);expect(StyleSheet.flatten(face.props.style)).toMatchObject({width:36,height:36,borderRadius:18});}
   expect(mockQuery).toHaveBeenCalledTimes(1);expect(mockMore).not.toHaveBeenCalled();expect(mockRetry).not.toHaveBeenCalled();
  }finally{act(()=>Dimensions.set({window:previous}));}
 });
@@ -37,4 +39,14 @@ it('remeasures expanded member text without collapsing or refetching the directo
   for(const scale of [1.35,1]){const values=['Who’s here','Person 10','Show less','More members'],old=values.map(leaf);act(()=>Dimensions.set({window:{...previous,width:390,fontScale:scale}}));values.forEach((v,i)=>expect(leaf(v)).not.toBe(old[i]));expect(tree.root.findByType(CommunityMembers)).toBe(component);expect(press('Show less')).toBe(control);expect(press('More members')).toBe(more);}
   expect(mockInfinite).toHaveBeenCalledTimes(calls);expect(mockMore).not.toHaveBeenCalled();expect(mockRetry).not.toHaveBeenCalled();
  }finally{act(()=>Dimensions.set({window:previous}));}
+});
+
+it('opens the existing privacy-aware profile route and retires the action on account change',()=>{
+ let current=true;
+ mockViewer.mockReturnValue({viewerId:'account-a',epoch:1,isCurrent:()=>current,isLoading:false,error:null});
+ mockQuery.mockReturnValue({data:[{id:'public-creator',name:'Maya',photo:null,role:'creator'}]});
+ act(()=>{tree=create(<CommunityCreators pageId="page" fallback={null} inline/>);});
+ const open=tree.root.findAll(n=>n.props.accessibilityLabel==='View Maya’s profile'&&typeof n.props.onPress==='function')[0].props.onPress;
+ act(()=>open());expect(mockPush).toHaveBeenCalledWith('/profile/public-creator');
+ mockPush.mockClear();current=false;act(()=>open());expect(mockPush).not.toHaveBeenCalled();
 });

@@ -12,6 +12,8 @@ export interface PageCreatorInformation { name: string; email: string; motivatio
 export interface PageEditorRecord {
   id: string; kind: CreatorPageKind; version: number; pageData: Record<string, unknown>;
   creator: PageCreatorInformation;
+  /** Local reservation intent; never sent as public page data. */
+  initialKind?: CreatorPageKind;
   pending?: { kind: 'save'; pageData: Record<string, unknown>; expectedVersion: number }
     | { kind: 'submit'; submissionId: string; expectedVersion: number; application: Record<string, unknown> };
 }
@@ -27,7 +29,7 @@ export const pageAudienceOptions = (gender: string | null | undefined) => [
   ...(gender === 'woman' ? [{ key: 'women_only', label: 'Women only' }] : gender === 'man' ? [{ key: 'men_only', label: 'Men only' }]
     : gender === 'non_binary' ? [{ key: 'nonbinary_only', label: 'Non-binary only' }] : []),
 ];
-export function pageDraftProblems(record: PageEditorRecord, gender: string | null) {
+export function pageDraftProblems(record: PageEditorRecord, gender: string | null, published = false) {
   const errors: Record<string, string> = {};
   const check = (field: string, min: number, max: number, label: string) => {
     const value = pageValue(record.pageData, field).trim();
@@ -35,6 +37,7 @@ export function pageDraftProblems(record: PageEditorRecord, gender: string | nul
   };
   check('name', 2, 60, 'Page name'); check('purpose', 10, 140, 'Purpose'); check('city', 2, 60, 'City');
   if (record.kind === 'community') Object.assign(errors, communityClassificationProblems(record.pageData));
+  if (record.kind === 'community' && !published && !['open', 'approval_required'].includes(pageValue(record.pageData, 'join_policy'))) errors.join_policy = 'Choose Open or Review requests.';
   const audience = pageValue(record.pageData, 'audience') || 'everyone';
   if (record.kind === 'organization' ? audience !== 'everyone' : !pageAudienceOptions(gender).some(o => o.key === audience)) errors.audience = 'Choose an audience available for your profile.';
   return errors;
@@ -101,8 +104,9 @@ const initialPageData = () => ({ name: '', purpose: '', city: 'Los Angeles', aud
 /** Only the exact untouched reservation is reusable; unknown data stays recoverable. */
 function hasInitialFields(record: PageEditorRecord) {
   const keys = Object.keys(record);
-  return keys.length === 5 && keys.every(key => ['id', 'kind', 'version', 'pageData', 'creator'].includes(key))
-    && record.version === 0 && record.kind === 'community' && !record.pending
+  const initialKind = record.initialKind ?? 'community';
+  return keys.length === (record.initialKind ? 6 : 5) && keys.every(key => ['id', 'kind', 'version', 'pageData', 'creator', 'initialKind'].includes(key))
+    && record.version === 0 && record.kind === initialKind && !record.pending
     && samePageData(record.pageData, initialPageData()) && samePageData({ ...record.creator }, { ...emptyPageCreator() });
 }
 async function untouchedReservation(record: PageEditorRecord, scope: CreatorPageScope) {
@@ -125,31 +129,31 @@ export async function listLocalPageEditors(scope: CreatorPageScope) {
   })); current(scope);
   return visible.filter((record): record is PageEditorRecord => !!record);
 }
-async function reservePageEditor(scope: CreatorPageScope, onPrepared?: (record: PageEditorRecord) => void): Promise<PageEditorRecord> {
+async function reservePageEditor(scope: CreatorPageScope, onPrepared?: (record: PageEditorRecord) => void, kind: CreatorPageKind = 'community'): Promise<PageEditorRecord> {
   current(scope);
   // Keep the durable ID needed by route/recovery, without accumulating visible
   // drafts each time an untouched form is opened and left.
   for (const record of await readLocalPageEditors(scope, true)) {
-    if (await untouchedReservation(record, scope)) {
+    if (record.kind === kind && await untouchedReservation(record, scope)) {
       // A queued edit may have completed while the photo marker was read.
       const latest = await readPageEditor(record.id, scope);
       if (latest && await untouchedReservation(latest, scope)) { current(scope); onPrepared?.(latest); return latest; }
     }
   }
   current(scope);
-  const record: PageEditorRecord = { id: Crypto.randomUUID(), kind: 'community', version: 0,
+  const record: PageEditorRecord = { id: Crypto.randomUUID(), kind, ...(kind === 'organization' ? { initialKind: kind } : {}), version: 0,
     pageData: initialPageData(), creator: emptyPageCreator() };
   // Expose the original identity before storage can stall. Recovery reads this
   // same draft; the actual serialized write remains owned until it settles.
   onPrepared?.(record);
   await persistPageEditor(record, scope); return record;
 }
-export async function startPageEditor(scope: CreatorPageScope, onPrepared?: (record: PageEditorRecord) => void): Promise<PageEditorRecord> {
+export async function startPageEditor(scope: CreatorPageScope, onPrepared?: (record: PageEditorRecord) => void, kind: CreatorPageKind = 'community'): Promise<PageEditorRecord> {
   current(scope);
   // Distinct mounted visits must not both miss an as-yet unwritten reservation.
   // Each queued visit checks its own scope; an earlier write retains ownership.
   const previous = starts.get(scope.userId) ?? Promise.resolve();
-  const pending = previous.catch(() => undefined).then(() => reservePageEditor(scope, onPrepared));
+  const pending = previous.catch(() => undefined).then(() => reservePageEditor(scope, onPrepared, kind));
   starts.set(scope.userId, pending);
   try { return await pending; }
   finally { if (starts.get(scope.userId) === pending) starts.delete(scope.userId); }

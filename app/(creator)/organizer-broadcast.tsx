@@ -11,7 +11,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Users } from 'lucide-react-native';
+import { Users } from 'lucide-react-native';
+import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
 import Colors from '../../constants/Colors';
 import { MESSAGE_TEST_SEND_ENABLED } from '../../constants/FeatureFlags';
 import { EventAction, EventSpacing, EventSurface, EventType } from '../../constants/EventDesign';
@@ -109,20 +110,8 @@ function BroadcastComposer({ scope, account }: Pick<ReturnType<typeof useCreator
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={leave}
-          hitSlop={12}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <ArrowLeft size={22} color={Colors.darkWarm} strokeWidth={2} />
-        </TouchableOpacity>
-        {/* LIZ COPY (proposed, taste gate) */}
-        <Text style={styles.headerTitle}>message your followers</Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={[]}>
+      <CreatorScreenHeader title="Message your followers" onBack={leave} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}

@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-04",
+  "project": "upstjumasqblszevlgik",
+  "backend_candidate_applied": false,
+  "ota_published": false,
+  "native_build_published": false,
+  "qa": {
+    "id": "5c451c48-67ee-45c0-bf14-6c3a6606c201",
+    "name": "WashedUp Visibility QA",
+    "handle": "washedup-visibility-qa",
+    "status": "archived",
+    "discoverable": false,
+    "join_policy": "approval_required",
+    "member_count": 1,
+    "member_roles": [
+      "leader"
+    ],
+    "ordinary_members_invited_or_messaged": false
+  },
+  "native_verified": [
+    "two-step creation with Review requests",
+    "read-only reconciliation after guarded QA visibility staging",
+    "publish hidden QA draft",
+    "published status and sharing availability",
+    "confirmed unpublish to draft",
+    "share removed for draft",
+    "archive from draft",
+    "archived screen removes discovery, share and unpublish controls"
+  ],
+  "fixture_setup": "Only the named QA draft was set discoverable=false through guarded SQL. This is not evidence of a live creator discovery write.",
+  "non_qa_fingerprint": {
+    "fields": [
+      "id",
+      "status",
+      "discoverable",
+      "join_policy"
+    ],
+    "before": "fd7c78b1eab8009ef4d2eff17d88da33",
+    "after": "fd7c78b1eab8009ef4d2eff17d88da33"
+  },
+  "live_readonly_checks_passed": 6,
+  "jest_tests_passed": 114,
+  "jest_suites_passed": 8,
+  "typescript_passed": true,
+  "postgres_checks": [
+    "authority and exact receipt",
+    "stale/null/archived denial",
+    "unauthorized roles and anonymous denial",
+    "no direct column grant",
+    "unchanged joining and audience",
+    "concurrent archive",
+    "concurrent role revocation",
+    "function collision refusal",
+    "rollback drift refusal",
+    "rollback preserves records",
+    "creator-authority drift refusal"
+  ],
+  "candidate_files": {
+    "20261104_community_discovery_control.sql": {
+      "sha256": "dbc56ee32d23f31d064310ad4a956d5bdfa61633e8f13c7ba5239ad389c3ad23"
+    },
+    "20261104_community_discovery_control.rollback.sql": {
+      "sha256": "040febf0646f6cf99d5205a3700f46ddf66e5fe9fb33ef802321844662abcda5"
+    }
+  },
+  "limits": [
+    "discovery RPC not deployed or tested live",
+    "full community age/gender coverage not certified",
+    "pending-request withdrawal not implemented",
+    "push and released-link install/auth handoff unverified",
+    "large-text bottom scrolling unverified",
+    "narrow/physical/Android devices unverified",
+    "legacy publication path only; no new creator-page publication acceptance claim"
+  ]
+}

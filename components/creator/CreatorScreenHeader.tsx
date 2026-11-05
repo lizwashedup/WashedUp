@@ -8,13 +8,13 @@ import { AfterglowColors as C } from '../../constants/Colors';
 import { AfterglowType as T } from '../../constants/Typography';
 
 /** The creator header without changing the screen's scroll, form or navigation ownership. */
-export function CreatorScreenHeader({ title, onBack }: { title: string; onBack?: () => void }) {
+export function CreatorScreenHeader({ title, onBack, backLabel = 'Back' }: { title: string; onBack?: () => void; backLabel?: string }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   return <View style={styles.header}>
-    {onBack && <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.back}>
+    {onBack && <Pressable accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} style={styles.back}>
       <ArrowLeft size={20} color={C.ink} />
     </Pressable>}
-    <ScaledText numberOfLines={2} style={[styles.title, { fontFamily: fonts.medium }]}>{title}</ScaledText>
+    <ScaledText accessibilityRole="header" numberOfLines={2} style={[styles.title, { fontFamily: fonts.medium }]}>{title}</ScaledText>
     <ProfileButton compact />
   </View>;
 }

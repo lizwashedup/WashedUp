@@ -1,3 +1,5 @@
+import { changeCommunityPublication, publicationAttempt, readCommunityPublication, type CommunityPublicationAction } from './communityPublication';
+import { getCommunityJoiningOptions, hasPublishedCommunityJoining } from './communityJoiningOptions';
 /**
  * Creator mode data layer (phase 4 logic).
  *
@@ -15,6 +17,8 @@ import { areaFromZip } from './zipAreas';
 import { isViewingAsEventHost } from './viewAs';
 import type { OperatorGrantStatus, OperatorTrack } from './operatorApplications';
 import type { TicketTier } from './ticketing';
+import type { CreatorPageScope } from './creatorPageReview';
+import { requestWithDeadline } from './requestWithDeadline';
 
 export type CommunityMemberRole =
   | 'leader' | 'co_leader' | 'admin' | 'events' | 'member_care' | 'finance' | 'member';
@@ -121,18 +125,19 @@ export function creatorShellKind(a: CreatorAccess | undefined | null): CreatorSh
  */
 export function creatorLandingRoute(
   a: CreatorAccess | undefined | null,
-): '/(creator)/today' | '/(creator)/organizer-home' | '/(creator)/members' | '/(creator)/menu' {
+): '/(tabs)/friends/manage/(tools)/today' | '/(tabs)/friends/manage/(tools)/organizer-home' | '/(tabs)/friends/manage/(tools)/members' | '/(tabs)/friends/manage/(tools)/menu' | '/(tabs)/friends/manage/(tools)/events' {
   switch (creatorShellKind(a)) {
     case 'full':
-      return '/(creator)/today';
+      return '/(tabs)/friends/manage/(tools)/today';
     case 'member_care':
-      return '/(creator)/members';
+      return '/(tabs)/friends/manage/(tools)/members';
     case 'finance':
-      return '/(creator)/menu';
+      return '/(tabs)/friends/manage/(tools)/menu';
     case 'events':
+      return '/(tabs)/friends/manage/(tools)/events';
     case 'organizer':
     default:
-      return '/(creator)/organizer-home';
+      return '/(tabs)/friends/manage/(tools)/organizer-home';
   }
 }
 
@@ -223,20 +228,11 @@ export async function getCreatorAccess(expectedUserId?: unknown): Promise<Creato
 
 // -- members ------------------------------------------------------------------
 
-/**
- * Publish a draft community: status draft -> active through the leader-scoped
- * communities_update RLS policy. Only active communities are world-readable
- * (lock view, discovery, member pages); this is the one-way door that opens
- * the page. archiveCommunity (below) is the matching leader-gated closing
- * door.
+/** Publish a draft with current creator authority and an exact conditional receipt.
+ * Existing visibility, joining policy, RLS and publication triggers still apply.
  */
-export async function publishCommunity(communityId: string): Promise<void> {
-  const { error } = await supabase
-    .from('communities')
-    .update({ status: 'active' })
-    .eq('id', communityId)
-    .eq('status', 'draft');
-  if (error) throw error;
+export async function publishCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'publish'), scope);
 }
 
 /**
@@ -252,14 +248,8 @@ export async function publishCommunity(communityId: string): Promise<void> {
  * away a stale draft they never published. Guarded against re-archiving an
  * already-archived row.
  */
-export async function archiveCommunity(communityId: string): Promise<void> {
-  const { error, count } = await supabase
-    .from('communities')
-    .update({ status: 'archived' }, { count: 'exact' })
-    .eq('id', communityId)
-    .neq('status', 'archived');
-  if (error) throw error;
-  if (!count) throw new Error('Could not archive that community.');
+export async function archiveCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'archive'), scope);
 }
 
 /**
@@ -273,13 +263,8 @@ export async function archiveCommunity(communityId: string): Promise<void> {
  * get_discoverable_communities() via status alone, see
  * getCommunityDiscoverable() below.
  */
-export async function unpublishCommunity(communityId: string): Promise<void> {
-  const { error } = await supabase
-    .from('communities')
-    .update({ status: 'draft' })
-    .eq('id', communityId)
-    .eq('status', 'active');
-  if (error) throw error;
+export async function unpublishCommunity(communityId: string, scope: CreatorPageScope): Promise<void> {
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), 'unpublish'), scope);
 }
 
 /**
@@ -293,14 +278,8 @@ export function buildCommunityPublicLink(handle: string): string {
   return `https://washedup.app/c/${handle}`;
 }
 
-/**
- * Whether the community appears in general browse/search (Screen 14's
- * discovery toggle), backed by communities.discoverable
- * (supabase/migrations/20260901030000, DRAFT -- not applied). SELF-FLIPPING,
- * same mechanism as getJoinPolicy: until that migration applies, the select
- * errors with 42703 and this returns null, so the toggle stays hidden -- no
- * dead control. The moment it applies, the real value flows and the toggle
- * wakes.
+/** Legacy read helper. A readable discovery value does not imply write access.
+ * The creator editor uses the scoped publication service and capability check.
  */
 export async function getCommunityDiscoverable(communityId: string): Promise<boolean | null> {
   const { data, error } = await supabase
@@ -313,24 +292,13 @@ export async function getCommunityDiscoverable(communityId: string): Promise<boo
   return typeof v === 'boolean' ? v : null;
 }
 
-/**
- * Leader-only by the existing communities_update RLS policy. No dedicated
- * RPC -- unlike join_policy, flipping discoverable carries no side effect to
- * guard (nothing else reads or reacts to it), so a plain update is the
- * conservative choice, the same shape publishCommunity() already uses.
- * Checks {count:'exact'} the same way archiveCommunity() and
- * updateJoinGateSettings() do, so a denied write (not a leader) cannot
- * silently report success while changing zero rows.
+/** Change discovery through the supported creator-scoped RPC, preserving status
+ * and admission. A missing backend capability prevents dispatch.
  */
-export async function setCommunityDiscoverable(
-  communityId: string,
-  discoverable: boolean,
-): Promise<boolean> {
-  const { error, count } = await supabase
-    .from('communities')
-    .update({ discoverable }, { count: 'exact' })
-    .eq('id', communityId);
-  return !error && !!count;
+export async function setCommunityDiscoverable(communityId: string, discoverable: boolean, scope: CreatorPageScope): Promise<boolean> {
+  const action: CommunityPublicationAction = discoverable ? 'show' : 'hide';
+  await changeCommunityPublication(publicationAttempt(await readCommunityPublication(communityId, scope), action), scope);
+  return true;
 }
 
 /**
@@ -680,21 +648,17 @@ export interface JoinGateSettings {
 // column can hold; do not build a UI path that cannot actually work yet.
 export type JoinPolicy = 'approval_required' | 'open' | 'invite_only';
 
-/**
- * The community's join gate (proposal 91, at Cowork's gate). SELF-FLIPPING:
- * until 91 adds communities.join_policy, the select errors with 42703 and
- * this returns null, so the leader toggle stays hidden - no dead control.
- * The moment 91 applies, the real value flows and the toggle wakes.
- */
+/** Read the effective joining method, including legacy communities that still require review. */
 export async function getJoinPolicy(communityId: string): Promise<JoinPolicy | null> {
-  const { data, error } = await supabase
-    .from('communities')
-    .select('join_policy')
-    .eq('id', communityId)
-    .single();
-  if (error || !data) return null; // column absent (42703) or unreadable = dormant
-  const v = (data as { join_policy?: string }).join_policy;
-  return v === 'open' || v === 'approval_required' ? v : null;
+  const options = await getCommunityJoiningOptions(communityId);
+  if (options) return options.method;
+  const { data, error } = await requestWithDeadline(supabase.from('communities').select('join_policy').eq('id', communityId).single(), 12_000);
+  if (error?.code === '42703') return null;
+  if (error) throw error;
+  const value = data?.join_policy;
+  if (value === 'approval_required') return value;
+  if (value !== 'open') return null;
+  return await hasPublishedCommunityJoining(communityId) ? 'open' : 'approval_required';
 }
 
 /**
@@ -916,27 +880,64 @@ export async function getBroadcasts(communityId: string): Promise<BroadcastRow[]
  * getCommunityMemberCounts above.
  */
 export async function getBroadcastAudienceCount(communityId: string): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
-  let query = supabase
+  const { data: { user }, error: accountError } = await supabase.auth.getUser();
+  if (accountError) throw accountError;
+  if (!user) throw new Error('Sign in to check update notifications.');
+  const { count, error } = await supabase
     .from('community_members')
     .select('id', { count: 'exact', head: true })
     .eq('community_id', communityId)
     .eq('status', 'active')
-    .eq('broadcasts_muted', false);
-  if (user) query = query.neq('user_id', user.id);
-  const { count } = await query;
-  return count ?? 0;
+    .eq('broadcasts_muted', false)
+    .neq('user_id', user.id);
+  if (error) throw error;
+  if (count == null) throw new Error('Could not check update notifications.');
+  return count;
 }
 
-export async function sendBroadcast(communityId: string, body: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in');
-  const { error } = await supabase.from('community_broadcasts').insert({
-    community_id: communityId,
-    sender_id: user.id,
-    body: body.trim(),
-  });
+function assertBroadcastScope(scope: CreatorPageScope) {
+  if (!scope.isCurrent()) throw Error('This community visit has changed.');
+}
+async function broadcastAuthorization(scope: CreatorPageScope) {
+  assertBroadcastScope(scope);
+  const { data, error } = await requestWithDeadline(supabase.auth.getSession(), 8_000);
+  assertBroadcastScope(scope);
   if (error) throw error;
+  if (data.session?.user.id !== scope.userId || !data.session.access_token) throw Error('Your account changed.');
+  return `Bearer ${data.session.access_token}`;
+}
+/** Read-only recovery of the exact update, never a body-text guess or a resend. */
+export async function checkBroadcast(communityId: string, body: string, scope: CreatorPageScope, id: string): Promise<boolean> {
+  const authorization = await broadcastAuthorization(scope);
+  const { data, error } = await requestWithDeadline(supabase.from('community_broadcasts')
+    .select('id,community_id,sender_id,body,kind').eq('id', id).eq('community_id', communityId)
+    .eq('sender_id', scope.userId).eq('kind', 'broadcast').maybeSingle().setHeader('Authorization', authorization), 8_000);
+  assertBroadcastScope(scope);
+  if (error) throw error;
+  if (!data) return false;
+  if (data.id !== id || data.community_id !== communityId || data.sender_id !== scope.userId ||
+    data.kind !== 'broadcast' || data.body !== body.trim()) throw Error('The original update could not be confirmed.');
+  return true;
+}
+/** The persisted UUID is reused on retry; a lost response cannot create a new update. */
+export async function sendBroadcast(communityId: string, body: string, scope: CreatorPageScope, id: string): Promise<void> {
+  assertBroadcastScope(scope);
+  if (!body.trim() || body.trim().length > 4000 || !/^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(id)) throw Error('Check your update before sending.');
+  const access = await requestWithDeadline(getCreatorAccess(scope.userId), 12_000);
+  assertBroadcastScope(scope);
+  if (!access.ledCommunities.some(item => item.id === communityId && isAdminTierRole(item.role))) throw Error('You no longer have permission to send updates to this community.');
+  const authorization = await broadcastAuthorization(scope);
+  try {
+    const { error } = await requestWithDeadline(supabase.from('community_broadcasts').insert({
+      id, community_id: communityId, sender_id: scope.userId, kind: 'broadcast', body: body.trim(),
+    }).setHeader('Authorization', authorization), 12_000);
+    assertBroadcastScope(scope);
+    if (error) throw error;
+  } catch (failure) {
+    assertBroadcastScope(scope);
+    if (await checkBroadcast(communityId, body, scope, id)) return;
+    throw failure;
+  }
 }
 
 // -- events (read-only this slice) --------------------------------------------

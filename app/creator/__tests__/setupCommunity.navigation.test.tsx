@@ -32,7 +32,7 @@ beforeEach(() => { jest.clearAllMocks(); jest.useFakeTimers(); mockCreate.mockRe
 afterEach(async () => { if (tree) await act(async () => tree.unmount()); jest.useRealTimers(); });
 
 it.each([
-  ['view community', '/(creator)/today', 'dismiss'],
+  ['view community', '/(tabs)/friends/manage/(tools)/today', 'dismiss'],
   ['edit page', '/creator/edit-page', 'push'],
   ['invite members', '/creator/member-invites', 'push'],
 ])('selects the returned community identity before %s', async (label, route, method) => {
@@ -45,7 +45,7 @@ it.each([
 it('uses the exact recovered identity after a lost creation response without creating again', async () => {
   mockCreate.mockRejectedValueOnce(Error('response lost')); mockFind.mockReturnValue({ id: 'recovered-id', handle: 'new-community', name: 'New community' });
   await fillAndCreate(); await press('view community');
-  expect(mockSelect).toHaveBeenCalledWith('recovered-id'); expect(mockDismissTo).toHaveBeenCalledWith('/(creator)/today'); expect(mockCreate).toHaveBeenCalledTimes(1);
+  expect(mockSelect).toHaveBeenCalledWith('recovered-id'); expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/today'); expect(mockCreate).toHaveBeenCalledTimes(1);
 });
 it('unconfirmed creation cannot navigate or change the selected community', async () => {
   mockCreate.mockRejectedValueOnce(Error('offline')); await fillAndCreate();

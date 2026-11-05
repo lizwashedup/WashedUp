@@ -158,3 +158,18 @@ it('remeasures mounted event identity, tabs and empty copy while preserving sele
  expect(mockCreate).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
  }finally{act(()=>Dimensions.set({window:previous}));}
 });
+
+it('the community shortcut opens the first event step without saving anything and does not reopen after Back',async()=>{
+ await act(async()=>{tree=create(<CreatorPageEventsScreen pageId={page} startCreating/>);});await flush();
+ expect(tree.root.findByType(PageFrame).props.title).toBe('New event');
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockStorage.size).toBe(0);
+ act(()=>tree.root.findByType(PageFrame).props.onBack());await flush();
+ expect(tree.root.findByType(PageFrame).props.title).toBe('Events');expect(mockCreate).not.toHaveBeenCalled();
+});
+
+it('a direct creation entry preserves an unresolved event attempt for explicit recovery',async()=>{
+ mockStorage.set(`creator-page-event-attempt:v1:${user}:${page}`,JSON.stringify({pageId:page,eventId:event,title:'Existing attempt',category:'community'}));
+ await act(async()=>{tree=create(<CreatorPageEventsScreen pageId={page} startCreating/>);});await flush();
+ expect(tree.root.findByType(PageFrame).props.title).toBe('Events');expect(action('Continue saved draft')).toBeDefined();
+ expect(renderedText(tree.toJSON())).toContain('Existing attempt');expect(mockCreate).not.toHaveBeenCalled();expect(mockStorage.size).toBe(1);
+});

@@ -1,3 +1,4 @@
+jest.mock('../CommunityDailyActions',()=>({CommunityDailyActions:()=>null}));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: 'creator', epoch: 1, isLoading: false, error: null, isCurrent: () => true, retry: jest.fn() }) }));
 // Profile header owns its query provider; this suite exercises the surrounding journey.
 jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null }));
@@ -5,10 +6,12 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockRefetch = jest.fn(async () => ({}));
 let mockQueries: Record<string, any>;
+let mockCommunityStatus = 'active';
+let mockOnFocus: () => void;
 jest.mock('@tanstack/react-query', () => ({useQuery: ({queryKey}: any) => mockQueries[queryKey[0]]}));
-jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null}));
-jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,creatorLandingRoute:()=>'/'}));
-jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table'})}));
+jest.mock('expo-router', () => ({router:{push:jest.fn(),replace:jest.fn()},Redirect:()=>null,useFocusEffect:(callback:()=>void)=>{mockOnFocus=callback;}}));
+jest.mock('../../../lib/creatorMode', () => ({isLeaderAccess:()=>true,isAdminTierRole:()=>true,creatorLandingRoute:()=>'/'}));
+jest.mock('../../../lib/selectedCommunity', () => ({useLedCommunity:()=>({id:'community',name:'Our Sunday Table',role:'leader',status:mockCommunityStatus})}));
 jest.mock('../../../lib/communityChat', () => ({}));
 jest.mock('../../../lib/supabase', () => ({supabase:{}}));
 jest.mock('../../../lib/ticketAttendees', () => ({countAttendees:()=>({sold:0,checkedIn:0})}));
@@ -21,10 +24,11 @@ jest.mock('../CreatorActionFill', () => ({CreatorActionFill:()=>null}));
 jest.mock('../../events/EventMediaImage', () => ({EventMediaImage:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
 import Screen from '../../../app/(creator)/today';
+import { router } from 'expo-router';
 let tree: ReactTestRenderer;
 const result=(data:unknown)=>({data,isFetchedAfterMount:true,isError:false,isLoading:false,isFetching:false,isRefetching:false,refetch:mockRefetch});
 beforeEach(()=>{
- jest.clearAllMocks();
+ jest.clearAllMocks(); mockCommunityStatus='active';
  mockQueries={
  'creator-access':result({hasLeaderGrant:true,ledCommunities:[{id:'community'}]}),
  'creator-members':result([{status:'active'}]),'creator-broadcasts':result([]),
@@ -34,6 +38,18 @@ beforeEach(()=>{
 afterEach(()=>act(()=>tree?.unmount()));
 const visibleText=(node:any):string => typeof node==='string' ? node : Array.isArray(node) ? node.map(visibleText).join('') : (node?.children ?? []).map(visibleText).join('');
 const render=async()=>{await act(async()=>{tree=create(<Screen/>);});return visibleText(tree.toJSON());};
+it('does not flash empty community facts or daily actions before account access loads',async()=>{
+ mockQueries['creator-access']={...result(undefined),isFetchedAfterMount:false,isLoading:true};
+ const text=await render();expect(text).not.toContain('0 members');expect(text).not.toContain('no join requests waiting');
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Send update')).toHaveLength(0);
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Loading community management').length).toBeGreaterThan(0);
+});
+it('offers recovery for a failed access check before displaying management tools',async()=>{
+ mockQueries['creator-access']={...result(undefined),isError:true};await render();
+ const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry community management'&&typeof n.props.onPress==='function')[0];
+ await act(async()=>retry.props.onPress());expect(mockRefetch).toHaveBeenCalledTimes(1);
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Send update')).toHaveLength(0);
+});
 it('keeps a failed member read distinct from an empty community and offers retry',async()=>{
  mockQueries['creator-members']={...result(undefined),isError:true};
  const text=await render();expect(text).toContain('Members unavailable');expect(text).not.toContain('no join requests waiting');expect(text).not.toContain('0 members');expect(text).toContain('Sunday walk');
@@ -44,7 +60,7 @@ it('keeps a failed member read distinct from an empty community and offers retry
 it('does not present empty member facts while loading',async()=>{
  mockQueries['creator-members']={...result(undefined),isLoading:true};const text=await render();expect(text).toContain('Loading members');expect(text).not.toContain('no join requests waiting');
 });
-it.each([['creator-events','Events','Plan your next gathering'],['creator-broadcasts','Updates','say something to your people'],['creator-rooms','Chat spaces','unused']])('exposes failed %s reads without inventing an empty state',async(key,label,empty)=>{
+it.each([['creator-events','Events','Create your next event'],['creator-broadcasts','Updates','Share an update'],['creator-rooms','Chat spaces','unused']])('exposes failed %s reads without inventing an empty state',async(key,label,empty)=>{
  mockQueries[key]={...result(undefined),isError:true};const text=await render();expect(text).toContain(`${label} unavailable`);if(empty!=='unused')expect(text).not.toContain(empty);
 });
 it('does not show sales or RSVP totals after either attendance read fails',async()=>{
@@ -53,4 +69,47 @@ it('does not show sales or RSVP totals after either attendance read fails',async
 });
 it('retains the confirmed empty and populated presentation when reads succeed',async()=>{
  const text=await render();expect(text).toContain('no join requests waiting');expect(text).toContain('1 member so far');expect(text).toContain('5 going');expect(text).not.toContain('unavailable');
+});
+it('replaces draft community event creation with its existing setup page',async()=>{
+ mockCommunityStatus='draft'; await render();
+ expect(tree.root.findAll(n=>n.props.accessibilityLabel==='Create event')).toHaveLength(0);
+ const setup=tree.root.findAll(n=>n.props.accessibilityLabel==='Continue setup'&&typeof n.props.onPress==='function')[0];
+ act(()=>setup.props.onPress());
+ expect(router.push).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/community');
+});
+it('retains active community event creation with its exact identity',async()=>{
+ await render();
+ const createEvent=tree.root.findAll(n=>n.props.accessibilityLabel==='Create event'&&typeof n.props.onPress==='function')[0];
+ act(()=>createEvent.props.onPress());
+ expect(router.push).toHaveBeenCalledWith('/creator/event-form?workspace=community&communityId=community');
+});
+
+it('opens the dedicated update composer from the daily action',async()=>{
+ await render();
+ const action=tree.root.findAll(n=>n.props.accessibilityLabel==='Send update'&&typeof n.props.onPress==='function')[0];
+ act(()=>action.props.onPress());expect(router.push).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/updates');
+});
+it('keeps the invite destination directly available after removing its Settings duplicate',async()=>{
+ await render();const invite=tree.root.findAll(n=>n.props.accessibilityLabel==='Invite'&&typeof n.props.onPress==='function')[0];
+ act(()=>invite.props.onPress());expect(router.push).toHaveBeenCalledWith('/creator/member-invites');
+});
+it('keeps optional chat spaces reachable through the community page',async()=>{
+ mockQueries['creator-rooms']=result([{id:'sunset-spots',name:'Sunset spots'}]);await render();
+ const chats=tree.root.findAll(n=>n.props.accessibilityLabel==='All community chats'&&typeof n.props.onPress==='function')[0];
+ expect(chats).toBeDefined();act(()=>chats.props.onPress());expect(router.push).toHaveBeenCalledWith('/community/community');
+});
+
+it('refreshes the member summary when returning after a member leaves elsewhere',async()=>{
+ mockQueries['creator-members']=result([{status:'active'},{status:'active'}]);
+ const refreshedMembers=jest.fn(async()=>{mockQueries['creator-members']={...result([{status:'active'}]),refetch:refreshedMembers};});
+ mockQueries['creator-members'].refetch=refreshedMembers;
+ expect(await render()).toContain('2 members so far');
+ await act(async()=>mockOnFocus());
+ await act(async()=>tree.update(<Screen/>));
+ expect(refreshedMembers).toHaveBeenCalledTimes(1);
+ expect(visibleText(tree.toJSON())).toContain('1 member so far');
+});
+it('does not refresh member details before creator access is available',async()=>{
+ mockQueries['creator-access']={...result(undefined),isLoading:true};
+ await render();await act(async()=>mockOnFocus());expect(mockRefetch).not.toHaveBeenCalled();
 });

@@ -1,4 +1,9 @@
 import { CommunityReplyComposer } from './CommunityReplyComposer';
+import { ChatSizedText as Text } from '../chat/ChatSizedText';
+import { createChatMessageAppearance } from '../chat/chatMessageAppearance';
+import { messageActionAccess, messageActionWeb } from '../chat/messageActionAccess';
+import { formatChatTime } from '../../lib/communityChatUi';
+import { soleUrlIn, openUrl } from '../../lib/url';
 /**
  * One broadcast in the community container: the leader's voice, a small
  * reaction row (react-not-reply is the low-pressure default), and a reply
@@ -10,7 +15,6 @@ import React from 'react';
 import { Image } from 'expo-image';
 import {
   View,
-  Text,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
@@ -35,6 +39,8 @@ interface Props {
   onViewMember?: (id: string) => void;
   onViewReactions?: () => void;
   broadcast: CommunityBroadcast;
+  /** Compact message surface within Main; the same reaction/reply records remain. */
+  inConversation?: boolean;
   appearance?: { fonts: AfterglowFontFamilies };
   /** Broadcasts are the community speaking; attribution is its name, never a person. */
   communityName: string;
@@ -43,7 +49,7 @@ interface Props {
   scope?: CommunityOperationScope;
 }
 
-export function BroadcastCard({ broadcast, communityName, onError, mentionNames, scope, appearance, onViewReactions, onViewMember }: Props) {
+export function BroadcastCard({ broadcast, communityName, onError, mentionNames, scope, appearance, onViewReactions, onViewMember, inConversation = false }: Props) {
   const { showReplies, draft, sending, replies, repliesLoading, repliesError, showReactionPicker, replyComposer,
     changeDraft, send: handleReply, react: handleReact, toggleReplies, retryReplies,
     openReactionPicker, closeReactionPicker, currentAction, repliesHaveOlder, repliesLoadingOlder, loadOlderReplies,
@@ -55,30 +61,38 @@ export function BroadcastCard({ broadcast, communityName, onError, mentionNames,
   const isIntro = broadcast.kind === 'intro';
   const intro = isIntro && broadcast.payload ? composeIntroCard(broadcast.payload) : null;
 
-  const revisedBody = appearance && { ...AfterglowType.body, fontFamily: appearance.fonts.regular, color: AfterglowColors.ink };
-  const revisedCaption = appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.regular, color: AfterglowColors.muted };
-  const revisedAction = appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.medium, color: AfterglowColors.clay };
+  const messageAppearance = inConversation ? createChatMessageAppearance(appearance?.fonts ?? AfterglowFallbackFonts) : undefined;
+  const MessageSurface = inConversation ? TouchableOpacity : View;
+  const bubbleUrl = inConversation ? soleUrlIn(intro ? [intro.lead, intro.qa].filter(Boolean).join('\n') : broadcast.body) : null;
+  const revisedBody = messageAppearance?.body ?? (appearance && { ...AfterglowType.body, fontFamily: appearance.fonts.regular, color: AfterglowColors.ink });
+  const revisedCaption = messageAppearance?.metadata ?? (appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.regular, color: AfterglowColors.muted });
+  const revisedAction = messageAppearance?.sender ?? (appearance && { ...AfterglowType.caption, fontFamily: appearance.fonts.medium, color: AfterglowColors.clay });
   return (
-    <View style={[styles.card, isIntro && styles.cardIntro, appearance && { backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderLeftColor: AfterglowColors.clay }]}>
-      {!!communityName && <Text style={[styles.attribution, revisedAction]}>{communityName}</Text>}
+    <View style={inConversation ? styles.conversation : [styles.card, isIntro && styles.cardIntro, appearance && { backgroundColor: AfterglowColors.white, borderColor: AfterglowColors.line, borderLeftColor: AfterglowColors.clay }]}
+      {...(inConversation ? messageActionWeb(openReactionPicker) : {})}>
+      <MessageSurface style={inConversation ? [messageAppearance?.bubble, styles.conversationBubble, isIntro && styles.conversationIntro] : undefined}
+        {...(inConversation ? { activeOpacity: 1, onPress: bubbleUrl ? () => openUrl(bubbleUrl) : undefined, onLongPress: openReactionPicker, accessibilityHint: 'Hold to react', ...messageActionAccess(openReactionPicker) } : {})}>
+      {(!!communityName || inConversation && !isIntro) && <Text style={[styles.attribution, revisedAction]}>{communityName || 'Community update'}</Text>}
       {/* LIZ COPY */}
       {isIntro && <Text style={[styles.introEyebrow, revisedCaption]}>just joined</Text>}
       {!!broadcast.image_url && <Image source={{ uri: broadcast.image_url }} style={styles.image} contentFit="cover" />}
       <LinkifiedText text={intro ? intro.lead : broadcast.body} style={[styles.body, revisedBody]} mentionNames={mentionNames} />
       {!!intro?.qa && <LinkifiedText text={intro.qa} style={[styles.body, revisedBody]} mentionNames={mentionNames} />}
-      <Text style={[styles.meta, revisedCaption]}>{formatTimestampLA(broadcast.created_at)}</Text>
+      <Text style={[styles.meta, revisedCaption, inConversation && styles.conversationTime]}>{inConversation ? formatChatTime(broadcast.created_at) : formatTimestampLA(broadcast.created_at)}</Text>
+      </MessageSurface>
 
       <ReactionChips
+        attached={inConversation}
         onViewReactions={onViewReactions}
         appearance={appearance}
         reactions={broadcast.reactions}
         onReact={(key) => { void handleReact(key); }}
         onAddReaction={openReactionPicker}
-        style={styles.reactionRow}
+        style={inConversation ? undefined : styles.reactionRow}
       >
-        <TouchableOpacity onPress={toggleReplies} hitSlop={6} accessibilityRole="button" accessibilityLabel="Reply to this message">
+        <TouchableOpacity style={inConversation ? styles.replyTarget : undefined} onPress={toggleReplies} hitSlop={6} accessibilityRole="button" accessibilityLabel="Reply to this message">
           <Text style={[styles.repliesLink, revisedAction]}>
-            {broadcast.reply_count > 0 ? `replies (${broadcast.reply_count})` : 'reply'}
+            {inConversation ? (broadcast.reply_count > 0 ? `${broadcast.reply_count} ${broadcast.reply_count === 1 ? 'reply' : 'replies'}` : 'Reply') : (broadcast.reply_count > 0 ? `replies (${broadcast.reply_count})` : 'reply')}
           </Text>
         </TouchableOpacity>
       </ReactionChips>
@@ -145,6 +159,11 @@ export function BroadcastCard({ broadcast, communityName, onError, mentionNames,
 }
 
 const styles = StyleSheet.create({
+  conversation: { maxWidth: '84%', alignSelf: 'flex-start', marginLeft: 30, marginBottom: 6 },
+  conversationBubble: { borderLeftWidth: 3, borderLeftColor: Colors.gold },
+  conversationIntro: { borderLeftColor: Colors.terracotta },
+  conversationTime: { alignSelf: 'flex-end', marginTop: 2 },
+  replyTarget: { minWidth: 44, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   card: {
     backgroundColor: Colors.cardBg,
     borderRadius: 16,

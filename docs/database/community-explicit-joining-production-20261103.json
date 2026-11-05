@@ -1,0 +1,99 @@
+{
+  "project": "upstjumasqblszevlgik",
+  "branch": "main PRODUCTION",
+  "source_commit": "f316d70",
+  "authorization": "Liz explicitly approved applying the backend joining upgrade and isolated QA; no OTA.",
+  "migration": "docs/database/review-only/20261103_community_explicit_joining.sql",
+  "migration_sha256": "38d9efcb20c40419689f8ae383cb2fdd35de5a16c07200ba4714f427244cd616",
+  "applied_via": "Signed-in Supabase SQL Editor; single BEGIN/COMMIT transaction; Success. No rows returned.",
+  "verified_at_utc": "2026-11-04T07:19:57Z",
+  "preflight": {
+    "eight_routines_match": true,
+    "new_capabilities_and_private_tables_absent": true,
+    "eligibility_trigger_enabled": true,
+    "legacy_open_community_count": 10,
+    "community_state_digest": "fbbc1fda47503f62fa72542f9cacb643",
+    "membership_state_digest": "86d2c6553a5e138d074ddafe3cbc53b4"
+  },
+  "postflight": {
+    "exact_function_hash_checks_passed": 12,
+    "community_state_unchanged": true,
+    "memberships_unchanged": true,
+    "all_10_legacy_open_still_review": true,
+    "choices_empty": true,
+    "creation_receipts_empty": true,
+    "eligibility_trigger_enabled": true,
+    "private_tables_rls": true,
+    "private_tables_no_client_access": true,
+    "helper_no_client_execution": true,
+    "new_rpcs_authenticated_only": true,
+    "total_checks_passed": 22
+  },
+  "rollback_applied": false,
+  "ota_published": false,
+  "qa_status": "complete_and_archived",
+  "qa": {
+    "community_id": "b016eee2-83e4-427c-916c-58b6a7eae4f0",
+    "name": "WashedUp Joining QA",
+    "creator_id": "ae8006dc-5bca-42b8-975a-e11ad14b796f",
+    "recipient_id": "34900c70-6339-40c5-b294-6b0a01310175",
+    "membership_id": "39872eb8-7ef8-40cb-9151-6e677899e4ef",
+    "request_id": "b4ddbc8d-823d-46c2-9c15-455cf95b1d59",
+    "native_creator_checks": [
+      "two_step_setup",
+      "explicit_review_choice_required",
+      "creation_receipt_confirmed",
+      "correct_community_workspace",
+      "settings_reachable",
+      "open_confirmation_with_one_pending",
+      "pending_request_approval",
+      "review_method_restored",
+      "joining_form_save",
+      "archive"
+    ],
+    "authenticated_sdk_checks": [
+      "App Review identity verified",
+      "review join pending",
+      "non-creator method change denied",
+      "Open preserves pending",
+      "pending retry rejected",
+      "creator approval active",
+      "active departure left",
+      "Open rejoin active on same membership",
+      "duplicate active join rejected",
+      "Review change retains existing active member",
+      "test account departure confirmed",
+      "other-account creation receipt hidden",
+      "both private tables denied",
+      "anonymous capability denied"
+    ],
+    "fixture_note": "Native creation returned a draft. Guarded SQL made only this exact QA community active and undiscoverable for admission tests, without a creator-page draft or publication. No ordinary members were invited or used as test data.",
+    "existing_rpc_observation": "leave_community returns success without changing a pending request. This was not treated as withdrawal; the creator approved the request first, then normal active-member departure was verified.",
+    "cleanup_checks_passed": 13,
+    "final_state": {
+      "status": "archived",
+      "discoverable": false,
+      "join_policy": "approval_required",
+      "recipient_status": "left",
+      "creator_role": "leader",
+      "creator_status": "active",
+      "publication_count": 0,
+      "receipt_retained": true
+    },
+    "non_test_community_state_digest_matches_preflight": true,
+    "non_test_membership_state_digest_matches_preflight": true,
+    "all_10_legacy_open_communities_still_review": true,
+    "tokens_logged_or_exported": false
+  },
+  "local_followup": {
+    "issue": "Creator overview retained an old member count after an external departure.",
+    "fix": "Refetch members when the management screen regains focus after creator access resolves.",
+    "verification": "17 tests across two creator overview suites; TypeScript passed; native overview refreshed from 2 members to the verified 1 member.",
+    "released": false
+  },
+  "evidence": {
+    "queries_and_results": "/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/community-joining-production-queries-and-results-2026-11-03.json",
+    "screenshot": "/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/community-joining-production-cleanup-2026-11-03.jpg",
+    "authenticated_qa_runner": "/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02/explicit-joining-authenticated-qa.cjs"
+  }
+}

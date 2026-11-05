@@ -24,9 +24,9 @@ jest.mock('../../../components/composer/TimePicker',()=>({__esModule:true,defaul
 jest.mock('../../../components/creator/EventPlaceSearch',()=>({__esModule:true,default:()=>null}));
 jest.mock('../../../components/creator/EventLocationMap',()=>({EventLocationMap:()=>null}));
 jest.mock('../../../lib/haptics',()=>({hapticLight:()=>{},hapticSuccess:()=>{}}));
-jest.mock('../../../lib/creatorMode',()=>({getCreatorAccess:async()=>null,canManageEvents:()=>true,creatorLandingRoute:()=>'/'}));
+jest.mock('../../../lib/creatorMode',()=>({getCreatorAccess:async()=>mockAccess,isAdminTierRole:(r:string)=>['leader','admin','co_leader'].includes(r),canManageEvents:()=>true,creatorLandingRoute:()=>'/'}));
 jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){return mockPagesEnabled;},CO_CREATOR_INVITES_ENABLED:true}));
-jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockAccess?.ledCommunities[0]??null}));
+jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockAccess?.ledCommunities[0]??null,setSelectedCommunityId:jest.fn()}));
 jest.mock('../../../lib/supabase',()=>({supabase:{auth:{onAuthStateChange:()=>({data:{subscription:{unsubscribe:()=>{}}}}),getUser:async()=>({data:{user:{id:mockUser}},error:null})}}}));
 jest.mock('../../../lib/ticketing',()=>({getTiers:()=>mockTiers(),getMyPayoutState:(...a:unknown[])=>mockPayout(...a),isPayoutReady:()=>true,getRefundAccess:(...a:unknown[])=>mockRefundAccess(...a),refundLiveOrdersOnCancel:(...a:unknown[])=>mockRefund(...a)}));
 jest.mock('../../../lib/creatorEvents',()=>({createOperatorEvent:(...a:unknown[])=>mockCreate(...a),pickAndUploadEventImage:(...a:unknown[])=>mockPoster(...a),EVENT_CATEGORIES:['Social'],saveEventTemplate:(...a:unknown[])=>mockLegacyTemplate(...a),getOperatorEvent:(...a:unknown[])=>mockLegacyRead(...a),updateOperatorEvent:(...a:unknown[])=>mockLegacyUpdate(...a),probeConfirmationMessage:async()=>({open:false,value:null}),probeOfferType:async()=>({open:false,value:null}),probeTicketCapacityRpc:async()=>false}));
@@ -40,6 +40,7 @@ jest.mock('../../../lib/creatorPageEventStatus',()=>({...jest.requireActual('../
 import {pageEventPublishGuidance,type PageEventPublishReason} from '../../../lib/creatorPageEventReadiness';
 jest.mock('../../../lib/creatorPageEventTemplate',()=>({getPageEventTemplate:(...a:unknown[])=>mockTemplateRead(...a),savePageEventTemplate:(...a:unknown[])=>mockTemplateSave(...a)}));
 jest.mock('../../../components/creator/pages/CreatorEventEntryGate',()=>({__esModule:true,default:(props:any)=>{mockEntryProps=props;return null;}}));
+jest.mock('../../../components/creator/LegacyEventCreateGate',()=>({LegacyEventCreateGate:({workspace,communityId,children}:any)=>children({workspace,community:workspace==='community'?mockAccess?.ledCommunities.find((c:any)=>c.id===communityId):undefined},mockScope)}));
 import EventForm from '../event-form';
 const fields={title:'Atomic snapshot title',description:'Full story',image_url:'',event_date:'2027-01-10',start_time:'2027-01-10T20:00:00Z',end_time:'2027-01-10T21:00:00Z',venue:'LA',venue_address:'Venue',category:'Social',external_url:'',ticket_price:'',public_name:'Page',pin_to_chat:true,description_blocks:[{type:'text',content:'Keep story'}],confirmation_message:'Welcome'};
 let saved:any,receipt:any,tree:ReactTestRenderer;
@@ -79,4 +80,24 @@ it('retains an explicit ownership choice through subsequent renders',async()=>{
  mockAccess={hasLeaderGrant:true,hasEventHostGrant:true,ledCommunities:[community],isRevoked:false};setWorkspace('organization');await mount();
  act(()=>button('from Sunday Table')!.props.onPress());act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.onChangeText('Explicit community event'));
  await act(async()=>{await button('save it as a draft')!.props.onPress();});expect(mockCreate.mock.calls[0][1]).toBe(community.id);
+});
+
+
+it.each(['community','organization'] as const)('explicit %s creation ignores another persisted workspace and returns the confirmed draft to Events',async workspace=>{
+ const club={...community,id:'00000000-0000-4000-8000-000000000001'};
+ mockAccess={hasLeaderGrant:true,hasEventHostGrant:true,ledCommunities:[club],isRevoked:false};
+ setWorkspace(workspace==='community'?'organization':'community');
+ mockRouteParams={workspace,...(workspace==='community'?{communityId:club.id}:{})};await mount();
+ act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.onChangeText('Explicit creator event'));
+ act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Category: music'&&typeof n.props.onPress==='function')[0].props.onPress());
+ await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockCreate.mock.calls[0][1]).toBe(workspace==='community'?club.id:null);expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/events?section=drafts');
+});
+it('does not create after the selected community permission is revoked while filling the form',async()=>{
+ const club={...community,id:'00000000-0000-4000-8000-000000000001'};
+ mockAccess={hasLeaderGrant:true,hasEventHostGrant:true,ledCommunities:[club],isRevoked:false};mockRouteParams={workspace:'community',communityId:club.id};await mount();
+ act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.onChangeText('Revoked event'));
+ act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Category: music'&&typeof n.props.onPress==='function')[0].props.onPress());
+ mockAccess={...mockAccess,ledCommunities:[]};
+ await act(async()=>{await button('save it as a draft')!.props.onPress();});expect(mockCreate).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CreatorPageScope } from './creatorPageReview';
 
-export type CommunicationDraftKind = 'message' | 'reminders' | 'invitation';
+export type CommunicationDraftKind = 'message' | 'reminders' | 'invitation' | 'community-update';
 const writes = new Map<string, Promise<void>>();
 function key(eventId: string, kind: CommunicationDraftKind, scope: CreatorPageScope) {
   if (!eventId || !scope.userId || !scope.isCurrent()) throw Error('This event visit has ended.');
