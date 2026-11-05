@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { uploadBase64ToStorage } from '../lib/uploadPhoto';
 import { circleKeys } from '../lib/circles/keys';
 import type { CreateCircleArgs } from '../lib/circles/types';
@@ -48,7 +49,7 @@ export function useCreateCircle(userId: string | null | undefined) {
   const check = (call: Call) => { if (!current(call)) throw new ObsoleteCircleCreationError(); };
   const verify = async (call: Call) => {
     check(call);
-    const { data, error } = await supabase.auth.getUser();
+    const { data, error } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
     check(call);
     if (error) throw error;
     if (data.user?.id !== call.owner.userId) throw new ObsoleteCircleCreationError();
@@ -108,7 +109,7 @@ export function useCreateCircle(userId: string | null | undefined) {
       if (result.error) {
         // A server rejection is retryable. A transport/server timeout can have
         // happened after commit, so a blind create retry could duplicate it.
-        if (result.status >= 400 && result.status < 500) throw result.error;
+        if (result.status >= 400 && result.status < 500 && result.status !== 408) throw result.error;
         throw new UnconfirmedCircleCreationError();
       }
       if (!isUuid(result.data)) throw new UnconfirmedCircleCreationError();
