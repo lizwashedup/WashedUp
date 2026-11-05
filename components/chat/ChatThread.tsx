@@ -80,6 +80,7 @@ import { checkContent } from '../../lib/contentFilter';
 import { restoreChatDraft } from '../../lib/restoreChatDraft';
 import { PhotoBatchFailure, sendPhotoBatch } from '../../lib/chatPhotoBatch';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { compareChatSequence } from '../../lib/chatPaging';
 import { PhotoSendSession } from '../../lib/photoSendSession';
 import { useChatComposerDraft } from '../../hooks/useChatComposerDraft';
 import { checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
@@ -923,7 +924,7 @@ function ChatThread(props: ChatThreadProps) {
     return () => { if (activeWritableVisit.current === writableVisit) activeWritableVisit.current = null; };
   }, [writableVisit]);
   const photos = useMemo(() => messages.filter(message => message.message_type !== 'system' && message.image_url)
-    .slice().sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    .slice().sort(compareChatSequence)
     .map(message => ({ id: message.id, uri: message.image_url!, senderName: message.sender?.first_name, caption: message.content })), [messages]);
   const photoSelection = useChatPhotoSelection(`${props.kind}:${id}:${currentUserId}:${entry.serial}`, photos);
   const openMessagePhoto = useCallback((url: string, messageId: string) => {
