@@ -21,6 +21,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DESTINATION_KEY = 'pendingLinkDestination';
 const CHECKOUT_KEY = 'pendingCheckoutOrderId';
+// One durable destination has one owner at a time. A newly arriving link
+// retires older consumers immediately; queued writes preserve arrival order.
+// Keep this separate from checkout: neither pointer may erase the other.
+let destinationRevision = 0;
+let destinationMutation: Promise<unknown> = Promise.resolve();
+function mutateDestination<T>(action: () => Promise<T>): Promise<T> {
+  const result = destinationMutation.then(action, action);
+  destinationMutation = result.catch(() => undefined);
+  return result;
+}
 // Serialize checkout-pointer writes/removals so an older screen cannot erase
 // a newer handoff between its comparison and removal. Other link state is separate.
 let checkoutMutation: Promise<unknown> = Promise.resolve();
@@ -69,19 +79,26 @@ export function parseAppDestination(url: string): string | null {
 }
 
 export async function stashPendingDestination(href: string): Promise<void> {
-  try { await AsyncStorage.setItem(DESTINATION_KEY, href); } catch { /* best-effort */ }
+  destinationRevision += 1;
+  try { await mutateDestination(() => AsyncStorage.setItem(DESTINATION_KEY, href)); } catch { /* best-effort */ }
 }
 
 /** Reads and clears only while the caller's handoff is still current. */
 export async function consumePendingDestination(
   shouldConsume: () => boolean = () => true,
 ): Promise<string | null> {
+  const revision = destinationRevision;
+  const current = () => revision === destinationRevision && shouldConsume();
   try {
-    const href = await AsyncStorage.getItem(DESTINATION_KEY);
-    // Authentication may change while the durable read is in flight.
-    if (!shouldConsume()) return null;
-    if (href) await AsyncStorage.removeItem(DESTINATION_KEY);
-    return href;
+    return await mutateDestination(async () => {
+      if (!current()) return null;
+      const href = await AsyncStorage.getItem(DESTINATION_KEY);
+      if (!current()) return null;
+      if (href) await AsyncStorage.removeItem(DESTINATION_KEY);
+      // A dispatched removal cannot be undone. Newer stashes wait behind it;
+      // its retired caller must not navigate after that removal settles.
+      return current() ? href : null;
+    });
   } catch {
     return null;
   }
@@ -91,7 +108,11 @@ export async function clearPendingDestination(
   shouldClear: () => boolean = () => true,
 ): Promise<void> {
   try {
-    if (shouldClear()) await AsyncStorage.removeItem(DESTINATION_KEY);
+    if (!shouldClear()) return;
+    const revision = ++destinationRevision;
+    await mutateDestination(async () => {
+      if (revision === destinationRevision && shouldClear()) await AsyncStorage.removeItem(DESTINATION_KEY);
+    });
   } catch { /* best-effort */ }
 }
 
