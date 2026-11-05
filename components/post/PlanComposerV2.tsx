@@ -34,6 +34,7 @@ import { ImagePlus, X, ChevronDown } from 'lucide-react-native';
 
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { extractFirstUrl } from '../../lib/url';
+import { usePlanComposerDraft } from './usePlanComposerDraft';
 import { legacyStyles, composerAppearance } from './planComposerStyles';
 import { AGE_RANGES, MIN_GROUP, MAX_GROUP, MSG_MIN, MSG_LIMIT, DESC_LIMIT, DESC_WARN_MARGIN, buildDatetime, ageRangesToMinMax, quickDate, sameDay, type GenderPreference, type AgeRange, type QuickKind } from './planComposerRules';
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from '../../lib/haptics';
@@ -42,12 +43,12 @@ import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt'
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getTodayInLA, getLAWallParts, isValidLAWallTime, resolveOvernightLAEnd } from '../../lib/laDate';
+import { MONTHS, getLAWallParts, isValidLAWallTime, resolveOvernightLAEnd } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
-import { PLAN_CATEGORIES, type PlanCategory } from '../../constants/Categories';
+import { PLAN_CATEGORIES } from '../../constants/Categories';
 import { COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { COPY } from '../yours/state/constants';
@@ -73,7 +74,7 @@ import InlineNudge from '../composer/InlineNudge';
 import { useNudgeArbiter, NUDGE_PLACE_BASE } from '../composer/nudgeArbiter';
 import PlacePicker, { type PlaceValue } from '../composer/place/PlacePicker';
 import PostConfirmation from '../composer/PostConfirmation';
-import InvitePeopleSection, { type InviteChip, type InviteSuggestion } from '../../components/post/InvitePeopleSection';
+import InvitePeopleSection, { type InviteSuggestion } from '../../components/post/InvitePeopleSection';
 import PeoplePickerSheet, { type PickedPerson } from '../../components/post/PeoplePickerSheet';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -151,55 +152,26 @@ export default function PlanComposerV2() {
     return () => { active = false; };
   }, [composerUserId, composerViewer.epoch, composerViewer.isCurrent]);
 
-  // ── Core fields ──
-  const [title, setTitle] = useState('');
-  const [exploreEventId, setExploreEventId] = useState<string | null>(null);
-  const [category, setCategory] = useState<PlanCategory | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const {
+    title, setTitle, exploreEventId, setExploreEventId, category, setCategory,
+    imageUrl, setImageUrl, creatorMessage, setCreatorMessage, location, setLocation,
+    locationLat, setLocationLat, locationLng, setLocationLng, neighborhood, setNeighborhood,
+    dateMonth, setDateMonth, dateDay, setDateDay, dateYear, setDateYear,
+    dateSelected, setDateSelected, timeHour, setTimeHour, timeMinute, setTimeMinute,
+    timePeriod, setTimePeriod, timeSelected, setTimeSelected, endTimeHour, setEndTimeHour,
+    endTimeMinute, setEndTimeMinute, endTimePeriod, setEndTimePeriod, endTimeSelected, setEndTimeSelected,
+    groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges,
+    ticketUrl, setTicketUrl, dropIn, setDropIn, allowDuplicate, setAllowDuplicate,
+    description, setDescription, invited, setInvited,
+    resetFields: resetDraftFields,
+  } = usePlanComposerDraft();
   const [imageLoading, setImageLoading] = useState(false);
-  const [creatorMessage, setCreatorMessage] = useState('');
-
-  // ── Place ──
-  const [location, setLocation] = useState('');
-  const [locationLat, setLocationLat] = useState<number | null>(null);
-  const [locationLng, setLocationLng] = useState<number | null>(null);
-  const [neighborhood, setNeighborhood] = useState('');
-
-  // ── When ──
-  const today = getTodayInLA();
-  const [dateMonth, setDateMonth] = useState(today.m);
-  const [dateDay, setDateDay] = useState(today.d);
-  const [dateYear, setDateYear] = useState(today.y);
-  const [dateSelected, setDateSelected] = useState(false);
-  const [timeHour, setTimeHour] = useState(8);
-  const [timeMinute, setTimeMinute] = useState('00');
-  const [timePeriod, setTimePeriod] = useState<'AM' | 'PM'>('PM');
-  const [timeSelected, setTimeSelected] = useState(false);
-  // End time is optional (legacy parity). When set we compose end_time, rolling
-  // to the next day for an overnight plan; min 30 min after start.
-  const [endTimeHour, setEndTimeHour] = useState(9);
-  const [endTimeMinute, setEndTimeMinute] = useState('00');
-  const [endTimePeriod, setEndTimePeriod] = useState<'AM' | 'PM'>('PM');
-  const [endTimeSelected, setEndTimeSelected] = useState(false);
-
-  // ── How many + audience ──
-  const [groupSize, setGroupSize] = useState(6); // max_invites; UI shows groupSize+1 total
-  const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
-  const [ageRanges, setAgeRanges] = useState<AgeRange[]>([]);
-
-  // ── Link/tickets, joinability, + secondary optional fields (surfaced from the
-  //    retired "more options" collapsible) ──
-  const [ticketUrl, setTicketUrl] = useState('');
-  const [dropIn, setDropIn] = useState(true);
-  const [allowDuplicate, setAllowDuplicate] = useState(true);
-  const [description, setDescription] = useState('');
   const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
 
   // ── Invite people (flag-on path) ──
   const { data: wantInSignals = [] } = useInviteInterestSignals(composerUserId);
   const { dismiss: dismissSuggestion, undo: undoDismissSuggestion } = useDismissSuggestion(composerUserId);
   const postInvitations = usePostPlanInvitations(composerViewer);
-  const [invited, setInvited] = useState<InviteChip[]>([]);
   const [inviteShowAll, setInviteShowAll] = useState(false);
   const [peoplePickerOpen, setPeoplePickerOpen] = useState(false);
   const [hiddenWantIn, setHiddenWantIn] = useState<Set<string>>(new Set());
@@ -618,18 +590,7 @@ export default function PlanComposerV2() {
     <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.fieldError}>{fieldErrors[field]}</Text>
   ) : null;
 
-  const resetFields = () => {
-    setValidationMode(null);
-    setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
-    setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
-    setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
-    setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
-    setAllowDuplicate(true); setInvited([]);
-    setEndTimeSelected(false);
-    setDateMonth(today.m); setDateDay(today.d); setDateYear(today.y);
-    setTimeHour(8); setTimeMinute('00'); setTimePeriod('PM');
-    setEndTimeHour(9); setEndTimeMinute('00'); setEndTimePeriod('PM');
-  };
+  const resetFields = () => { setValidationMode(null); resetDraftFields(); };
   const resetForm = () => {
     resetFields();
     // Clear every prefill/duplicate param after a successful post. Otherwise a
