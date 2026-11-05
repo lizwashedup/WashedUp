@@ -51,11 +51,13 @@ export default function CircleCard({
   // Identity ladder: manual cover > living mosaic > monogram. The detail fetch
   // only runs for circles WITHOUT a manual cover (useCircle disables on null).
   const manualCoverUrl = buildCircleCoverUrl(circle.id, circle.cover_upload_id);
-  const { data: detail } = useCircle(manualCoverUrl ? null : circle.id);
+  const { data: detail, viewerId, viewerEpoch, isCurrentViewer } = useCircle(manualCoverUrl ? null : circle.id);
   const recentPaths = (detail?.recent_together ?? [])
     .slice(0, 4)
     .map((p) => p.media_path);
-  const { data: signed = {} } = useSignedAlbumUrls(recentPaths);
+  const { data: signed = {} } = useSignedAlbumUrls(recentPaths, viewerId ? {
+    userId: viewerId, epoch: viewerEpoch, isCurrent: isCurrentViewer,
+  } : undefined);
   const mosaicUris = recentPaths
     .map((p) => signed[p])
     .filter((u): u is string => !!u);

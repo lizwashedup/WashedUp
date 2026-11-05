@@ -43,8 +43,13 @@ it('a replacement manual photo and a different circle are not poisoned by old im
 it('uses only the newest signed shared photo when there is no manual cover and never treats a storage path as a URL', () => {
   const data = payload(); data.circle.cover_upload_id = null;
   const f = mount(board({ payload: data })); expect(f.photos()[0].props.source.uri).toBe(mockSigned['private/newest.jpg']);
-  expect(mockSignedHook).toHaveBeenCalledWith(['private/newest.jpg']);
+  expect(mockSignedHook).toHaveBeenCalledWith(['private/newest.jpg'], undefined);
   mockSigned = {}; f.update(board({ payload: data })); expect(f.photos().every(n => !n.props.source.uri.startsWith('private/'))).toBe(true);
+});
+it('passes the confirmed account generation to private photo signing', () => {
+  const scope = { userId: 'alice', epoch: 8, isCurrent: () => true };
+  mount(board({ plansScope: scope }));
+  expect(mockSignedHook).toHaveBeenCalledWith(['private/newest.jpg'], scope);
 });
 it('keeps plan title, date, place and two separate capacity facts readable and leaves routes unchanged', () => {
   const title = 'A long plan title that remains completely readable on a small phone', place = 'A deliberately long meeting place near the Santa Monica entrance';
