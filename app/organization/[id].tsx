@@ -55,9 +55,20 @@ import {
   type FollowTarget,
 } from '../../lib/organizerFollows';
 import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 
 const AVATAR_SIZE = 88;
 const ROW_THUMB_SIZE = 56;
+
+function PageReadRecovery({ retry, pending }: { retry: () => void; pending: boolean }) {
+  return <View>
+    <Text style={styles.emptyText} accessibilityRole="alert">Couldn't load the latest details.</Text>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry organization page"
+      accessibilityState={{ disabled: pending }} disabled={pending} onPress={retry} style={styles.goBackBtn}>
+      <Text style={styles.goBackText} numberOfLines={1} adjustsFontSizeToFit>{pending ? 'checking' : 'try again'}</Text>
+    </TouchableOpacity>
+  </View>;
+}
 
 function EventRow({ event }: { event: OrganizationPageEvent }) {
   const price = normalizeTicketPrice(event.ticket_price);
@@ -106,11 +117,12 @@ function LegacyOrganizationProfileScreen() {
   const queryClient = useQueryClient();
   const { data: userId = null } = useAuthUserId();
 
-  const { data: page, isLoading } = useQuery({
+  const { data: page, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['organization-page', id],
-    queryFn: () => getOrganizationPage(id!),
+    queryFn: () => requestWithDeadline(getOrganizationPage(id!), 12_000),
     enabled: !!id,
     staleTime: 30_000,
+    retry: false,
   });
 
   const followTarget: FollowTarget | null = id ? { kind: 'organizer', id } : null;
@@ -177,11 +189,13 @@ function LegacyOrganizationProfileScreen() {
           <ProfileButton compact/>
         </View>
         <View style={styles.centered}>
+          {isError ? <PageReadRecovery retry={() => { void refetch(); }} pending={isFetching} /> : <>
           {/* LIZ COPY (voice match: "this event is not around anymore.") */}
           <Text style={styles.emptyText}>this page isn't around.</Text>
           <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
             <Text style={styles.goBackText}>go back</Text>
           </TouchableOpacity>
+          </>}
         </View>
       </SafeAreaView>
     );
@@ -202,6 +216,7 @@ function LegacyOrganizationProfileScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {isError && <PageReadRecovery retry={() => { void refetch(); }} pending={isFetching} />}
         {profile.logo_url ? (
           <Image source={{ uri: profile.logo_url }} style={styles.avatar} contentFit="cover" />
         ) : (

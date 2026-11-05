@@ -53,6 +53,9 @@ export interface OrganizerProfile {
 
 const COLUMNS = 'user_id, display_name, logo_url, bio, link_url';
 
+const isMissingPublicSchema = (code?: string) =>
+  code === '42P01' || code === 'PGRST205' || code === '42703' || code === 'PGRST204';
+
 /**
  * The city column lives on its own isolated select/update, same technique
  * as lib/creatorMode.ts's getCommunityDiscoverable/getJoinPolicy: a 42703
@@ -243,10 +246,14 @@ export async function getOrganizationPage(organizerId: string): Promise<Organiza
     .select(COLUMNS)
     .eq('user_id', organizerId)
     .maybeSingle();
-  if (error || !row) return null;
+  if (error) {
+    if (isMissingPublicSchema(error.code)) return null;
+    throw error;
+  }
+  if (!row) return null;
 
   const today = laTodayIsoDate();
-  const [{ data: upcoming }, { data: past }, city, supportEmail] = await Promise.all([
+  const [upcoming, past, city, supportEmail] = await Promise.all([
     supabase
       .from('explore_events')
       .select(ORG_EVENT_COLUMNS)
@@ -269,9 +276,15 @@ export async function getOrganizationPage(organizerId: string): Promise<Organiza
     getOrganizerSupportEmail(organizerId),
   ]);
 
+  // Preserve pre-apply dormancy, but never report a failed network read as an
+  // empty events list. React Query can retain the last confirmed page on error.
+  for (const result of [upcoming, past]) {
+    if (result.error && !isMissingPublicSchema(result.error.code)) throw result.error;
+  }
+
   return {
     profile: { ...(row as OrganizerProfile), city, support_email: supportEmail },
-    upcomingEvents: (upcoming ?? []) as OrganizationPageEvent[],
-    pastEvents: (past ?? []) as OrganizationPageEvent[],
+    upcomingEvents: (upcoming.data ?? []) as OrganizationPageEvent[],
+    pastEvents: (past.data ?? []) as OrganizationPageEvent[],
   };
 }

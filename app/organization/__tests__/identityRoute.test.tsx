@@ -15,7 +15,7 @@ import Route from '../[id]';
 import PublicOrganizationPageScreen from '../../../components/creator/pages/PublicOrganizationPageScreen';
 import {Redirect} from 'expo-router';
 let tree:ReactTestRenderer;
-beforeEach(()=>{jest.clearAllMocks();mockFlag=true;mockParams={id:'page',identity:'page'};mockQuery.mockReturnValue({isLoading:true});});
+beforeEach(()=>{jest.clearAllMocks();mockLegacyRead.mockResolvedValue(null);mockFlag=true;mockParams={id:'page',identity:'page'};mockQuery.mockReturnValue({isLoading:true});});
 afterEach(()=>act(()=>tree?.unmount()));
 it('routes an explicit new page identity without calling legacy profile/follow hooks',()=>{act(()=>{tree=create(<Route/>);});expect(tree.root.findByType(PublicOrganizationPageScreen).props.pageId).toBe('page');expect(mockQuery).not.toHaveBeenCalled();});
 it('retains existing organization account addresses and their query identity',async()=>{mockParams={id:'legacy-account'};act(()=>{tree=create(<Route/>);});expect(tree.root.findAllByType(PublicOrganizationPageScreen)).toHaveLength(0);const query=mockQuery.mock.calls[0][0];expect(query.queryKey).toEqual(['organization-page','legacy-account']);await query.queryFn();expect(mockLegacyRead).toHaveBeenCalledWith('legacy-account');});
