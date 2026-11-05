@@ -102,3 +102,25 @@ it('keeps the focused comment in view as the keyboard resizes the body, without 
  act(()=>tree.root.findByType(ScrollView).props.onLayout());expect(scroll).not.toHaveBeenCalled();
  expect(mockRpc).toHaveBeenCalledWith('upsert_plan_feedback',expect.objectContaining({p_rating:'thumbs_down',p_comment:'Keep my comment'}));expect(words()).toContain('Did these people attend?');
 });
+
+it.each([null, undefined, 'unknown_receipt', { outcome: 'requested' }, ['requested'], ['now_connected']])('does not confirm a keep-in-touch result from malformed receipt %p', async data => {
+ mockRpc.mockImplementation(name=>Promise.resolve({data:name==='add_or_accept_person'?data:null,error:null}));
+ mount();attendance();press('Skip attendance');press('Add them');await flush();
+ expect(words()).toContain("Couldn't add everyone just now.");
+ expect(words()).not.toContain("Request sent. They'll see it.");
+ expect(words()).not.toContain('You both said yes.');
+ expect(mockComplete).not.toHaveBeenCalled();
+ expect(mockRpc.mock.calls.filter(([name])=>name==='add_or_accept_person')).toHaveLength(3);
+});
+it('preserves confirmed requests while disclosing an unconfirmed person in the same submission', async()=>{
+ mockRpc.mockImplementation((name,args)=>Promise.resolve({data:name==='add_or_accept_person'?(args.p_target==='alex'?'requested':null):null,error:null}));
+ mount();attendance();press('Skip attendance');press('Add them');await flush();
+ expect(words()).toContain("Request sent. They'll see it.");
+ expect(words()).toContain("Couldn't add everyone just now.");
+});
+it('keeps the confirmed already-connected receipt as a quiet completion', async()=>{
+ mockRpc.mockImplementation(name=>Promise.resolve({data:name==='add_or_accept_person'?'already_connected':null,error:null}));
+ mount();attendance();press('Skip attendance');press('Add them');await flush();
+ expect(mockComplete).toHaveBeenCalledTimes(1);
+ expect(words()).not.toContain("Couldn't add everyone just now.");
+});
