@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { View, Modal, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Modal, Pressable, StyleSheet, ScrollView, useWindowDimensions } from 'react-native';
 import { X } from 'lucide-react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ScaledText as Text } from '../../ScaledText';
@@ -29,6 +29,7 @@ const fresh = (owner: Owner): Visit => ({ owner, resolved: new Set(), operations
  * A fulfilled existing void RPC is the confirmation; opening, tapping, or a
  * disappearing query row alone never confirms acceptance or soft decline. */
 export default function RequestStack({ visible, onClose, userId, requests, highlightRequesterId, appearance }: RequestStackProps) {
+  const { fontScale } = useWindowDimensions();
   const { accept, decline } = usePeopleConnectionMutations(userId);
   const revisionRef = useRef(0);
   const [revision, setRevision] = useState(0);
@@ -134,19 +135,22 @@ export default function RequestStack({ visible, onClose, userId, requests, highl
     });
   };
   const s = useMemo(() => appearance ? { ...styles, ...requestAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  const scrollingTitle = fontScale > 1.3 && (!!blockFor || pending.length > 0);
+  const title = <Text style={s.title} accessibilityRole="header">{appearance ? 'Connection requests' : COPY.requestListTitle}</Text>;
   if (!visible) return null;
   return (
     <Modal visible animationType="slide" statusBarTranslucent onRequestClose={close} onAccessibilityEscape={close}>
       <SafeAreaProvider>
         <SafeAreaView key={`${userId}:${revision}`} style={s.container} edges={['top', 'bottom']}>
           <View style={s.header}>
-            <Text style={s.title} accessibilityRole="header">{appearance ? 'Connection requests' : COPY.requestListTitle}</Text>
+            {scrollingTitle ? <View style={{ flex: 1 }} /> : title}
             <Pressable style={s.close} onPress={close} accessibilityRole="button" accessibilityLabel="Close requests">
               <X size={24} color={appearance ? AfterglowColors.ink : Colors.asphalt} />
             </Pressable>
           </View>
           {blockFor ? (
             <ScrollView contentContainerStyle={s.blockWrap} keyboardShouldPersistTaps="handled">
+              {scrollingTitle && <View style={styles.scrollingTitle}>{title}</View>}
               <BlockPrompt key={requestKey(blockFor)} name={blockFor.first_name_display ?? 'them'}
                 onBlock={() => { void perform(blockFor, 'block'); }} onKeep={() => dismissBlock(blockFor)}
                 pending={state.operations[requestKey(blockFor)]?.phase === 'pending'}
@@ -154,6 +158,7 @@ export default function RequestStack({ visible, onClose, userId, requests, highl
             </ScrollView>
           ) : pending.length ? (
             <ScrollView contentContainerStyle={s.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {scrollingTitle && <View style={styles.scrollingTitle}>{title}</View>}
               {pending.map(req => {
                 const operation = state.operations[requestKey(req)];
                 const unavailable = operation?.phase === 'error' && !requests.some(row => requestKey(row) === requestKey(req));
@@ -187,6 +192,7 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.displaySM,
     color: Colors.asphalt,
   },
+  scrollingTitle: { marginHorizontal: 20, marginBottom: 16 },
   close: { padding: 8 },
   list: { paddingTop: 4, paddingBottom: 32 },
   blockWrap: { flexGrow: 1, justifyContent: 'center' },
