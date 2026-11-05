@@ -453,7 +453,7 @@ export default function YoursScreen() {
             <ScaledText accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
               {requests.length ? 'Connection requests couldn’t refresh. Your saved requests are still here.' : 'Connection requests couldn’t load.'}
             </ScaledText>
-            <PageAction quiet compact title={requestsRead.isFetching || requestsRetry === scope ? 'Retrying requests…' : 'Retry requests'}
+            <PageAction quiet compact accessibilityLabel="Retry requests" title={requestsRead.isFetching || requestsRetry === scope ? 'Retrying…' : 'Retry'}
               disabled={requestsRead.isFetching || requestsRetry === scope} onPress={() => { void retryRequests(); }} />
           </ScrollView>}
           {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
