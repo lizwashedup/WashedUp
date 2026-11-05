@@ -7,6 +7,8 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { RequestDeadlineError } from '../lib/requestWithDeadline';
+import { readCircleRequest } from '../lib/circles/readCircleRequest';
 import type { CirclePlansScope } from './useCirclePlans';
 import { circleKeys } from '../lib/circles/keys';
 import { circleDisplay, type DisplayMember } from '../lib/circles/display';
@@ -24,14 +26,14 @@ export function useMyCircles(userId: string | null | undefined, scope?: CirclePl
       };
       requireCurrent();
       if (scope) {
-        const { data: auth, error: authError } = await supabase.auth.getUser();
+        const { data: auth, error: authError } = await readCircleRequest(supabase.auth.getUser());
         requireCurrent();
         if (authError) throw authError;
         if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
       }
       requireCurrent();
       const request = supabase.rpc('get_my_circles');
-      const { data, error } = await (scope ? request.abortSignal(signal) : request);
+      const { data, error } = await readCircleRequest(scope ? request.abortSignal(signal) : request);
       requireCurrent();
       if (error) throw error;
       const circles = (data ?? []) as MyCircle[];
@@ -47,7 +49,12 @@ export function useMyCircles(userId: string | null | undefined, scope?: CirclePl
         .select('circle_id, user_id, profiles_public!inner(first_name_display)')
         .in('circle_id', unnamed.map((c) => c.id))
         .eq('status', 'joined');
-      const { data: rows } = await (scope ? memberRequest.abortSignal(signal) : memberRequest);
+      const { data: rows } = await readCircleRequest(scope ? memberRequest.abortSignal(signal) : memberRequest).catch(error => {
+        // Names are optional enrichment; retain the confirmed directory if
+        // this lookup stalls, just as for its existing error-response fallback.
+        if (error instanceof RequestDeadlineError) return { data: null };
+        throw error;
+      });
       requireCurrent();
 
       const byCircle: Record<string, DisplayMember[]> = {};

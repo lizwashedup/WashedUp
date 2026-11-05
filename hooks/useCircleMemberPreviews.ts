@@ -10,6 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { readCircleRequest } from '../lib/circles/readCircleRequest';
 import type { CirclePlansScope } from './useCirclePlans';
 import type { MemberPreview } from '../lib/circles/types';
 
@@ -34,7 +35,7 @@ export function useCircleMemberPreviews(
       };
       requireCurrent();
       if (scope) {
-        const { data: auth, error: authError } = await supabase.auth.getUser();
+        const { data: auth, error: authError } = await readCircleRequest(supabase.auth.getUser());
         requireCurrent();
         if (authError) throw authError;
         if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
@@ -48,7 +49,7 @@ export function useCircleMemberPreviews(
         .in('circle_id', circleIds)
         .eq('status', 'joined')
         .order('joined_at');
-      const { data: rows, error } = await (scope ? request.abortSignal(signal) : request);
+      const { data: rows, error } = await readCircleRequest(scope ? request.abortSignal(signal) : request);
       requireCurrent();
       if (error) throw error;
 
