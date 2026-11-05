@@ -51,7 +51,7 @@ afterEach(() => cleanup.splice(0).forEach(close => close()));
 it('keeps identity loading distinct from an empty people list', () => {
   identity = { ...identity, viewerId: undefined, isLoading: true };
   const fixture = mount();
-  expect(grid).toHaveBeenLastCalledWith(undefined);
+  expect(grid).toHaveBeenLastCalledWith(undefined, expect.objectContaining({ userId: '', epoch: identity.epoch }));
   expect(fixture.tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
   expect(action(fixture.tree.root, 'Add 1 person')).toBeUndefined();
   expect(fixture.onConfirm).not.toHaveBeenCalled();

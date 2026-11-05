@@ -87,7 +87,7 @@ function ObservedPeoplePicker(props: Props) {
 
 function AccountPeoplePicker({ viewer, ...props }: Props & { viewer: ReturnType<typeof useObservedUser> }) {
   const userId = !viewer.error && !viewer.isLoading ? viewer.viewerId : undefined;
-  const query = useYoursGrid(userId);
+  const query = useYoursGrid(userId, { userId: userId ?? '', epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const [retrying, setRetrying] = useState(false);
   const retryRef = useRef(false);
   const mounted = useRef(false);
