@@ -11,6 +11,7 @@ jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esM
 jest.mock('@tanstack/react-query', () => ({ useQuery: ({ queryKey }: any) => ({ data: queryKey[0] === 'profile-photo' ? 'https://example.test/profile.jpg' : queryKey[0] === 'inbox-count' ? 3 : 'viewer', refetch: jest.fn() }) }));
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
+jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>({viewerId:'viewer',epoch:0,isLoading:false,error:null,isCurrent:()=>true})}));
 jest.mock('../../../lib/supabase', () => ({ supabase: {} }));
 jest.mock('../../InboxModal', () => () => null);
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: jest.requireActual('../../../constants/Typography').AfterglowFonts }) }));
