@@ -7,9 +7,10 @@
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, Modal, Pressable, SectionList, ActivityIndicator, StyleSheet,
+  View, Modal, Pressable, SectionList, ScrollView, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { ScaledText as Text } from '../ScaledText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, X } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../constants/Colors';
@@ -245,34 +246,34 @@ function PeoplePickerContents({
   };
 
   return (
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={styles.backdropTap} onPress={close} accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} accessibilityViewIsModal>
           <View style={styles.headerRow}>
-            <Text style={styles.title}>{COPY.peoplePickerTitle}</Text>
-            <Pressable onPress={close} style={appearance ? styles.close : undefined} hitSlop={12} accessibilityRole="button" accessibilityLabel={COPY.circlePlusCancel}>
+            <Text numberOfLines={1} style={styles.title}>{COPY.peoplePickerTitle}</Text>
+            <Pressable onPress={close} style={styles.close} hitSlop={12} accessibilityRole="button" accessibilityLabel={COPY.circlePlusCancel}>
               <X size={22} color={appearance ? AfterglowColors.muted : Colors.secondary} />
             </Pressable>
           </View>
 
           {loading ? (
-            <View style={styles.center}><ActivityIndicator color={appearance ? AfterglowColors.clay : Colors.terracotta} /></View>
+            <ScrollView style={styles.statusScroll} contentContainerStyle={styles.center}><ActivityIndicator color={appearance ? AfterglowColors.clay : Colors.terracotta} /></ScrollView>
           ) : error ? (
-            <View style={styles.center}>
+            <ScrollView style={styles.statusScroll} contentContainerStyle={styles.center}>
               <Text style={styles.emptyTitle} accessibilityRole="alert">Your people couldn’t load.</Text>
               <Pressable style={styles.retry} onPress={() => { if (mounted.current && !closed.current) onRetry(); }} accessibilityRole="button" accessibilityLabel="Retry loading your people">
-                <Text style={styles.retryText}>Try again</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.retryText}>Try again</Text>
               </Pressable>
-            </View>
+            </ScrollView>
           ) : pickable.length === 0 ? (
-            <View style={styles.center}>
+            <ScrollView style={styles.statusScroll} contentContainerStyle={styles.center}>
               <Text style={styles.emptyTitle}>{appearance && people.length === 0 ? 'Your people will appear here.' : COPY.peoplePickerEmptyTitle}</Text>
               <Text style={styles.emptySub}>{appearance && people.length === 0 ? 'Connect with someone in Yours, then invite them to a plan.' : COPY.peoplePickerEmptySub}</Text>
-            </View>
+            </ScrollView>
           ) : (
             <>
-              {showSearch && <PeopleSearchBar value={query} onChange={(value) => { if (mounted.current && !closed.current && latest.current.isCurrent()) setQuery(value); }} appearance={appearance} />}
               <SectionList
+                ListHeaderComponent={showSearch ? <PeopleSearchBar value={query} onChange={(value) => { if (mounted.current && !closed.current && latest.current.isCurrent()) setQuery(value); }} appearance={appearance} /> : null}
                 sections={sections}
                 keyExtractor={(p) => p.user_id}
                 renderItem={({ item }) => (
@@ -287,6 +288,7 @@ function PeoplePickerContents({
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
               />
             </>
           )}
@@ -301,11 +303,11 @@ function PeoplePickerContents({
               aria-disabled={selectedCount === 0}
               accessibilityLabel={appearance && selectedCount === 0 ? 'Add people' : COPY.peoplePickerConfirm(selectedCount)}
             >
-              <Text style={styles.ctaLabel} numberOfLines={1}>{appearance && selectedCount === 0 ? 'Add people' : COPY.peoplePickerConfirm(selectedCount)}</Text>
+              <Text style={styles.ctaLabel} numberOfLines={1} adjustsFontSizeToFit>{appearance && selectedCount === 0 ? 'Add people' : COPY.peoplePickerConfirm(selectedCount)}</Text>
             </Pressable>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
   );
 }
 
@@ -317,13 +319,14 @@ const baseStyles = StyleSheet.create({
   backdropTap: { flex: 1 },
   sheet: { backgroundColor: Colors.parchment, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 16, maxHeight: '80%' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
-  title: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displaySM, color: Colors.darkWarm },
-  center: { paddingVertical: 48, paddingHorizontal: 40, alignItems: 'center', justifyContent: 'center' },
+  title: { flex: 1, minWidth: 0, fontFamily: Fonts.displayBold, fontSize: FontSizes.displaySM, color: Colors.darkWarm },
+  statusScroll: { flexShrink: 1, minHeight: 0 },
+  center: { flexGrow: 1, paddingVertical: 48, paddingHorizontal: 40, alignItems: 'center', justifyContent: 'center' },
   retry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, marginTop: 12 },
   retryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   emptyTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, textAlign: 'center' },
   emptySub: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.secondary, textAlign: 'center', marginTop: 8 },
-  list: { flexGrow: 0 },
+  list: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   listContent: { paddingBottom: 12 },
   sectionLabel: {
     fontFamily: Fonts.sansMedium,
@@ -342,7 +345,7 @@ const baseStyles = StyleSheet.create({
   name: { flex: 1, fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm },
   check: { width: CHECK, height: CHECK, borderRadius: CHECK / 2, borderWidth: 1.5, borderColor: Colors.borderWarm, alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  cta: { backgroundColor: Colors.terracotta, borderRadius: 999, marginHorizontal: 20, marginTop: 8, paddingVertical: 15, alignItems: 'center' },
+  cta: { backgroundColor: Colors.terracotta, borderRadius: 999, marginHorizontal: 20, marginTop: 8, paddingVertical: 15, paddingHorizontal: 16, alignItems: 'center' },
   ctaDisabled: { opacity: 0.4 },
   ctaLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
 });
@@ -350,7 +353,7 @@ const baseStyles = StyleSheet.create({
 function afterglow(fonts: AfterglowFontFamilies) { return StyleSheet.create({
   sheet: { ...baseStyles.sheet, backgroundColor: AfterglowColors.paper, borderTopLeftRadius: 4, borderTopRightRadius: 4, paddingTop: 12 },
   headerRow: { ...baseStyles.headerRow, marginBottom: 4 },
-  title: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, flex: 1 },
+  title: { ...AfterglowType.contextTitle, fontFamily: fonts.semibold, color: AfterglowColors.ink, flex: 1, minWidth: 0 },
   emptyTitle: { ...baseStyles.emptyTitle, ...AfterglowType.title, fontFamily: fonts.semibold, color: AfterglowColors.ink },
   emptySub: { ...baseStyles.emptySub, ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
   retryText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.clay },
