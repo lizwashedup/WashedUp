@@ -16,10 +16,9 @@
  * All operations are best-effort: already_connected / cannot_re_request /
  * blocked from send_people_request are swallowed (the scan is a soft action).
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabase';
-
-const PENDING_KEY = 'pendingReferralCode';
+import { stashPendingReferral } from './pendingReferral';
+export { stashPendingReferral, consumePendingReferral } from './pendingReferral';
 
 /** Extract the <code> from a washedup.app/r/<code> or washedupapp://r/<code> URL. */
 export function parseReferralCode(url: string): string | null {
@@ -52,15 +51,6 @@ async function resolveAndSend(code: string): Promise<boolean> {
   return (await resolveAndConnect(code)) !== null;
 }
 
-/** Stash a referral code for consumePendingReferral() to run after sign-in. */
-export async function stashPendingReferral(code: string): Promise<void> {
-  try {
-    await AsyncStorage.setItem(PENDING_KEY, code);
-  } catch {
-    /* best-effort */
-  }
-}
-
 /**
  * Handle a freshly received referral URL. Returns true if it was a
  * referral link (so the caller can skip other URL handlers).
@@ -79,19 +69,4 @@ export async function handleReferralUrl(url: string): Promise<boolean> {
     /* best-effort */
   }
   return true;
-}
-
-/**
- * Consume a referral code captured while signed out. Safe to call on every
- * sign-in; it no-ops when there is nothing pending.
- */
-export async function consumePendingReferral(): Promise<void> {
-  try {
-    const code = await AsyncStorage.getItem(PENDING_KEY);
-    if (!code) return;
-    await AsyncStorage.removeItem(PENDING_KEY);
-    await resolveAndSend(code);
-  } catch {
-    /* best-effort */
-  }
 }
