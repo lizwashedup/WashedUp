@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { View, Text, Modal, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Modal, Pressable, StyleSheet, ScrollView, useWindowDimensions } from 'react-native';
 import { X } from 'lucide-react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { ScaledText as Text } from '../../ScaledText';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import RequestRow from './RequestRow';
@@ -28,6 +29,7 @@ const fresh = (owner: Owner): Visit => ({ owner, resolved: new Set(), operations
  * A fulfilled existing void RPC is the confirmation; opening, tapping, or a
  * disappearing query row alone never confirms acceptance or soft decline. */
 export default function RequestStack({ visible, onClose, userId, requests, highlightRequesterId, appearance }: RequestStackProps) {
+  const { height } = useWindowDimensions();
   const { accept, decline } = usePeopleConnectionMutations(userId);
   const revisionRef = useRef(0);
   const [revision, setRevision] = useState(0);
@@ -139,20 +141,22 @@ export default function RequestStack({ visible, onClose, userId, requests, highl
       <SafeAreaProvider>
         <SafeAreaView key={`${userId}:${revision}`} style={s.container} edges={['top', 'bottom']}>
           <View style={s.header}>
-            <Text style={s.title}>{appearance ? 'Connection requests' : COPY.requestListTitle}</Text>
+            <ScrollView style={{ flex: 1, maxHeight: height * 0.25 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+              <Text style={s.title} accessibilityRole="header">{appearance ? 'Connection requests' : COPY.requestListTitle}</Text>
+            </ScrollView>
             <Pressable style={s.close} onPress={close} accessibilityRole="button" accessibilityLabel="Close requests">
               <X size={24} color={appearance ? AfterglowColors.ink : Colors.asphalt} />
             </Pressable>
           </View>
           {blockFor ? (
-            <ScrollView contentContainerStyle={s.blockWrap} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.body} contentContainerStyle={s.blockWrap} keyboardShouldPersistTaps="handled">
               <BlockPrompt key={requestKey(blockFor)} name={blockFor.first_name_display ?? 'them'}
                 onBlock={() => { void perform(blockFor, 'block'); }} onKeep={() => dismissBlock(blockFor)}
                 pending={state.operations[requestKey(blockFor)]?.phase === 'pending'}
                 error={state.operations[requestKey(blockFor)]?.error} appearance={appearance} />
             </ScrollView>
           ) : pending.length ? (
-            <ScrollView contentContainerStyle={s.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.body} contentContainerStyle={s.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {pending.map(req => {
                 const operation = state.operations[requestKey(req)];
                 const unavailable = operation?.phase === 'error' && !requests.some(row => requestKey(row) === requestKey(req));
@@ -188,7 +192,8 @@ const styles = StyleSheet.create({
   },
   close: { padding: 8 },
   list: { paddingTop: 4, paddingBottom: 32 },
-  blockWrap: { flex: 1, justifyContent: 'center' },
+  body: { flex: 1, minHeight: 0 },
+  blockWrap: { flexGrow: 1, justifyContent: 'center' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: {
     fontFamily: Fonts.display,
@@ -201,7 +206,7 @@ const styles = StyleSheet.create({
 function requestAppearance(fonts: AfterglowFontFamilies) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: AfterglowColors.paper },
-    title: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink, flex: 1 },
+    title: { ...AfterglowType.identity, fontFamily: fonts.display, color: AfterglowColors.ink },
     close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
     header: { ...styles.header, gap: 10, paddingBottom: 20 },
     blockWrap: { flexGrow: 1, justifyContent: 'center', paddingVertical: 24 },

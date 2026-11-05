@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
@@ -11,6 +12,8 @@ export type BlockPromptProps = { name: string; onBlock: () => void; onKeep: () =
  * legacy timer pauses during a write or failure. The staged choice remains
  * available until explicitly dismissed; it is not a timed reading task. */
 export default function BlockPrompt({ name, onBlock, onKeep, pending = false, error, appearance }: BlockPromptProps) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
   const keep = useRef(onKeep); keep.current = onKeep;
   useEffect(() => {
     if (appearance || pending || error) return;
@@ -23,11 +26,11 @@ export default function BlockPrompt({ name, onBlock, onKeep, pending = false, er
       <Text style={s.title}>{COPY.blockPromptTitle(name)}</Text>
       {appearance && <Text style={s.body}>The request was declined. Blocking also prevents new connection requests from this person.</Text>}
       {(pending || error) && <Text style={s.feedback} accessibilityRole={error ? 'alert' : undefined} accessibilityLiveRegion="polite">{pending ? 'Blocking…' : error}</Text>}
-      <View style={s.row}>
-        <Pressable style={[s.block, pending && s.disabled]} onPress={onBlock} disabled={pending} accessibilityRole="button" accessibilityLabel={error ? `Try again to block ${name}` : `Block ${name}`} accessibilityState={{ disabled: pending, busy: pending }}>
+      <View style={[s.row, largeText && styles.stackedActions]}>
+        <Pressable style={[s.block, largeText && styles.stackedAction, pending && s.disabled]} onPress={onBlock} disabled={pending} accessibilityRole="button" accessibilityLabel={error ? `Try again to block ${name}` : `Block ${name}`} accessibilityState={{ disabled: pending, busy: pending }}>
           <Text numberOfLines={1} style={s.blockText}>{error ? 'Try again' : COPY.blockPromptBlock}</Text>
         </Pressable>
-        <Pressable style={[s.keep, pending && s.disabled]} onPress={onKeep} disabled={pending} accessibilityRole="button" accessibilityLabel={appearance ? "No thanks, skip blocking" : "Skip blocking"} accessibilityState={{ disabled: pending }}>
+        <Pressable style={[s.keep, largeText && styles.stackedAction, pending && s.disabled]} onPress={onKeep} disabled={pending} accessibilityRole="button" accessibilityLabel={appearance ? "No thanks, skip blocking" : "Skip blocking"} accessibilityState={{ disabled: pending }}>
           <Text numberOfLines={1} style={s.keepText}>{appearance ? 'No thanks' : COPY.blockPromptKeep}</Text>
         </Pressable>
       </View>
@@ -36,6 +39,8 @@ export default function BlockPrompt({ name, onBlock, onKeep, pending = false, er
 }
 
 const styles = StyleSheet.create({
+  stackedActions: { flexDirection: 'column', alignItems: 'stretch' },
+  stackedAction: { flex: 0, width: '100%' },
   body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
   feedback: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
   disabled: { opacity: 0.55 },
