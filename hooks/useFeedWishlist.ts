@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useObservedUser } from './useObservedUser';
 import { supabase } from '../lib/supabase';
 import { withDeadline } from '../lib/withTimeout';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { hapticError } from '../lib/haptics';
 
 type SaveCall = {
@@ -48,7 +49,7 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
   const mutation = useMutation({
     mutationFn: async (call: SaveCall) => {
       if (!call.isCurrent()) throw new Error('Obsolete save');
-      const { data: { user }, error } = await supabase.auth.getUser();
+      const { data: { user }, error } = await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!call.isCurrent() || user?.id !== call.account) throw new Error('Obsolete save');
       if (error) throw error;
       const result = !call.wantSaved
