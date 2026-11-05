@@ -83,3 +83,14 @@ it('late identity from a closed sheet cannot enrich its reopened visit',async()=
 });
 it('failed portrait falls back without losing the code',async()=>{const f=renderQR();await flush();act(()=>f.tree.root.findByType('Photo' as any).props.onError());expect(f.tree.root.findAllByType('Photo' as any)).toHaveLength(0);expect(f.codes()).toHaveLength(1);});
 it('an inactive parent scope stops code preparation',async()=>{renderQR({operationScope:{userId:'alice',isCurrent:()=>false}});await flush();expect(mockEnsure).not.toHaveBeenCalled();});
+
+it.each(['back', 'close', 'account', 'roundtrip', 'unmount'])('retires the past-plan reader after %s without reviving the old visit', change => {
+  const f = renderPaths(); act(() => f.button('Past plans').props.onPress());
+  const owner = f.tree.root.findByType('PlanHistory' as any).props.readScope;
+  expect(owner.userId).toBe('alice'); expect(owner.epoch).toBe(mockEpoch); expect(owner.isCurrent()).toBe(true);
+  if (change === 'back') { act(() => f.button('Back to add people').props.onPress()); act(() => f.button('Past plans').props.onPress()); }
+  if (change === 'close') { act(() => f.button('Close add people').props.onPress()); f.update({ visible: false }); f.update({ visible: true }); }
+  if (change === 'account' || change === 'roundtrip') { mockUser = 'bob'; mockEpoch++; if (change === 'roundtrip') { mockUser = 'alice'; mockEpoch++; } f.update(); }
+  if (change === 'unmount') f.unmount();
+  expect(owner.isCurrent()).toBe(false);
+});

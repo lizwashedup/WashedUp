@@ -8,13 +8,13 @@ import { usePlanHistoryBacklog } from '../../../hooks/usePlanHistoryBacklog';
 import type { PeopleConnectionScope } from '../../../hooks/usePeopleConnectionMutations';
 import { usePeoplePathVisit, type PeoplePathAppearance } from './usePeoplePathVisit';
 
-export type PlanHistoryBacklogProps = { userId: string; onPressPerson: (id: string) => void; appearance?: PeoplePathAppearance; operationScope?: PeopleConnectionScope };
+export type PlanHistoryBacklogProps = { userId: string; readScope: NonNullable<Parameters<typeof usePlanHistoryBacklog>[1]>; onPressPerson: (id: string) => void; appearance?: PeoplePathAppearance; operationScope?: PeopleConnectionScope };
 /** Existing completed-plan backlog with a local first-name substring filter.
  * It never performs remote name discovery or expands the received people. */
-export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, operationScope }: PlanHistoryBacklogProps) {
+export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, operationScope, readScope }: PlanHistoryBacklogProps) {
   const [input, setInput] = useState({ userId, value: '' });
   const q = input.userId === userId ? input.value : '', normalized = q.trim().toLowerCase();
-  const backlog = usePlanHistoryBacklog(userId);
+  const backlog = usePlanHistoryBacklog(userId, readScope);
   const visit = usePeoplePathVisit(userId, normalized, operationScope);
   const queryRef = useRef(normalized); queryRef.current = normalized;
   const list = (backlog.data ?? []).filter(p => (p.first_name_display ?? '').toLowerCase().includes(normalized));

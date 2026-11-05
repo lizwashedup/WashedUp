@@ -78,7 +78,7 @@ function PathsVisit({ onClose, userId, backlogCount, onPressPerson, appearance, 
         <Pressable accessibilityRole="button" accessibilityLabel="Close add people" onPress={close} style={styles.icon}><X size={24} color={colors.ink}/></Pressable>
       </View>
       <View style={styles.fullBody}>{status || (page.mode === 'plans' ?
-        <PlanHistoryBacklog userId={userId} onPressPerson={openPerson} appearance={appearance} operationScope={operationScope}/> : page.mode === 'handle' ?
+        <PlanHistoryBacklog readScope={{ ...operationScope, epoch: opening.epoch }} userId={userId} onPressPerson={openPerson} appearance={appearance} operationScope={operationScope}/> : page.mode === 'handle' ?
         <HandleLookupView userId={userId} onPressPerson={openPerson} appearance={appearance} operationScope={operationScope}/> :
         <QRShareView userId={userId} appearance={appearance} operationScope={operationScope}/>)}</View>
     </SafeAreaView>

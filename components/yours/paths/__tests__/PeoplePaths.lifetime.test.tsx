@@ -13,7 +13,7 @@ const mockRpc = jest.fn(), mockGetUser = jest.fn();
 let mockViewer: string | null = 'alice';
 const mockListeners = new Set<(event: string, session: { user: { id: string } } | null) => void>();
 jest.mock('../../../../lib/supabase', () => ({ supabase: {
-  rpc: (...args: unknown[]) => mockRpc(...args),
+  rpc: (...args: unknown[]) => { const request = Promise.resolve(mockRpc(...args)); return Object.assign(request, { abortSignal: () => request }); },
   auth: { getUser: () => mockGetUser(), onAuthStateChange: (fn: typeof mockListeners extends Set<infer T> ? T : never) => {
     mockListeners.add(fn); return { data: { subscription: { unsubscribe: () => mockListeners.delete(fn) } } };
   } },
@@ -27,11 +27,11 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 async function flush() { for (let i = 0; i < 4; i++) { await act(async () => { for (let j = 0; j < 8; j++) await Promise.resolve(); }); act(() => jest.advanceTimersByTime(0)); } }
 async function settle() { act(() => jest.advanceTimersByTime(300)); await flush(); }
 const writes = () => mockRpc.mock.calls.filter(([name]) => name === 'add_or_accept_person');
-function mount(kind: 'handle' | 'backlog') {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false, gcTime: Infinity } } });
-  let userId = 'alice', live = true, mounted = true; const open = jest.fn();
+function mount(kind: 'handle' | 'backlog', sharedClient?: QueryClient) {
+  const client = sharedClient ?? new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false, gcTime: Infinity } } });
+  let userId = 'alice', live = true, mounted = true, epoch = 0; const open = jest.fn();
   const scope = { userId, isCurrent: () => live };
-  const render = () => <QueryClientProvider client={client}>{kind === 'handle' ? <HandleLookupView userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} /> : <PlanHistoryBacklog userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} />}</QueryClientProvider>;
+  const render = () => { const openingEpoch = epoch; return <QueryClientProvider client={client}>{kind === 'handle' ? <HandleLookupView userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} /> : <PlanHistoryBacklog readScope={{ userId, epoch, isCurrent: () => live && mounted && epoch === openingEpoch }} userId={userId} onPressPerson={open} appearance={{ fonts: AfterglowFonts }} operationScope={scope} />}</QueryClientProvider>; };
   let tree!: ReturnType<typeof create>; act(() => { tree = create(render()); });
   const unmount = () => { if (mounted) act(() => tree.unmount()); mounted = false; }; cleanup.push(() => { unmount(); client.clear(); });
   const update = (id = userId) => { userId = id; scope.userId = id; act(() => tree.update(render())); };
@@ -42,7 +42,7 @@ function mount(kind: 'handle' | 'backlog') {
     text: () => tree.root.findAllByType(Text).flatMap(n => n.props.children).join(' '),
     tap: async (label: string) => { act(() => button(label).props.onPress()); await flush(); },
     retire: () => { live = false; },
-    auth: (id: string | null, changeProp = true) => { mockViewer = id; act(() => { for (const fn of mockListeners) fn(id ? 'SIGNED_IN' : 'SIGNED_OUT', id ? { user: { id } } : null); }); if (changeProp) update(id ?? ''); },
+    auth: (id: string | null, changeProp = true) => { mockViewer = id; epoch++; act(() => { for (const fn of mockListeners) fn(id ? 'SIGNED_IN' : 'SIGNED_OUT', id ? { user: { id } } : null); }); if (changeProp) update(id ?? ''); },
   };
 }
 beforeEach(() => { jest.useFakeTimers(); jest.clearAllMocks(); mockViewer = 'alice'; mockListeners.clear();
@@ -112,8 +112,8 @@ it.each([
   expect(writes()[0]).toEqual(writes()[1]);
 });
 it.each(['handle', 'backlog'] as const)('%s serializes rapid duplicate Add before pending paints', async kind => {
-  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise); const f = mount(kind); if (kind === 'handle') { f.type('bea'); await settle(); } else await flush();
-  const add = f.rows()[0].props.onAdd; act(() => { add(); add(); }); await flush(); expect(mockGetUser).toHaveBeenCalledTimes(1);
+  const auth = deferred<any>(); const f = mount(kind); if (kind === 'handle') { f.type('bea'); await settle(); } else await flush();
+  mockGetUser.mockClear().mockReturnValueOnce(auth.promise); const add = f.rows()[0].props.onAdd; act(() => { add(); add(); }); await flush(); expect(mockGetUser).toHaveBeenCalledTimes(1);
   await act(async () => auth.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush(); expect(writes()).toHaveLength(1);
 });
 it.each(['query', 'account', 'roundtrip', 'parent', 'unmount'])('retires a scoped handle Add before dispatch after %s change', async change => {
@@ -140,7 +140,7 @@ it('backlog differentiates read loading, failure/retry, no name match and no pas
   await act(async () => read.resolve({ data: null, error: new Error('offline') })); await flush(); expect(f.text()).toContain('Couldn’t load'); expect(f.text()).not.toContain('completed plans will appear');
   await f.tap('Try again to load people from your plans'); expect(f.rows()).toHaveLength(2); f.type('missing'); await flush(); expect(f.text()).toContain('No matches');
   await f.tap('Clear name search'); expect(f.rows()).toHaveLength(2);
-  act(() => { f.client.setQueryData(yoursKeys.backlog('alice'), []); }); await flush(); expect(f.text()).toContain('People from completed plans will appear');
+  act(() => { f.client.setQueriesData({ queryKey: yoursKeys.backlog('alice') }, []); }); await flush(); expect(f.text()).toContain('People from completed plans will appear');
 });
 it('backlog pending is not Requested; confirmed mutual outcome becomes Connected', async () => {
   const write = deferred<any>(), original = mockRpc.getMockImplementation()!; mockRpc.mockImplementation((name, args) => name === 'add_or_accept_person' ? write.promise : original(name, args));
@@ -152,8 +152,8 @@ it('backlog existing requested rows never dispatch an Add', async () => {
   expect(row.props.state).toBe('requested'); act(() => row.props.onAdd()); await flush(); expect(writes()).toHaveLength(0);
 });
 it('backlog eligibility changes during preflight cancel dispatch without false error on the confirmed row', async () => {
-  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise); const f = mount('backlog'); await flush(); await f.tap('Add Bea');
-  act(() => { f.client.setQueryData(yoursKeys.backlog('alice'), [backlogPerson('Bea', 'requested')]); }); await flush();
+  const auth = deferred<any>(); const f = mount('backlog'); await flush(); mockGetUser.mockReturnValueOnce(auth.promise); await f.tap('Add Bea');
+  act(() => { f.client.setQueriesData({ queryKey: yoursKeys.backlog('alice') }, [backlogPerson('Bea', 'requested')]); }); await flush();
   await act(async () => auth.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush(); expect(writes()).toHaveLength(0); expect(f.rows()[0].props.state).toBe('requested'); expect(f.rows()[0].props.isAdding).toBe(false);
 });
 it('backlog late result cannot replace another filtered person or new account state', async () => {
@@ -164,4 +164,43 @@ it('backlog late result cannot replace another filtered person or new account st
 });
 it('guarded profile tap opens exactly the displayed person', async () => {
   const f = mount('backlog'); await flush(); act(() => f.rows()[1].props.onPressPerson()); expect(f.open).toHaveBeenCalledWith('Zoe');
+});
+
+
+it('checks the account before reading private past-plan people', async () => {
+  mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'other-account' } }, error: null });
+  const f = mount('backlog'); await flush();
+  expect(mockRpc).not.toHaveBeenCalled(); expect(f.rows()).toHaveLength(0);
+  expect(f.text()).toContain('Couldn’t load people from your plans');
+});
+it('does not reuse past-plan choices when a new visit starts', async () => {
+  const first = mount('backlog'); await flush(); expect(first.rows()).toHaveLength(2);
+  first.unmount(); const pending = deferred<any>(); mockRpc.mockReturnValue(pending.promise);
+  const second = mount('backlog', first.client); await flush(); expect(second.rows()).toHaveLength(0);
+  pending.resolve({ data: [], error: null }); await flush(); expect(second.rows()).toHaveLength(0);
+});
+it('does not cache a delayed past-plan list after the page retires', async () => {
+  const pending = deferred<any>(); mockRpc.mockReturnValue(pending.promise);
+  const f = mount('backlog'); await flush(); f.retire();
+  pending.resolve({ data: [backlogPerson('Late private person')], error: null }); await flush();
+  expect(f.rows()).toHaveLength(0);
+  expect(f.client.getQueriesData({ queryKey: yoursKeys.backlog('alice') }).every(([, data]) => data === undefined)).toBe(true);
+});
+
+it('past-plan account preflight times out visibly, preserves the filter and retries only explicitly', async () => {
+  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise);
+  const f = mount('backlog'); f.type('zo'); await flush();
+  act(() => jest.advanceTimersByTime(12001)); await flush();
+  expect(f.text()).toContain('Couldn’t load'); expect(f.input().props.value).toBe('zo'); expect(mockRpc).not.toHaveBeenCalled();
+  auth.resolve({ data: { user: { id: 'alice' } }, error: null }); await flush(); expect(mockRpc).not.toHaveBeenCalled();
+  await f.tap('Try again to load people from your plans'); expect(f.rows().map(row => row.props.name)).toEqual(['Zoe']);
+});
+it.each(['parent', 'roundtrip', 'unmount'])('retires a past-plan account check before dispatch after %s', async change => {
+  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise);
+  const f = mount('backlog'); await flush();
+  if (change === 'parent') f.retire();
+  if (change === 'roundtrip') { f.auth('bob', false); f.auth('alice', false); }
+  if (change === 'unmount') f.unmount();
+  auth.resolve({ data: { user: { id: 'alice' } }, error: null }); await flush();
+  expect(mockRpc).not.toHaveBeenCalled();
 });
