@@ -156,6 +156,26 @@ it('exposes a labeled 44-point reply cancel that preserves the typed draft', asy
   expect(control('Cancel reply')).toBeUndefined(); expect(input().props.value).toBe('My draft');
 });
 
+it('advertises direct reply only while the conversation permits replies', async () => {
+  mockChat.messages = [message('reply')];
+  await mount();
+  const bubble = () => tree!.root.findAll(node =>
+    node.props.accessibilityActions?.some((action: { name: string }) => action.name === 'messageActions'))[0];
+  expect(bubble().props.accessibilityHint).toBe('Starts a reply to this message');
+  act(() => bubble().props.onPress());
+  expect(control('Cancel reply')).toBeDefined();
+  act(() => control('Cancel reply').props.onPress());
+
+  readOnly = { text: 'This chat is closed' };
+  await update();
+  expect(bubble().props.accessibilityHint).toBe('Shows message actions');
+  expect(bubble().props.onPress).toBeUndefined();
+  act(() => bubble().props.onAccessibilityAction({ nativeEvent: { actionName: 'messageActions' } }));
+  expect(tree!.root.findByType(MessageActionsMenu).props.menu?.preview).toBe('Original message');
+  expect(control('Cancel reply')).toBeUndefined();
+  expect(mockSend).not.toHaveBeenCalled();
+});
+
 it('exposes a labeled 44-point edit cancel with the existing clear behavior', async () => {
   mockChat.messages = [message('edit')]; await mount();
   const controls = messageControls('edit'); act(() => controls.onMessageLongPress(controls.message, true));

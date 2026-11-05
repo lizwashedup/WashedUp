@@ -179,7 +179,7 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
   // A plain text bubble can be a direct reply target. Media, locations, audio,
   // and links keep their existing tap action; long-press and swipe still expose
   // Reply for those message types.
-  const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;
+  const canTapToReply = !!onStartReply && message.message_type === 'user' && !message.image_url && !firstUrl;
   // Media owns its individual accessible controls (map, photo viewer, playback).
   // The wrapper retains the physical long-press without grouping those controls
   // into a second, non-functional screen-reader button.
