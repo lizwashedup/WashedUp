@@ -259,3 +259,57 @@ it('rechecks caller ownership after success callbacks before returning an async 
   await act(async () => { await expect(current.mutateAsync('amelia', { scope, onSuccess, onSettled })).rejects.toMatchObject({ name: 'ObsoleteDmOperationError' }); });
   expect(onSuccess).toHaveBeenCalledTimes(1); expect(onSettled).not.toHaveBeenCalled();
 });
+
+
+describe('bounded account reads', () => {
+  const tick = async (ms = 0) => { await act(async () => { await jest.advanceTimersByTimeAsync(ms); }); };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+  it.each(['recovery-session', 'verified-user', 'receipt-session'] as const)('recovers a stalled %s and ignores its late response', async stage => {
+    const gate = deferred<any>();
+    if (stage === 'recovery-session') mockGetSession.mockRejectedValueOnce(new Error('Initial read failed')).mockReturnValueOnce(gate.promise);
+    if (stage === 'verified-user') mockGetUser.mockReturnValueOnce(gate.promise);
+    if (stage === 'receipt-session') mockGetSession.mockResolvedValueOnce(session()).mockReturnValueOnce(gate.promise);
+    mount(); await tick();
+    const feedback = callbacks(); let outcome: any;
+    act(() => { void current.mutateAsync('amelia', feedback).then(value => { outcome = { value }; }, error => { outcome = { error }; }); });
+    await tick(); await tick(8000); await tick(1);
+    expect(outcome?.error?.name).toBe('RequestDeadlineError');
+    expect(current.isPending).toBe(false);
+    expect(feedback.onError).toHaveBeenCalledTimes(1); expect(feedback.onSuccess).not.toHaveBeenCalled();
+    expect(mockRpc).toHaveBeenCalledTimes(stage === 'receipt-session' ? 1 : 0); noEffects();
+    await act(async () => gate.resolve(stage === 'verified-user' ? account('bob') : session('bob'))); await tick(1);
+    expect(feedback.onSuccess).not.toHaveBeenCalled(); noEffects();
+    expect(mockRpc).toHaveBeenCalledTimes(stage === 'receipt-session' ? 1 : 0);
+    await act(async () => { expect(await current.mutateAsync('amelia')).toBe('dm-one'); });
+    expect(mockRpc).toHaveBeenCalledTimes(stage === 'receipt-session' ? 2 : 1);
+  });
+  it('retries a stalled initial session on the waiting explicit action and ignores the old identity', async () => {
+    const gate = deferred<ReturnType<typeof session>>(); mockGetSession.mockReturnValueOnce(gate.promise);
+    mount(); let outcome: any;
+    act(() => { void current.mutateAsync('amelia').then(value => { outcome = { value }; }, error => { outcome = { error }; }); });
+    await tick(); expect(mockRpc).not.toHaveBeenCalled();
+    await tick(8000); await tick(1);
+    expect(outcome).toEqual({ value: 'dm-one' }); expect(mockRpc).toHaveBeenCalledTimes(1);
+    await act(async () => gate.resolve(session('bob'))); await tick(1);
+    await act(async () => { expect(await current.mutateAsync('jamie')).toBe('dm-one'); });
+    expect(mockRpc).toHaveBeenLastCalledWith('get_or_create_dm', { p_other: 'jamie' });
+  });
+  it('suppresses timeout feedback after the caller visit retires', async () => {
+    mockGetUser.mockReturnValueOnce(new Promise(() => {})); mount(); await tick();
+    let live = true; const feedback = callbacks(); let outcome: any;
+    act(() => { void current.mutateAsync('amelia', { ...feedback, scope: { userId: 'alice', isCurrent: () => live } }).catch(error => { outcome = error; }); });
+    await tick(); live = false; await tick(8000); await tick(1);
+    expect(outcome?.name).toBe('ObsoleteDmOperationError'); noEffects(feedback); expect(mockRpc).not.toHaveBeenCalled();
+  });
+  it('does not apply the account-read deadline to the dispatched DM mutation', async () => {
+    const gate = deferred<ReturnType<typeof response>>(); mockRpc.mockReturnValueOnce(gate.promise);
+    mount(); await tick(); let outcome: any;
+    act(() => { void current.mutateAsync('amelia').then(value => { outcome = { value }; }, error => { outcome = { error }; }); });
+    await tick(); await tick(24000);
+    expect(outcome).toBeUndefined(); expect(current.isPending).toBe(true); expect(mockRpc).toHaveBeenCalledTimes(1);
+    await act(async () => gate.resolve(response())); await tick(1);
+    expect(outcome).toEqual({ value: 'dm-one' }); expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+});
