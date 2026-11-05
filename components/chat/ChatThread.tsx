@@ -2046,4 +2046,3 @@ function ChatThread(props: ChatThreadProps) {
 // add-people / plan state) does not re-render the whole chat. Paired with the
 // stabilized props passed by CircleChatScreenInner.
 export default memo(ChatThread);
-
