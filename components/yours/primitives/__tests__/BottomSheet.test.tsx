@@ -85,6 +85,16 @@ it('rotation interrupts an old dismissal completion and keeps the current sheet 
   const f = mount(); act(() => f.modal().props.onRequestClose()); const old = animations[1]; mockWindow = { ...mockWindow, height: 500 }; f.update();
   act(() => old.callback!({ finished: true })); expect(f.props.onClose).not.toHaveBeenCalled();
 });
+it('keeps the native popup but retires an old dismissal when its account visit changes', () => {
+  const f = mount({ visitKey: 'account-a' } as Partial<BottomSheetProps>), popup = f.modal();
+  act(() => popup.props.onRequestClose()); const old = animations[1];
+  f.update({ visitKey: 'account-b' } as Partial<BottomSheetProps>);
+  expect(f.modal()).toBe(popup);
+  act(() => old.callback!({ finished: true })); expect(f.props.onClose).not.toHaveBeenCalled();
+  act(() => f.modal().props.onRequestClose());
+  act(() => animations[animations.length - 1].callback!({ finished: true }));
+  expect(f.props.onClose).toHaveBeenCalledTimes(1);
+});
 it('adds a visible44px Close action and cream surface only with optional appearance', () => {
   const f = mount(); expect(f.button('Close')).toBeUndefined(); const original = f.sheetStyle().backgroundColor;
   f.update({ appearance: { fonts: AfterglowFallbackFonts } }); expect(f.sheetStyle().backgroundColor).toBe(AfterglowColors.paper); expect(original).not.toBe(AfterglowColors.paper);

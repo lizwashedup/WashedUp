@@ -8,6 +8,7 @@ import YoursAvatar from '../primitives/YoursAvatar';
 import { COPY } from '../state/constants';
 import { useProfileCard } from '../../../hooks/useProfileCard';
 import { useObservedUser, type ObservedUser } from '../../../hooks/useObservedUser';
+import { useActiveSheetClose, type RegisterSheetClose } from '../../../hooks/useActiveSheetClose';
 import { usePeopleConnectionMutations, friendlyConnectionError, isObsoletePeopleConnection } from '../../../hooks/usePeopleConnectionMutations';
 
 function fmtDate(iso: string | null): string {
@@ -31,9 +32,12 @@ export default function ProfileCardSheet(props: ProfileCardSheetProps) {
 function OpenProfileCardSheet(props: ProfileCardSheetProps) {
   const viewer = useObservedUser();
   const visitKey = useMemo(() => JSON.stringify([viewer.viewerId, viewer.epoch]), [viewer.viewerId, viewer.epoch]);
-  return <ProfileCardVisit key={visitKey} {...props} viewer={viewer} />;
+  const { registerClose, closeCurrent } = useActiveSheetClose(visitKey);
+  return <BottomSheet visible visitKey={visitKey} onClose={closeCurrent} heightPct={props.appearance?.fonts ? undefined : 0.8} appearance={props.appearance}>
+    <ProfileCardVisit key={visitKey} {...props} viewer={viewer} registerClose={registerClose} />
+  </BottomSheet>;
 }
-function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer }: ProfileCardSheetProps & { viewer: ObservedUser }) {
+function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer, registerClose }: ProfileCardSheetProps & { viewer: ObservedUser; registerClose: RegisterSheetClose }) {
   const fonts = appearance?.fonts;
   const styles = useMemo(() => fonts ? { ...baseStyles, ...profileAppearance(fonts) } : baseStyles, [fonts]);
   const mounted = useRef(false);
@@ -57,6 +61,7 @@ function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer }: Pro
     if (!mounted.current || retired.current) return;
     retired.current = true; latestClose.current();
   };
+  useLayoutEffect(() => registerClose(close));
   const add = async () => {
     const chosen = currentCard.current;
     if (!isCurrent() || pending.current || receipt || !targetId || !chosen || chosen.user_id !== targetId ||
@@ -95,7 +100,6 @@ function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer }: Pro
   const name = card?.first_name_display?.trim() || 'Someone';
 
   return (
-    <BottomSheet visible onClose={close} heightPct={fonts ? undefined : 0.8} appearance={appearance}>
       <ScrollView style={fonts ? styles.compactScroll : undefined} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         {checkingIdentity || profileLoading ? (
           <View style={styles.feedback} accessibilityLiveRegion="polite">
@@ -155,7 +159,6 @@ function ProfileCardVisit({ userId, targetId, onClose, appearance, viewer }: Pro
           </>
         )}
       </ScrollView>
-    </BottomSheet>
   );
 }
 function ProfilePhoto({ name, photoUrl, fonts }: { name: string; photoUrl: string | null; fonts: AfterglowFontFamilies }) {
