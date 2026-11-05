@@ -601,6 +601,12 @@ export async function getJoinAnswerCards(
       ]),
     );
   }
+  // A permission, timeout or connection failure is not an older schema.
+  // Falling through can turn unavailable answers into an empty RLS result,
+  // hiding the failure from the creator deciding a join request.
+  const missingProjection = error.code === 'PGRST202'
+    || error.code === '42883' && /function\s+(?:public\.)?get_join_answer_cards\s*\(/i.test(error.message ?? '');
+  if (!missingProjection) throw error;
   // pre-42 fallback: the leader RLS table read still works; same card shape.
   // open_question is always null here (no join to communities in this
   // fallback path) -- a real gap only for an admin hitting this branch on a

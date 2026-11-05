@@ -208,8 +208,11 @@ describe('getJoinAnswerCards', () => {
     });
   });
 
-  it('falls back to the raw table read and still shapes the new fields when the RPC errors', async () => {
-    rpcResult = { data: null, error: { message: 'rpc missing' } };
+  it.each([
+    { code: 'PGRST202', message: 'Could not find the function public.get_join_answer_cards in the schema cache' },
+    { code: '42883', message: 'function public.get_join_answer_cards(uuid) does not exist' },
+  ])('retains the older-schema fallback only when the projection is missing (%s)', async error => {
+    rpcResult = { data: null, error };
     communityMemberAnswersResult = {
       data: [
         {
@@ -235,5 +238,16 @@ describe('getJoinAnswerCards', () => {
     // no join to communities in this legacy fallback path -- the live
     // question text is only ever available through the RPC projection above
     expect(card.open_question).toBeNull();
+  });
+
+  it.each([
+    { code: '42501', message: 'permission denied' },
+    { code: '57014', message: 'statement timeout' },
+    { message: 'Network request failed' },
+    { code: '42883', message: 'function internal_helper(uuid) does not exist' },
+  ])('surfaces unavailable answers without reading raw answers (%s)', async error => {
+    rpcResult = { data: null, error };
+    await expect(getJoinAnswerCards('c1')).rejects.toBe(error);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
   });
 });

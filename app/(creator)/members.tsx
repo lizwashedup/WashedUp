@@ -4,8 +4,10 @@
  * enforced server-side by RLS; this screen is just the surface.
  */
 
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, RefreshControl, ActivityIndicator, Share } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, ScrollView, TouchableOpacity, TextInput, StyleSheet, RefreshControl, ActivityIndicator, Share } from 'react-native';
+import { ScaledText as Text } from '../../components/ScaledText';
+import { PageAction } from '../../components/creator/pages/PageFrame';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,6 +19,7 @@ import { CO_CREATOR_INVITES_ENABLED, MEMBER_INVITES_ENABLED, MEMBER_REMOVAL_REAS
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 import { MemberRemovalReasonModal } from '../../components/creator/MemberRemovalReasonModal';
 import { friendlyError } from '../../lib/friendlyError';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
@@ -48,28 +51,44 @@ export default function CreatorMembersScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const community = useLedCommunity(access);
 
-  const { data: members = [], isLoading, refetch, isRefetching } = useQuery({
+  const rosterQuery = useQuery({
     queryKey: ['creator-members', community?.id],
-    queryFn: () => getCommunityMembers(community!.id),
+    queryFn: () => requestWithDeadline(getCommunityMembers(community!.id), 12_000),
     enabled: !!community,
+    retry: false,
   });
+  const { data: members = [] } = rosterQuery;
   const [query, setQuery] = useState('');
 
-  const { data: removed = [] } = useQuery({
+  const removedQuery = useQuery({
     queryKey: ['creator-members-removed', community?.id],
-    queryFn: () => getRemovedCommunityMembers(community!.id),
+    queryFn: () => requestWithDeadline(getRemovedCommunityMembers(community!.id), 12_000),
     enabled: !!community,
+    retry: false,
   });
+  const { data: removed = [] } = removedQuery;
   const [showRemoved, setShowRemoved] = useState(false);
 
   // private join answers, leader-eyes-only by RLS (community_member_answers)
   // the proposal-42 bridge: the projection RPC once 42 lands, the leader
   // table read until then — one card shape either way, never email/raw zip
-  const { data: answersByMember } = useQuery({
+  const answersQuery = useQuery({
     queryKey: ['join-answer-cards', community?.id],
-    queryFn: () => getJoinAnswerCards(community!.id),
+    queryFn: () => requestWithDeadline(getJoinAnswerCards(community!.id), 12_000),
     enabled: !!community,
+    retry: false,
   });
+  const { data: answersByMember } = answersQuery;
+  const hasRoster = rosterQuery.data !== undefined;
+  const canChangeMembers = !!community && hasRoster && !rosterQuery.isError;
+  const canReviewRequests = canChangeMembers && answersQuery.data !== undefined && !answersQuery.isError;
+  const canRestoreMembers = !!community && removedQuery.data !== undefined && !removedQuery.isError;
+  const readState = useRef({ communityId: community?.id, members: canChangeMembers, answers: canReviewRequests, removed: canRestoreMembers });
+  readState.current = { communityId: community?.id, members: canChangeMembers, answers: canReviewRequests, removed: canRestoreMembers };
+  const mounted = useRef(true);
+  const actionLock = useRef<object | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const refreshAll = () => Promise.allSettled([rosterQuery.refetch(), removedQuery.refetch(), answersQuery.refetch()]);
 
   const pending = members.filter((m) => m.status === 'pending');
   const active = members.filter((m) => m.status === 'active');
@@ -77,17 +96,27 @@ export default function CreatorMembersScreen() {
   const visiblePending = q ? pending.filter((m) => (m.name ?? '').toLowerCase().includes(q)) : pending;
   const visibleActive = q ? active.filter((m) => (m.name ?? '').toLowerCase().includes(q)) : active;
 
-  const act = async (fn: () => Promise<void>, id: string) => {
+  const act = async (fn: () => Promise<void>, id: string, needs: 'members' | 'answers' | 'removed' = 'members') => {
+    if (!mounted.current || actionLock.current || readState.current.communityId !== community?.id) return;
+    // A confirmation can stay open while a refresh fails. Recheck the live
+    // read state at dispatch instead of trusting its earlier render.
+    if (!readState.current[needs]) {
+      setAlertInfo({ title: 'Refresh this list', message: 'Check the latest members and request answers before making changes.' });
+      return;
+    }
+    const attempt = {}; actionLock.current = attempt;
     setActingId(id);
     try {
       await fn();
-      hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['creator-members', community?.id] });
       queryClient.invalidateQueries({ queryKey: ['creator-members-removed', community?.id] });
+      queryClient.invalidateQueries({ queryKey: ['join-answer-cards', community?.id] });
+      if (mounted.current && readState.current.communityId === community?.id) hapticSuccess();
     } catch (e) {
-      setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
+      if (mounted.current && readState.current.communityId === community?.id) setAlertInfo({ title: 'That did not work', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
-      setActingId(null);
+      if (actionLock.current === attempt) actionLock.current = null;
+      if (mounted.current && readState.current.communityId === community?.id) setActingId(null);
     }
   };
 
@@ -102,7 +131,7 @@ export default function CreatorMembersScreen() {
       message: "They'll join the community chat right away and their introduction posts there.",
       buttons: [
         { text: 'Not yet', style: 'cancel' },
-        { text: 'Approve', onPress: () => act(() => reviewJoinRequest(m.id, true), m.id) },
+        { text: 'Approve', onPress: () => act(() => reviewJoinRequest(m.id, true), m.id, 'answers') },
       ],
     });
   };
@@ -115,7 +144,7 @@ export default function CreatorMembersScreen() {
       message: 'They get a kind note, and they cannot ask again for now.',
       buttons: [
         { text: 'Keep it pending', style: 'cancel' },
-        { text: 'Decline', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id) },
+        { text: 'Decline', onPress: () => act(() => reviewJoinRequest(m.id, false), m.id, 'answers') },
       ],
     });
   };
@@ -124,7 +153,7 @@ export default function CreatorMembersScreen() {
   // Messages, etc) instead of a download route that does not exist on
   // mobile. Active members only, same fields the roster already shows.
   const handleExport = async () => {
-    if (active.length === 0) return;
+    if (active.length === 0 || !canChangeMembers) return;
     hapticLight();
     try {
       await Share.share({ message: membersToCsv(members) });
@@ -166,7 +195,7 @@ export default function CreatorMembersScreen() {
       message: 'They get their access back, including the community chat.',
       buttons: [
         { text: 'Never mind', style: 'cancel' },
-        { text: 'Undo removal', onPress: () => act(() => restoreMember(m.id), m.id) },
+        { text: 'Undo removal', onPress: () => act(() => restoreMember(m.id), m.id, 'removed') },
       ],
     });
   };
@@ -178,17 +207,27 @@ export default function CreatorMembersScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      {isLoading ? (
+      {rosterQuery.isPending && !rosterQuery.isError ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.content}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
+          refreshControl={<RefreshControl refreshing={rosterQuery.isRefetching || removedQuery.isRefetching || answersQuery.isRefetching} onRefresh={refreshAll} tintColor={Colors.terracotta} />}
         >
 
           <Text style={styles.title}>Members</Text>
+          {rosterQuery.isError && <MemberReadError title="Members didn’t load"
+            message={hasRoster ? 'Showing previously loaded members. Refresh before making changes.' : 'Check your connection and try again to see members and join requests.'}
+            retryLabel="Retry members" busy={rosterQuery.isFetching} retry={() => void rosterQuery.refetch()} />}
+          {answersQuery.isError && <MemberReadError title="Request answers didn’t load"
+            message="Refresh the answers before approving or declining a request."
+            retryLabel="Retry request answers" busy={answersQuery.isFetching} retry={() => void answersQuery.refetch()} />}
+          {!answersQuery.isError && answersQuery.isPending && pending.length > 0 && <Text accessibilityRole="alert" style={styles.rowMeta}>Loading request answers…</Text>}
+          {removedQuery.isError && <MemberReadError title="Removed members didn’t load"
+            message={removedQuery.data ? 'Showing previously loaded removed members. Refresh before restoring access.' : 'Try again to check previously removed members.'}
+            retryLabel="Retry removed members" busy={removedQuery.isFetching} retry={() => void removedQuery.refetch()} />}
 
           {CO_CREATOR_INVITES_ENABLED && (
             <TouchableOpacity
@@ -281,6 +320,7 @@ export default function CreatorMembersScreen() {
                             hitSlop={8}
                             accessibilityRole="button"
                             accessibilityLabel={`Approve ${m.name ?? 'this request'}`}
+                            disabled={!canReviewRequests || !!actingId}
                           >
                             <Check size={18} color={Colors.white} strokeWidth={2.5} />
                           </TouchableOpacity>
@@ -290,6 +330,7 @@ export default function CreatorMembersScreen() {
                             hitSlop={8}
                             accessibilityRole="button"
                             accessibilityLabel={`Decline ${m.name ?? 'this request'}`}
+                            disabled={!canReviewRequests || !!actingId}
                           >
                             <X size={18} color={Colors.secondary} strokeWidth={2.5} />
                           </TouchableOpacity>
@@ -353,7 +394,7 @@ export default function CreatorMembersScreen() {
             </>
           )}
 
-          <View style={styles.sectionHeaderRow}>
+          {hasRoster && <View style={styles.sectionHeaderRow}>
             <Text style={[styles.sectionLabel, { marginTop: pending.length ? 20 : 0 }]}>
               in the community ({active.length})
             </Text>
@@ -364,12 +405,13 @@ export default function CreatorMembersScreen() {
                 style={{ marginTop: pending.length ? 20 : 0 }}
                 accessibilityRole="button"
                 accessibilityLabel="Export the member list"
+                disabled={!canChangeMembers}
               >
                 {/* LIZ COPY */}
                 <Text style={styles.exportLink}>export</Text>
               </TouchableOpacity>
             )}
-          </View>
+          </View>}
           {visibleActive.map((m) => (
             <View key={m.id} style={styles.row}>
               <TouchableOpacity
@@ -398,6 +440,7 @@ export default function CreatorMembersScreen() {
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${m.name ?? 'this member'}`}
+                  disabled={!canChangeMembers || !!actingId}
                 >
                   <Text style={styles.removeLink}>remove</Text>
                 </TouchableOpacity>
@@ -432,6 +475,7 @@ export default function CreatorMembersScreen() {
                       hitSlop={8}
                       accessibilityRole="button"
                       accessibilityLabel={`Undo removing ${m.name ?? 'this member'}`}
+                      disabled={!canRestoreMembers || !!actingId}
                     >
                       <Text style={styles.removeLink}>undo</Text>
                     </TouchableOpacity>
@@ -441,7 +485,7 @@ export default function CreatorMembersScreen() {
             </>
           )}
 
-          {active.length === 0 && pending.length === 0 && (
+          {canChangeMembers && active.length === 0 && pending.length === 0 && (
             <Text style={styles.empty}>share your page and the first faces show up here.</Text>
           )}
           {q.length > 0 && visiblePending.length === 0 && visibleActive.length === 0 && (pending.length > 0 || active.length > 0) && (
@@ -470,6 +514,16 @@ export default function CreatorMembersScreen() {
   );
 }
 
+function MemberReadError({ title, message, retryLabel, busy, retry }: {
+  title: string; message: string; retryLabel: string; busy: boolean; retry(): void;
+}) {
+  return <View style={styles.readError}>
+    <Text accessibilityRole="alert" style={styles.rowName}>{title}</Text>
+    <Text style={styles.rowMeta}>{message}</Text>
+    <PageAction quiet compact title="Try again" accessibilityLabel={retryLabel} disabled={busy} onPress={retry} />
+  </View>;
+}
+
 function MemberFace({ m }: { m: CommunityMemberRow }) {
   return m.photo_url ? (
     <Image source={{ uri: m.photo_url }} style={styles.face} contentFit="cover" />
@@ -481,6 +535,7 @@ function MemberFace({ m }: { m: CommunityMemberRow }) {
 }
 
 const styles = StyleSheet.create({
+  readError: { padding: 16, gap: 8, marginBottom: 16, backgroundColor: Colors.cardBg, borderWidth: 1, borderColor: Colors.border, borderRadius: 16 },
   container: { flex: 1, backgroundColor: Colors.parchment },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 20, gap: 10 },

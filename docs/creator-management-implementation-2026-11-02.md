@@ -588,3 +588,15 @@ The real creator simulator saved a changed name and short description in the exi
 Native QA also exposed misleading Basics copy claiming **not started** despite saved identity details. The local prompt now says **Add a cover photo and an introduction.** The editor's 13 tests and diff check passed, and the native overview showed the corrected prompt. The simulator returned to archived Discovery QA settings with Text Size 3/Capture Keyboard off and was released to other work.
 
 Complete scope, evidence and limits: [identity permission rollout](database/direct-apply-evidence-20261104-community-identity.md). The backend is live. **No OTA or native build was published.** The earlier unrelated verification gaps remain open.
+
+### November 5 creator member-list recovery — private candidate
+
+The legacy Members screen previously treated failed roster, removed-member and request-answer reads as empty results. A six-case baseline reproduced the misleading zero-member state, missing recovery, stale confirmation dispatch and incomplete pull-to-refresh. Members now shows an explicit retry for each failed read, keeps previously loaded rows with a warning, and pauses the affected membership actions until that read recovers. An already-open confirmation checks the current read state again before dispatch; simultaneous confirmed actions share a lock. Pull-to-refresh reloads all three sources. Each read has a 12-second deadline followed by explicit retry, and the screen uses the existing scalable text component.
+
+`getJoinAnswerCards` also previously attempted the raw-table fallback after any RPC error. Permission, connection and timeout errors now propagate to recovery; the older-schema fallback remains only for a missing projection. No admission RPC, role, age/gender rule or database permission changed.
+
+Verification: 67 tests across seven suites passed, including ten new member-screen checks and the expanded answer-service checks; TypeScript and diff checks passed. The first six screen cases failed before the repair. Event-ownership, creation-gate, event-library, management-layout and critical creator UX checks were included.
+
+Native acceptance is pending. An actual-root/router fixture with fictional services and blocked external traffic is prepared at `/Users/liz/Desktop/WashedUp/Implementation/creator-daily-workflow-20261105`; its earlier exported bundle predates this roster repair and must be refreshed before acceptance. The shared simulator remains reserved for the refactor task's pending invitation swipe check. This fixture is not production evidence. The current app only exposes Leave to active members, so the known pending-request withdrawal RPC gap remains separately recorded rather than being described as a working cancellation flow.
+
+No production changes, messages, invitations, native compile or OTA were made in this pass. The two local preview wiring files remain excluded from commits. Full creator daily-workflow, narrow/large-text native and physical-device acceptance remain open.
