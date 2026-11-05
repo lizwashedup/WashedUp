@@ -3,7 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Dimensions, TextInput, ScrollView } from 'react-native';
 const mockBack=jest.fn(),mockCreate=jest.fn(),mockSave=jest.fn();
 const mockAccess={ledCommunities:[{id:'community',name:'Sunday people',role:'leader',status:'draft'}],hasLeaderGrant:true,hasEventHostGrant:false};
-jest.mock('expo-router',()=>({Stack:{Screen:()=>null},router:{back:()=>mockBack()},useRouter:()=>({back:()=>mockBack()}),Redirect:()=>null}));
+jest.mock('expo-router',()=>({Stack:{Screen:()=>null},router:{back:()=>mockBack(),canGoBack:()=>true},useRouter:()=>({back:()=>mockBack()}),Redirect:()=>null}));
 jest.mock('../../../components/ProfileButton',()=>()=>require('react')['createElement']('ProfileDestination'));
 jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:{display:'Display',regular:'Regular',medium:'Medium',semibold:'Semibold'}})}));
 const mockJoiningScope={userId:'creator',isCurrent:()=>true};
@@ -13,6 +13,8 @@ jest.mock('../../../hooks/useCreatorAccessRead',()=>({useCreatorAccessRead:()=>(
 jest.mock('../../../lib/supabase',()=>({supabase:{rpc:async()=>({data:true,error:null})}}));
 jest.mock('../../../lib/haptics',()=>({hapticSuccess:jest.fn(),hapticError:jest.fn(),hapticLight:jest.fn()}));
 jest.mock('../../../lib/creatorMode',()=>({...jest.requireActual('../../../lib/creatorMode'),createCommunity:(...args:any[])=>mockCreate(...args),updateJoinGateSettings:(...args:any[])=>mockSave(...args)}));
+jest.mock('../../../lib/communityJoiningOptions',()=>({getCommunityJoiningOptions:async()=>({version:1})}));
+jest.mock('../../../lib/communityCreation',()=>({readCommunityCreationAttempt:async()=>null,createCommunityWithJoining:(...args:any[])=>mockCreate(...args)}));
 jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockAccess.ledCommunities[0],setSelectedCommunityId:jest.fn()}));
 jest.mock('../../../components/communities/JoinCommunityPopup',()=>({JoinCommunityPopup:()=>null}));
 jest.mock('../../../components/BrandedAlert',()=>({BrandedAlert:()=>null}));
@@ -24,12 +26,12 @@ import { ScaledText } from '../../../components/ScaledText';
 let tree:ReactTestRenderer;
 function scale(fontScale:number){act(()=>Dimensions.set({window:{width:390,height:844,scale:3,fontScale},screen:{width:390,height:844,scale:3,fontScale}}));}
 afterEach(()=>{act(()=>tree?.unmount());scale(1);jest.clearAllMocks();});
-it.each([[Setup,['Community name','City','Community purpose','Community handle']],[JoinGate,['Welcome message','Introduction question','Guidelines link']]] as const)('keeps the named inputs, values, scroll and Back while creator text resizes',async(Screen,labels)=>{
+it.each([[Setup,'Start a community',['Community name','City','What brings people together?','Community address']],[JoinGate,'Joining settings',['Welcome message','Introduction question','Guidelines link']]] as const)('keeps the named inputs, values, scroll and Back while creator text resizes',async(Screen,title,labels)=>{
  scale(1);await act(async()=>{tree=create(<Screen/>);});const inputs=tree.root.findAllByType(TextInput),scroll=tree.root.findByType(ScrollView);
  for(const label of labels)expect(inputs.some(input=>input.props.accessibilityLabel===label)).toBe(true);
- const input=inputs[0];act(()=>input.props.onChangeText('Retained draft'));expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('Retained draft');
+ const input=inputs[0];expect(input.props.editable).not.toBe(false);act(()=>input.props.onChangeText('Retained draft'));expect(tree.root.findAllByType(TextInput)[0].props.value).toBe('Retained draft');
  const profile=tree.root.findByType('ProfileDestination' as any);const back=tree.root.findAll(p=>p.props.accessibilityLabel==='Back'&&typeof p.props.onPress==='function')[0];
- expect(back).toBeDefined();expect(tree.root.findAllByType(ScaledText).length).toBeGreaterThan(5);
- for(const font of [1.35,1]){scale(font);expect(tree.root.findByType(ScrollView)).toBe(scroll);expect(tree.root.findAllByType(TextInput)[0]).toBe(input);expect(input.props.value).toBe('Retained draft');expect(tree.root.findByType('ProfileDestination' as any)).toBe(profile);}
+ expect(back).toBeDefined();expect(tree.root.findAllByType(ScaledText).some(text=>text.props.children===title)).toBe(true);
+ for(const font of [1.35,3.2,1]){scale(font);expect(tree.root.findByType(ScrollView)).toBe(scroll);expect(tree.root.findAllByType(TextInput)[0]).toBe(input);expect(input.props.value).toBe('Retained draft');expect(tree.root.findByType('ProfileDestination' as any)).toBe(profile);}
  act(()=>back.props.onPress());expect(mockBack).toHaveBeenCalledTimes(1);expect(mockCreate).not.toHaveBeenCalled();expect(mockSave).not.toHaveBeenCalled();
 });
