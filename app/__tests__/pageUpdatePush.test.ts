@@ -1,14 +1,9 @@
-import { communityJoinPushRoute } from '../../lib/communityJoinNotification';
-import { memberReactionPushRoute } from '../../lib/memberReactionPushRoute';
-import { communityChatPushRoute } from '../../lib/communityChatPushRoute';
-import { pageInvitationPushRoute } from '../../lib/pageInvitationNotification';
+import { notificationDestination } from '../../lib/notificationDestination';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 jest.mock('../../lib/supabase',()=>({supabase:{}}));
-import {attendeeMessagePushRoute} from '../../lib/attendeeMessageNotification';
-import {organizationPageUpdatePushRoute} from '../../lib/organizationPageUpdate';
 // Execute the actual root click-handler body with navigation captured. This
 // proves branch continuity, not SDK registration or cold-start/auth lifecycle.
 const source=fs.readFileSync(path.join(__dirname,'../_layout.tsx'),'utf8');
@@ -23,7 +18,7 @@ if(handlers.length!==1||!handlers[0].initializer)throw Error('Expected one root 
 // Branch tests exercise an active subscription. Full-root lifecycle tests cover
 // retirement; extract the declaration itself rather than a later local variable.
 const code=ts.transpileModule('const cancelled=false; const '+handlers[0].getText(parsed)+';\nglobalThis.handler=onClick;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-function click(data:any,enabled=true){const push=jest.fn();const context:any={safePush:push,communityJoinPushRoute,attendeeMessagePushRoute,organizationPageUpdatePushRoute,communityChatPushRoute,pageInvitationPushRoute,memberReactionPushRoute,CREATOR_PAGES_ENABLED:enabled,COMMUNITIES_ENABLED:true,YOURS_PAGE_ENABLED:true,COMMUNITY_CHAT_GROUPING_ENABLED:false};vm.runInNewContext(code,context);context.handler({notification:{additionalData:data}});return push;}
+function click(data:any,enabled=true){const push=jest.fn();const context:any={notificationDestination,safePush:push,CREATOR_PAGES_ENABLED:enabled,COMMUNITIES_ENABLED:true,YOURS_PAGE_ENABLED:true,COMMUNITY_CHAT_GROUPING_ENABLED:false};vm.runInNewContext(code,context);context.handler({notification:{additionalData:data}});return push;}
 const page='22222222-2222-4222-8222-222222222222',update='33333333-3333-4333-8333-333333333333';
 it('root click opens exact organization/update before an unrelated chat fallback',()=>{const push=click({type:'creator_page_update',creatorPageId:page,creatorPageBroadcastId:update,eventId:'wrong-chat'});expect(push).toHaveBeenCalledWith(`/organization/${page}?identity=page&update=${update}`);expect(push).toHaveBeenCalledTimes(1);});
 it('unknown or gated page targets recover to Scene',()=>{expect(click({type:'creator_page_update',eventId:'wrong-chat'})).toHaveBeenCalledWith('/(tabs)/explore');expect(click({type:'creator_page_update',creatorPageId:page,creatorPageBroadcastId:update},false)).toHaveBeenCalledWith('/(tabs)/explore');});

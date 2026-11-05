@@ -1,11 +1,6 @@
-import { communityJoinPushRoute } from '../lib/communityJoinNotification';
+import { notificationDestination } from '../lib/notificationDestination';
 import { subscribePlanNotificationPrompts, planNotificationPromptCopy, type PlanNotificationPromptRequest, type PlanNotificationPromptReason } from '../lib/planNotificationPrompt';
 import { subscribeExpoNotificationResponses } from '../lib/expoNotificationResponses';
-import { communityChatPushRoute } from '../lib/communityChatPushRoute';
-import { memberReactionPushRoute } from '../lib/memberReactionPushRoute';
-import { pageInvitationPushRoute } from '../lib/pageInvitationNotification';
-import { attendeeMessagePushRoute } from '../lib/attendeeMessageNotification';
-import { organizationPageUpdatePushRoute } from '../lib/organizationPageUpdate';
 import { LOCAL_DEVELOPMENT_ONLY } from '../constants/LocalDevelopment';
 import '../global.css';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -749,122 +744,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       // Removing a listener does not invalidate a callback already queued by the SDK.
       if (cancelled) return;
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
-      const type = data?.type as string | undefined;
-      if (type === 'operator_grant') { safePush('/creator/apply'); return; }
-      const joinRoute = communityJoinPushRoute(data, CREATOR_PAGES_ENABLED);
-      if (joinRoute) { safePush(joinRoute); return; }
-      const attendeeRoute = attendeeMessagePushRoute(data, COMMUNITIES_ENABLED);
-      if (attendeeRoute) { safePush(attendeeRoute); return; }
-      const invitationRoute = pageInvitationPushRoute(data, CREATOR_PAGES_ENABLED);
-      if (invitationRoute) { safePush(invitationRoute); return; }
-      const pageUpdateRoute = organizationPageUpdatePushRoute(data, CREATOR_PAGES_ENABLED);
-      if (pageUpdateRoute) { safePush(pageUpdateRoute); return; }
-      const communityRoute = communityChatPushRoute(data, COMMUNITIES_ENABLED);
-      if (communityRoute) { safePush(communityRoute); return; }
-      const memberReactionRoute = memberReactionPushRoute(data);
-      if (memberReactionRoute) { safePush(memberReactionRoute); return; }
-
-      // Album notifications: prompt/reminder/no-uploads-nudge open the upload
-      // flow; ready/someone-uploaded/more-photos-added/hearts-batched open the
-      // album detail view. eventId now lives in the same outer condition as
-      // every other type-specific branch below (waitlist/plan/etc.), not a
-      // nested check inside the branch body: previously a type match with no
-      // eventId (malformed payload, future shape change) fell into the `if`
-      // with nothing to push, which ended the whole if/else-if chain right
-      // there -- the tap did literally nothing, instead of falling through
-      // to the generic id-based fallback chain like every other type
-      // already does. Consistency fix so no notification type can silently
-      // no-op on tap.
-      if (
-        (type === 'album_upload_prompt' || type === 'album_upload_reminder' || type === 'album_creator_no_uploads_nudge') &&
-        data?.eventId
-      ) {
-        safePush(`/album/upload/${data.eventId}`);
-      } else if (
-        (type === 'album_ready' || type === 'album_someone_uploaded' || type === 'album_more_photos_added' || type === 'album_hearts_batched') &&
-        data?.eventId
-      ) {
-        safePush(`/album/${data.eventId}`);
-      } else if (
-        (type === 'waitlist_request' || type === 'exception_slot_refunded') &&
-        data?.eventId
-      ) {
-        // Creator-side waitlist-exception pushes open the manager screen
-        // (creator-only server-side; non-creators get the auth screen there).
-        safePush(`/waitlist/${data.eventId}`);
-      } else if (
-        (type === 'plan_invite' ||
-          type === 'plan_cancelled' ||
-          type === 'waitlist_spot' ||
-          type === 'duplicate_plan' ||
-          type === 'interest_signal' ||
-          type === 'interest_invite' ||
-          type === 'exception_invite') &&
-        data?.eventId
-      ) {
-        // Tag the URL when the push is the creator-side "someone signaled
-        // interest" notification, so the plan detail can surface the
-        // "Would go next time" section explicitly. Receiver may currently
-        // no-op on the param; it's a marker for future scroll/analytics.
-        const focusParam = type === 'interest_signal' ? '?focus=interest' : '';
-        safePush(`/plan/${data.eventId}${focusParam}`);
-      } else if (type === 'people_request') {
-        // An incoming add-request: route to People and OPEN the requests LIST
-        // (YoursScreen consumes ?openRequests=1). The notification is a pointer
-        // ONLY; it never accepts/declines/destroys anything. If the push payload
-        // carries the requester id, float that person to the top of the list;
-        // otherwise the full pending list (each row individually actionable)
-        // already makes wrong-target impossible.
-        const requester =
-          data?.actorUserId ?? data?.actor_user_id ?? data?.requesterId ?? null;
-        safePush(
-          requester
-            ? `/(tabs)/friends?openRequests=1&tab=people&requesterId=${requester}`
-            : '/(tabs)/friends?openRequests=1&tab=people',
-        );
-      } else if (
-        type === 'people_request_accepted' ||
-        type === 'referral_joined'
-      ) {
-        // Yours system: the request banner + swipe stack live on the
-        // Yours page. Single inbox routes people notifications there.
-        safePush('/(tabs)/friends?tab=people');
-      } else if (type === 'people_ping' && data?.eventId) {
-        // A ping IS the plan, open the plan detail, not the chat.
-        safePush(`/plan/${data.eventId}`);
-      } else if (type === 'community_join_request') {
-        // A join request is the leader's to answer: the wants-in list lives
-        // on the creator members tab. No flag guard: only grant-holders get
-        // this push, and the creator shell itself admits by grant, so a
-        // non-creator tapping a stale push still gets redirected out of the
-        // shell safely while the flag keeps the surface dark to the public.
-        safePush('/(tabs)/friends/manage/(tools)/members');
-      } else if (COMMUNITIES_ENABLED && type === 'community_event') {
-        // "just posted <event>" lands on Scene, where the event lives. The
-        // payload carries no event id by design (event_id is the plans FK).
-        safePush('/(tabs)/explore');
-        // Source-less join decisions retain the generic chats-list fallback.
-      } else if (data?.circleId) {
-        // Circle chat push (20260605000200_circle_message_push.sql +
-        // 20260827223000_claim_rpc_add_circle_topic_ids.sql):
-        // circle chat lives at a different route than plan chat, not the
-        // generic eventId fallback below.
-        safePush(`/(tabs)/chats/circle/${data.circleId}`);
-      } else if (data?.topicId) {
-        // Community room push (20260827220000_community_topic_message_push.sql
-        // + 20260827223000_claim_rpc_add_circle_topic_ids.sql). The database
-        // contract suite proves both migrations remain present and wired.
-        safePush(`/community-topic/${data.topicId}`);
-      } else if (data?.chatId) {
-        safePush(`/(tabs)/chats/${data.chatId}`);
-      } else if (data?.eventId) {
-        safePush(`/(tabs)/chats/${data.eventId}`);
-      } else {
-        // Final fallback for notification types that carry neither eventId
-        // nor chatId (e.g. broadcast, future admin pings). Drop the user on
-        // the chats list rather than no-op'ing the tap.
-        safePush('/(tabs)/chats');
-      }
+      safePush(notificationDestination(data, {
+        creatorPages: CREATOR_PAGES_ENABLED,
+        communities: COMMUNITIES_ENABLED,
+      }));
     };
 
     let attached: ((event: any) => void) | null = null;
@@ -902,8 +785,36 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
   // Handle auth callback deep link (password recovery)
   useEffect(() => {
+    let active = true;
+    let recoveryAttempt = 0;
+    let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let recoveryAlert: { title: string; message: string } | null = null;
+    const clearExpiryTimer = () => {
+      if (expiryTimer !== null) clearTimeout(expiryTimer);
+      expiryTimer = null;
+    };
     const parseSessionFromUrl = async (url: string) => {
-      if (!url || !url.includes('auth/callback')) return;
+      if (!active || !url || !url.includes('auth/callback')) return;
+      const attempt = ++recoveryAttempt;
+      const isCurrent = () => active && recoveryAttempt === attempt;
+      clearExpiryTimer();
+      if (recoveryAlert) {
+        const previous = recoveryAlert;
+        setLayoutAlert(current => current === previous ? null : current);
+        recoveryAlert = null;
+      }
+      const failRecovery = (title: string, message: string) => {
+        if (!isCurrent()) return;
+        isRecoveryRef.current = false;
+        setAuthResolved(true);
+        router.replace('/login');
+        expiryTimer = setTimeout(() => {
+          expiryTimer = null;
+          if (!isCurrent()) return;
+          recoveryAlert = { title, message };
+          setLayoutAlert(recoveryAlert);
+        }, 500);
+      };
 
       // Tokens may arrive in fragment (#) or query string (?) depending on email client
       const hashPart = url.split('#')[1] || '';
@@ -916,27 +827,24 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
       if (!accessToken || !refreshToken || type !== 'recovery') {
         // Link was tapped but tokens are missing (expired link or fragment stripped)
-        isRecoveryRef.current = false;
-        setAuthResolved(true);
-        router.replace('/login');
-        setTimeout(() => {
-          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired or is invalid. Please request a new one from the login screen.' });
-        }, 500);
+        failRecovery('Link expired', 'This password reset link has expired or is invalid. Please request a new one from the login screen.');
         return;
       }
 
       isRecoveryRef.current = true;
-      const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-      if (!error) {
-        setAuthResolved(true);
-        router.replace('/reset-password');
-      } else {
-        isRecoveryRef.current = false;
-        setAuthResolved(true);
-        router.replace('/login');
-        setTimeout(() => {
-          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired. Please request a new one from the login screen.' });
-        }, 500);
+      try {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        // The auth provider owns the dispatched session change. Only this
+        // effect's current attempt may present its completion or redirect.
+        if (!isCurrent()) return;
+        if (!error) {
+          setAuthResolved(true);
+          router.replace('/reset-password');
+        } else {
+          failRecovery('Link expired', 'This password reset link has expired. Please request a new one from the login screen.');
+        }
+      } catch {
+        failRecovery('Could not open link', 'Please check your connection and reopen your password reset link.');
       }
     };
 
@@ -954,11 +862,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
-    return subscribeAppLinks(Linking, url => {
-      parseSessionFromUrl(url);
+    const stopLinks = subscribeAppLinks(Linking, url => {
+      void parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
       captureDestination(url);
     }, error => logError(error, 'layout.getInitialURL'));
+    return () => {
+      active = false;
+      recoveryAttempt += 1;
+      clearExpiryTimer();
+      stopLinks();
+    };
   }, []);
 
   useEffect(() => {
@@ -1269,8 +1183,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           // Best-effort: consume a referral code captured while signed out
           // (QR/link scanned before auth). Fire-and-forget; fully self-
           // contained and error-swallowed so it cannot affect routing below.
-          if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN') {
-            consumePendingReferral();
+          if (YOURS_PAGE_ENABLED && event === 'SIGNED_IN' && userId) {
+            void consumePendingReferral({ userId, isCurrent });
           }
 
           // A ticket-transfer code stashed while signed out (item 15, draft,
