@@ -54,13 +54,13 @@ it('retires during the identity read before a code can be generated', async () =
 it.each([false, true])('discards a late %s-error receipt when the originating visit retires', async fail => {
   const gate = deferred<any>(), entry = scope(); mockRpc.mockReturnValueOnce(gate.promise);
   const result = mount().ensureReferralCode('alice', entry); const assertion = expect(result).rejects.toBeInstanceOf(ObsoleteReferralOperation);
-  await Promise.resolve(); expect(mockRpc).toHaveBeenCalledTimes(1); entry.live = false;
+  await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); }); expect(mockRpc).toHaveBeenCalledTimes(1); entry.live = false;
   gate.resolve({ data: fail ? null : 'JZJAAJU', error: fail ? new Error('network') : null }); await assertion;
 });
 it('retains the initiating epoch even if the same account returns', async () => {
   let epoch = 1; const capturedEpoch = epoch, gate = deferred<any>(); mockRpc.mockReturnValueOnce(gate.promise);
   const result = mount().ensureReferralCode('alice', { isCurrent: () => epoch === capturedEpoch });
-  const assertion = expect(result).rejects.toBeInstanceOf(ObsoleteReferralOperation); await Promise.resolve();
+  const assertion = expect(result).rejects.toBeInstanceOf(ObsoleteReferralOperation); await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
   epoch += 2; gate.resolve({ data: 'JZJAAJU', error: null }); await assertion;
 });
 it.each([null, undefined, '', ' ', 'bad/code', 'bad?query', 'A'.repeat(65), 123, { code: 'JZJAAJU' }])('rejects malformed successful RPC data: %p', async data => {
@@ -71,4 +71,27 @@ it('keeps current RPC failures retryable by the same caller', async () => {
   const error = new Error('network'), hook = mount(), entry = scope(); mockRpc.mockResolvedValueOnce({ data: null, error });
   await expect(hook.ensureReferralCode('alice', entry)).rejects.toBe(error);
   await expect(hook.ensureReferralCode('alice', entry)).resolves.toBe('JZJAAJU'); expect(mockRpc).toHaveBeenCalledTimes(2);
+});
+
+it('releases a stalled account check without generating a code, then permits an explicit retry', async () => {
+  jest.useFakeTimers();
+  try {
+    const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise);
+    const hook = mount(), entry = scope(); let outcome: unknown;
+    const pending = hook.ensureReferralCode('alice', entry).then(value => { outcome = value; }, error => { outcome = error; });
+    await jest.advanceTimersByTimeAsync(8001);
+    expect(outcome).toMatchObject({ name: 'RequestDeadlineError' }); expect(mockRpc).not.toHaveBeenCalled();
+    auth.resolve({ data: { user: { id: 'alice' } }, error: null }); await pending;
+    expect(mockRpc).not.toHaveBeenCalled();
+    await expect(hook.ensureReferralCode('alice', entry)).resolves.toBe('JZJAAJU'); expect(mockRpc).toHaveBeenCalledTimes(1);
+  } finally { jest.useRealTimers(); }
+});
+it('does not impose an auth deadline on an already-dispatched referral write', async () => {
+  jest.useFakeTimers();
+  try {
+    const write = deferred<any>(); mockRpc.mockReturnValueOnce(write.promise); let settled = false;
+    const pending = mount().ensureReferralCode('alice', scope()).finally(() => { settled = true; });
+    await jest.advanceTimersByTimeAsync(20000); expect(mockRpc).toHaveBeenCalledTimes(1); expect(settled).toBe(false);
+    write.resolve({ data: 'JZJAAJU', error: null }); await expect(pending).resolves.toBe('JZJAAJU');
+  } finally { jest.useRealTimers(); }
 });

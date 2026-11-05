@@ -4,14 +4,16 @@ import { act, create } from 'react-test-renderer';
 import PathsSheet, { type PathsSheetProps } from '../PathsSheet';
 import QRShareView from '../QRShareView';
 import { AfterglowFallbackFonts } from '../../../../constants/Typography';
+const mockReferralAuth = jest.fn(), mockReferralRpc = jest.fn();
+let mockRealReferral = false;
 const mockEnsure = jest.fn(), mockInvite = jest.fn(), mockProfile = jest.fn(), mockRetry = jest.fn();
 let mockUser: string | null = 'alice', mockEpoch = 0, mockLoading = false, mockError: Error | null = null;
 jest.mock('../../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
   const epoch = mockEpoch; return { viewerId: mockUser, epoch, isLoading: mockLoading, error: mockError, isCurrent: () => epoch === mockEpoch, retry: mockRetry };
 } }));
-jest.mock('../../../../hooks/useReferral', () => ({ useReferral: () => ({ ensureReferralCode: mockEnsure }) }));
+jest.mock('../../../../hooks/useReferral', () => ({ useReferral: () => mockRealReferral ? jest.requireActual('../../../../hooks/useReferral').useReferral() : ({ ensureReferralCode: mockEnsure }) }));
 jest.mock('../../../../lib/yours/invite', () => ({ ...jest.requireActual('../../../../lib/yours/invite'), openInviteComposer: (...args: unknown[]) => mockInvite(...args) }));
-jest.mock('../../../../lib/supabase', () => ({ supabase: { from: () => ({ select: () => ({ eq: (_key: string, id: string) => ({ maybeSingle: () => mockProfile(id) }) }) }) } }));
+jest.mock('../../../../lib/supabase', () => ({ supabase: { auth: { getUser: () => mockReferralAuth() }, rpc: (...args: unknown[]) => mockReferralRpc(...args), from: () => ({ select: () => ({ eq: (_key: string, id: string) => ({ maybeSingle: () => mockProfile(id) }) }) }) } }));
 jest.mock('../../primitives/BottomSheet', () => ({ __esModule: true, default: (p: any) => require('react').createElement('Sheet', p, p.children) }));
 jest.mock('../HandleLookupView', () => ({ __esModule: true, default: (p: any) => require('react').createElement('HandleLookup', p) }));
 jest.mock('../PlanHistoryBacklog', () => ({ __esModule: true, default: (p: any) => require('react').createElement('PlanHistory', p) }));
@@ -37,7 +39,7 @@ function renderQR(extra: any = {}) {
  codes:()=>tree.root.findAllByType('QRCode' as any),text:()=>tree.root.findAllByType(Text).flatMap(n=>n.props.children).join(' '),
  button:(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0] };
 }
-beforeEach(()=>{jest.clearAllMocks();mockUser='alice';mockEpoch=0;mockLoading=false;mockError=null;mockEnsure.mockResolvedValue('ALICE12');mockInvite.mockResolvedValue(undefined);mockProfile.mockResolvedValue({data:{first_name_display:'Alice',profile_photo_url:'https://example.invalid/alice.jpg'},error:null});});
+beforeEach(()=>{jest.clearAllMocks();mockRealReferral=false;mockReferralAuth.mockReset().mockResolvedValue({data:{user:{id:'alice'}},error:null});mockReferralRpc.mockReset().mockResolvedValue({data:'ALICE12',error:null});mockUser='alice';mockEpoch=0;mockLoading=false;mockError=null;mockEnsure.mockResolvedValue('ALICE12');mockInvite.mockResolvedValue(undefined);mockProfile.mockResolvedValue({data:{first_name_display:'Alice',profile_photo_url:'https://example.invalid/alice.jpg'},error:null});});
 afterEach(()=>cleanup.splice(0).forEach(fn=>fn()));
 it('does not mount hidden paths or generate referrals',()=>{const f=renderPaths({visible:false});expect(f.tree.toJSON()).toBeNull();expect(mockEnsure).not.toHaveBeenCalled();});
 it('hides a nested mode on parent close and reopens at the menu',()=>{const f=renderPaths();act(()=>f.button('Find by handle').props.onPress());expect(f.tree.root.findAllByType(Modal)).toHaveLength(1);f.update({visible:false});expect(f.tree.toJSON()).toBeNull();f.update({visible:true});expect(f.tree.root.findAllByType(Modal)).toHaveLength(0);expect(f.button('Past plans')).toBeDefined();});
@@ -93,4 +95,40 @@ it.each(['back', 'close', 'account', 'roundtrip', 'unmount'])('retires the past-
   if (change === 'account' || change === 'roundtrip') { mockUser = 'bob'; mockEpoch++; if (change === 'roundtrip') { mockUser = 'alice'; mockEpoch++; } f.update(); }
   if (change === 'unmount') f.unmount();
   expect(owner.isCurrent()).toBe(false);
+});
+
+it('a stalled real invite account check unlocks explicit retry without late sharing', async () => {
+  jest.useFakeTimers(); mockRealReferral = true;
+  try {
+    const auth = deferred<any>(); mockReferralAuth.mockReturnValueOnce(auth.promise);
+    const f = renderPaths(); act(() => f.button('Invite someone').props.onPress()); await flush();
+    expect(f.button('Invite someone').props.disabled).toBe(true);
+    await act(async () => { await jest.advanceTimersByTimeAsync(8001); });
+    expect(f.text()).toContain('Couldn’t open your invite'); expect(mockInvite).not.toHaveBeenCalled(); expect(mockReferralRpc).not.toHaveBeenCalled();
+    auth.resolve({data:{user:{id:'alice'}},error:null}); await flush(); expect(mockInvite).not.toHaveBeenCalled();
+    act(() => f.button('Try again').props.onPress()); await flush();
+    expect(mockInvite).toHaveBeenCalledTimes(1); expect(mockReferralRpc).toHaveBeenCalledTimes(1);
+  } finally { jest.useRealTimers(); }
+});
+it('a stalled real QR account check exposes retry and cannot create a stale code', async () => {
+  jest.useFakeTimers(); mockRealReferral = true;
+  try {
+    const auth = deferred<any>(); mockReferralAuth.mockReturnValueOnce(auth.promise);
+    const f = renderQR(); await flush(); expect(f.text()).toContain('Loading your code');
+    await act(async () => { await jest.advanceTimersByTimeAsync(8001); });
+    expect(f.text()).toContain('Couldn’t load your code'); expect(f.codes()).toHaveLength(0);
+    auth.resolve({data:{user:{id:'alice'}},error:null}); await flush(); expect(f.codes()).toHaveLength(0); expect(mockReferralRpc).not.toHaveBeenCalled();
+    act(() => f.button('Try again to load invite code').props.onPress()); await flush(); expect(f.codes()).toHaveLength(1);
+  } finally { jest.useRealTimers(); }
+});
+it('a timed-out real invitation cannot attach feedback to a reopened menu', async () => {
+  jest.useFakeTimers(); mockRealReferral = true;
+  try {
+    const auth = deferred<any>(); mockReferralAuth.mockReturnValueOnce(auth.promise);
+    const f = renderPaths(); act(() => f.button('Invite someone').props.onPress()); await flush();
+    f.update({visible:false});f.update({visible:true});
+    await act(async () => { await jest.advanceTimersByTimeAsync(8001); });
+    expect(f.text()).not.toContain('Couldn’t open your invite'); expect(f.button('Invite someone').props.disabled).toBe(false);
+    auth.resolve({data:{user:{id:'alice'}},error:null}); await flush(); expect(mockInvite).not.toHaveBeenCalled(); expect(mockReferralRpc).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
 });
