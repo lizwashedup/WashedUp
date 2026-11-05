@@ -50,7 +50,7 @@ beforeEach(() => {
   mockGetUser.mockImplementation(async () => ({ data: { user: { id: mockAccount } }, error: null }));
   mockWrite.mockResolvedValue({ error: null }); mockRead.mockResolvedValue({ data: [], error: null });
 });
-afterEach(() => { onlineManager.setOnline(true); cleanups.splice(0).forEach(fn => fn()); });
+afterEach(() => { onlineManager.setOnline(true); cleanups.splice(0).forEach(fn => fn()); jest.useRealTimers(); });
 
 it('announces only after a confirmed save and blocks repeated taps synchronously', async () => {
   const gate = deferred<{ error: null }>(); mockWrite.mockReturnValue(gate.promise);
@@ -185,4 +185,36 @@ it('a failed identity check exposes a retry and disables writing despite cached 
   expect(f.current.identityError).toBe(mockIdentityError);
   f.toggle(); await flush(); expect(mockWrite).not.toHaveBeenCalled();
   await f.current.retryIdentity(); expect(mockIdentityRetry).toHaveBeenCalledTimes(1);
+});
+
+
+it.each([false, true])('recovers a stalled account check for an original saved state of %s', async wasSaved => {
+  mockRead.mockResolvedValue({ data: wasSaved ? [{ event_id: 'plan-one' }] : [], error: null });
+  const f = await mount(wasSaved ? ['plan-one'] : []), auth = deferred<any>();
+  mockGetUser.mockReturnValueOnce(auth.promise); jest.useFakeTimers();
+  f.toggle(); await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+  expect(f.current.pending('plan-one')).toBe(true);
+  await act(async () => { await jest.advanceTimersByTimeAsync(8001); });
+  expect(f.current.pending('plan-one')).toBe(false); expect(f.current.feedback?.kind).toBe('error');
+  expect(f.client.getQueryData(['wishlists', 'alice'])).toEqual(wasSaved ? ['plan-one'] : []);
+  expect(mockWrite).not.toHaveBeenCalled(); expect(f.saved).not.toHaveBeenCalled();
+  await act(async () => { auth.resolve({ data: { user: { id: 'alice' } }, error: null }); await jest.advanceTimersByTimeAsync(1); });
+  expect(mockWrite).not.toHaveBeenCalled();
+  act(() => f.current.retry()); await act(async () => { await jest.advanceTimersByTimeAsync(5); });
+  expect(mockWrite).toHaveBeenCalledTimes(1); expect(mockWrite.mock.calls[0][0]).toBe(wasSaved ? 'delete' : 'insert');
+});
+it('a stalled account check rolls back only its plan while another save remains pending', async () => {
+  const f=await mount(),auth=deferred<any>(),write=deferred<any>();
+  mockGetUser.mockReturnValueOnce(auth.promise);mockWrite.mockReturnValueOnce(write.promise);jest.useFakeTimers();
+  f.toggle('one');await act(async()=>{await jest.advanceTimersByTimeAsync(1);});
+  f.toggle('two');await act(async()=>{await jest.advanceTimersByTimeAsync(8001);});
+  expect(f.current.pending('one')).toBe(false);expect(f.current.pending('two')).toBe(true);
+  expect(f.client.getQueryData(['wishlists','alice'])).toEqual(['two']);expect(mockWrite).toHaveBeenCalledTimes(1);
+  await act(async()=>{write.resolve({error:null});await jest.advanceTimersByTimeAsync(5);});
+});
+it('does not time out or repeat a submitted wishlist write',async()=>{
+ const f=await mount(),write=deferred<any>();mockWrite.mockReturnValueOnce(write.promise);jest.useFakeTimers();f.toggle();
+ await act(async()=>{await jest.advanceTimersByTimeAsync(30000);});f.toggle();
+ expect(f.current.pending('plan-one')).toBe(true);expect(mockWrite).toHaveBeenCalledTimes(1);expect(f.saved).not.toHaveBeenCalled();
+ await act(async()=>{write.resolve({error:null});await jest.advanceTimersByTimeAsync(5);});expect(f.saved).toHaveBeenCalledTimes(1);
 });
