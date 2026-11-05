@@ -5,6 +5,7 @@ import { fetchPlanDetail, fetchMembers, type PlanDetail, type Member } from '../
 import { legacyStyles, legacyJoinStyles, ticketStyles } from '../../components/plans/planDetailStyles';
 import { legacyManagePlacesStyles, legacyManageStyles, legacyDuplicateSheetStyles } from '../../components/plans/managePlanStyles';
 import { detailAppearance, manageAppearance } from '../../components/plans/planDetailAppearance';
+import { formatLocalPlanDay as formatWhenShort } from '../../lib/planDateLabels';
 import { ScaledText as Text } from '../../components/ScaledText';
 import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt';
 import ProfileButton from '../../components/ProfileButton';
@@ -153,17 +154,6 @@ function formatTime(dateString: string): string {
   });
 }
 
-function formatWhenShort(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-  if (dateStart.getTime() === todayStart.getTime()) return date.getHours() >= 17 ? 'Tonight' : 'Today';
-  if (dateStart.getTime() === tomorrowStart.getTime()) return 'Tomorrow';
-  return date.toLocaleDateString('en-US', { weekday: 'short' });
-}
 
 function buildCalendarUrl(title: string, startTime: string, endTime?: string | null, location?: string): string {
   const start = new Date(startTime);
