@@ -49,16 +49,16 @@ describe('Profile return navigation', () => {
     const stack = StackRouter({ initialRouteName: 'index' });
     const stackOptions = { routeNames: ['index', 'manage/index', 'manage/(tools)'], routeParamList: {}, routeGetIdList: {} };
     let nested = stack.getInitialState(stackOptions);
-    nested = stack.getStateForAction(nested, StackActions.push('manage/index'), stackOptions)!;
-    nested = stack.getStateForAction(nested, StackActions.push('manage/(tools)', { screen: 'community', params: { marker: 'retained' } }), stackOptions)!;
+    nested = stack.getRehydratedState(stack.getStateForAction(nested, StackActions.push('manage/index'), stackOptions)!, stackOptions);
+    nested = stack.getRehydratedState(stack.getStateForAction(nested, StackActions.push('manage/(tools)', { screen: 'community', params: { marker: 'retained' } }), stackOptions)!, stackOptions);
     const previous = go(initial(), 'friends');
     previous.routes[previous.index] = { ...active(previous), state: nested };
     const returned = back(go(previous, 'profile'))!;
     expect(active(returned)).toEqual(active(previous));
     expect(active(returned).state).toEqual(nested);
-    const directory = stack.getStateForAction(nested, CommonActions.goBack(), stackOptions)!;
+    const directory = stack.getRehydratedState(stack.getStateForAction(nested, CommonActions.goBack(), stackOptions)!, stackOptions);
     expect(directory.routes[directory.index].name).toBe('manage/index');
-    const yours = stack.getStateForAction(directory, CommonActions.goBack(), stackOptions)!;
+    const yours = stack.getRehydratedState(stack.getStateForAction(directory, CommonActions.goBack(), stackOptions)!, stackOptions);
     expect(yours.routes[yours.index].name).toBe('index');
   });
   it('does not create a Profile loop after repeated visits', () => {
