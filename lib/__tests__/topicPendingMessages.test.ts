@@ -37,3 +37,25 @@ describe('topic message refresh while sending', () => {
       .toContain('id.lt.b');
   });
 });
+
+it('keeps pending and persisted topic messages in real time order across offsets', () => {
+  const earlier = message('persisted', '2026-11-04T21:00:00Z');
+  const pending = message('pending', '2026-11-04T13:00:00.100-08:00');
+  expect(mergeTopicMessagesWithPending([earlier], [pending])).toEqual([earlier, pending]);
+});
+it('preserves microsecond order when pending timestamps use shorter precision', () => {
+  const earlier = message('z', '2026-11-04T21:00:00.123Z');
+  const later = message('a', '2026-11-04T21:00:00.123001+00:00');
+  expect(mergeTopicMessagesWithPending([later], [earlier])).toEqual([earlier, later]);
+});
+it('uses the ID tie-break for equivalent instants written differently', () => {
+  const a = message('a', '2026-11-04T21:00:00Z');
+  const b = message('b', '2026-11-04T13:00:00-08:00');
+  expect(mergeTopicMessagesWithPending([b], [a])).toEqual([a, b]);
+});
+it('uses the receipt once and repositions it when its server timestamp changes', () => {
+  const pending = message('client', '2026-11-04T21:00:00Z', 'pending');
+  const confirmed = message('client', '2026-11-04T13:00:00.200-08:00', 'confirmed');
+  const other = message('other', '2026-11-04T21:00:00.100Z');
+  expect(mergeTopicMessagesWithPending([confirmed, other], [pending])).toEqual([other, confirmed]);
+});
