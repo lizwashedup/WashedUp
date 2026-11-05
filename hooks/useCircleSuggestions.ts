@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { readCircleRequest } from '../lib/circles/readCircleRequest';
 import type { CirclePlansScope } from './useCirclePlans';
 import { circleKeys } from '../lib/circles/keys';
 import type { CircleSuggestion } from '../lib/circles/types';
@@ -26,14 +27,14 @@ export function useCircleSuggestions(userId: string | null | undefined, scope?: 
       };
       requireCurrent();
       if (scope) {
-        const { data: auth, error: authError } = await supabase.auth.getUser();
+        const { data: auth, error: authError } = await readCircleRequest(supabase.auth.getUser());
         requireCurrent();
         if (authError) throw authError;
         if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
       }
       requireCurrent();
       const request = supabase.rpc('get_circle_suggestions');
-      const { data, error } = await (scope ? request.abortSignal(signal) : request);
+      const { data, error } = await readCircleRequest(scope ? request.abortSignal(signal) : request);
       requireCurrent();
       if (error) throw error;
       return (data ?? []) as CircleSuggestion[];
@@ -99,7 +100,7 @@ export function useSetSuggestionStatus(userId: string | null | undefined) {
     mutationFn: async call => {
       requireCurrent(call);
       if (call.scope) {
-        const { data: { user }, error } = await supabase.auth.getUser();
+        const { data: { user }, error } = await readCircleRequest(supabase.auth.getUser());
         requireCurrent(call);
         if (error) throw error;
         if (user?.id !== call.scope.userId) throw new ObsoleteCircleSuggestionError();

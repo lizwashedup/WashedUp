@@ -116,10 +116,16 @@ it('creates one page, saves in place, refines its preview, submits once, and ret
   await press('Save and continue'); expect(action('Continue')).toBeUndefined(); expect(mockSubmit).not.toHaveBeenCalled();
   await type('What brings people together?', 'A welcoming table for neighbors');
   await tap('Area in LA: Choose an area'); await tap('Many places around LA'); await tap('Category: Community');
+  await press('Save and continue'); expect(action('Continue')).toBeUndefined();
+  expect(JSON.stringify(tree.toJSON())).toContain('Choose Open or Review requests.');
+  expect(mockSave).toHaveBeenCalledTimes(1); expect(mockSubmit).not.toHaveBeenCalled();
+  await tap('Review requests');
   await press('Save and continue'); expect(action('Continue')).toBeDefined();
+  expect(mockSaved.page_data.join_policy).toBe('approval_required');
   expect(JSON.stringify(tree.toJSON())).toContain('Step 2 of 3 · Preview');
   expect(JSON.stringify(tree.toJSON())).toContain('Next: creator details');
   await press('Edit page details'); expect(field('Name').props.value).toBe('Sunday Table');
+  expect(tree.root.findAllByProps({ accessibilityLabel: 'Review requests' }).find(node => node.props.onPress)!.props.accessibilityState.checked).toBe(true);
   await type('Name', 'Sunday Table LA'); await press('Save and continue'); await press('Continue');
   expect(JSON.stringify(tree.toJSON())).toContain('Step 3 of 3 · Creator details');
   await press('Submit for review'); expect(mockSubmit).not.toHaveBeenCalled();
@@ -128,6 +134,7 @@ it('creates one page, saves in place, refines its preview, submits once, and ret
   await back(); expect(action('Continue')).toBeDefined(); await press('Continue');
   expect(field('Your name').props.value).toBe('Aster'); await press('Submit for review');
   expect(mockSubmit).toHaveBeenCalledTimes(1); expect(mockStart).toHaveBeenCalledTimes(1);
+  expect(mockSubmissions[0].page_snapshot.join_policy).toBe('approval_required');
   expect(mockPath()).toBe(`/creator/page?id=${mockId}`); expect(action('Continue setup')).toBeUndefined();
   expect(JSON.stringify(tree.toJSON())).toContain('In review.');
   await press('Edit private draft'); await press('Save draft'); await back();
@@ -150,8 +157,8 @@ it('continues the existing draft from workspace preview and returns to the same 
 });
 
 it('retains existing legacy community identity without routing through new-page creation', async () => {
-  mockLegacy.mockResolvedValue([{ id: 'existing-community', name: 'Existing community', kind: 'community', route: '/(creator)/today', legacy: { workspace: 'community', communityId: 'existing-community', status: 'active' } }]);
+  mockLegacy.mockResolvedValue([{ id: 'existing-community', name: 'Existing community', kind: 'community', route: '/(tabs)/friends/manage/(tools)/today', legacy: { workspace: 'community', communityId: 'existing-community', status: 'active' } }]);
   await mount(); await tap('Manage Existing community, Community');
   expect(mockSelect).toHaveBeenCalledWith('existing-community'); expect(mockWorkspace).toHaveBeenCalledWith('community');
-  expect(mockPath()).toBe('/(creator)/today'); expect(mockStart).not.toHaveBeenCalled(); expect(mockSave).not.toHaveBeenCalled();
+  expect(mockPath()).toBe('/(tabs)/friends/manage/(tools)/today'); expect(mockStart).not.toHaveBeenCalled(); expect(mockSave).not.toHaveBeenCalled();
 });

@@ -12,6 +12,8 @@ jest.mock('../../hooks/useCreatorPageScope', () => ({ useCreatorPageScope: () =>
 }) }));
 jest.mock('../../constants/FeatureFlags', () => ({ MESSAGE_TEST_SEND_ENABLED: true }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }) }));
+jest.mock('../creator/CreatorScreenHeader', () => ({ CreatorScreenHeader: ({ onBack }: any) =>
+  require('react').createElement(require('react-native').TouchableOpacity, { accessibilityLabel: 'Back', onPress: onBack }) }));
 jest.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: 3 }) }));
 jest.mock('../../lib/organizerFollows', () => ({ getFollowerCount: jest.fn() }));
 jest.mock('../../lib/followerBroadcasts', () => ({

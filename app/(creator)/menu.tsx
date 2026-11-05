@@ -1,7 +1,6 @@
-import { BackToYoursButton } from '../../components/creator/BackToYoursButton';
 /**
- * Creator mode: menu. Numbers plus the symmetric exit (doc 08: switch back
- * lives on the last tab, the way Airbnb does it).
+ * Organization settings and role-specific community tools. The shared
+ * management layout keeps these inside Yours with the normal app tabs.
  */
 
 import React from 'react';
@@ -21,8 +20,6 @@ import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { setViewAsEventHost, useViewAsEventHost } from '../../lib/viewAs';
 import { supabase } from '../../lib/supabase';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { useWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorMenuScreen() {
@@ -69,12 +66,11 @@ export default function CreatorMenuScreen() {
   const pendingCount = members.filter((m) => m.status === 'pending').length;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* LIZ COPY */}
-        <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>{workspace === 'organization' ? 'organization' : 'community'}</Text>
-        <WorkspaceSwitcher access={access} />
+        <Text style={styles.kicker}>Manage</Text>
+        <Text style={styles.title}>{workspace === 'organization' ? 'Organization settings' : 'Community tools'}</Text>
 
         {/* slice 0 (doc 43 track B): the identity card — who you are here.
             community mark + the leader's face chip for a community;
@@ -129,13 +125,6 @@ export default function CreatorMenuScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        {workspace === 'community' && <CommunitySwitcher access={access} />}
-
-        {/* switch back rides directly beneath the identity card (slice 0) */}
-        <BackToYoursButton />
-        <Text style={styles.switchHint}>
-          your plans, chats, and people are exactly where you left them.
-        </Text>
 
         {community && (
           <>
@@ -262,12 +251,12 @@ export default function CreatorMenuScreen() {
               setViewAsEventHost(true);
               queryClient.invalidateQueries({ queryKey: ['creator-access'] });
               // land exactly where a real event host lands
-              router.replace('/(creator)/organizer-home');
+              router.replace('/(tabs)/friends/manage/(tools)/organizer-home');
             }}
             hitSlop={8}
           >
             {/* LIZ COPY (admin-only) */}
-            <Text style={styles.adminViewAsText}>view as an event host</Text>
+            <Text style={styles.adminViewAsText}>Preview event tools</Text>
           </TouchableOpacity>
         )}
       </ScrollView>

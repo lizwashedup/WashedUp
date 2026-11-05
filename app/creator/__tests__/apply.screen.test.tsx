@@ -138,6 +138,6 @@ it('retains the initial-loading state without exposing an unconfirmed applicatio
 });
 
 it.each(['community_leader','event_host'] as const)('opens approved %s in the guarded creator chooser without starting another application',track=>{
- mockGrants=[grant(track,'approved')];mount();const label=track==='community_leader'?'Open community creator space':'Open organization creator space';
- act(()=>control(label).props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/pages');expect(mockWithdraw).not.toHaveBeenCalled();
+ mockGrants=[grant(track,'approved')];mount();const label='Open your management tools';
+ act(()=>control(label).props.onPress());expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');expect(mockWithdraw).not.toHaveBeenCalled();
 });

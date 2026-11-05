@@ -1,5 +1,7 @@
+import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { CommunityDailyActions } from '../../components/creator/CommunityDailyActions';
+import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import { ScaledText as Text } from '../../components/ScaledText';
-import { CreatorScreenHeader } from '../../components/creator/CreatorScreenHeader';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
@@ -8,10 +10,10 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
  * per decision 15a.
  */
 
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { ActivityIndicator, View, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Calendar, Megaphone, Plus, UserPlus } from 'lucide-react-native';
@@ -22,25 +24,25 @@ import {
   getBroadcasts,
   getCreatorEvents,
   isLeaderAccess,
+  isAdminTierRole,
   creatorLandingRoute,
 } from '../../lib/creatorMode';
 import { getCommunityRooms } from '../../lib/communityChat';
 import { pickNextUpcomingEvent } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import { supabase } from '../../lib/supabase';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { getRsvpCount } from '../../lib/eventRsvp';
 import { OfflineBanner } from '../../components/state/StateViews';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
 
 export default function CreatorTodayScreen() {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => createStyles(fonts), [fonts]);
-  const { data: access } = useCreatorAccessRead();
+  const accessRead = useCreatorAccessRead();
+  const { data: access } = accessRead;
   const community = useLedCommunity(access);
 
   const membersQuery = useQuery({
@@ -63,6 +65,12 @@ export default function CreatorTodayScreen() {
     enabled: access != null,
   });
   const { data: members = [], refetch: refetchMembers, isRefetching } = membersQuery;
+  const canRefreshMembers = !!community && !!access && !accessRead.isLoading && !accessRead.isError;
+  // A join or departure can happen while the creator is on another screen.
+  // React Navigation keeps this screen mounted, so mount-only reads go stale.
+  useFocusEffect(useCallback(() => {
+    if (canRefreshMembers) void refetchMembers();
+  }, [community?.id, canRefreshMembers, refetchMembers]));
   const { data: broadcasts = [] } = broadcastsQuery;
   const { data: allEvents = [] } = eventsQuery;
   const events = allEvents.filter((event) =>
@@ -108,9 +116,18 @@ export default function CreatorTodayScreen() {
       ? `${counts.sold} sold · ${counts.checkedIn} checked in`
       : `${rsvpCount} going`;
 
+  // Disabled community queries are not evidence of an empty community.
+  if (accessRead.isLoading) return <View style={styles.accessState}><ActivityIndicator accessibilityLabel="Loading community management" color={Colors.terracotta} /></View>;
+  if (accessRead.isError) return <View style={styles.accessState}>
+    <Text accessibilityRole="alert" style={styles.cardMeta}>Couldn’t load your community management.</Text>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry community management" style={styles.retry}
+      disabled={accessRead.isFetching} onPress={() => void accessRead.refetch()}><Text style={styles.retryText}>{accessRead.isFetching ? 'Checking…' : 'Try again'}</Text></TouchableOpacity>
+  </View>;
+
   // today is a leader screen: an event-host-only grant never sees it
   // (doc 34 §1.2). The layout already hides the tab; this covers the
   // landing route, stale pushes, and deep links.
+  if (access && community && !isAdminTierRole(community.role)) return <Redirect href={creatorLandingRoute({ ...access, ledCommunities: [community], hasLeaderGrant: false, hasEventHostGrant: false })} />;
   if (access && !isLeaderAccess(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   // stage 2 entry state: an approved leader who has not started their
@@ -118,11 +135,11 @@ export default function CreatorTodayScreen() {
   // never the empty triage cards.
   if (access && access.hasLeaderGrant && access.ledCommunities.length === 0) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <CreatorScreenHeader title="Community overview" />
+      <SafeAreaView style={styles.container} edges={[]}>
+
         <ScrollView contentContainerStyle={styles.content}>
           {/* LIZ COPY */}
-          <Text style={styles.kicker}>creator mode</Text>
+          <Text style={styles.kicker}>Manage</Text>
           {/* LIZ COPY */}
           <Text style={styles.title}>you're in.</Text>
           {/* LIZ COPY */}
@@ -146,34 +163,26 @@ export default function CreatorTodayScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-        <CreatorScreenHeader title="Community overview" />
-      {/* Screen 11 gap: persistent active-community name. Outside the
-          ScrollView on purpose so it survives scrolling, unlike the big
-          title below which is the first-paint moment, not the ongoing
-          reminder of which community you're in. */}
-      {community && (
-        <View style={styles.stickyHeader}>
-          <Text style={styles.stickyHeaderText} numberOfLines={1}>{community.name}</Text>
-        </View>
-      )}
+    <SafeAreaView style={styles.container} edges={[]}>
+
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetchMembers} tintColor={Colors.terracotta} />}
       >
-        <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>{community ? community.name : 'today'}</Text>
-        <WorkspaceSwitcher access={access} />
-        <CommunitySwitcher access={access} />
+
+        <Text style={styles.kicker}>Manage</Text>
+        <Text style={styles.title}>{community ? community.name : 'Your community'}</Text>
+
         {!online && <OfflineBanner />}
+        <CommunitySetupNotice community={community} onNavigate={route => router.push(route as never)} />
 
         {/* Screen 11 gap closed 2026-09-06: Invite (Screen 56) now has a real
             destination -- app/creator/member-invites.tsx, backend live since
             2026-09-05 -- so it's wired in here in the spec's fixed order. */}
         <View style={styles.quickActions}>
-          <TouchableOpacity
+          {community?.status === 'active' && <TouchableOpacity
             style={[styles.quickAction, styles.quickActionPrimary]}
-            onPress={() => router.push('/creator/event-form')}
+            onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/(tabs)/friends/manage') as never)}
             accessibilityRole="button"
             accessibilityLabel="Create event"
             activeOpacity={0.85}
@@ -183,16 +192,16 @@ export default function CreatorTodayScreen() {
               <Plus size={16} color={Colors.white} strokeWidth={2.5} />
               <Text style={styles.quickActionText} numberOfLines={1}>create event</Text>
             </View>
-          </TouchableOpacity>
+          </TouchableOpacity>}
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
-            onPress={() => router.push('/(creator)/community')}
+            onPress={() => router.push('/(tabs)/friends/manage/(tools)/updates')}
             accessibilityRole="button"
-            accessibilityLabel="Broadcast"
+            accessibilityLabel="Send update"
             activeOpacity={0.85}
           >
             <Megaphone size={16} color={Colors.terracotta} strokeWidth={2.5} />
-            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>broadcast</Text>
+            <Text style={[styles.quickActionText, styles.quickActionTextSecondary]} numberOfLines={1}>Send update</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.quickAction, styles.quickActionSecondary]}
@@ -206,6 +215,8 @@ export default function CreatorTodayScreen() {
           </TouchableOpacity>
         </View>
 
+        {community && <CommunityDailyActions communityId={community.id} />}
+
         {/* Unknown reads must not appear as a zero or empty community. */}
         {membersQuery.isError || membersQuery.isLoading ? (
           <OverviewReadState label="Members" query={membersQuery} />
@@ -213,7 +224,7 @@ export default function CreatorTodayScreen() {
         <TouchableOpacity
           accessibilityRole="button"
           style={[styles.card, pending.length > 0 && styles.cardAttention]}
-          onPress={() => router.push('/(creator)/members')}
+          onPress={() => router.push('/(tabs)/friends/manage/(tools)/members')}
           activeOpacity={0.8}
         >
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -233,7 +244,7 @@ export default function CreatorTodayScreen() {
         {eventsQuery.isError || eventsQuery.isLoading ? (
           <OverviewReadState label="Events" query={eventsQuery} />
         ) : (
-        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/events')} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/events')} activeOpacity={0.8}>
           {/* the next event's cover, so the home reads finished not skeletal */}
           {nextEvent?.image_url ? (
             <EventMediaImage eventId={nextEvent.id} reference={nextEvent.image_url} style={styles.cardThumb} contentFit="cover" />
@@ -245,13 +256,13 @@ export default function CreatorTodayScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
             <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
-            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : 'Plan your next gathering'}</Text>
+            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : community?.status === 'active' ? 'Create your next event' : 'Your events'}</Text>
             <Text style={styles.cardMeta}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
                     .filter(Boolean)
                     .join(' · ')
-                : 'Bring your community together. Start with an event.'}
+                : community?.status === 'active' ? 'Bring your community together. Start with an event.' : 'Find existing events and saved drafts here.'}
             </Text>
             {attendanceLabel && (
               <Text style={styles.cardCounts} numberOfLines={1}>{attendanceLabel}</Text>
@@ -268,13 +279,13 @@ export default function CreatorTodayScreen() {
         {broadcastsQuery.isError || broadcastsQuery.isLoading ? (
           <OverviewReadState label="Updates" query={broadcastsQuery} />
         ) : (
-        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(creator)/community')} activeOpacity={0.8}>
+        <TouchableOpacity accessibilityRole="button" style={styles.card} onPress={() => router.push('/(tabs)/friends/manage/(tools)/updates')} activeOpacity={0.8}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>
-              {latestBroadcast ? 'last broadcast' : 'say something to your people'}
+              {latestBroadcast ? 'Latest update' : 'Share an update'}
             </Text>
             <Text style={styles.cardMeta} numberOfLines={2}>
-              {latestBroadcast ? latestBroadcast.body : 'your first broadcast pins to the top of every member’s chats'}
+              {latestBroadcast ? latestBroadcast.body : 'Post news or a reminder in your community’s Main chat.'}
             </Text>
           </View>
           <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
@@ -285,16 +296,18 @@ export default function CreatorTodayScreen() {
         {community && !roomsQuery.isError && !roomsQuery.isLoading && rooms.length > 0 && (
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="All community chats"
+            accessibilityHint="Browse Main chat and optional groups for this community."
             style={styles.card}
-            onPress={() => router.push(`/community-topic/${rooms[0].id}` as never)}
+            onPress={() => router.push(`/community/${community.id}` as never)}
             activeOpacity={0.8}
           >
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.cardTitle}>
-                {rooms.length === 1 ? rooms[0].name : `${rooms.length} chat spaces open`}
+                All community chats
               </Text>
               <Text style={styles.cardMeta}>
-                the chat spaces members join. tap to open{rooms.length > 1 ? ' the first one' : ''}.
+                Browse your community’s conversations and optional groups.
               </Text>
             </View>
             <ChevronRight size={18} color={Colors.warmGray} strokeWidth={2} />
@@ -324,6 +337,7 @@ function OverviewReadState({ label, query }: {
 }
 
 function createStyles(fonts: AfterglowFontFamilies) { return StyleSheet.create({
+  accessState: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: Colors.parchment },
   retry: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   retryText: { fontFamily: fonts.medium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   container: { flex: 1, backgroundColor: Colors.parchment },

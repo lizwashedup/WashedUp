@@ -130,7 +130,7 @@ it('does not silently save name and description when the selected cover fails to
   mockUpload.mockRejectedValueOnce(new Error('offline')); const f = mount(); await flush(); f.name(); f.description('Keep this'); await f.pick();
   await act(async () => { await f.save().props.onPress(); });
   expect(mockRpc).not.toHaveBeenCalled(); expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
-  expect(f.text()).toContain('Your cover didn’t upload'); expect(f.inputs()[0].props.value).toBe('Weekend crew'); expect(f.inputs()[1].props.value).toBe('Keep this');
+  expect(f.text()).toContain('Couldn’t confirm your cover upload'); expect(f.inputs()[0].props.value).toBe('Weekend crew'); expect(f.inputs()[1].props.value).toBe('Keep this');
   expect(f.preview().coverUrl).toBe(picked.uri); expect(f.save().props.accessibilityLabel).toBe('Try again');
   await act(async () => { await f.save().props.onPress(); });
   expect(mockUpload.mock.calls[0]).toEqual(mockUpload.mock.calls[1]); expect(mockUuid).toHaveBeenCalledTimes(1); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.done).toHaveBeenCalledTimes(1);
@@ -161,7 +161,7 @@ it.each(['picker', 'upload', 'rpc'])('does not show a retired %s failure in a re
   else { if (stage === 'upload') { await f.pick(); mockUpload.mockReturnValueOnce(waiting.promise); } else mockRpc.mockReturnValueOnce(waiting.promise); act(() => { void f.save().props.onPress(); }); }
   await flush(); f.update({ visible: false }); f.update({ visible: true }); await flush(); f.name('Fresh name');
   await act(async () => waiting.reject(new Error('retired failure'))); await flush();
-  expect(f.text()).not.toContain('Couldn’t'); expect(f.text()).not.toContain('didn’t upload'); expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
+  expect(f.text()).not.toContain('Couldn’t'); expect(f.text()).not.toContain('Couldn’t confirm your cover upload'); expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
 });
 it('does not upload if closed during the fresh account check', async () => {
   const auth = deferred<ReturnType<typeof account>>(); const f = mount(); await flush(); f.name(); await f.pick();
@@ -236,4 +236,33 @@ it('ignores a late initial account lookup after a newer auth event', async () =>
   await act(async () => initial.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush();
   expect(f.inputs()[0].props.value).toBe('Other account draft'); expect(f.save().props.disabled).toBe(false);
   await act(async () => { await f.save().props.onPress(); }); expect(f.done).toHaveBeenCalledTimes(1);
+});
+
+it.each(['account', 'upload'] as const)('recovers a stalled cover %s without losing the draft or accepting a late result', async stage => {
+ const f=mount();await flush();f.name('Keep this circle');f.description('Keep this description');await f.pick();
+ const waiting=deferred<any>();
+ if(stage==='account')mockGetUser.mockReturnValueOnce(waiting.promise);else mockUpload.mockReturnValueOnce(waiting.promise);
+ jest.useFakeTimers();
+ try {
+  act(()=>{void f.save().props.onPress();});
+  await act(async()=>{await jest.advanceTimersByTimeAsync(stage==='account'?12001:30001);});
+  expect(f.save().props.disabled).toBe(false);
+  expect(f.text()).toContain(stage==='account'?'Couldn’t confirm your account':'Couldn’t confirm your cover upload');
+  expect(f.inputs()[0].props.value).toBe('Keep this circle');expect(f.inputs()[1].props.value).toBe('Keep this description');expect(f.preview().coverUrl).toBe(picked.uri);
+  expect(mockRpc).not.toHaveBeenCalled();
+  if(stage==='account')expect(mockUpload).not.toHaveBeenCalled();
+  await act(async()=>{waiting.resolve(stage==='account'?account():'uploaded');await jest.advanceTimersByTimeAsync(1);});
+  expect(mockRpc).not.toHaveBeenCalled();expect(f.done).not.toHaveBeenCalled();expect(f.close).not.toHaveBeenCalled();
+  await act(async()=>{await f.save().props.onPress();});
+  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.done).toHaveBeenCalledTimes(1);expect(f.close).toHaveBeenCalledTimes(1);expect(mockUuid).toHaveBeenCalledTimes(1);
+  expect(mockUpload.mock.calls.every(call=>call[0]==='circle-covers'&&call[1]==='circle-a/cover-uuid'&&call[2]===picked.base64&&call[3].upsert===true)).toBe(true);
+ } finally {f.unmount();jest.clearAllTimers();jest.useRealTimers();}
+});
+it('does not time out an identity update after the cover has already uploaded', async()=>{
+ const f=mount();await flush();f.name();await f.pick();const waiting=deferred<any>();mockRpc.mockReturnValueOnce(waiting.promise);jest.useFakeTimers();
+ try {
+  act(()=>{void f.save().props.onPress();});await act(async()=>{await jest.advanceTimersByTimeAsync(45000);});
+  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.save().props.disabled).toBe(true);expect(f.text()).not.toContain('Couldn’t confirm your cover upload');expect(f.done).not.toHaveBeenCalled();
+  await act(async()=>{waiting.resolve({error:null});await jest.advanceTimersByTimeAsync(1);});expect(f.done).toHaveBeenCalledTimes(1);
+ } finally {f.unmount();jest.clearAllTimers();jest.useRealTimers();}
 });

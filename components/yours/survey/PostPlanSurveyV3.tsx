@@ -32,30 +32,24 @@ import {
   View,
   Text,
   Pressable,
-  TextInput,
   Keyboard,
   KeyboardAvoidingView,
-  StyleSheet,
   Animated,
   Dimensions,
-  ActivityIndicator,
   Platform,
   useWindowDimensions,
   ScrollView,
 } from 'react-native';
-import { Image } from 'expo-image';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes } from '../../../constants/Typography';
 import { supabase } from '../../../lib/supabase';
 import { requestWithDeadline } from '../../../lib/requestWithDeadline';
+import { sendOrAcceptPeopleRequest } from '../../../lib/yours/connectionRequests';
 import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useReduceMotion } from '../a11y/useReduceMotion';
-import YoursAvatar from '../primitives/YoursAvatar';
 import { COPY } from '../state/constants';
 import {
   markPostPlanSurveyHandled,
@@ -63,10 +57,11 @@ import {
   type SurveyMember,
 } from '../../PostPlanSurvey';
 
+import { PlanCardBehind, SheetHeader, Footer, StepHow, StepWho, StepKeep, KeepFooter, type Rating, type AttendanceAnswer } from './SurveyPresentation';
+import { styles } from './surveyStyles';
+
 // ─── Types ────────────────────────────────────────────────────────────────
 type Step = 'how' | 'who' | 'keep';
-type Rating = 'thumbs_up' | 'thumbs_down' | 'fine';
-type AttendanceAnswer = 'there' | 'no_show' | 'unsure';
 
 // The handshake result overlay. Celebration (gold-ruled toast) only when
 // someone became a mutual connection; otherwise a quiet auto-dismissing line.
@@ -130,11 +125,16 @@ function SurveySession({
     peoplePool.length > 0;
   const whoMadeItList = peoplePool;
 
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  // Fixed headings and summaries can consume the entire list viewport on
+  // small screens or with larger text. Keep those sections in the scroll flow.
+  const scrollSections = windowHeight < 740 || fontScale > 1.3;
   const [step, setStep] = useState<Step>('how');
   const [rating, setRating] = useState<Rating | null>(null);
   const [comment, setComment] = useState('');
   const [showComment, setShowComment] = useState(false);
   const bodyScroll = useRef<ScrollView>(null);
+  useEffect(() => { bodyScroll.current?.scrollTo({ y: 0, animated: false }); }, [step]);
   const commentFocused = useRef(false);
   const revealFocusedComment = () => {
     if (step === 'how' && commentFocused.current) bodyScroll.current?.scrollToEnd({ animated: false });
@@ -406,13 +406,12 @@ function SurveySession({
     }
     const settled = await Promise.allSettled(
       selected.map(async (m) => {
-        const { data, error } = await requestWithDeadline(supabase.rpc('add_or_accept_person', {
-          p_target: m.id,
-          p_context: 'plan_history',
-          p_context_event_id: plan.id,
+        const outcome = await requestWithDeadline(sendOrAcceptPeopleRequest({
+          recipientId: m.id,
+          context: 'plan_history',
+          contextEventId: plan.id,
         }), 8000);
-        if (error) throw error;
-        return { member: m, outcome: String(data) };
+        return { member: m, outcome };
       }),
     );
     if (!current()) return;
@@ -449,6 +448,26 @@ function SurveySession({
   const headerTitle =
     step === 'how' ? COPY.surveyHow : step === 'who' ? COPY.surveyWhoMadeIt : null;
 
+  const header = (
+    <SheetHeader
+      eyebrow={plan.title}
+      title={headerTitle}
+      current={stepIndex[step]}
+      total={totalSteps}
+    />
+  );
+  const attendanceSummary = step === 'who' && (
+    <View style={styles.attendanceSummary}>
+      <Text accessibilityLiveRegion="polite" style={styles.whoHelper}>
+        {noShows.size === 1 ? '1 person marked ‘Didn’t show up.’' : `${noShows.size} people marked ‘Didn’t show up.’`}
+      </Text>
+      {attendanceError && <Text accessibilityRole="alert" style={styles.attendanceError}>{attendanceError}</Text>}
+      <Pressable accessibilityRole="button" accessibilityLabel={attendanceStarted ? 'Skip remaining attendance reports' : 'Skip attendance'} style={styles.skipAttendance} onPress={skipAttendance}>
+        <Text style={styles.escapeText}>{attendanceStarted ? 'Skip remaining' : 'Skip'}</Text>
+      </Pressable>
+    </View>
+  );
+
   return (
     <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={exit}>
       <SafeAreaProvider>
@@ -475,78 +494,73 @@ function SurveySession({
             ]}
           >
             <View style={styles.handle} />
-            <SheetHeader
-              eyebrow={plan.title}
-              title={headerTitle}
-              current={stepIndex[step]}
-              total={totalSteps}
-            />
+            {!scrollSections && header}
 
             {/* Bodies land in checkpoints 2-4. */}
             <Animated.ScrollView
               ref={bodyScroll}
               style={styles.body}
-              contentContainerStyle={styles.bodyContent}
+              contentContainerStyle={scrollSections ? styles.scrollingSections : styles.bodyContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               onLayout={revealFocusedComment}
+              onContentSizeChange={() => {
+                if (scrollSections && attendanceError) bodyScroll.current?.scrollToEnd({ animated: false });
+                else revealFocusedComment();
+              }}
             >
-              {step === 'how' && (
-                <StepHow
-                  selected={rating}
-                  onPick={(r) => {
-                    hapticSelection();
-                    setRating(r);
-                    setShowComment(r === 'thumbs_down');
-                    if (r !== 'thumbs_down') Keyboard.dismiss();
-                  }}
-                  comment={comment}
-                  setComment={setComment}
-                  showComment={showComment}
-                  onCommentFocus={() => { commentFocused.current = true; revealFocusedComment(); }}
-                  onCommentBlur={() => { commentFocused.current = false; }}
-                />
-              )}
-              {step === 'who' && (
-                <StepWho
-                  list={whoMadeItList}
-                  answers={answers}
-                  disabled={attendanceStarted}
-                  onAnswer={(id, answer) => {
-                    if (!isCurrent() || attendanceFrozen.current || attendanceAttempt.current) return;
-                    hapticSelection();
-                    setAnswers(current => ({ ...current, [id]: answer }));
-                  }}
-                />
-              )}
-              {step === 'keep' && (
-                <StepKeep
-                  candidates={keepCandidates}
-                  selected={addSel}
-                  disabled={busy || !!result}
-                  onToggle={(id) => {
-                    if (!isCurrent() || keepAttempt.current) return;
-                    hapticSelection();
-                    setAddSel((s) => {
-                      const n = new Set(s);
-                      if (n.has(id)) n.delete(id);
-                      else n.add(id);
-                      return n;
-                    });
-                  }}
-                />
-              )}
+              {scrollSections && header}
+              <View style={scrollSections ? styles.bodyContent : undefined}>
+                {step === 'how' && (
+                  <StepHow
+                    selected={rating}
+                    onPick={(r) => {
+                      hapticSelection();
+                      setRating(r);
+                      setShowComment(r === 'thumbs_down');
+                      if (r !== 'thumbs_down') Keyboard.dismiss();
+                    }}
+                    comment={comment}
+                    setComment={setComment}
+                    showComment={showComment}
+                    onCommentFocus={() => { commentFocused.current = true; revealFocusedComment(); }}
+                    onCommentBlur={() => { commentFocused.current = false; }}
+                  />
+                )}
+                {step === 'who' && (
+                  <StepWho
+                    list={whoMadeItList}
+                    answers={answers}
+                    disabled={attendanceStarted}
+                    onAnswer={(id, answer) => {
+                      if (!isCurrent() || attendanceFrozen.current || attendanceAttempt.current) return;
+                      hapticSelection();
+                      setAnswers(current => ({ ...current, [id]: answer }));
+                    }}
+                  />
+                )}
+                {step === 'keep' && (
+                  <StepKeep
+                    candidates={keepCandidates}
+                    selected={addSel}
+                    disabled={busy || !!result}
+                    onToggle={(id) => {
+                      if (!isCurrent() || keepAttempt.current) return;
+                      hapticSelection();
+                      setAddSel((s) => {
+                        const n = new Set(s);
+                        if (n.has(id)) n.delete(id);
+                        else n.add(id);
+                        return n;
+                      });
+                    }}
+                  />
+                )}
+              </View>
+              {scrollSections && attendanceSummary}
             </Animated.ScrollView>
 
-            {step === 'who' && <View style={styles.attendanceSummary}>
-              <Text accessibilityLiveRegion="polite" style={styles.whoHelper}>
-                {noShows.size === 1 ? '1 person marked ‘Didn’t show up.’' : `${noShows.size} people marked ‘Didn’t show up.’`}
-              </Text>
-              {attendanceError && <Text accessibilityRole="alert" style={styles.attendanceError}>{attendanceError}</Text>}
-              <Pressable accessibilityRole="button" accessibilityLabel={attendanceStarted ? 'Skip remaining attendance reports' : 'Skip attendance'} style={styles.skipAttendance} onPress={skipAttendance}>
-                <Text style={styles.escapeText}>{attendanceStarted ? 'Skip remaining' : 'Skip'}</Text>
-              </Pressable>
-            </View>}
+            {!scrollSections && attendanceSummary}
 
             {/* Footer. Steps 1-2: a single Continue. Step 3: equal-weight Add /
                 Skip (fill vs ghost only). "Not now" stays present on all steps. */}
@@ -592,349 +606,6 @@ function SurveySession({
         </View>
       </SafeAreaProvider>
     </Modal>
-  );
-}
-
-// ─── Plan card behind (the "which plan" context) ────────────────────────────
-function PlanCardBehind({
-  plan,
-  wentCount,
-}: {
-  plan: SurveyProps['plan'];
-  wentCount: number;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={[styles.cardBehindWrap, { paddingTop: insets.top + 12 }]}>
-      <Text style={styles.cardBehindEyebrow}>{COPY.wordmark}</Text>
-      <View style={styles.cardBehind}>
-        {plan.image_url ? (
-          <Image
-            source={{ uri: plan.image_url }}
-            style={styles.cardBehindImg}
-            contentFit="cover"
-          />
-        ) : (
-          <View style={[styles.cardBehindImg, styles.cardBehindImgFallback]} />
-        )}
-        <View style={styles.cardBehindBody}>
-          <Text style={styles.cardBehindTitle} numberOfLines={2}>
-            {plan.title}
-          </Text>
-          <Text style={styles.cardBehindMeta}>{wentCount} joined</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-// ─── Sheet header (eyebrow + serif title + step indicator) ──────────────────
-function SheetHeader({
-  eyebrow,
-  title,
-  current,
-  total,
-}: {
-  eyebrow: string;
-  title: string | null;
-  current: number;
-  total: number;
-}) {
-  return (
-    <View style={styles.header}>
-      <Text style={styles.eyebrow} numberOfLines={1}>
-        {eyebrow}
-      </Text>
-      {title != null && <Text style={styles.title}>{title}</Text>}
-      <View style={styles.stepRow}>
-        {Array.from({ length: total }).map((_, i) => {
-          const n = i + 1;
-          const state = n < current ? 'done' : n === current ? 'on' : 'todo';
-          return (
-            <View
-              key={n}
-              style={[
-                styles.stepDot,
-                state === 'on' && styles.stepDotOn,
-                state === 'done' && styles.stepDotDone,
-              ]}
-            />
-          );
-        })}
-        <Text style={styles.stepCounter}>
-          {COPY.surveyStepCounter(current, total)}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-// ─── Footer (Continue + Not now) ────────────────────────────────────────────
-function Footer({
-  primaryLabel,
-  primaryActive,
-  busy,
-  onPrimary,
-  onEscape,
-}: {
-  primaryLabel: string;
-  primaryActive: boolean;
-  busy: boolean;
-  onPrimary: () => void;
-  onEscape: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
-      <Pressable
-        style={[styles.primary, !primaryActive && styles.primaryOff]}
-        accessibilityRole="button"
-        accessibilityLabel={primaryLabel}
-        accessibilityState={{ disabled: !primaryActive || busy, busy }}
-        disabled={!primaryActive || busy}
-        onPress={onPrimary}
-      >
-        {busy ? (
-          <ActivityIndicator color={Colors.white} />
-        ) : (
-          <Text style={styles.primaryText}>{primaryLabel}</Text>
-        )}
-      </Pressable>
-      <Pressable
-        style={styles.escape}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel={COPY.surveyNotNow}
-        onPress={onEscape}
-      >
-        <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-// ─── Step 1: How was it? (pills + optional "Not great" comment reveal) ───────
-const COMMENT_REVEAL_H = 134;
-
-function StepHow({
-  selected,
-  onPick,
-  comment,
-  setComment,
-  showComment,
-  onCommentFocus,
-  onCommentBlur,
-}: {
-  selected: Rating | null;
-  onPick: (r: Rating) => void;
-  comment: string;
-  setComment: (s: string) => void;
-  showComment: boolean;
-  onCommentFocus: () => void;
-  onCommentBlur: () => void;
-}) {
-  const reduceMotion = useReduceMotion();
-  const reveal = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (reduceMotion) {
-      reveal.setValue(showComment ? 1 : 0);
-      return;
-    }
-    Animated.spring(reveal, {
-      toValue: showComment ? 1 : 0,
-      mass: 1,
-      stiffness: 280,
-      damping: 30,
-      useNativeDriver: false,
-    }).start();
-  }, [showComment, reduceMotion, reveal]);
-
-  const pills: Array<{ r: Rating; label: string }> = [
-    { r: 'thumbs_up', label: COPY.surveyGood },
-    { r: 'fine', label: COPY.surveyFine },
-    { r: 'thumbs_down', label: COPY.surveyBad },
-  ];
-  return (
-    <View style={styles.pillCol}>
-      {pills.map((p) => {
-        const on = selected === p.r;
-        return (
-          <Pressable
-            key={p.r}
-            style={[styles.pill, on && styles.pillOn]}
-            onPress={() => onPick(p.r)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: on }}
-          >
-            <Text style={[styles.pillText, on && styles.pillTextOn]}>{p.label}</Text>
-          </Pressable>
-        );
-      })}
-
-      {/* "Not great" reveals an optional, never-required comment box. */}
-      <Animated.View
-        style={[
-          styles.commentReveal,
-          {
-            height: reveal.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, COMMENT_REVEAL_H],
-            }),
-            opacity: reveal,
-          },
-        ]}
-      >
-        <Text style={styles.commentLabel}>{COPY.surveyBadFollowup}</Text>
-        <TextInput
-          accessibilityLabel="Optional feedback"
-          onFocus={onCommentFocus}
-          onBlur={onCommentBlur}
-          value={comment}
-          onChangeText={setComment}
-          placeholder=""
-          style={styles.commentInput}
-          multiline
-          editable={showComment}
-        />
-        <Text style={styles.commentHint}>{COPY.surveyBadHelper}</Text>
-      </Animated.View>
-    </View>
-  );
-}
-
-// ─── Step 2: Explicit attendance choices, initially unanswered ─────────────
-function StepWho({
-  list,
-  answers,
-  disabled,
-  onAnswer,
-}: {
-  list: SurveyMember[];
-  answers: Record<string, AttendanceAnswer>;
-  disabled: boolean;
-  onAnswer: (id: string, answer: AttendanceAnswer) => void;
-}) {
-  const { width, fontScale } = useWindowDimensions();
-  const choiceWidth = Math.min(width - 48, 154 * fontScale);
-  return (
-    <View>
-      <Text style={styles.whoHelper}>{COPY.surveyWhoHelper}</Text>
-      <View style={styles.attendList}>
-        {list.map((m) => {
-          const name = m.first_name_display ?? 'Someone';
-          return (
-            <View key={m.id} style={styles.attendancePerson}>
-              <View style={styles.attendRow}>
-                <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={44} bucket="none" />
-                <Text style={styles.attendName}>{name}</Text>
-              </View>
-              <View accessibilityRole="radiogroup" accessibilityLabel={`Attendance for ${name}`} style={styles.attendanceChoices}>
-                {([['there', 'Was there'], ['no_show', 'Didn’t show up'], ['unsure', 'Not sure']] as const).map(([answer, label]) => {
-                  const selected = answers[m.id] === answer;
-                  return <Pressable key={answer} accessibilityRole="radio" accessibilityLabel={`${name}: ${label}`}
-                    accessibilityState={{ checked: selected, disabled }} disabled={disabled}
-                    onPress={() => onAnswer(m.id, answer)}
-                    style={[styles.attendanceChoice, { flexBasis: choiceWidth }, selected && styles.attendanceChoiceSelected]}>
-                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.attendanceChoiceText, selected && styles.attendanceChoiceTextSelected]}>{selected ? `✓ ${label}` : label}</Text>
-                  </Pressable>;
-                })}
-              </View>
-            </View>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-// ─── Step 3: Keep these people (pre-selected avatar chips) ──────────────────
-function StepKeep({
-  candidates,
-  selected,
-  disabled,
-  onToggle,
-}: {
-  candidates: SurveyMember[];
-  selected: Set<string>;
-  disabled: boolean;
-  onToggle: (id: string) => void;
-}) {
-  return (
-    <View>
-      <Text style={styles.keepHeadline}>{COPY.surveyAddPrompt}</Text>
-      <View style={styles.chipWrap}>
-        {candidates.map((m) => {
-          const on = selected.has(m.id);
-          return (
-            <Pressable
-              key={m.id}
-              style={[styles.chip, on ? styles.chipOn : styles.chipOff]}
-              onPress={() => onToggle(m.id)}
-              disabled={disabled}
-              accessibilityRole="button"
-              accessibilityLabel={`Keep in touch with ${m.first_name_display ?? 'this person'}`}
-              accessibilityState={{ selected: on, disabled }}
-            >
-              <YoursAvatar name={m.first_name_display} photoUrl={m.profile_photo_url} size={28} bucket="none" />
-              <Text style={styles.chipName} numberOfLines={1}>
-                {m.first_name_display ?? ''}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-// ─── Step 3 footer: equal-weight Add / Skip + the always-live escape ────────
-function KeepFooter({
-  addLabel,
-  canAdd,
-  busy,
-  onAdd,
-  onSkip,
-  onEscape,
-}: {
-  addLabel: string;
-  canAdd: boolean;
-  busy: boolean;
-  onAdd: () => void;
-  onSkip: () => void;
-  onEscape: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
-      <View style={styles.keepRow}>
-        <Pressable
-          style={[styles.keepBtn, styles.keepBtnFill, !canAdd && styles.primaryOff]}
-          disabled={!canAdd || busy}
-          accessibilityRole="button"
-          accessibilityLabel={addLabel}
-          accessibilityState={{ disabled: !canAdd || busy, busy }}
-          onPress={onAdd}
-        >
-          {busy ? (
-            <ActivityIndicator color={Colors.white} />
-          ) : (
-            <Text style={styles.keepBtnFillText}>{addLabel}</Text>
-          )}
-        </Pressable>
-        <Pressable style={[styles.keepBtn, styles.keepBtnGhost]} onPress={onSkip}>
-          <Text style={styles.keepBtnGhostText}>{COPY.surveySkip}</Text>
-        </Pressable>
-      </View>
-      <Pressable
-        style={styles.escape}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel={COPY.surveyNotNow}
-        onPress={onEscape}
-      >
-        <Text style={styles.escapeText}>{COPY.surveyNotNow}</Text>
-      </Pressable>
-    </View>
   );
 }
 
@@ -1015,339 +686,3 @@ export function SurveyOutcomeOverlay({
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  attendancePerson: { paddingVertical: 8 },
-  attendanceChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 8 },
-  attendanceChoice: { flexGrow: 1, minHeight: 44, paddingVertical: 10, paddingHorizontal: 10, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, justifyContent: 'center' },
-  attendanceChoiceSelected: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
-  attendanceChoiceText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.asphalt, textAlign: 'center' },
-  attendanceChoiceTextSelected: { color: Colors.white, fontFamily: Fonts.sansBold },
-  attendanceSummary: { paddingHorizontal: 24, paddingTop: 8 },
-  attendanceError: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.errorRed },
-  skipAttendance: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
-  root: { flex: 1, justifyContent: 'flex-end' },
-  keyboardSpace: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: Colors.surveyScrim },
-
-  // ── Plan card behind ──
-  planContext: { ...StyleSheet.absoluteFillObject },
-  cardBehindWrap: { paddingHorizontal: 20 },
-  cardBehindEyebrow: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
-    marginBottom: 12,
-  },
-  cardBehind: {
-    flexDirection: 'row',
-    gap: 12,
-    backgroundColor: Colors.cardBg,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 12,
-    alignItems: 'center',
-  },
-  cardBehindImg: { width: 56, height: 56, borderRadius: 10 },
-  cardBehindImgFallback: { backgroundColor: Colors.yoursGhostBg },
-  cardBehindBody: { flex: 1, minWidth: 0 },
-  cardBehindTitle: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displaySM,
-    color: Colors.asphalt,
-  },
-  cardBehindMeta: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-    marginTop: 3,
-  },
-
-  // ── Sheet ──
-  sheet: {
-    // Stay inside the safe space above the keyboard instead of translating
-    // a fixed-height sheet past the top of a small screen.
-    flexShrink: 1,
-    backgroundColor: Colors.cream,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.iconMuted,
-    marginTop: 12,
-  },
-
-  // ── Header ──
-  header: {
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  eyebrow: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    color: Colors.tertiary,
-  },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    color: Colors.asphalt,
-    marginTop: 4,
-  },
-  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
-  stepDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.border,
-  },
-  stepDotOn: { backgroundColor: Colors.terracotta },
-  stepDotDone: { backgroundColor: Colors.gold },
-  stepCounter: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    color: Colors.terracotta,
-    marginLeft: 6,
-  },
-
-  // ── Body + footer ──
-  body: { flex: 1 },
-  bodyContent: { paddingHorizontal: 24, paddingTop: 18, paddingBottom: 8, flexGrow: 1 },
-  footer: {
-    paddingHorizontal: 24,
-    paddingTop: 8,
-  },
-  primary: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  primaryOff: { opacity: 0.4 },
-  primaryText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.white,
-  },
-  escape: { alignItems: 'center', paddingVertical: 8 },
-  escapeText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.tertiary,
-  },
-
-  // ── Step 1 pills (checkpoint 2 refines) ──
-  pillCol: { gap: 10 },
-  pill: {
-    height: 56,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    backgroundColor: Colors.cardBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pillOn: { borderColor: Colors.terracotta, backgroundColor: Colors.terracotta },
-  pillText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-  pillTextOn: { color: Colors.cream },
-
-  // ── Step 1 comment reveal ──
-  commentReveal: {
-    overflow: 'hidden',
-    marginTop: 6,
-    justifyContent: 'flex-start',
-  },
-  commentLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    color: Colors.secondary,
-    marginBottom: 8,
-  },
-  commentInput: {
-    backgroundColor: Colors.cardBg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 12,
-    minHeight: 72,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    textAlignVertical: 'top',
-  },
-  commentHint: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.tertiary,
-    marginTop: 6,
-  },
-
-  // ── Step 2 attendance rows ──
-  whoHelper: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-    lineHeight: 19,
-    marginBottom: 14,
-  },
-  attendList: { gap: 2 },
-  attendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  // "Didn't make it" = the whole row dims. The faded rows answer "who's out" at
-  // a glance; no strikethrough anywhere (striking "Didn't make it" double-negates).
-  attendRowOut: { opacity: 0.5 },
-  attendName: {
-    flex: 1,
-    minWidth: 0,
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-  },
-  tag: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1.5,
-  },
-  // Made = gold-tint FILL + ink text (reads filled). Missed = plain outline.
-  tagMade: { borderColor: Colors.gold, backgroundColor: Colors.surveyChipFill },
-  tagMissed: { borderColor: Colors.border, backgroundColor: 'transparent' },
-  tagText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM },
-  tagTextMade: { color: Colors.asphalt },
-  tagTextMissed: { color: Colors.secondary },
-
-  // ── Step 3 keep chips ──
-  keepHeadline: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayMD,
-    color: Colors.asphalt,
-    lineHeight: 28,
-    marginBottom: 18,
-  },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 7,
-    paddingLeft: 7,
-    paddingRight: 14,
-    borderRadius: 24,
-    borderWidth: 1.5,
-  },
-  // Selected reads ADDED: gold-tint fill + terracotta ring + full-color avatar/ink.
-  chipOn: { borderColor: Colors.terracotta, backgroundColor: Colors.surveyChipFill },
-  // Deselected is a ghost: no fill, faint border, avatar + text dimmed.
-  chipOff: { borderColor: Colors.border, backgroundColor: 'transparent', opacity: 0.45 },
-  chipName: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-  },
-
-  // ── Step 3 footer (equal-weight Add / Skip) ──
-  keepRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
-  keepBtn: {
-    flex: 1,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  keepBtnFill: { backgroundColor: Colors.terracotta },
-  keepBtnFillText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.white,
-  },
-  keepBtnGhost: { borderWidth: 1.5, borderColor: Colors.border },
-  keepBtnGhostText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.asphalt,
-  },
-
-  // ── Outcome overlay ──
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-  },
-  toast: {
-    backgroundColor: Colors.darkWarm,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  toastRule: { height: 3, backgroundColor: Colors.gold },
-  toastInner: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
-  toastEyebrow: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    letterSpacing: 1.6,
-    textTransform: 'uppercase',
-    color: Colors.gold,
-    marginBottom: 6,
-  },
-  toastTitle: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displaySM,
-    color: Colors.white,
-    lineHeight: 26,
-  },
-  toastQuiet: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.overlayWhite,
-    marginTop: 6,
-  },
-  toastDismiss: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.tertiary,
-    marginTop: 10,
-  },
-  // Quiet variant (request-sent / failure, no mutual): a LIGHT cream/gold inline
-  // toast. The dark gold-rule card is reserved exclusively for mutual moments.
-  quietLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.surveyQuietBg,
-    borderWidth: 1,
-    borderColor: Colors.goldAccent,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-  },
-  quietDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.gold },
-  quietTextCol: { flex: 1, gap: 3 },
-  quietText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-  },
-});

@@ -119,7 +119,7 @@ export default function CoCreatorInviteClaimScreen() {
           <>
             <Text style={styles.title}>You&apos;re a co-creator</Text>
             <Text style={styles.body}>You're on the team at {preview.communityName}.</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(creator)/community')}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/friends/manage/(tools)/community')}>
               <Text style={styles.primaryBtnText}>Go to the community</Text>
             </TouchableOpacity>
           </>

@@ -1,4 +1,4 @@
-import { Tabs, router } from 'expo-router';
+import { Tabs, router, usePathname } from 'expo-router';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import SunriseIcon from '../../components/yours/icons/SunriseIcon';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
+import CreateMenuSheet, { type CreationKind } from '../../components/create/CreateMenuSheet';
 import { getOrder } from '../../lib/ticketing';
 import { getVerificationDestination, approveVerificationEntry } from '../../lib/navState';
 import {
@@ -96,6 +97,15 @@ export default function TabLayout() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState<string | null>(null);
   const [verificationGateRevision, setVerificationGateRevision] = useState(0);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const pathname = usePathname();
+
+  useEffect(() => { setCreateMenuOpen(false); }, [pathname, userId]);
+  const selectCreation = (kind: CreationKind) => {
+    setCreateMenuOpen(false);
+    if (kind === 'plan') router.navigate('/(tabs)/post' as never);
+    else router.push({ pathname: '/creator/start', params: { kind } } as never);
+  };
 
   // Audit findings 2 and 5, consumed HERE because reaching the tabs is the
   // proof that the person is fully inside the app: past the auth gate, the
@@ -249,6 +259,9 @@ export default function TabLayout() {
     {/* Hidden routes remain navigable but are not visible tabs. Explicit labels
         keep iOS from announcing those routes in the five-tab count. */}
     <Tabs
+      // Profile and conversations are hidden tab routes. Back must return to
+      // the screen that opened them, including its existing conversation ID.
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         lazy: true,
@@ -304,10 +317,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="post/index"
+        listeners={{ tabPress: event => { event.preventDefault(); setCreateMenuOpen(true); } }}
         options={{
-          title: 'Post',
+          title: 'Create',
           tabBarLabel: '',
-          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Post a plan, tab, 3 of 5' : 'Post a plan',
+          tabBarAccessibilityLabel: Platform.OS === 'ios' ? 'Create, tab, 3 of 5' : 'Create',
           tabBarIcon: () => <PostTabIcon />,
         }}
       />
@@ -323,7 +337,7 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="friends/index"
+        name="friends"
         options={{
           title: 'Your People',
           tabBarLabel: 'Yours',
@@ -371,6 +385,7 @@ export default function TabLayout() {
         options={{ href: null, tabBarStyle: { display: 'none' } }}
       />
     </Tabs>
+    <CreateMenuSheet key={`${userId ?? 'signed-out'}:${pathname}`} visible={createMenuOpen} onClose={() => setCreateMenuOpen(false)} onSelect={selectCreation} />
     </>
   );
 }

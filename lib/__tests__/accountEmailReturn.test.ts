@@ -7,7 +7,7 @@ it('strips link credentials only from the new email confirmation destination', (
   const recovery='https://washedup.app/auth/callback?code=example#access_token=example&type=recovery';
   expect(redirectSystemPath({path:recovery,initial:true})).toBe(recovery);
   expect(redirectSystemPath({path:'https://washedup.app/app/plan/abc?invitation=kept',initial:false})).toBe('/plan/abc?invitation=kept');
-  expect(redirectSystemPath({path:'https://washedup.app/app/creator/events',initial:false})).toBe('/(creator)/events');
+  expect(redirectSystemPath({path:'https://washedup.app/app/creator/events',initial:false})).toBe('/(tabs)/friends/manage/(tools)/events');
 });
 it('classifies missing configuration before network or account mutation', async () => {
   const fetcher=jest.fn(),authorization=jest.fn(); const api=createAccountEmailApi({url:'http://127.0.0.1',anonKey:'public',fetch:fetcher,authorization});

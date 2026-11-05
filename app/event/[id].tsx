@@ -584,7 +584,7 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
     !viewerIsMemberHere &&
     !viewerJoinPending;
   const { data: joinPolicy = null } = useQuery({
-    queryKey: ['community-join-policy', event?.community_id],
+    queryKey: ['community-join-policy', event?.community_id, userId],
     queryFn: () => getJoinPolicy(event!.community_id!),
     enabled: MEMBER_STATE_ENABLED && !!event?.community_id,
     staleTime: 60_000,

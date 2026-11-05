@@ -9,6 +9,7 @@
 import { useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { circleKeys } from '../lib/circles/keys';
 
 export type CirclePlanVisibility = 'circle_only' | 'open';
@@ -124,7 +125,7 @@ export function useCreateCirclePlan() {
       pending.current = attempt;
       let dispatched = false;
       try {
-        const verified = await supabase.auth.getUser();
+        const verified = await requestWithDeadline(supabase.auth.getUser(), 12_000);
         check();
         if (verified.error) throw verified.error;
         const verifiedId = verified.data.user?.id;

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { baseStyles } from '../../components/plans/plansDiscoveryStyles';
 
 const root = path.join(__dirname, '..', '..');
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -21,7 +22,7 @@ describe('call-critical creator UX contracts', () => {
   });
 
   it('names the audience in both community conversation types', () => {
-    expect(read('app/community-thread/[id].tsx')).toContain('everyone in this community');
+    expect(read('app/community-thread/[id].tsx')).toContain("coreLayout?.name ?? card?.name ?? 'Everyone in this community'");
     expect(read('app/community-topic/[id].tsx')).toContain('people going to this event');
   });
 
@@ -34,7 +35,13 @@ describe('call-critical creator UX contracts', () => {
     const source = read('app/(tabs)/plans/index.tsx');
     expect(source).toContain('horizontal');
     expect(source).toContain('contentContainerStyle={styles.filterRow}');
-    expect(source).toContain("justifyContent: 'center'");
+    expect(source).toContain("from '../../../components/plans/plansDiscoveryStyles'");
+    expect(baseStyles.filterRow).toMatchObject({
+      flexGrow: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    });
   });
 
   it('shows reply and reaction affordances in the main community conversation', () => {

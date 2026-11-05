@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ChatSizedText as Text } from '../chat/ChatSizedText';
 import { AfterglowColors as Colors } from '../../constants/Colors';
 import { AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import type { CommunityReplyComposerState } from '../../hooks/useCommunityReplyComposer';

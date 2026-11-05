@@ -63,7 +63,7 @@ export default function EventSummaryScreen() {
     message: { padding: 24, gap: 16 },
     pending: { padding: 32, alignItems: 'center', gap: 12 },
   }), [c.paper, c.ink, c.muted, c.accent, c.surface, c.border, c.white, f.regular, f.medium, f.semibold, f.display, compactIdentity]);
-  const back = () => router.canGoBack() ? router.back() : router.replace((pageId ? `/creator/${state.page?.entry === 'team' ? 'page-events' : 'page'}?id=${pageId}` : '/(creator)/events') as never);
+  const back = () => router.canGoBack() ? router.back() : router.replace((pageId ? `/creator/${state.page?.entry === 'team' ? 'page-events' : 'page'}?id=${pageId}` : '/(tabs)/friends/manage/(tools)/events') as never);
   const open = (path: string, kind: 'events' | 'finance' | 'audience', parameter = 'id') => {
     if (!id || !state.canOpen(kind)) return;
     hapticLight();

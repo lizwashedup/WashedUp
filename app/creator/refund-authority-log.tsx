@@ -54,7 +54,7 @@ export default function RefundAuthorityLogScreen() {
   });
 
   if (!REFUND_AUTHORITY_ENABLED) return <Redirect href="/creator/co-creators" />;
-  if (access && !isLeaderAccess(access)) return <Redirect href="/(creator)/events" />;
+  if (access && !isLeaderAccess(access)) return <Redirect href="/(tabs)/friends/manage/(tools)/events" />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>

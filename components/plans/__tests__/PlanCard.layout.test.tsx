@@ -13,6 +13,7 @@ afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
 
 jest.mock('@expo/vector-icons', () => {

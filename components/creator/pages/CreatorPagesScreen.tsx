@@ -20,7 +20,7 @@ import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
 import { PageFrame, PageAction, pageStyles as s } from './PageFrame';
 import Colors, { AfterglowColors, CreatorSurfaceColors } from '../../../constants/Colors';
 
-export default function CreatorPagesScreen() {
+export default function CreatorPagesScreen({ creationKind }: { creationKind?: 'community' | 'event' } = {}) {
   const { scope, account } = useCreatorPageScope('your-pages');
   const read = useCallback(async (owned: CreatorPageScope) => ({
     saved: await listCreatorPages(owned), local: await listLocalPageEditors(owned),
@@ -47,7 +47,7 @@ export default function CreatorPagesScreen() {
     if(!current()||!scope||ownedAttempt||attempt.current?.scope===scope||loading||error)return;
     const owned:StartAttempt={scope,settled:'pending',checking:false};attempt.current=owned;
     setStartState({owner:owned,phase:'starting'});setProblem(undefined);
-    const pending=startPageEditor(scope,record=>{owned.record=record;});
+    const pending=startPageEditor(scope,record=>{owned.record=record;}, creationKind === 'event' ? 'organization' : 'community');
     // Observe the original write without canceling it or starting another serialized write.
     void pending.then(record=>{owned.record=record;owned.settled='saved';},()=>{owned.settled='failed';});
     try{
@@ -92,19 +92,19 @@ export default function CreatorPagesScreen() {
     const actual = latestLegacy.current.data?.find(candidate => candidate.id === space.id);
     if (!actual?.legacy) return;
     setWorkspace(actual.legacy.workspace);
-    if (actual.legacy.communityId) setSelectedCommunityId(actual.legacy.communityId);
+    setSelectedCommunityId(actual.legacy.communityId ?? null);
     router.push(actual.route as never);
   };
-  const createAction = scope ? <PageAction compact primary singleLine accessibilityLabel="Create a page"
-    title={starting ? 'Starting…' : 'New page'} disabled={loading || !!error || !!ownedAttempt}
+  const createAction = scope ? <PageAction compact primary singleLine accessibilityLabel={creationKind === 'community' ? 'Start a community' : creationKind === 'event' ? 'Set up creator page' : 'Create a page'}
+    title={starting ? 'Starting…' : creationKind === 'community' ? 'Start community' : creationKind === 'event' ? 'Set up page' : 'New page'} disabled={loading || !!error || !!ownedAttempt}
     leadingIcon={starting ? <ActivityIndicator color={Colors.white} /> : <Plus size={18} color={Colors.white} strokeWidth={1.8} />}
     onPress={() => void start()} /> : null;
-  return <PageFrame title="Creator space">
+  return <PageFrame title={creationKind === 'community' ? 'Start a community' : creationKind === 'event' ? 'Create an event' : 'You manage'}>
     <View style={look.headingRow}>
-      <Text accessibilityRole="header" style={[look.heading, { fontFamily: fonts.display }]}>Your communities & organizations</Text>
+      <Text accessibilityRole="header" style={[look.heading, { fontFamily: fonts.display }]}>{creationKind === 'community' ? 'Start your community' : creationKind === 'event' ? 'Who’s creating this event?' : 'Your communities & organizations'}</Text>
       {!empty && !error && !account.error && createAction}
     </View>
-    {!empty && !error && !account.error && <Text style={[look.intro, { fontFamily: fonts.regular }]}>Choose a space to manage its events, details and team.</Text>}
+    {!empty && !error && !account.error && <Text style={[look.intro, { fontFamily: fonts.regular }]}>{creationKind === 'event' ? 'Choose an existing community or organization, or set up your public creator identity.' : creationKind === 'community' ? 'Continue an existing community or start a new one below.' : 'Choose a space to manage its events, details and team.'}</Text>}
     {(account.isLoading || loading) && <ActivityIndicator accessibilityLabel="Loading your pages" color={Colors.terracotta} />}
     {(account.error || error) && <View style={look.recovery}>
       <Text accessibilityRole="alert" style={[look.name, { fontFamily: fonts.semibold }]}>{account.error ? 'Couldn’t check your account' : 'Couldn’t load your pages'}</Text>
@@ -114,8 +114,8 @@ export default function CreatorPagesScreen() {
     {!account.isLoading && !account.error && account.viewerId === null && <Text style={[s.body, { fontFamily: fonts.regular }]}>Sign in to see your pages.</Text>}
     {empty && <View style={look.welcome}>
       <View style={look.welcomeMark}><Plus size={28} color={Colors.terracotta} /></View>
-      <Text accessibilityRole="header" style={[look.welcomeTitle, { fontFamily: fonts.display }]}>Bring your people together</Text>
-      <Text style={[s.small, { fontFamily: fonts.regular }]}>Give your community or organization a home. Add your details, then prepare your first event.</Text>
+      <Text accessibilityRole="header" style={[look.welcomeTitle, { fontFamily: fonts.display }]}>{creationKind === 'event' ? 'Create under your name' : creationKind === 'community' ? 'Start your community' : 'Bring your people together'}</Text>
+      <Text style={[s.small, { fontFamily: fonts.regular }]}>{creationKind === 'event' ? 'Set up a public creator page for yourself or your organization, then prepare your first event.' : 'Give your community or organization a home. Add your details, then prepare your first event.'}</Text>
       {createAction}
     </View>}
     {state&&state.phase!=='starting'&&<View style={[look.recovery,look.draftRecovery]}>
@@ -127,7 +127,7 @@ export default function CreatorPagesScreen() {
     {!!data?.saved.length && <View style={look.collection}>
       {data.saved.map((page, index) => <PageEntry key={page.id} id={page.id} data={page.published_data ?? page.page_data} scope={scope} separated={index > 0}
         kind={`${page.page_kind === 'community' ? 'Community' : 'Organization'} · ${page.published_data ? 'Published' : 'Private page'}`}
-        onPress={() => { if (current()) router.push(`/creator/page?id=${page.id}` as never); }} />)}
+        onPress={() => { if (current()) router.push((creationKind === 'event' && page.published_data ? `/creator/page-events?id=${page.id}` : `/creator/page?id=${page.id}`) as never); }} />)}
     </View>}
     {localDrafts.length > 0 && <View style={look.drafts}>
       <Text accessibilityRole="header" style={[look.section, { fontFamily: fonts.semibold }]}>Continue creating</Text>

@@ -1,3 +1,9 @@
+import { ChatComposerContext } from './ChatComposerContext';
+import { chatStyles, createConversationAppearance } from './chatThreadStyles';
+import MessageBubble from './ChatMessageBubble';
+import SwipeableRow from './ChatSwipeReplyRow';
+import { bubbleStyles } from './chatBubbleStyles';
+import { formatChatDate, formatMessageTime, isSameDay } from './chatDateFormatting';
 import { useChatReplyScroll } from '../../hooks/useChatReplyScroll';
 import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
@@ -7,13 +13,10 @@ import { ChatMessageAnchorNotice } from './ChatMessageAnchorNotice';
 import { addChatMentionReference, rebaseChatMentions, readChatMentionDocument } from '../../lib/chatMentionIdentity';
 import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
 import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
-import LinkifiedText from '../LinkifiedText';
 import { ChatMentionPicker } from './ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { mentionQueryAt, insertMentionAt } from '../../lib/communityChatUi';
-import { ChatBubbleFill } from './ChatBubbleFill';
-import ProfileButton from '../ProfileButton';
-import { messageActionAccess, messageActionWeb } from './messageActionAccess';
+import { ChatThreadHeader } from './ChatThreadHeader';
 import { MessageActionsMenu, type MessageMenu } from './MessageActionsMenu';
 import { MEMBER_REDESIGN_APPEARANCE_ENABLED, memberPresentationFonts } from '../../constants/MemberAppearance';
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, memo } from 'react';
@@ -23,7 +26,6 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
-  StyleSheet,
   Keyboard,
   Platform,
   ActionSheetIOS,
@@ -32,8 +34,6 @@ import {
   Modal,
   Pressable,
   Linking,
-  ScrollView,
-  AppState,
   BackHandler,
   LayoutChangeEvent,
   useWindowDimensions,
@@ -60,26 +60,22 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../lib/supabase';
 import Colors, { AfterglowColors } from '../../constants/Colors';
-import { Fonts, FontSizes, ChatType, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
-import { ChatContextHeader, chatHeaderActionStyle } from './ChatContextHeader';
 import { CreatorActionFill } from '../creator/CreatorActionFill';
-import { ChatPhotoAttachment } from './ChatPhotoAttachment';
-import { createChatMessageAppearance } from './chatMessageAppearance';
 import { createChatComposerAppearance } from './chatComposerAppearance';
 import { useChatInputHeight } from '../../hooks/useChatInputHeight';
 import { ChatPhotoViewer, useChatPhotoSelection } from './ChatPhotoViewer';
 import type { AnchorRect } from '../menu/MenuCard';
 import SunriseIcon from '../yours/icons/SunriseIcon';
-import ChatPlanCard from './ChatPlanCard';
-import { openUrl, soleUrlIn } from '../../lib/url';
+import { openUrl } from '../../lib/url';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { isChatEditRefused } from '../../lib/chatMessageEdit';
 import { checkContent } from '../../lib/contentFilter';
 import { restoreChatDraft } from '../../lib/restoreChatDraft';
 import { PhotoBatchFailure, sendPhotoBatch } from '../../lib/chatPhotoBatch';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { compareChatSequence } from '../../lib/chatPaging';
 import { PhotoSendSession } from '../../lib/photoSendSession';
 import { useChatComposerDraft } from '../../hooks/useChatComposerDraft';
 import { checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
@@ -91,18 +87,13 @@ import MediaPanel, { isChatGifPickerAvailable } from '../chat/MediaPanel';
 import LocationPickerModal from '../chat/LocationPickerModal';
 import PhotoPreviewModal from '../chat/PhotoPreviewModal';
 import ReactionEmojiPicker from '../chat/ReactionEmojiPicker';
-import { ReactionChips } from './ReactionChips';
 import { ReactionDetailsSheet, type ReactionDetailsRequest } from './ReactionDetailsSheet';
 import { reactionEmoji, reactionKeyForEmoji, topicReactionCounts } from '../../lib/communityReactionChips';
-import LinkPreviewCard from '../chat/LinkPreviewCard';
 import TypingIndicator from '../chat/TypingIndicator';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useActiveChatPresence } from '../../hooks/useActiveChatPresence';
 import ScrollToBottomButton from '../chat/ScrollToBottomButton';
-import VoicePlayer from '../chat/VoicePlayer';
 import { ChatSizedText } from './ChatSizedText';
-import { ChatLocationPreview } from './ChatLocationPreview';
-import { chatLocationLabel, parsePlanChatLocation } from '../../lib/chatLocation';
 import VoiceRecorder, { RecorderUiMode } from '../chat/VoiceRecorder';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { uploadAudioToStorage } from '../../lib/uploadAudio';
@@ -110,9 +101,7 @@ import { logError } from '../../lib/logger';
 import { ReportModal } from '../modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerPushNotificationsWithResult, getPushPermissionStatus } from '../../hooks/usePushNotifications';
-import { pushRegistrationFeedback } from '../notifications/pushRegistrationFeedback';
+import { useChatPushBanner } from '../../hooks/useChatPushBanner';
 
 // ─── Shared chat surface ────────────────────────────────────────────────────────
 // ChatThread is the ONE polished chat body shared by plan, circle, and DM chats.
@@ -170,563 +159,6 @@ export interface ChatThreadProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatChatDate(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 86400000);
-  const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-  if (msgDate.getTime() === today.getTime()) return 'Today';
-  if (msgDate.getTime() === yesterday.getTime()) return 'Yesterday';
-  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function formatMessageTime(dateString: string): string {
-  return new Date(dateString).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true,
-  });
-}
-
-function isSameDay(a: string, b: string): boolean {
-  const da = new Date(a), db = new Date(b);
-  return da.getFullYear() === db.getFullYear()
-    && da.getMonth() === db.getMonth()
-    && da.getDate() === db.getDate();
-}
-
-// ─── Linked Text ─────────────────────────────────────────────────────────────
-
-const URL_PATTERN = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
-
-// Image bubble sizing -- bounds the bubble while preserving the source image's
-// aspect ratio (the old 240x180 + contentFit:cover cropped tall GIFs to their
-// top). Intrinsic w/h is captured via expo-image's onLoad and cached so the
-// same image (e.g. a GIF reused in scrollback) doesn't re-measure on every
-// remount.
-const MESSAGE_IMAGE_MAX_WIDTH = 240;
-const MESSAGE_IMAGE_MAX_HEIGHT = 320;
-const MESSAGE_IMAGE_DEFAULT_AR = 4 / 3;
-const imageSizeCache = new Map<string, { w: number; h: number }>();
-function fitImage(natural: { w: number; h: number } | null) {
-  const ar = natural && natural.h > 0 ? natural.w / natural.h : MESSAGE_IMAGE_DEFAULT_AR;
-  let width = MESSAGE_IMAGE_MAX_WIDTH;
-  let height = width / ar;
-  if (height > MESSAGE_IMAGE_MAX_HEIGHT) {
-    height = MESSAGE_IMAGE_MAX_HEIGHT;
-    width = height * ar;
-  }
-  return { width: Math.round(width), height: Math.round(height) };
-}
-
-// A message that is only 1-3 emoji (no letters/numbers) renders large with no
-// bubble, like iMessage/WhatsApp. Hermes may lack Intl.Segmenter, so fall back
-// to a code-point count; over-counting a ZWJ sequence just renders it as a
-// normal bubble, which is a safe default.
-function isEmojiOnly(text: string): boolean {
-  const t = text.trim();
-  if (!t || /[\p{L}\p{N}]/u.test(t)) return false;
-  if (!/\p{Extended_Pictographic}/u.test(t)) return false;
-  const Seg = (Intl as any)?.Segmenter;
-  const count = Seg ? Array.from(new Seg().segment(t)).length : Array.from(t).length;
-  return count <= 3;
-}
-
-function LinkedText(props: React.ComponentProps<typeof LinkifiedText>) {
-  return <LinkifiedText {...props} fullUrls/>;
-}
-
-// ─── Location helpers ─────────────────────────────────────────────────────────
-
-function openLocationInMaps(lat: number, lng: number, address: string) {
-  const encoded = encodeURIComponent(address);
-  const url = Platform.OS === 'ios'
-    ? `maps://app?ll=${lat},${lng}&q=${encoded}`
-    : `geo:${lat},${lng}?q=${encoded}`;
-  Linking.openURL(url).catch(() => {
-    const fallback = Platform.OS === 'ios'
-      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encoded}`
-      : `https://www.google.com/maps?q=${lat},${lng}`;
-    Linking.openURL(fallback).catch(() => {});
-  });
-}
-
-// ─── Message Bubble ───────────────────────────────────────────────────────────
-
-interface BubbleProps {
-  message: ChatMessage;
-  isOwn: boolean;
-  showAvatar: boolean;
-  showName: boolean;
-  isGrouped: boolean;
-  currentUserId: string;
-  contextTitle?: string;
-  onPhotoPress?: (url: string, messageId: string) => void;
-  photoMaxWidth: number;
-  conversationFonts: AfterglowFontFamilies;
-  onReaction?: (messageId: string, emoji?: string) => void;
-  onAddReaction?: (messageId: string) => void;
-  onViewReactions?: (messageId: string) => void;
-  reactionsDisabled?: boolean;
-  onMessageLongPress?: (message: ChatMessage, isOwn: boolean) => void;
-  onStartReply?: (messageId: string) => void;
-  onReplyTap?: (messageId: string) => void;
-  onAvatarPress?: (userId: string) => void;
-  mentionNames?: Set<string>;
-}
-
-// The bare system-row templates the app writes today (app/plan/[id].tsx).
-// Anchored exact-match so legacy name-embedded lines are never double-prefixed.
-const BARE_SYSTEM_TEMPLATES = /^(joined the plan|had to leave the plan|cancelled this plan)$/i;
-
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, photoMaxWidth, conversationFonts, onReaction, onAddReaction, onViewReactions, reactionsDisabled, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
-  const messageAppearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? createChatMessageAppearance(conversationFonts) : null, [conversationFonts]);
-  if (message.message_type === 'system') {
-    // A system message carrying a plan reference renders as the compact plan card
-    // (invite delivery), not as system text.
-    if (message.ref_event_id) {
-      return (
-        <View style={bubbleStyles.systemRow}>
-          <ChatPlanCard eventId={message.ref_event_id} />
-        </View>
-      );
-    }
-    let displayContent = message.content;
-    // Current-era system rows store the bare verb phrase and carry the actor
-    // only in user_id, so the line rendered nameless ("joined Cali splash!").
-    // Prefix the sender's name for exactly those templates; older rows (the
-    // "X just joined the group!" era) already embed the name.
-    if (BARE_SYSTEM_TEMPLATES.test(displayContent.trim()) && message.sender?.first_name) {
-      displayContent = `${message.sender.first_name} ${displayContent.trim()}`;
-    }
-    if (contextTitle) {
-      displayContent = displayContent
-        .replace(/joined the plan/gi, `joined ${contextTitle}`)
-        .replace(/the plan/gi, contextTitle);
-    }
-    return (
-      <View style={bubbleStyles.systemRow}>
-        <Text style={[bubbleStyles.systemText, messageAppearance?.day]}>{displayContent}</Text>
-      </View>
-    );
-  }
-
-  const handleLongPress = () => {
-    hapticMedium();
-    onMessageLongPress?.(message, isOwn);
-  };
-
-  const reactions = message.reactions ?? [];
-  const totalReactions = reactions.length;
-  // Collect unique emojis in order of first appearance -- memoized so a parent
-  // re-render that didn't touch reactions skips the loop.
-  const uniqueEmojis = useMemo(() => {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const r of reactions) {
-      if (!seen.has(r.reaction)) { seen.add(r.reaction); out.push(r.reaction); }
-    }
-    return out;
-  }, [reactions]);
-  const iReacted = reactions.some(r => r.user_id === currentUserId);
-  // First link in a text message gets a rich preview card under the text (the
-  // card renders nothing until og-unfurl returns usable metadata). Memoized so
-  // the regex doesn't re-run on unrelated re-renders.
-  const firstUrl = useMemo(
-    () => (message.message_type === 'user' ? (message.content?.match(URL_PATTERN)?.[0] ?? null) : null),
-    [message.message_type, message.content],
-  );
-  // A message carrying exactly one link makes the whole bubble a second way
-  // into that link. The inline link Text stays the primary target; this is the
-  // one an ancestor cannot swallow, which is the failure shape reported on
-  // 8-02 (a shared plan link that did nothing when tapped on Android). The
-  // bubble had no onPress at all before, so this only adds a way through and
-  // can never override an existing one.
-  const bubbleUrl = useMemo(
-    () => (message.message_type === 'user' ? soleUrlIn(message.content) : null),
-    [message.message_type, message.content],
-  );
-  // A plain text bubble can be a direct reply target. Media, locations, audio,
-  // and links keep their existing tap action; long-press and swipe still expose
-  // Reply for those message types.
-  const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;
-  // Media owns its individual accessible controls (map, photo viewer, playback).
-  // The wrapper retains the physical long-press without grouping those controls
-  // into a second, non-functional screen-reader button.
-  const hasInteractiveMedia = !!message.image_url || message.message_type === 'location'
-    || (message.message_type === 'audio' && !!message.audio_url);
-  // Cache the emoji-only verdict per content -- the regex/Segmenter test is
-  // cheap individually but runs for every bubble on every list re-render.
-  const isEmojiOnlyMsg = useMemo(() => isEmojiOnly(message.content), [message.content]);
-  // Intrinsic image size -- seeded from the module-level cache if we've seen
-  // this URL before, otherwise updated by the Image's onLoad. fitImage clamps
-  // to the bubble bounds while keeping the source aspect ratio (no more
-  // top-of-GIF cropping for portrait sources).
-  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(
-    () => (message.image_url ? imageSizeCache.get(message.image_url) ?? null : null),
-  );
-  const imageDisplaySize = useMemo(() => fitImage(imgSize), [imgSize]);
-
-  const borderRadius = isOwn
-    ? { borderTopLeftRadius: 14, borderTopRightRadius: 14, borderBottomLeftRadius: 14, borderBottomRightRadius: 5 }
-    : { borderTopLeftRadius: 14, borderTopRightRadius: 14, borderBottomLeftRadius: 5, borderBottomRightRadius: 14 };
-
-  return (
-    <View
-      style={[
-        bubbleStyles.row,
-        isOwn ? bubbleStyles.rowOwn : bubbleStyles.rowOther,
-        // Reaction badge is absolutely positioned at bottom:-12 of the bubble.
-        // Without extra clearance below, it overlaps the sender label of the
-        // next message. Bump marginBottom only when there's a badge to clear.
-        !COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && bubbleStyles.rowWithReaction,
-      ]}
-    >
-      {!isOwn && (
-        <View style={bubbleStyles.avatarSlot}>
-          {showAvatar ? (
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => onAvatarPress?.(message.user_id)}
-              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-              accessibilityLabel={`View ${message.sender?.first_name ?? 'member'}'s profile`}
-            >
-              {message.sender?.avatar_url ? (
-                <Image source={{ uri: message.sender.avatar_url }} style={bubbleStyles.avatar} contentFit="cover" />
-              ) : (
-                <View style={[bubbleStyles.avatar, bubbleStyles.avatarFallback, messageAppearance?.avatar]}>
-                  <Text style={[bubbleStyles.avatarInitial, messageAppearance?.avatarInitial]}>
-                    {message.sender?.first_name?.[0]?.toUpperCase() ?? '?'}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      )}
-
-      <View style={[bubbleStyles.bubbleWrapper, isOwn ? bubbleStyles.wrapperOwn : bubbleStyles.wrapperOther]} {...messageActionWeb(handleLongPress)}>
-
-        <Pressable
-          onPress={bubbleUrl
-            ? () => openUrl(bubbleUrl)
-            : canTapToReply
-              ? () => onStartReply?.(message.id)
-              : undefined}
-          onLongPress={handleLongPress}
-          {...messageActionAccess(handleLongPress)}
-          delayLongPress={400}
-          accessible={hasInteractiveMedia ? false : undefined}
-          accessibilityRole={hasInteractiveMedia ? undefined : 'button'}
-          accessibilityActions={hasInteractiveMedia ? undefined : [{ name: 'messageActions', label: 'Message actions and reactions' }]}
-          onAccessibilityAction={hasInteractiveMedia ? undefined : event => { if (event.nativeEvent.actionName === 'messageActions') handleLongPress(); }}
-          accessibilityHint={bubbleUrl
-            ? 'Opens this link'
-            : canTapToReply
-              ? 'Starts a reply to this message'
-              : 'Shows message actions'}
-        >
-          {message.message_type === 'audio' && message.audio_url ? (
-            <View style={[
-              bubbleStyles.bubble,
-              bubbleStyles.bubbleText,
-              isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
-              borderRadius,
-              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
-            ]}>
-              <VoicePlayer
-                uri={message.audio_url}
-                durationSeconds={message.duration_seconds ?? 0}
-                isOwn={isOwn}
-                appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
-              />
-            </View>
-          ) : !!message.image_url ? (
-            <View>
-              {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatPhotoAttachment
-                uri={message.image_url} senderName={message.sender?.first_name} fonts={conversationFonts}
-                maxWidth={photoMaxWidth} onOpen={() => onPhotoPress?.(message.image_url!, message.id)} onLongPress={handleLongPress}
-              /> : (
-              <Pressable
-                onPress={() => onPhotoPress?.(message.image_url!, message.id)}
-                onLongPress={handleLongPress}
-                delayLongPress={400}
-              >
-                <Image
-                  source={{ uri: message.image_url }}
-                  style={[bubbleStyles.messageImage, imageDisplaySize, borderRadius]}
-                  contentFit="contain"
-                  transition={200}
-                  placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-                  cachePolicy="memory-disk"
-                  onLoad={(e) => {
-                    const w = e.source?.width;
-                    const h = e.source?.height;
-                    if (w && h && message.image_url) {
-                      imageSizeCache.set(message.image_url, { w, h });
-                      setImgSize({ w, h });
-                    }
-                  }}
-                />
-              </Pressable>
-              )}
-              {!!message.content?.trim() && (
-                <Text style={[bubbleStyles.imageCaption, isOwn && bubbleStyles.imageCaptionOwn, messageAppearance?.body]}>
-                  {message.content}
-                </Text>
-              )}
-            </View>
-          ) : message.message_type === 'location' ? (() => {
-            const location = parsePlanChatLocation(message.content);
-            return (
-              <Pressable
-                onPress={location ? () => openLocationInMaps(location.latitude, location.longitude, location.address) : undefined}
-                onLongPress={handleLongPress}
-                accessibilityRole={location ? 'button' : undefined}
-                accessibilityLabel={location ? `Open map for ${chatLocationLabel(location)}` : 'Location unavailable'}
-                style={[
-                  bubbleStyles.bubble,
-                  bubbleStyles.locationBubble,
-                  isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
-                  borderRadius,
-              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
-                ]}
-              >
-                {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatLocationPreview location={location} fonts={conversationFonts} isOwn={isOwn} /> : <>
-                <View style={bubbleStyles.locationPinRow}>
-                  <Ionicons name="location" size={15} color={isOwn ? Colors.white : Colors.terracotta} />
-                  <Text style={[bubbleStyles.locationLabel, isOwn && bubbleStyles.locationLabelOwn]}>
-                    Shared location
-                  </Text>
-                </View>
-                <Text style={[bubbleStyles.locationAddress, isOwn && bubbleStyles.locationAddressOwn]} numberOfLines={2}>
-                  {location ? chatLocationLabel(location) : 'Location unavailable'}
-                </Text>
-                <Text style={[bubbleStyles.locationTapHint, isOwn && bubbleStyles.locationTapHintOwn]}>
-                  {location ? 'Tap to open in Maps' : 'Ask for a new pin'}
-                </Text>
-                </>}
-              </Pressable>
-            );
-          })() : isEmojiOnlyMsg && !message.reply_to ? (
-            // Wrap the emoji glyph in a padded View so the outer Pressable has a
-            // real hit area -- a bare Text loses the long-press to the row-level
-            // SwipeableRow's pan gesture on Android, hiding the delete overlay.
-            <View style={bubbleStyles.emojiOnlyWrap}>
-              <Text style={bubbleStyles.emojiOnly}>{message.content}</Text>
-            </View>
-          ) : (
-            <View style={[
-              bubbleStyles.bubble,
-              bubbleStyles.bubbleText,
-              isOwn ? bubbleStyles.bubbleOwn : bubbleStyles.bubbleOther,
-              borderRadius,
-              messageAppearance?.bubble, isOwn && messageAppearance?.bubbleOwn,
-            ]}>
-              {isOwn && COMMUNITY_CHAT_GROUPING_ENABLED && <ChatBubbleFill/>}
-              {!isOwn && showName && <Text style={bubbleStyles.senderName}>{message.sender?.first_name ?? 'Someone'}</Text>}
-              {message.reply_to && (
-                <TouchableOpacity
-                  onPress={() => onReplyTap?.(message.reply_to!.id)}
-                  style={[bubbleStyles.replyQuote, isOwn ? bubbleStyles.replyQuoteOwn : bubbleStyles.replyQuoteOther, messageAppearance?.quote, isOwn && messageAppearance?.quoteOwn]}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[bubbleStyles.replyQuoteName, isOwn && bubbleStyles.replyQuoteNameOwn, messageAppearance?.quoteName, isOwn && messageAppearance?.bodyOwn]}>
-                    {message.reply_to.sender_name ?? 'Someone'}
-                  </Text>
-                  <Text style={[bubbleStyles.replyQuoteText, isOwn && bubbleStyles.replyQuoteTextOwn, messageAppearance?.quoteBody, isOwn && messageAppearance?.bodyOwn]} numberOfLines={2}>
-                    {message.reply_to.content}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <LinkedText
-                text={message.content}
-                mentionDocument={message.mention_data}
-                onMentionPress={onAvatarPress}
-                style={[bubbleStyles.messageText, isOwn && bubbleStyles.messageTextOwn, messageAppearance?.body, isOwn && messageAppearance?.bodyOwn]}
-                linkStyle={messageAppearance ? isOwn ? messageAppearance.linkOwn : messageAppearance.link : isOwn ? bubbleStyles.linkOwn : bubbleStyles.linkOther}
-                mentionNames={mentionNames}
-                mentionStyle={messageAppearance ? isOwn ? messageAppearance.mentionOwn : messageAppearance.mention : isOwn ? bubbleStyles.mentionOwn : bubbleStyles.mention}
-              />
-              {firstUrl && <LinkPreviewCard url={firstUrl} isOwn={isOwn} />}
-              <ChatSizedText style={[bubbleStyles.inlineTime, isOwn && bubbleStyles.inlineTimeOwn]}>{formatMessageTime(message.created_at)}</ChatSizedText>
-            </View>
-          )}
-
-          {!COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && (
-            <TouchableOpacity onPress={event => { event.stopPropagation(); onViewReactions?.(message.id); }} accessibilityRole="button" accessibilityLabel={`${totalReactions} reactions. See who reacted`} hitSlop={12} style={[bubbleStyles.reactionBadge, isOwn ? bubbleStyles.reactionBadgeOwn : bubbleStyles.reactionBadgeOther, iReacted && bubbleStyles.reactionBadgeMine]}>
-              {uniqueEmojis.map((emoji) => (
-                <Text key={emoji} style={bubbleStyles.reactionEmoji}>
-                  {emoji === 'heart' ? '\u2764\uFE0F' : emoji}
-                </Text>
-              ))}
-              {totalReactions > 1 && (
-                <Text style={bubbleStyles.reactionCount}>{totalReactions}</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </Pressable>
-        {(message.image_url || message.message_type === 'location' || message.message_type === 'audio' || (isEmojiOnlyMsg && !message.reply_to)) && (
-          <ChatSizedText style={bubbleStyles.inlineTime}>{!isOwn && showName ? `${message.sender?.first_name ?? 'Someone'} · ` : ''}{formatMessageTime(message.created_at)}</ChatSizedText>
-        )}
-        {COMMUNITY_CHAT_GROUPING_ENABLED && totalReactions > 0 && <ReactionChips attached
-          reactions={topicReactionCounts(reactions, currentUserId)}
-          onViewReactions={onViewReactions ? () => onViewReactions(message.id) : undefined}
-          onReact={key => { if (!isOwn && !reactionsDisabled) onReaction?.(message.id, key); }}
-          onAddReaction={!isOwn && onAddReaction ? () => onAddReaction(message.id) : undefined}
-          disabled={isOwn || reactionsDisabled}
-          appearance={{ fonts: conversationFonts }}
-        />}
-      </View>
-    </View>
-  );
-});
-
-const bubbleStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 2, paddingHorizontal: 12 },
-  rowOwn: { justifyContent: 'flex-end' },
-  rowOther: { justifyContent: 'flex-start' },
-  // Extra clearance below a row that has a reaction badge dangling
-  // 12px below the bubble. 16px = badge offset (12) + breathing room (4).
-  rowWithReaction: { marginBottom: 16 },
-  avatarSlot: { width: 24, marginRight: 6, alignSelf: 'flex-start', marginTop: 3 },
-  avatar: { width: 24, height: 24, borderRadius: 12 },
-  avatarFallback: { backgroundColor: Colors.inputBg, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  bubbleWrapper: { maxWidth: '84%', flexShrink: 1 },
-  wrapperOwn: { alignItems: 'flex-end' },
-  wrapperOther: { alignItems: 'flex-start' },
-  senderLine: { marginBottom: 2, marginLeft: 4 },
-  senderName: { ...ChatType.sender, fontFamily: Fonts.sansSemibold, color: Colors.terracotta, marginBottom: 3 },
-  senderDot: { fontSize: 10, color: Colors.tertiary },
-  senderTime: { fontSize: 10, color: Colors.secondary },
-  bubble: { overflow: 'hidden' },
-  bubbleText: { paddingHorizontal: 11, paddingVertical: 7 },
-  bubbleOwn: { backgroundColor: Colors.terracotta },
-  bubbleOther: {
-    backgroundColor: Colors.cardBg,
-  },
-  messageText: { ...ChatType.message, fontFamily: Fonts.sans, color: Colors.darkWarm },
-  emojiOnly: { fontSize: 44, lineHeight: 54, paddingVertical: 2 },
-  emojiOnlyWrap: { paddingVertical: 6, paddingHorizontal: 10 },
-  imageCaption: { fontFamily: Fonts.sans, fontSize: 15, color: Colors.darkWarm, lineHeight: 21, marginTop: 6, maxWidth: 260 },
-  imageCaptionOwn: { color: Colors.darkWarm },
-  messageTextOwn: { color: Colors.white },
-  inlineTime: { ...ChatType.time, fontFamily: Fonts.sans, color: Colors.secondary, textAlign: 'right', alignSelf: 'flex-end', marginLeft: 14, marginTop: 2 },
-  inlineTimeOwn: { color: Colors.overlayWhiteLight },
-  linkOther: { textDecorationLine: 'underline' as const, color: Colors.terracotta },
-  linkOwn: { textDecorationLine: 'underline' as const, color: Colors.white },
-  mention: { fontFamily: Fonts.sansBold, color: Colors.terracotta },
-  mentionOwn: { fontFamily: Fonts.sansBold, color: Colors.white },
-  messageImage: { backgroundColor: Colors.inputBg },
-  systemRow: { alignItems: 'center', marginVertical: 8, paddingHorizontal: 16 },
-  systemText: {
-    fontFamily: Fonts.sans,
-    fontSize: 11,
-    color: Colors.tertiary,
-    backgroundColor: Colors.inputBg,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  reactionBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.white,
-    borderRadius: 12,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    gap: 2,
-    position: 'absolute',
-    bottom: -12,
-    shadowColor: Colors.shadowBlack,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  reactionBadgeOwn: { right: 4 },
-  reactionBadgeOther: { left: 4 },
-  reactionBadgeMine: {
-    backgroundColor: Colors.warmTint,
-  },
-  reactionEmoji: { fontSize: 13 },
-  reactionCount: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.caption,
-    color: Colors.textMedium,
-    marginLeft: 1,
-  },
-  replyQuote: {
-    borderLeftWidth: 3,
-    paddingLeft: 8,
-    paddingVertical: 4,
-    marginBottom: 6,
-    borderRadius: 10,
-  },
-  replyQuoteOwn: {
-    borderLeftColor: Colors.overlayWhite,
-    backgroundColor: Colors.overlayLight,
-  },
-  replyQuoteOther: {
-    borderLeftColor: Colors.terracotta,
-    backgroundColor: Colors.inputBg,
-  },
-  replyQuoteName: {
-    fontFamily: Fonts.sansBold,
-    fontSize: 12,
-    color: Colors.terracotta,
-    marginBottom: 1,
-  },
-  replyQuoteNameOwn: {
-    color: Colors.overlayWhiteLight,
-  },
-  replyQuoteText: {
-    fontFamily: Fonts.sans,
-    ...ChatType.quote,
-    color: Colors.textMedium,
-  },
-  replyQuoteTextOwn: {
-    color: Colors.overlayWhiteLight,
-  },
-  locationBubble: { paddingHorizontal: 13, paddingVertical: 10, minWidth: 180 },
-  locationPinRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
-  locationLabel: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textMedium },
-  locationLabelOwn: { color: Colors.white },
-  locationAddress: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  locationAddressOwn: { color: Colors.white },
-  locationTapHint: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.textLight,
-  },
-  locationTapHintOwn: { color: Colors.overlayWhiteLight },
-});
-
-// ─── Swipe to reply ─────────────────────────────────────────────────────────
-// Drag a message row left-to-right (finger moves rightward on screen,
-// independent of the inverted list) to enter reply mode, mirroring WhatsApp.
-// activeOffsetX keeps it from stealing the FlatList's vertical scroll and from
-// firing on Android's left-edge back gesture; failOffsetY cancels the moment
-// the drag turns vertical. At the threshold we fire hapticMedium once and, on
-// release, the same reply activation the long-press menu uses.
-const SWIPE_REPLY_THRESHOLD = 80;
-const SWIPE_REPLY_MAX_TRANSLATE = 96;
-const SWIPE_REPLY_ACTIVE_OFFSET_X = 20;
-const SWIPE_REPLY_FAIL_OFFSET_Y = 12;
-const SWIPE_REPLY_ICON_SIZE = 20;
-const SWIPE_REPLY_ICON_LEFT = 16;
-const SWIPE_REPLY_ICON_MIN_SCALE = 0.6;
-const SWIPE_REPLY_ICON_SCALE_RANGE = 0.4;
-const SWIPE_REPLY_SPRING = { damping: 18, stiffness: 220, mass: 0.5 };
-
 // Input-bar send button morph: crossfade between mic (empty input) and send
 // (text entered). 0 = mic, 1 = send.
 const SEND_MORPH_DURATION = 150;
@@ -751,98 +183,6 @@ const PHOTO_BATCH_LIMIT = 10;
 const VOICE_HOLD_MS = 200;
 const VOICE_CANCEL_THRESHOLD = 80;
 const VOICE_LOCK_THRESHOLD = 80;
-
-const SwipeableRow = memo(function SwipeableRow({
-  enabled,
-  messageId,
-  onTriggerReply,
-  containerStyle,
-  children,
-}: {
-  enabled: boolean;
-  messageId: string;
-  onTriggerReply: (messageId: string) => void;
-  containerStyle: any;
-  children: React.ReactNode;
-}) {
-  const translateX = useSharedValue(0);
-  const triggered = useSharedValue(false);
-
-  // Keep the latest callback in a ref so the memoized gesture never calls a
-  // stale closure when the row re-renders.
-  const onTriggerReplyRef = useRef(onTriggerReply);
-  onTriggerReplyRef.current = onTriggerReply;
-  const fireReply = useCallback(() => onTriggerReplyRef.current?.(messageId), [messageId]);
-
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(enabled)
-        // A positive scalar waits for rightward movement. A positive lower
-        // bound also activates at dx=0, stealing stationary long presses.
-        .activeOffsetX(SWIPE_REPLY_ACTIVE_OFFSET_X)
-        .failOffsetY([-SWIPE_REPLY_FAIL_OFFSET_Y, SWIPE_REPLY_FAIL_OFFSET_Y])
-        .onBegin(() => {
-          triggered.value = false;
-        })
-        .onUpdate((e) => {
-          const x = Math.max(0, Math.min(e.translationX, SWIPE_REPLY_MAX_TRANSLATE));
-          translateX.value = x;
-          if (!triggered.value && x >= SWIPE_REPLY_THRESHOLD) {
-            triggered.value = true;
-            runOnJS(hapticMedium)();
-          }
-        })
-        .onEnd(() => {
-          if (triggered.value) runOnJS(fireReply)();
-        })
-        .onFinalize(() => {
-          translateX.value = withSpring(0, SWIPE_REPLY_SPRING);
-          triggered.value = false;
-        }),
-    [enabled, fireReply],
-  );
-
-  const rowStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
-  }));
-
-  const iconStyle = useAnimatedStyle(() => {
-    const progress = Math.min(translateX.value / SWIPE_REPLY_THRESHOLD, 1);
-    return {
-      opacity: progress,
-      transform: [
-        { scale: SWIPE_REPLY_ICON_MIN_SCALE + SWIPE_REPLY_ICON_SCALE_RANGE * progress },
-      ],
-    };
-  });
-
-  if (!enabled) {
-    return <View style={containerStyle}>{children}</View>;
-  }
-
-  return (
-    <View style={containerStyle}>
-      <Animated.View style={[swipeStyles.replyIcon, iconStyle]} pointerEvents="none">
-        <Ionicons name="arrow-undo" size={SWIPE_REPLY_ICON_SIZE} color={Colors.terracotta} />
-      </Animated.View>
-      <GestureDetector gesture={pan}>
-        <Animated.View style={rowStyle}>{children}</Animated.View>
-      </GestureDetector>
-    </View>
-  );
-});
-
-const swipeStyles = StyleSheet.create({
-  replyIcon: {
-    position: 'absolute',
-    left: SWIPE_REPLY_ICON_LEFT,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -923,7 +263,7 @@ function ChatThread(props: ChatThreadProps) {
     return () => { if (activeWritableVisit.current === writableVisit) activeWritableVisit.current = null; };
   }, [writableVisit]);
   const photos = useMemo(() => messages.filter(message => message.message_type !== 'system' && message.image_url)
-    .slice().sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    .slice().sort(compareChatSequence)
     .map(message => ({ id: message.id, uri: message.image_url!, senderName: message.sender?.first_name, caption: message.content })), [messages]);
   const photoSelection = useChatPhotoSelection(`${props.kind}:${id}:${currentUserId}:${entry.serial}`, photos);
   const openMessagePhoto = useCallback((url: string, messageId: string) => {
@@ -1100,144 +440,7 @@ function ChatThread(props: ChatThreadProps) {
 
   // Keep the existing invitation and seven-day explicit-dismissal/denial
   // policy. A slow or failed registration is not a permission decision.
-  const [showPushBanner, setShowPushBanner] = useState(false);
-  const [enablingPush, setEnablingPush] = useState(false);
-  const [pushFeedback, setPushFeedback] = useState<string | null>(null);
-  const [pushVisit, setPushVisit] = useState<object>({});
-  const activePushVisit = useRef<object | null>(null);
-  const pushAttempt = useRef<object | null>(null);
-  const pushCheckRevision = useRef(0);
-  const pushSettingsReturn = useRef<{ visit: object; returned: boolean } | null>(null);
-  const PUSH_BANNER_KEY = 'push_banner_dismissed_at';
-  const PUSH_BANNER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-  const isCurrentPush = useCallback(() => isCurrentEntry() && activePushVisit.current === pushVisit,
-    [isCurrentEntry, pushVisit]);
-
-  useFocusEffect(useCallback(() => {
-    const visit = {};
-    activePushVisit.current = visit;
-    setPushVisit(visit);
-    pushAttempt.current = null;
-    pushSettingsReturn.current = null;
-    pushCheckRevision.current++;
-    setShowPushBanner(false);
-    setPushFeedback(null);
-    setEnablingPush(false);
-    return () => {
-      if (activePushVisit.current !== visit) return;
-      activePushVisit.current = null;
-      pushAttempt.current = null;
-      pushSettingsReturn.current = null;
-      pushCheckRevision.current++;
-    };
-  }, [entry]));
-
-  useEffect(() => {
-    if (!isCurrentPush() || !currentUserId || messages.length === 0) return;
-    if (!messages.some(message => message.user_id !== currentUserId)) return;
-    let cancelled = false;
-    const revision = pushCheckRevision.current;
-    const current = () => !cancelled && isCurrentPush() && revision === pushCheckRevision.current;
-    void (async () => {
-      try {
-        const permission = await getPushPermissionStatus();
-        if (!current() || permission === 'granted') return;
-        const dismissed = await AsyncStorage.getItem(PUSH_BANNER_KEY);
-        if (!current()) return;
-        if (dismissed && Date.now() - parseInt(dismissed, 10) < PUSH_BANNER_COOLDOWN_MS) return;
-        setShowPushBanner(true);
-      } catch { /* A passive check never opens an error or requests permission. */ }
-    })();
-    return () => { cancelled = true; };
-  }, [currentUserId, messages.length, isCurrentPush]);
-
-  const handleEnablePush = useCallback(async (fromSettings = false): Promise<void> => {
-    if (!isCurrentPush() || pushAttempt.current) return;
-    if (fromSettings && (pushSettingsReturn.current?.visit !== pushVisit || !pushSettingsReturn.current.returned)) return;
-    pushSettingsReturn.current = null;
-    const attempt = {};
-    pushAttempt.current = attempt;
-    pushCheckRevision.current++;
-    setEnablingPush(true);
-    setPushFeedback(null);
-    const current = () => isCurrentPush() && pushAttempt.current === attempt;
-    // showResult and the native foreground listener can assign this ref
-    // after the initial clear; read its declared type at completion time.
-    const getSettingsReturn = (): { visit: object; returned: boolean } | null => pushSettingsReturn.current;
-    const showResult = (result: Parameters<typeof pushRegistrationFeedback>[0], previouslyDenied = false) => {
-      if (!current()) return;
-      const feedback = pushRegistrationFeedback(result);
-      if (feedback.kind === 'silent') return;
-      if (feedback.kind === 'success') {
-        setShowPushBanner(false);
-      } else if (feedback.kind === 'settings') {
-        // Keep the established snooze after a declined native prompt. Open
-        // Settings only when denial was known before this enable attempt.
-        void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-        setShowPushBanner(false);
-        if (fromSettings || !previouslyDenied) return;
-        const settingsReturn = { visit: pushVisit, returned: false };
-        pushSettingsReturn.current = settingsReturn;
-        void Linking.openSettings().catch(() => {
-          if (!isCurrentPush() || pushSettingsReturn.current !== settingsReturn) return;
-          pushSettingsReturn.current = null;
-          setShowPushBanner(true);
-          setPushFeedback('Couldn’t open Settings. Open your device settings and choose WashedUp.');
-        });
-      } else {
-        setShowPushBanner(true);
-        setPushFeedback(feedback.message);
-      }
-    };
-    try {
-      // An explicit Enable action first asks for a truthful, non-prompting
-      // registration result; the coarse Android native enum is insufficient.
-      let result = await registerPushNotificationsWithResult({ prompt: false, userId: currentUserId });
-      if (!current()) return;
-      const previouslyDenied = result.status === 'permission-denied';
-      if (result.status === 'permission-required' && !fromSettings) {
-        result = await registerPushNotificationsWithResult({ prompt: true, userId: currentUserId, canPrompt: current });
-      }
-      showResult(result, previouslyDenied);
-    } catch {
-      showResult({ status: 'failed' });
-    } finally {
-      if (pushAttempt.current === attempt) {
-        pushAttempt.current = null;
-        if (isCurrentPush()) {
-          setEnablingPush(false);
-          // An early foreground event may arrive before this attempt releases
-          // its lock. Retain and consume that one return after the lock clears.
-          const settingsReturn = getSettingsReturn();
-          if (settingsReturn?.visit === pushVisit && settingsReturn.returned) {
-            void handleEnablePush(true);
-          }
-        }
-      }
-    }
-  }, [currentUserId, isCurrentPush, pushVisit]);
-
-  const handleDismissPushBanner = useCallback(() => {
-    if (!isCurrentPush()) return;
-    pushAttempt.current = null;
-    pushCheckRevision.current++;
-    pushSettingsReturn.current = null;
-    setEnablingPush(false);
-    setShowPushBanner(false);
-    setPushFeedback(null);
-    void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-  }, [isCurrentPush]);
-
-  // Recheck only after this visit's explicit Settings action. Foregrounding
-  // elsewhere must not start another registration or display a new prompt.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', state => {
-      if (state !== 'active' || !isCurrentPush() || pushSettingsReturn.current?.visit !== pushVisit) return;
-      pushSettingsReturn.current.returned = true;
-      void handleEnablePush(true);
-    });
-    return () => sub.remove();
-  }, [handleEnablePush, isCurrentPush, pushVisit]);
+  const { showPushBanner, enablingPush, pushFeedback, handleEnablePush, handleDismissPushBanner } = useChatPushBanner({ entry, currentUserId, isCurrentEntry, messages });
 
   // Throttle the focus-driven message refetch. New messages already
   // arrive live via realtime; this is a safety-net resync, so once per
@@ -1343,17 +546,37 @@ function ChatThread(props: ChatThreadProps) {
   // conditionally skipped (an early return before these hooks would throw
   // "rendered fewer hooks" if infoError flipped true after a successful render).
 
+  const reportMembersAttempt = useRef<object | null>(null);
+  const [loadingReportMembers, setLoadingReportMembers] = useState(false);
+  const reportMenuVisit = useRef<object | null>(null);
+  useFocusEffect(useCallback(() => {
+    const visit = {}; reportMenuVisit.current = visit;
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
+    return () => {
+      if (reportMenuVisit.current !== visit) return;
+      reportMenuVisit.current = null; reportMembersAttempt.current = null;
+    };
+  }, [entry]));
   const handleReportMenu = useCallback(async () => {
-    if (!isCurrentEntry()) return;
+    const visit = reportMenuVisit.current;
+    const current = () => isCurrentEntry() && !!visit && reportMenuVisit.current === visit;
+    if (!current() || reportMembersAttempt.current) return;
+    const menuScope = { userId: moderationScope.userId, isCurrent: () => current() && moderationScope.isCurrent() };
+    const attempt = {}; reportMembersAttempt.current = attempt; setLoadingReportMembers(true);
     // The full member list (avatar row is capped) comes from the per-kind wrapper:
     // plans query event_members, circles query circle_members.
     let reportMembers: { id: string; name: string }[];
     try { reportMembers = (await props.fetchReportMembers?.()) ?? []; }
     catch {
-      if (isCurrentEntry()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
+      if (current()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
       return;
+    } finally {
+      if (reportMembersAttempt.current === attempt) {
+        reportMembersAttempt.current = null;
+        if (current()) setLoadingReportMembers(false);
+      }
     }
-    if (!isCurrentEntry()) return;
+    if (!current()) return;
 
     if (reportMembers.length === 0) {
       setAlertInfo({ title: 'No other members', message: 'There are no other members in this chat to report.' });
@@ -1366,16 +589,16 @@ function ChatThread(props: ChatThreadProps) {
       ActionSheetIOS.showActionSheetWithOptions(
         { options: [...memberNames, 'Cancel'], cancelButtonIndex: memberNames.length, title: 'Members' },
         (idx) => {
-          if (!isCurrentEntry() || idx < 0 || idx >= reportMembers.length) return;
+          if (!current() || idx < 0 || idx >= reportMembers.length) return;
           const member = reportMembers[idx];
           setTimeout(() => {
-            if (!isCurrentEntry()) return;
+            if (!current()) return;
             ActionSheetIOS.showActionSheetWithOptions(
               { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
               (actionIdx) => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
-                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope);
+                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope);
               },
             );
           }, 300);
@@ -1389,15 +612,15 @@ function ChatThread(props: ChatThreadProps) {
           ...reportMembers.map((member) => ({
             text: member.name,
             onPress: () => {
-              if (!isCurrentEntry()) return;
+              if (!current()) return;
               setTimeout(() => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 setAlertInfo({
                   title: member.name,
                   message: '',
                   buttons: [
-                    { text: 'Report User', onPress: () => { if (isCurrentEntry()) { setReportTarget(member); setShowReport(true); } } },
-                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope) },
+                    { text: 'Report User', onPress: () => { if (current()) { setReportTarget(member); setShowReport(true); } } },
+                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope) },
                     { text: 'Cancel', style: 'cancel' },
                   ],
                 });
@@ -2002,6 +1225,7 @@ function ChatThread(props: ChatThreadProps) {
     setLocationPickerOpen(false); setActivePanel(null);
     setOverlayMessage(null); setReactionDetails(null); setReactionPickerMsgId(null); setPhotoViewUrl(null);
     setAlertInfo(null); setMiniProfileUserId(null); setShowReport(false); setReportTarget(null);
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
     setRecordingMode('idle'); setDraft(null); setAudioSending(false); setAudioError(null); setVoiceDockHeight(0);
     voiceCapture.current = null; voiceStopAttempt.current = null; audioSendAttempt.current = null; audioSession.current = null;
   }, [entry]);
@@ -2220,144 +1444,14 @@ function ChatThread(props: ChatThreadProps) {
   return (
     <View style={[chatStyles.screen, screenAppearance?.screen]}>
       {/* ── Header ── */}
-      <View style={[chatStyles.headerSafe, COMMUNITY_CHAT_GROUPING_ENABLED && { backgroundColor: AfterglowColors.paper }, { paddingTop: insets.top }]}>
-        {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatContextHeader
-          title={props.title} subtitle={typingLabel ?? props.subtitle} location={props.locationLabel}
-          contextLabel={props.viewContextLabel} fonts={conversationFonts}
-          onBack={() => { Keyboard.dismiss(); router.navigate('/(tabs)/chats' as never); }} onViewContext={props.onViewContext}
-          wrapActionsOnNarrow={!!props.calendarAction}
-          actions={<>
-            {props.calendarAction && <TouchableOpacity onPress={props.calendarAction.onPress} accessibilityRole="button" accessibilityLabel={props.calendarAction.label} style={chatHeaderActionStyle}>
-              <Ionicons name="calendar-outline" size={21} color={AfterglowColors.clay} />
-            </TouchableOpacity>}
-            {props.headerMenu.type === 'plus' ? <TouchableOpacity ref={plusBtnRef} onPress={openPlusFromButton} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="Add people or make a plan">
-              <Ionicons name="add" size={24} color={AfterglowColors.clay} />
-            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
-              <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />
-            </TouchableOpacity>}
-          </>}
-        /> : <View style={chatStyles.header}>
-          <TouchableOpacity
-            onPress={() => { Keyboard.dismiss(); router.navigate('/(tabs)/chats' as never); }}
-            style={chatStyles.backBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Back to Chats"
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="chevron-back" size={24} color={Colors.asphalt} />
-          </TouchableOpacity>
-
-          <View style={chatStyles.headerCenter}>
-            <Text style={chatStyles.headerTitle} numberOfLines={1}>{props.title}</Text>
-            {(typingLabel ?? props.subtitle) != null && (
-              <Text style={chatStyles.headerSub} numberOfLines={1}>
-                {typingLabel ?? props.subtitle}
-              </Text>
-            )}
-          </View>
-
-          <TouchableOpacity
-            onPress={props.onViewContext}
-            style={chatStyles.viewPlanBtn}
-            accessibilityRole="button"
-            accessibilityLabel={props.viewContextLabel}
-          >
-            <Text style={chatStyles.viewPlanText} numberOfLines={1}>{props.viewContextLabel}</Text>
-          </TouchableOpacity>
-
-          {props.headerMenu.type === 'plus' ? (
-            <TouchableOpacity
-              ref={plusBtnRef}
-              onPress={openPlusFromButton}
-              style={chatStyles.ellipsisBtn}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityRole="button"
-              accessibilityLabel="Add people or make a plan"
-            >
-              <Ionicons name="add" size={24} color={Colors.terracotta} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              onPress={handleReportMenu}
-              style={chatStyles.ellipsisBtn}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityRole="button"
-              accessibilityLabel="More options"
-            >
-              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
-            </TouchableOpacity>
-          )}
-          <ProfileButton compact/>
-        </View>}
-
-        {/* Header banner slot (plan ticket banner) */}
-        {props.renderHeaderBanner?.()}
-
-        {/* Member avatars row */}
-        {members.length > 0 && (() => {
-          const total = members.length;
-          const isOverflow = total > 5;
-          const visibleMembers = !isOverflow || membersExpanded
-            ? members
-            : members.slice(0, 4);
-          return (
-            <ScrollView
-              decelerationRate="normal"
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={[chatStyles.membersRow, COMMUNITY_CHAT_GROUPING_ENABLED && { backgroundColor: AfterglowColors.paper }]}
-              contentContainerStyle={chatStyles.membersRowContent}
-            >
-              {visibleMembers.map((member) => (
-                <TouchableOpacity
-                  key={member.id}
-                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
-                  onPress={() => handleAvatarPress(member.id)}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={`View ${member.first_name || 'member'} profile`}
-                >
-                  {member.avatar_url ? (
-                    <Image source={{ uri: member.avatar_url }} style={chatStyles.memberAvatar} contentFit="cover" />
-                  ) : (
-                    <View style={[chatStyles.memberAvatar, chatStyles.memberAvatarFallback]}>
-                      <ChatSizedText allowFontScaling={!COMMUNITY_CHAT_GROUPING_ENABLED} style={[chatStyles.memberInitial, COMMUNITY_CHAT_GROUPING_ENABLED && { fontFamily: conversationFonts.medium, color: AfterglowColors.clay }]}>{member.first_name?.[0]?.toUpperCase() ?? '?'}</ChatSizedText>
-                    </View>
-                  )}
-                  <ChatSizedText style={[chatStyles.memberName, COMMUNITY_CHAT_GROUPING_ENABLED && { fontFamily: conversationFonts.regular, color: AfterglowColors.muted }]} numberOfLines={1}>{member.first_name ?? ''}</ChatSizedText>
-                </TouchableOpacity>
-              ))}
-              {isOverflow && !membersExpanded && (
-                <TouchableOpacity
-                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
-                  onPress={() => setMembersExpanded(true)}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show ${total - 4} more members`}
-                >
-                  <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
-                    <ChatSizedText style={chatStyles.memberOverflowText}>+{total - 4}</ChatSizedText>
-                  </View>
-                </TouchableOpacity>
-              )}
-              {isOverflow && membersExpanded && (
-                <TouchableOpacity
-                  style={[chatStyles.memberItem, COMMUNITY_CHAT_GROUPING_ENABLED && { width: 44, minHeight: 44 }]}
-                  onPress={() => setMembersExpanded(false)}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Show fewer members"
-                >
-                  <View style={[chatStyles.memberAvatar, chatStyles.memberOverflow]}>
-                    <Ionicons name="chevron-back" size={16} color={Colors.terracotta} />
-                  </View>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-          );
-        })()}
-
-      </View>
+      <ChatThreadHeader
+        thread={props} typingLabel={typingLabel} conversationFonts={conversationFonts} topInset={insets.top}
+        plusBtnRef={plusBtnRef} openPlusFromButton={openPlusFromButton}
+        handleReportMenu={handleReportMenu} loadingReportMembers={loadingReportMembers}
+        members={members} membersExpanded={membersExpanded} setMembersExpanded={setMembersExpanded}
+        handleAvatarPress={handleAvatarPress}
+        onBack={() => { Keyboard.dismiss(); router.navigate('/(tabs)/chats' as never); }}
+      />
 
       {showPushBanner && (
         <View style={chatStyles.pushBanner}>
@@ -2537,44 +1631,20 @@ function ChatThread(props: ChatThreadProps) {
                 {props.countdownText}
               </Text>
             )}
-            {(!composerDraft.ready || composerDraft.error || composerDraft.draft.attempt && !sendingText) && (
-              <View style={chatStyles.replyBar}>
-                <View style={chatStyles.replyBarContent}>
-                  <Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>{composerDraft.error ? 'Your draft could not be saved or checked.' : !composerDraft.ready ? 'Checking your draft…' : 'Your previous message is not confirmed.'}</Text>
-                  {!!composerDraft.draft.attempt && <Text style={[chatStyles.replyBarText, composerAppearance?.contextBody]} numberOfLines={2}>{composerDraft.draft.attempt.text}</Text>}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                    {composerDraft.error ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry message draft" style={chatStyles.draftRecoveryAction} onPress={() => { void composerDraft.retry(); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Try again</Text></TouchableOpacity>
-                      : composerDraft.draft.attempt && <>
-                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check original message" style={chatStyles.draftRecoveryAction} disabled={checkingDraft} onPress={() => { void checkPendingDraft(); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Check message</Text></TouchableOpacity>
-                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry original message" style={chatStyles.draftRecoveryAction} disabled={checkingDraft || !canWrite()} onPress={() => { void handleSend(true); }}><Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>Retry original</Text></TouchableOpacity>
-                      </>}
-                  </View>
-                </View>
-              </View>
-            )}
-            {replyingTo && (
-              <View style={chatStyles.replyBar}>
-                <View style={chatStyles.replyBarLeft}>
-                  <Ionicons name="arrow-undo-outline" size={16} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
-                  <View style={chatStyles.replyBarContent}>
-                    <Text style={[chatStyles.replyBarName, composerAppearance?.contextName]}>{replyingTo.senderName}</Text>
-                    <Text style={[chatStyles.replyBarText, composerAppearance?.contextBody]} numberOfLines={1}>{replyingTo.content}</Text>
-                  </View>
-                </View>
-                <TouchableOpacity onPress={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setReplyingTo(null); }} style={chatStyles.composerCancel} accessibilityRole="button" accessibilityLabel="Cancel reply">
-                  <Ionicons name="close" size={18} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {editingMessageId && (
-              <View style={chatStyles.editingBar}>
-                <Ionicons name="create-outline" size={16} color={composerAppearance ? AfterglowColors.clay : Colors.terracotta} />
-                <Text style={[chatStyles.editingText, composerAppearance?.contextName]}>Editing message</Text>
-                <TouchableOpacity onPress={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setEditingMessageId(null); setInputText(''); inputTextRef.current = ''; }} style={chatStyles.composerCancel} accessibilityRole="button" accessibilityLabel="Cancel edit">
-                  <Ionicons name="close" size={18} color={composerAppearance ? AfterglowColors.muted : Colors.warmGray} />
-                </TouchableOpacity>
-              </View>
-            )}
+            <ChatComposerContext
+              composerDraft={composerDraft}
+              composerAppearance={composerAppearance}
+              sendingText={sendingText}
+              checkingDraft={checkingDraft}
+              writable={canWrite()}
+              replyingTo={replyingTo}
+              editingMessageId={editingMessageId}
+              onRetryDraft={() => { void composerDraft.retry(); }}
+              onCheckOriginal={() => { void checkPendingDraft(); }}
+              onRetryOriginal={() => { void handleSend(true); }}
+              onCancelReply={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setReplyingTo(null); }}
+              onCancelEdit={() => { if (!canWrite()) return; draftRevision.current++; draftContextRevision.current++; setEditingMessageId(null); setInputText(''); inputTextRef.current = ''; }}
+            />
             {mentionQuery !== null && <ChatMentionPicker members={mentionCandidates} fonts={conversationFonts}
               onSelect={insertMention} onClose={()=>{if(canWrite())setMentionQuery(null);}}/>}
           <View
@@ -2843,367 +1913,3 @@ function ChatThread(props: ChatThreadProps) {
 // add-people / plan state) does not re-render the whole chat. Paired with the
 // stabilized props passed by CircleChatScreenInner.
 export default memo(ChatThread);
-
-function createConversationAppearance(fonts: AfterglowFontFamilies) {
-  return StyleSheet.create({
-    screen: { backgroundColor: AfterglowColors.paper },
-    day: { ...AfterglowType.caption, fontFamily: fonts.regular, color: AfterglowColors.muted, backgroundColor: AfterglowColors.paper, borderRadius: 0 },
-    title: { ...AfterglowType.identity, fontFamily: fonts.semibold, color: AfterglowColors.ink },
-    body: { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted },
-    warning: { minHeight: 44, justifyContent: 'center', backgroundColor: AfterglowColors.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AfterglowColors.line },
-    button: { minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: AfterglowColors.clay, borderRadius: 6 },
-    buttonText: { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.white },
-    textAction: { minHeight: 44, justifyContent: 'center' },
-    link: { ...AfterglowType.body, fontFamily: fonts.medium, color: AfterglowColors.clay },
-  });
-}
-
-const chatStyles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.parchment },
-  headerSafe: { backgroundColor: Colors.white },
-  listWrap: { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadErrorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 },
-  loadErrorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt, textAlign: 'center' },
-  loadErrorText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary, textAlign: 'center' },
-  loadRetry: { backgroundColor: Colors.terracotta, borderRadius: 24, minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 12, marginTop: 4 },
-  loadRetryText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  loadWarning: { backgroundColor: Colors.inputBg, paddingHorizontal: 16, paddingVertical: 9 },
-  loadWarningText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.asphalt, textAlign: 'center' },
-  olderRetry: { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 12, marginVertical: 8 },
-  olderRetryText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.terracotta, textAlign: 'center' },
-  pushBanner: {
-    backgroundColor: Colors.inputBg,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  pushBannerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pushBannerText: {
-    flex: 1,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-  },
-  pushBannerButton: {
-    backgroundColor: Colors.terracotta,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  pushBannerButtonText: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodySM,
-    color: Colors.white,
-  },
-  pushBannerClose: {
-    marginLeft: 8,
-    padding: 4,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: Colors.white,
-    gap: 8,
-  },
-  backBtn: { padding: 2 },
-  headerCenter: { flex: 1, minWidth: 0 },
-  headerTitle: { fontSize: 16, fontWeight: '700' as const, color: Colors.darkWarm },
-  headerSub: { fontSize: 11, color: Colors.secondary, marginTop: 1 },
-  viewPlanBtn: {
-    borderWidth: 1.5,
-    borderColor: Colors.terracotta,
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    // Cap so a long DM counterpart name ("View Magdalena") can't crowd/wrap the
-    // header; the title (flex:1) truncates first, then this.
-    maxWidth: 85,
-  },
-  viewPlanText: { fontSize: 12, fontWeight: '600' as const, color: Colors.terracotta },
-  ellipsisBtn: {
-    padding: 4,
-  },
-  membersRow: {
-    backgroundColor: Colors.white,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.border,
-    flexGrow: 0,
-  },
-  membersRowContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  memberItem: {
-    alignItems: 'center',
-    width: 40,
-  },
-  memberAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  memberAvatarFallback: {
-    backgroundColor: Colors.dividerWarm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  memberInitial: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.terracotta,
-  },
-  memberName: {
-    fontSize: 9,
-    color: Colors.secondary,
-    marginTop: 2,
-    textAlign: 'center',
-    maxWidth: 40,
-  },
-  memberOverflow: {
-    backgroundColor: Colors.cream,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  memberOverflowText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.terracotta,
-  },
-
-  messageList: { paddingTop: 4, paddingBottom: 12 },
-  msgGap1: { marginBottom: 1 },
-  msgGap10: { marginBottom: 10 },
-  msgGap18: { marginBottom: 18 },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 48,
-    transform: Platform.OS === 'android'
-      ? [{ scaleY: -1 }, { scaleX: -1 }]
-      : [{ scaleY: -1 }],
-  },
-  emptyMark: {
-    marginBottom: 12,
-  },
-  emptyText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.tertiary,
-  },
-
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    backgroundColor: Colors.white,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-    gap: 8,
-  },
-  cameraBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: Colors.inputBg,
-    borderRadius: 20,
-    paddingLeft: 10,
-    paddingRight: 10,
-    paddingTop: 9,
-    paddingBottom: 9,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.asphalt,
-    maxHeight: 100,
-    textAlign: 'left',
-  },
-  emojiBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  sendMorphWrap: {
-    width: 36,
-    height: 36,
-    marginBottom: 2,
-  },
-  morphLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendCircle: { backgroundColor: Colors.terracotta },
-  recorderOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: Colors.white,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-  },
-  attachPanelWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-
-  readOnlyBar: {
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    backgroundColor: Colors.white,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-  },
-  readOnlyText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.warmGray },
-  countdownText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodySM,
-    color: Colors.secondary,
-    textAlign: 'center',
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-  },
-  draftRecoveryAction: { minHeight: 44, justifyContent: 'center' },
-  replyBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-  },
-  replyBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  replyBarContent: {
-    flex: 1,
-  },
-  replyBarName: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-  },
-  replyBarText: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.warmGray,
-  },
-  editingBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-    gap: 8,
-  },
-  editingText: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.terracotta,
-    flex: 1,
-  },
-  composerCancel: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-
-  mentionBar: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.inputBg,
-  },
-  mentionBarContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    alignItems: 'center',
-  },
-  mentionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    backgroundColor: Colors.inputBg,
-  },
-  mentionAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: Colors.border,
-  },
-  mentionAvatarFallback: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: Colors.brandSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mentionInitial: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-  },
-  mentionName: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodySM,
-    color: Colors.asphalt,
-    maxWidth: 120,
-  },
-
-  photoModal: {
-    flex: 1,
-    backgroundColor: Colors.overlayDarker,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoFull: { width: '100%', height: '80%' },
-  photoClose: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.overlayLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

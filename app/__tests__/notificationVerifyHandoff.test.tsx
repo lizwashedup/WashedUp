@@ -629,3 +629,61 @@ it('leaves recovery mode after sign-out and routes the next completed sign-in', 
   await tick(600);
   expect(mockPath).toBe('/(tabs)/plans');
 });
+
+
+describe('root link-delivery lifetime', () => {
+  it('ignores an initial shared link that resolves after the root unmounts', async () => {
+    const initial = deferred<string | null>();
+    jest.mocked(Linking.getInitialURL).mockReturnValue(initial.promise);
+    await mount();
+    await act(async () => tree!.unmount()); tree = undefined;
+    await act(async () => initial.resolve('https://washedup.app/app/plan/old-plan'));
+    await flush();
+    expect(await AsyncStorage.getItem('pendingLinkDestination')).toBeNull();
+  });
+
+  it('keeps a newer foreground link when the cold-start link resolves late', async () => {
+    const initial = deferred<string | null>();
+    jest.mocked(Linking.getInitialURL).mockReturnValue(initial.promise);
+    let onUrl!: (event: { url: string }) => void;
+    jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
+      onUrl = listener; return { remove: jest.fn() } as unknown as ReturnType<typeof Linking.addEventListener>;
+    });
+    await mount();
+    act(() => onUrl({ url: 'https://washedup.app/app/plan/new-plan?invitation=kept' })); await flush();
+    await act(async () => initial.resolve('https://washedup.app/app/plan/old-plan')); await flush();
+    expect(await AsyncStorage.getItem('pendingLinkDestination')).toBe('/plan/new-plan?invitation=kept');
+  });
+
+  it('ignores an already-delivered listener callback retained after root cleanup', async () => {
+    let onUrl!: (event: { url: string }) => void;
+    const remove = jest.fn();
+    jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
+      onUrl = listener; return { remove } as unknown as ReturnType<typeof Linking.addEventListener>;
+    });
+    await mount(); await act(async () => tree!.unmount()); tree = undefined;
+    act(() => onUrl({ url: 'https://washedup.app/app/plan/retired-plan' })); await flush();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(await AsyncStorage.getItem('pendingLinkDestination')).toBeNull();
+  });
+
+  it('still captures the initial shared destination and query when no newer link arrives', async () => {
+    jest.mocked(Linking.getInitialURL).mockResolvedValue('https://washedup.app/app/plan/initial-plan?invitation=kept');
+    await mount();
+    expect(await AsyncStorage.getItem('pendingLinkDestination')).toBe('/plan/initial-plan?invitation=kept');
+  });
+});
+
+
+it('ignores a buffered OneSignal callback retained after root cleanup', async () => {
+  await mount(); await verify(); await tick(600);
+  const callback = Array.from(mockClickListeners)[0]; expect(callback).toBeDefined();
+  // Prove this callback can route while its subscription is alive.
+  act(() => callback({ notification: { additionalData: { type: 'new_message', topicId: '22222222-2222-4222-8222-222222222222' } } })); await flush();
+  expect(mockRoutes.some(route => route.href === '/community-topic/22222222-2222-4222-8222-222222222222')).toBe(true);
+  await act(async () => tree!.unmount()); tree = undefined;
+  expect(mockClickListeners.size).toBe(0);
+  const count = mockRoutes.length;
+  act(() => callback({ notification: { additionalData: { type: 'new_message', topicId: '33333333-3333-4333-8333-333333333333' } } })); await flush();
+  expect(mockRoutes).toHaveLength(count);
+});

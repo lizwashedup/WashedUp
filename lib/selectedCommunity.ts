@@ -11,7 +11,7 @@
  *
  * Persisted (AsyncStorage, master plan §5.1 A4: "workspace selection
  * persists"): hydrateSelectedCommunity() restores it once at app start
- * (wired in app/(creator)/_layout.tsx); setSelectedCommunityId writes it
+ * (wired in components/creator/ManagementLayout.tsx); setSelectedCommunityId writes it
  * every time it changes. A single global key, not per-user -- a stale id
  * left over from a previous account is already harmless by construction,
  * since useLedCommunity below falls back to led[0] the instant the
@@ -27,6 +27,7 @@ import type { CreatorAccess, LedCommunity } from './creatorMode';
 const STORAGE_KEY = 'washedup.selectedCommunityId';
 
 let selectedId: string | null = null;
+let selectionRevision = 0;
 const listeners = new Set<() => void>();
 
 function setInMemory(id: string | null): void {
@@ -35,6 +36,7 @@ function setInMemory(id: string | null): void {
 }
 
 export function setSelectedCommunityId(id: string | null): void {
+  selectionRevision += 1;
   setInMemory(id);
   const write = id === null ? AsyncStorage.removeItem(STORAGE_KEY) : AsyncStorage.setItem(STORAGE_KEY, id);
   write.catch(() => {
@@ -45,15 +47,17 @@ export function setSelectedCommunityId(id: string | null): void {
 
 /**
  * Reads the persisted selection back in. Call once, early (wired in
- * app/(creator)/_layout.tsx). Best-effort: a read failure, or nothing ever
+ * components/creator/ManagementLayout.tsx). Best-effort: a read failure, or nothing ever
  * saved, leaves selectedId at its initial null -- the same state a genuine
  * first-ever launch is already in, which useLedCommunity's own fallback
  * below already handles.
  */
 export async function hydrateSelectedCommunity(): Promise<void> {
+  // An explicit choice in Yours always wins over an older disk snapshot.
+  if (selectionRevision !== 0) return;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) setInMemory(raw);
+    if (raw && selectionRevision === 0) setInMemory(raw);
   } catch {
     /* best-effort; stays null */
   }

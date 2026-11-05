@@ -1,6 +1,7 @@
 import { ScaledText as Text } from '../../components/ScaledText';
 import ProfileButton from '../../components/ProfileButton';
 import { CommunityCreators, CommunityMembers } from '../../components/communities/CommunityPeople';
+import { CommunityCreatorActions } from '../../components/communities/CommunityCreatorActions';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
 /** Selected sunset community detail. Home retains the existing member block
  * order and visitor projection; Events lists the already-visible published
@@ -93,11 +94,9 @@ export default function CommunityPageScreen() {
     queryFn: () => getCommunityPage(id!),
     enabled: !!id,
   });
-  // proposal 91: null while the column is absent, which is today's server
-  // behavior (every join is reviewed), so the door keeps saying "ask to
-  // join" until the migration lands and then tells the truth on its own
+  // Read effective admission; older raw Open settings still require review.
   const { data: joinPolicy = null } = useQuery({
-    queryKey: ['community-join-policy', id],
+    queryKey: ['community-join-policy', id, viewer.viewerId],
     queryFn: () => getJoinPolicy(id!),
     enabled: !!id,
     staleTime: 60_000,
@@ -519,6 +518,7 @@ export default function CommunityPageScreen() {
           onPress={() => router.push(`/community-thread/${id}` as never)}>
           <MessagesSquare size={20} color={Scene.text} />
         </TouchableOpacity>}
+        {!previewMode && <CommunityManageLink communityId={id} iconOnly />}
         <ProfileButton compact surface="scene"/>
       </View>
       <ScrollView
@@ -529,6 +529,10 @@ export default function CommunityPageScreen() {
         <View style={styles.identity}>
           <Text style={styles.houseMark}>{isHouseCommunity(page.community.handle) ? HOUSE_MARK_LABEL : 'COMMUNITY'}</Text>
           <Text accessibilityRole="header" style={styles.name}>{page.community.name}</Text>
+          <CommunityCreators pageId={id} inline fallback={(leaderCard?.avatar_url || leaderFirstName) && <View style={styles.trustRow}>
+            {!!leaderCard?.avatar_url && <Image source={{ uri: leaderCard.avatar_url }} style={styles.faceChip} contentFit="cover" />}
+            {!!leaderFirstName && <Text style={styles.byLine}>Created by {leaderFirstName}</Text>}
+          </View>} />
           <CommunityClassificationSummary classification={page.classification} />
           {!!page.community.description && !isMember && <Text style={styles.description}>{page.community.description}</Text>}
           <View style={styles.identityActions}>
@@ -536,7 +540,6 @@ export default function CommunityPageScreen() {
             accessibilityState={{ disabled: sharing === id }} disabled={sharing === id} style={styles.shareButton} onPress={() => { void sharePage(); }}>
             <Share2 size={16} color={Scene.text} /><Text numberOfLines={1} style={styles.shareText}>{sharing === id ? 'Opening…' : 'Share'}</Text>
           </TouchableOpacity>}
-          {!previewMode && <CommunityManageLink communityId={id}/>}
           </View>
         </View>
         <View style={[styles.heroContainer, { height: heroHeight }]}>
@@ -550,10 +553,7 @@ export default function CommunityPageScreen() {
             </View>
           )}
         </View>
-        <CommunityCreators pageId={id} fallback={(leaderCard?.avatar_url || leaderFirstName) && <View style={styles.trustRow}>
-          {!!leaderCard?.avatar_url && <Image source={{ uri: leaderCard.avatar_url }} style={styles.faceChip} contentFit="cover" />}
-          {!!leaderFirstName && <Text style={styles.byLine}>Created by {leaderFirstName}</Text>}
-        </View>} />
+        {!previewMode && <CommunityCreatorActions communityId={id} />}
 
         <View style={styles.tabs}>
           {(['home', 'events', 'about'] as const).map(name => <TouchableOpacity key={name} accessibilityRole="tab"
@@ -566,7 +566,7 @@ export default function CommunityPageScreen() {
           {activeTab === 'home' ? isMember ? memberBlocks : lockSections : activeTab === 'about' ? aboutBlocks : <View style={styles.block}>
             <Text accessibilityRole="header" style={styles.blockLabel}>coming up</Text>
             {page.events.length ? page.events.map(event => <EventRow key={event.id} event={event} onPress={() => router.push(`/event/${event.id}` as never)} />)
-              : <Text style={styles.bodyText}>The next gathering is taking shape. Come back soon.</Text>}
+              : <Text style={styles.bodyText}>Come back for the community’s next event.</Text>}
           </View>}
 
           {activeTab === 'home' && isMember && (CREATOR_PAGES_ENABLED && COMMUNITY_CHAT_GROUPING_ENABLED ? <View style={!previewMode && styles.chatDirectory}><CommunityRoomDirectory
@@ -701,7 +701,7 @@ const styles = StyleSheet.create({
   shareButton: { alignSelf: 'flex-start', flexShrink: 0, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 14, borderRadius: 6, borderWidth: 1, borderColor: Scene.border },
   shareText: { flexShrink: 0, fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Scene.text },
   navigationTitle: { flex: 1, fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Scene.text },
-  trustRow: { paddingHorizontal: 20, paddingTop: 16, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  trustRow: { paddingTop: 10, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
   coverFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   coverInitial: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayLG, color: Scene.text },
   chatDirectory: { borderRadius: 20 },

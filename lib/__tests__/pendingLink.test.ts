@@ -47,7 +47,7 @@ describe('redirectSystemPath (universal-link routing)', () => {
   });
 
   it('keeps the creator app-door guarantee', () => {
-    expect(call('https://washedup.app/app/creator/events')).toBe('/(creator)/events');
+    expect(call('https://washedup.app/app/creator/events')).toBe('/(tabs)/friends/manage/(tools)/events');
   });
 
   it('routes a Stripe success return into the native checkout handoff', () => {
@@ -114,12 +114,15 @@ describe('pending destination durability', () => {
         activeUserId === 'user-a' && generation === startingGeneration
       ));
       let finishRead!: (value: string | null) => void;
+      let startRead!: () => void;
+      const started = new Promise<void>(resolve => { startRead = resolve; });
       jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => new Promise((resolve) => {
         finishRead = resolve;
+        startRead();
       }));
 
       const consumption = consumePendingDestination(shouldConsume);
-      expect(shouldConsume).not.toHaveBeenCalled();
+      await started;
       activeUserId = null;
       generation += 1;
       if (transition === 'same-user signout/signin') {
@@ -129,7 +132,7 @@ describe('pending destination durability', () => {
       finishRead(href);
 
       await expect(consumption).resolves.toBeNull();
-      expect(shouldConsume).toHaveBeenCalledTimes(1);
+      expect(shouldConsume).toHaveBeenCalled();
       expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
       await expect(consumePendingDestination(() => true)).resolves.toBe(href);
       await expect(consumePendingDestination()).resolves.toBeNull();

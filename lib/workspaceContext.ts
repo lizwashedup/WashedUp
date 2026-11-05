@@ -33,7 +33,7 @@
  * `led.find(...) ?? led[0]` fallback already relies on.
  *
  * The contract is now wired into the creator shell and its explicit
- * WorkspaceSwitcher. hydrateWorkspace() runs from app/(creator)/_layout.tsx
+ * WorkspaceSwitcher. hydrateWorkspace() runs from components/creator/ManagementLayout.tsx
  * so the persisted value is loaded when the creator shell mounts.
  */
 
@@ -46,6 +46,7 @@ export type Workspace = 'organization' | 'community';
 const STORAGE_KEY = 'washedup.workspace';
 
 let workspace: Workspace | null = null;
+let workspaceRevision = 0;
 const listeners = new Set<() => void>();
 
 function setInMemory(next: Workspace | null): void {
@@ -60,6 +61,7 @@ function setInMemory(next: Workspace | null): void {
  * above already happened synchronously).
  */
 export function setWorkspace(next: Workspace): void {
+  workspaceRevision += 1;
   setInMemory(next);
   AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {
     /* best-effort */
@@ -68,15 +70,16 @@ export function setWorkspace(next: Workspace): void {
 
 /**
  * Reads the persisted workspace back in. Call once, early (wired in
- * app/(creator)/_layout.tsx). Best-effort: a read failure, or nothing ever
+ * components/creator/ManagementLayout.tsx). Best-effort: a read failure, or nothing ever
  * saved, leaves the in-memory value at its initial null, which
  * resolveWorkspace's availability fallback below resolves exactly like a
  * genuine first-ever launch.
  */
 export async function hydrateWorkspace(): Promise<void> {
+  if (workspaceRevision !== 0) return;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw === 'organization' || raw === 'community') setInMemory(raw);
+    if (workspaceRevision === 0 && (raw === 'organization' || raw === 'community')) setInMemory(raw);
   } catch {
     /* best-effort; stays null */
   }

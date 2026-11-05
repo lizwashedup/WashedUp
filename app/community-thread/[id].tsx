@@ -1,4 +1,5 @@
 import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
+import { ChatSizedText as Text } from '../../components/chat/ChatSizedText';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useCommunityLocalDelivery, type CommunityDeliveryRow } from '../../hooks/useCommunityLocalDelivery';
 import { CHAT_SEND_ATTEMPT_DEADLINE_MS } from '../../lib/chatSendReceipt';
@@ -14,12 +15,11 @@ import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
 import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
-import ProfileButton from '../../components/ProfileButton';
 import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { memberPresentationFonts } from '../../constants/MemberAppearance';
+import { MEMBER_REDESIGN_APPEARANCE_ENABLED, memberPresentationFonts } from '../../constants/MemberAppearance';
 /**
  * Mapped creator pages use independent main-room history/read positions under
  * the existing development flags. Unmapped communities retain the earlier
@@ -39,7 +39,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   View,
-  Text,
   FlatList,
   TextInput,
   TouchableOpacity,
@@ -49,19 +48,18 @@ import {
   Platform,
   AppState,
   type ViewToken,
-  ScrollView,
 } from 'react-native';
 import { ChatKeyboardAvoidingView as KeyboardAvoidingView, IOSKeyboardDock, IOSKeyboardViewport } from '../../components/keyboard/ChatKeyboard';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams, useFocusEffect, Stack } from 'expo-router';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Bell, BellOff, CalendarDays, CircleHelp, Image as ImageIcon, MapPin, X } from 'lucide-react-native';
+import { CalendarDays, CircleHelp, X } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights, AfterglowType } from '../../constants/Typography';
 import { COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
-import { ChatContextHeader, chatHeaderActionStyle } from '../../components/chat/ChatContextHeader';
+import { ChatContextHeader } from '../../components/chat/ChatContextHeader';
 import { CommunityChatComposer } from '../../components/chat/CommunityChatComposer';
 import { createChatMessageAppearance } from '../../components/chat/chatMessageAppearance';
 import { ChatPhotoAttachment } from '../../components/chat/ChatPhotoAttachment';
@@ -125,9 +123,9 @@ export default function CommunityThreadScreen() {
   const MessageViewport = Platform.OS === 'ios' ? IOSKeyboardViewport : React.Fragment;
   const ComposerDock = Platform.OS === 'ios' ? IOSKeyboardDock : React.Fragment;
   const { width: windowWidth } = useWindowDimensions();
-  const { fonts: loadedConversationFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
+  const { fonts: loadedConversationFonts } = useAfterglowFonts(MEMBER_REDESIGN_APPEARANCE_ENABLED);
   const conversationFonts = memberPresentationFonts(loadedConversationFonts);
-  const messageAppearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? createChatMessageAppearance(conversationFonts) : null, [conversationFonts]);
+  const messageAppearance = useMemo(() => createChatMessageAppearance(conversationFonts), [conversationFonts]);
   const queryClient = useQueryClient();
   const { id, reactionMessageId, reactionMessageSource } = useLocalSearchParams<{ id: string; reactionMessageId?: string; reactionMessageSource?: string }>();
   const { anchor, anchorKey, clearAnchor } = useChatMessageAnchor(id, reactionMessageId, reactionMessageSource);
@@ -757,10 +755,11 @@ export default function CommunityThreadScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, COMMUNITY_CHAT_GROUPING_ENABLED && { backgroundColor: AfterglowColors.paper }]} edges={Platform.OS === 'ios' ? ['top'] : ['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={Platform.OS === 'ios' ? ['top'] : ['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardLayout style={styles.flex} {...(Platform.OS === 'ios' ? {} : { behavior: 'height' as const })}>
-      {COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatContextHeader
+      <KeyboardLayout style={[styles.flex, { backgroundColor: Colors.parchment }]} {...(Platform.OS === 'ios' ? {} : { behavior: 'height' as const })}>
+      <ChatContextHeader
+        appearance={MEMBER_REDESIGN_APPEARANCE_ENABLED ? 'staged' : 'live'}
         title={coreLayout?.rooms[1].name ?? card?.main_chat_name ?? 'Community chat'}
         subtitle={coreLayout?.name ?? card?.name ?? 'Everyone in this community'}
         contextLabel="View community"
@@ -775,41 +774,10 @@ export default function CommunityThreadScreen() {
           {notifications.parent && <CommunityChatPreferenceControl control={notifications.parent} fonts={conversationFonts} compact/>}
         </ChatOptionsButton>}
 
-      /> : <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
-          <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.headerTitleTap}
-          onPress={() => router.push(`/community/${id}` as never)}
-          hitSlop={6}
-        >
-          {/* Screen 37: the main chat's own display name (communities.main_chat_name),
-              not the community's name -- the two are deliberately decoupled so a
-              leader can eventually rename just the chat. Falls back to the same
-              "community chat" default the column itself carries, for a card that
-              predates migration 20260906200000. */}
-          <Text style={styles.headerTitle} numberOfLines={1}>{card?.main_chat_name ?? 'community chat'}</Text>
-          <Text style={styles.headerAudience} numberOfLines={1}>
-            {card?.name ? `everyone in ${card.name}` : 'everyone in this community'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleMute} style={styles.muteButton} disabled={!!muteChecking}
-          accessibilityRole="button"
-          accessibilityLabel={notifications.label ?? (muteChecking ? 'Checking chat notifications' : !muteReady ? 'Check chat notification setting' : muted ? 'Unmute chat' : 'Mute chat')}
-          accessibilityState={{ disabled: !!muteChecking, busy: !!muteChecking }}>
-          {muteChecking ? <ActivityIndicator size="small" color={Colors.tertiary} /> : muted === true ? (
-            <BellOff size={20} color={Colors.tertiary} strokeWidth={2.5} />
-          ) : (
-            <Bell size={20} color={muteReady ? Colors.terracotta : Colors.tertiary} strokeWidth={2.5} />
-          )}
-        </TouchableOpacity>
-        <ProfileButton compact/>
-      </View>}
-      {!COMMUNITY_CHAT_GROUPING_ENABLED && notifications.parent && <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}><CommunityChatPreferenceControl control={notifications.parent} fonts={conversationFonts} compact /></View>}
+      />
       {!muteChecking && !muteReady
-        ? <Text style={[styles.mutedLine, COMMUNITY_CHAT_GROUPING_ENABLED && { ...AfterglowType.caption, fontFamily: conversationFonts.regular, color: AfterglowColors.muted, paddingHorizontal: 16, paddingVertical: 4 }]} accessibilityLiveRegion="polite">{COMMUNITY_CHAT_GROUPING_ENABLED ? 'Couldn’t check notifications. Retry in chat options.' : 'Couldn’t check notifications. Tap the bell to retry.'}</Text>
-        : muted === true && <Text style={[styles.mutedLine, COMMUNITY_CHAT_GROUPING_ENABLED && { ...AfterglowType.caption, fontFamily: conversationFonts.regular, color: AfterglowColors.muted, paddingHorizontal: 16, paddingVertical: 4 }]}>Chat muted. Unread messages stay here.</Text>}
+        ? <Text style={styles.mutedLine} accessibilityLiveRegion="polite">Couldn’t check notifications. Retry in chat options.</Text>
+        : muted === true && <Text style={styles.mutedLine}>Chat muted. Unread messages stay here.</Text>}
       {!!coreLayout && readAcknowledgement.uncertain && <TouchableOpacity
         style={[styles.loadWarning, { backgroundColor: AfterglowColors.white }]} accessibilityRole="button"
         accessibilityLabel={readAcknowledgement.retryReady ? 'Retry syncing read messages' : 'Check read message status'}
@@ -819,19 +787,17 @@ export default function CommunityThreadScreen() {
       </TouchableOpacity>}
       {!!pinnedEvent && (
         <TouchableOpacity
-          style={[styles.pinnedCard, COMMUNITY_CHAT_GROUPING_ENABLED && styles.compactPinnedEvent]}
+          style={[styles.pinnedCard, styles.compactPinnedEvent]}
           onPress={() => router.push(`/event/${pinnedEvent.id}` as never)}
           accessibilityRole="button"
           accessibilityLabel={`View upcoming event: ${pinnedEvent.title}`}
           accessibilityHint={[pinnedEvent.event_date ? formatEventDateLA(pinnedEvent.event_date) : null, pinnedEvent.venue].filter(Boolean).join('. ')}
           activeOpacity={0.85}
         >
-          <CalendarDays size={18} color={COMMUNITY_CHAT_GROUPING_ENABLED ? AfterglowColors.clay : Colors.terracotta} strokeWidth={2.5} />
+          <CalendarDays size={18} color={Colors.terracotta} strokeWidth={2.5} />
           <View style={styles.pinnedBody}>
-            {/* LIZ COPY */}
-            {!COMMUNITY_CHAT_GROUPING_ENABLED && <Text style={styles.pinnedLabel}>up next</Text>}
-            <Text style={[styles.pinnedTitle, COMMUNITY_CHAT_GROUPING_ENABLED && { ...AfterglowType.body, fontFamily: conversationFonts.medium, color: AfterglowColors.ink }]} numberOfLines={1}>{pinnedEvent.title}</Text>
-            <Text style={[styles.pinnedMeta, COMMUNITY_CHAT_GROUPING_ENABLED && { ...AfterglowType.caption, fontFamily: conversationFonts.regular, color: AfterglowColors.muted }]} numberOfLines={1}>
+            <Text style={[styles.pinnedTitle, { ...AfterglowType.body, fontFamily: conversationFonts.medium, color: AfterglowColors.ink }]} numberOfLines={1}>{pinnedEvent.title}</Text>
+            <Text style={[styles.pinnedMeta, { ...AfterglowType.caption, fontFamily: conversationFonts.regular, color: AfterglowColors.muted }]} numberOfLines={1}>
               {[
                 pinnedEvent.event_date
                   ? formatEventDateLA(pinnedEvent.event_date)
@@ -949,32 +915,26 @@ export default function CommunityThreadScreen() {
                     <View style={[styles.messageColumn, mine && styles.messageColumnMine]} {...(detailsReady ? messageActionWeb(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); }) : {})}>
                       <TouchableOpacity
                         activeOpacity={0.9}
-                        onPress={COMMUNITY_CHAT_GROUPING_ENABLED && item.image_url ? () => photoSelection.onSelect(item.id) : sharedLocation ? () => openUrl(communityLocationMapUrl(sharedLocation)) : bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
+                        onPress={item.image_url ? () => photoSelection.onSelect(item.id) : sharedLocation ? () => openUrl(communityLocationMapUrl(sharedLocation)) : bubbleUrl ? () => openUrl(bubbleUrl) : undefined}
                         onLongPress={!detailsReady ? undefined : () => {
                           if (mine) openOwnMessageMenu(item);
                           else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id);
                         }}
-                        style={[styles.bubble, mine && styles.bubbleMine, messageAppearance?.bubble, mine && messageAppearance?.bubbleOwn, COMMUNITY_CHAT_GROUPING_ENABLED && { maxWidth: '100%' }]}
+                        style={[styles.bubble, mine && styles.bubbleMine, messageAppearance?.bubble, mine && messageAppearance?.bubbleOwn]}
                         {...(detailsReady ? messageActionAccess(() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); }) : {})}
                         accessibilityHint={detailsReady ? "hold for message actions" : undefined}
                         accessibilityRole={sharedLocation ? 'button' : undefined}
                         accessibilityLabel={sharedLocation ? `Open map for ${chatLocationLabel(sharedLocation)}` : undefined}
                       >
-                        {mine && COMMUNITY_CHAT_GROUPING_ENABLED && <ChatBubbleFill/>}
-              {!mine && !grouped && <Text style={[styles.senderName, messageAppearance?.sender]}>{item.sender_name ?? 'someone'}</Text>}
-                        {sharedLocation && (COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatLocationPreview location={sharedLocation} fonts={conversationFonts} isOwn={mine} /> : (
-                          <View style={styles.locationCard}>
-                            <View style={styles.locationHeading}><MapPin size={16} color={mine ? Colors.white : Colors.terracotta} /><Text style={[styles.locationLabel, mine && styles.locationLabelMine]}>Shared location</Text></View>
-                            <Text style={[styles.locationAddress, mine && styles.locationLabelMine]} numberOfLines={2}>{sharedLocation.address || 'View on map'}</Text>
-                            <Text style={[styles.locationHint, mine && styles.locationLabelMine]}>Tap to open map</Text>
-                          </View>
-                        ))}
-                        {!!item.image_url && (COMMUNITY_CHAT_GROUPING_ENABLED ? <ChatPhotoAttachment
+                        {mine && MEMBER_REDESIGN_APPEARANCE_ENABLED && <ChatBubbleFill/>}
+                        {!mine && !grouped && <Text style={[styles.senderName, messageAppearance?.sender]}>{item.sender_name ?? 'someone'}</Text>}
+                        {sharedLocation && <ChatLocationPreview location={sharedLocation} fonts={conversationFonts} isOwn={mine} />}
+                        {!!item.image_url && <ChatPhotoAttachment
                           uri={item.image_url} senderName={item.sender_name} fonts={conversationFonts}
                           maxWidth={Math.min(240, (windowWidth - 68) * 0.82 - 26)}
                           onOpen={() => photoSelection.onSelect(item.id)}
                           onLongPress={() => { if (mine) openOwnMessageMenu(item); else if (item.sender_id) openMemberMenu(item.sender_id, item.sender_name ?? 'someone', item.id); }}
-                        /> : <Image source={{ uri: item.image_url }} style={styles.messageImage} contentFit="cover" />)}
+                        />}
                         {!!item.body && !sharedLocation && (
                           <LinkifiedText
                             text={item.body}
@@ -990,14 +950,14 @@ export default function CommunityThreadScreen() {
                         <Text style={[styles.editedText, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn, { alignSelf: 'flex-end', marginTop: 2 }]}>{localDelivery === 'sending' ? 'Sending…' : localDelivery === 'unconfirmed' ? 'Not confirmed · retry below' : localDelivery === 'sent' ? 'Sent' : formatChatTime(item.created_at)}</Text>
                       {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn]}>edited</Text>}
                       </TouchableOpacity>
-                      {detailsReady && <CommunityMessageActions onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />}
+                      {detailsReady && <CommunityMessageActions onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={{ fonts: conversationFonts }} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />}
                     </View>
                   </View>
                 ) : item.metadata_pending ? (
                   <View style={styles.welcomeCard}><Text style={styles.welcomeBody}>{item.body}</Text></View>
                 ) : (
-                  <BroadcastCard onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }}
-                    appearance={COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts: conversationFonts } : undefined}
+                  <BroadcastCard inConversation onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }}
+                    appearance={{ fonts: conversationFonts }}
                     broadcast={item}
                     onViewReactions={() => openReactionDetails(item.id)}
                     scope={operationScope}
@@ -1055,7 +1015,8 @@ export default function CommunityThreadScreen() {
               </TouchableOpacity>
             </View>
           )}
-          {COMMUNITY_CHAT_GROUPING_ENABLED ? <CommunityChatComposer
+          <CommunityChatComposer
+            appearance={MEMBER_REDESIGN_APPEARANCE_ENABLED ? 'staged' : 'live'}
             composerInputRef={composerInputRef}
             fonts={conversationFonts}
             inputProps={{ ...composerInputProps, placeholderTextColor: AfterglowColors.muted, placeholder: 'Message…' }}
@@ -1066,46 +1027,13 @@ export default function CommunityThreadScreen() {
             sendDisabled={!identityReady || draftBlocked || !draft.trim() || sending}
             sending={sending}
             editing={!!editingMessageId}
-          /> : <View style={styles.composer}>
-            <TouchableOpacity
-              style={styles.photoBtn}
-              onPress={() => handlePickPhoto()}
-              disabled={!attachmentVisit.allowed || uploadingPhoto}
-              accessibilityRole="button"
-              accessibilityLabel="Add photo"
-            >
-              {uploadingPhoto
-                ? <ActivityIndicator size="small" color={Colors.terracotta} />
-                : <ImageIcon size={22} color={Colors.terracotta} strokeWidth={2.25} />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.photoBtn}
-              onPress={() => { if (attachmentIsCurrent()) setLocationPickerOpen(true); }}
-              disabled={!attachmentVisit.allowed || uploadingPhoto}
-              accessibilityRole="button"
-              accessibilityLabel="Share location"
-            >
-              <MapPin size={22} color={Colors.terracotta} strokeWidth={2.25} />
-            </TouchableOpacity>
-            <TextInput ref={composerInputRef} style={styles.input} {...composerInputProps} />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!draft.trim() || sending) && styles.sendBtnOff]}
-              onPress={handleSend}
-              disabled={!identityReady || draftBlocked || !draft.trim() || sending}
-            >
-              {sending ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <Text style={styles.sendBtnText}>send</Text>
-              )}
-            </TouchableOpacity>
-          </View>}
+          />
         </>
       )}
 
       </ComposerDock>
       </KeyboardLayout>
-      {COMMUNITY_CHAT_GROUPING_ENABLED && <ChatPhotoViewer photos={photos} {...photoSelection} fonts={conversationFonts} />}
+      <ChatPhotoViewer photos={photos} {...photoSelection} fonts={conversationFonts} />
 
       <PhotoPreviewModal
         visible={photoPreviewOpen}
@@ -1186,7 +1114,7 @@ const styles = StyleSheet.create({
   draftRecoveryBody: { ...AfterglowType.caption, color: AfterglowColors.muted, fontFamily: Fonts.sans },
   draftRecoveryActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
   draftRecoveryAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-  container: { flex: 1, backgroundColor: Colors.parchment },
+  container: { flex: 1, backgroundColor: Colors.cardBg },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadErrorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 12 },
   loadErrorTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.darkWarm, textAlign: 'center' },
@@ -1197,27 +1125,6 @@ const styles = StyleSheet.create({
   olderButtonText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.terracotta },
   loadWarning: { backgroundColor: Colors.inputBg, paddingHorizontal: 16, paddingVertical: 9 },
   loadWarningText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.darkWarm, textAlign: 'center' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  headerTitleTap: { flex: 1, alignItems: 'center' },
-  muteButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.bodyLG,
-    color: Colors.darkWarm,
-    textAlign: 'center',
-  },
-  headerAudience: {
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.caption,
-    color: Colors.tertiary,
-    textAlign: 'center',
-  },
   mutedLine: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.caption,
@@ -1251,16 +1158,9 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   pinnedBody: { flex: 1 },
-  pinnedLabel: {
-    fontFamily: Fonts.sansBold,
-    fontSize: FontSizes.caption,
-    color: Colors.terracotta,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
   pinnedTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm, marginTop: 1 },
   pinnedMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 1 },
-  listContent: { padding: 16, paddingBottom: 40, flexGrow: 1 },
+  listContent: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 16, flexGrow: 1 },
   emptyLine: {
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyMD,
@@ -1285,14 +1185,16 @@ const styles = StyleSheet.create({
   messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 8 },
   messageRowGrouped: { marginTop: -7 },
   messageRowMine: { justifyContent: 'flex-end' },
-  messageColumn: { maxWidth: '86%', flexShrink: 1, alignItems: 'flex-start' },
+  messageColumn: { maxWidth: '84%', flexShrink: 1, alignItems: 'flex-start' },
   messageColumnMine: { alignItems: 'flex-end' },
   face: { width: 24, height: 24, borderRadius: 12, marginTop: 3 },
   faceSpacer: { width: 24 },
   facePlaceholder: { backgroundColor: Colors.accentSubtle, alignItems: 'center', justifyContent: 'center' },
   faceInitial: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
   bubble: {
-    maxWidth: '78%',
+    // The message column already caps the row. A second percentage squeezes
+    // main-chat messages more than the topic rooms beside them.
+    maxWidth: '100%',
     backgroundColor: Colors.cardBg,
     borderRadius: 16,
     borderWidth: 1,
@@ -1302,15 +1204,8 @@ const styles = StyleSheet.create({
   },
   bubbleMine: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   senderName: { fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta, marginBottom: 2 },
-  locationCard: { minWidth: 180, gap: 4 },
-  locationHeading: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  locationLabel: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodySM, color: Colors.darkWarm },
-  locationLabelMine: { color: Colors.white },
-  locationAddress: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  locationHint: { fontFamily: Fonts.sans, fontSize: FontSizes.caption, color: Colors.secondary },
   messageText: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
   messageTextMine: { color: Colors.white },
-  messageImage: { width: 220, height: 180, borderRadius: 12, backgroundColor: Colors.inputBg, marginBottom: 6 },
   editedText: { fontFamily: Fonts.sans, fontSize: FontSizes.micro, color: Colors.tertiary, marginTop: 3 },
   daySeparator: {
     alignSelf: 'center',
@@ -1344,43 +1239,4 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   editingText: { flex: 1, fontFamily: Fonts.sansBold, fontSize: FontSizes.caption, color: Colors.terracotta },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    backgroundColor: Colors.parchment,
-  },
-  photoBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.inputBg,
-  },
-  input: {
-    flex: 1,
-    maxHeight: 120,
-    backgroundColor: Colors.inputBg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontFamily: Fonts.sans,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.darkWarm,
-  },
-  sendBtn: {
-    backgroundColor: Colors.terracotta,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  sendBtnOff: { opacity: 0.4 },
-  sendBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
 });

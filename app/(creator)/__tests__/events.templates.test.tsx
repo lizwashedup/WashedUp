@@ -15,7 +15,7 @@ jest.mock('../../../components/events/EventMediaImage',()=>({EventMediaImage:(pr
 jest.mock('../../../lib/supabase',()=>({supabase:{}}));
 jest.mock('../../../lib/haptics',()=>({hapticLight:()=>{}}));
 jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){return mockPages;},EVENT_SUMMARY_ENABLED:true}));
-jest.mock('expo-router',()=>({useRouter:()=>({push:(...a:unknown[])=>mockPush(...a)})}));
+jest.mock('expo-router',()=>({useLocalSearchParams:()=>({}),useFocusEffect:(fn:any)=>require('react').useEffect(fn,[fn]),useRouter:()=>({push:(...a:unknown[])=>mockPush(...a)})}));
 jest.mock('@tanstack/react-query',()=>({useQuery:({queryKey}:any)=>({data:queryKey[0]==='creator-access'?{}:queryKey[0]==='event-templates'?[mockOrdinary]:[],refetch:async()=>{},isRefetching:false}),useQueryClient:()=>({invalidateQueries:async()=>{}}),useMutation:(config:any)=>({mutate:(value:any)=>config.mutationFn(value),isPending:false,isError:false})}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View}));
 jest.mock('expo-image',()=>({Image:require('react-native').View}));

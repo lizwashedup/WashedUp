@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../../lib/supabase';
+import { withDeadline } from '../../../../lib/withTimeout';
 import { normalizeProfileHandle, verifyProfileOwner, isObsoleteProfileOperation, type ProfileOperationScope } from './profileOperations';
 type Status = 'idle' | 'unchanged' | 'invalid' | 'checking' | 'available' | 'taken' | 'error';
 interface Input { enabled: boolean; handle: string; currentHandle: string | null; scope: ProfileOperationScope; }
@@ -18,7 +19,11 @@ export function useProfileHandleAvailability({ enabled, handle, currentHandle, s
       try {
         await verifyProfileOwner({ userId: scope.userId, isCurrent });
         if (!isCurrent()) return;
-        const { data, error } = await supabase.from('profiles').select('id').eq('handle', clean).neq('id', scope.userId).maybeSingle();
+        const { data, error } = await withDeadline(
+          supabase.from('profiles').select('id').eq('handle', clean).neq('id', scope.userId).maybeSingle(),
+          12_000,
+          'profile handle availability',
+        );
         if (!isCurrent()) return;
         if (error) throw error;
         setReply({ key, status: data ? 'taken' : 'available' });

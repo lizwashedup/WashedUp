@@ -109,7 +109,7 @@ export default function OnboardingLACheckScreen() {
           <View style={styles.container}>
             <ProgressHead
               step={2}
-              totalSteps={5}
+              totalSteps={4}
               onBack={() => {
                 retire();
                 hapticLight();

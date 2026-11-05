@@ -29,6 +29,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as Crypto from 'expo-crypto';
 import { supabase } from './supabase';
 import { uploadBase64ToStorage } from './uploadPhoto';
+import { CreatorPageScopeExpired, type CreatorPageScope } from './creatorPageReview';
+import { requestWithDeadline } from './requestWithDeadline';
 
 export type CommunityBlockType =
   | 'cover'
@@ -272,16 +274,34 @@ export async function getCommunityIdentity(communityId: string): Promise<Communi
   return { name: data.name as string, purpose: (data.purpose as string | null) ?? null };
 }
 
-/** Leader-only via the existing communities_update RLS policy; no new grant needed. */
+/** Existing communities_update RLS plus name/purpose column permissions are required. */
 export async function updateCommunityIdentity(
   communityId: string,
   fields: { name: string; purpose: string },
+  scope: CreatorPageScope,
 ): Promise<void> {
-  const { error } = await supabase
+  if (!scope.isCurrent()) throw new CreatorPageScopeExpired();
+  const session = await requestWithDeadline(supabase.auth.getSession(), 8_000);
+  if (!scope.isCurrent() || session.data.session?.user.id !== scope.userId) throw new CreatorPageScopeExpired();
+  if (session.error) throw session.error;
+  if (!session.data.session?.access_token) throw new CreatorPageScopeExpired();
+  const { data, error } = await requestWithDeadline(supabase
     .from('communities')
     .update({ name: fields.name, purpose: fields.purpose })
-    .eq('id', communityId);
+    .eq('id', communityId)
+    .select('id, name, purpose')
+    .single()
+    .setHeader('Authorization', `Bearer ${session.data.session.access_token}`), 12_000);
+  if (!scope.isCurrent()) throw new CreatorPageScopeExpired();
+  if (error?.code === '42501') {
+    throw new Error('You don’t currently have permission to save these details. Your edits are still here.');
+  }
   if (error) throw error;
+  // RLS can filter a write to zero rows without returning an update error.
+  // Only the requested community's exact saved values confirm this change.
+  if (data?.id !== communityId || data.name !== fields.name || data.purpose !== fields.purpose) {
+    throw new Error('Couldn’t confirm the saved name and description. Your edits are still here.');
+  }
 }
 
 // -- Link validation (Build 35 screen 36) ------------------------------------

@@ -1,0 +1,22 @@
+import React from 'react';
+import {act,create,type ReactTestRenderer} from 'react-test-renderer';
+const mockRead=jest.fn(),mockAttempt=jest.fn(),mockChange=jest.fn(),mockCheck=jest.fn(),mockInvalidate=jest.fn();
+let mockObserved:any;
+jest.mock('../useCreatorPageScope',()=>({useCreatorPageScope:()=>mockObserved}));
+jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:mockInvalidate})}));
+jest.mock('../../lib/communityPublication',()=>({...jest.requireActual('../../lib/communityPublication'),readCommunityDiscoveryAvailable:async()=>true,readCommunityPublication:(...a:any[])=>mockRead(...a),readCommunityPublicationAttempt:(...a:any[])=>mockAttempt(...a),changeCommunityPublication:(...a:any[])=>mockChange(...a),checkCommunityPublication:(...a:any[])=>mockCheck(...a)}));
+import {useCommunityPublication} from '../useCommunityPublication';
+const id='00000000-0000-4000-8000-000000000001',initial={id,status:'draft',discoverable:false};
+let output:ReturnType<typeof useCommunityPublication>,tree:ReactTestRenderer,live:boolean;
+function Fixture(){output=useCommunityPublication(id);return null;}
+const mount=async()=>{await act(async()=>{tree=create(<Fixture/>)});};
+const update=async()=>{await act(async()=>tree.update(<Fixture/>));};
+const deferred=()=>{let resolve!:(r:any)=>void;const promise=new Promise(r=>{resolve=r});return{promise,resolve};};
+beforeEach(()=>{jest.clearAllMocks();live=true;mockObserved={scope:{userId:'creator',isCurrent:()=>live},account:{isLoading:false,error:null}};mockRead.mockResolvedValue(initial);mockAttempt.mockResolvedValue(null);mockChange.mockResolvedValue({...initial,status:'active'});mockCheck.mockResolvedValue({state:initial,attempt:null});});
+afterEach(()=>act(()=>tree?.unmount()));
+it('does not dispatch two same-frame publication actions and names the active action',async()=>{const pending=deferred();mockChange.mockReturnValue(pending.promise);await mount();expect(output.ready).toBe(true);let first!:Promise<boolean>;act(()=>{first=output.run('publish');void output.run('archive')});expect(mockChange).toHaveBeenCalledTimes(1);expect(output.activeAction).toBe('publish');await act(async()=>pending.resolve({...initial,status:'active'}));await first;expect(output.activeAction).toBeUndefined();});
+it('retires a confirmation after blur/account change before dispatch',async()=>{await mount();const run=output.run;live=false;mockObserved={...mockObserved,scope:{userId:'next',isCurrent:()=>true}};await update();await act(async()=>{await run('publish');});expect(mockChange).not.toHaveBeenCalled();});
+it('does not show late success or invalidate the next account after a pending write',async()=>{const pending=deferred();mockChange.mockReturnValue(pending.promise);await mount();let request!:Promise<boolean>;act(()=>{request=output.run('publish')});live=false;mockObserved={...mockObserved,scope:{userId:'next',isCurrent:()=>true}};await update();await act(async()=>pending.resolve({...initial,status:'active'}));expect(await request).toBe(false);expect(mockInvalidate).not.toHaveBeenCalled();expect(output.message).toBeUndefined();});
+it('restores a retained attempt and allows checking without another write',async()=>{const retained={action:'publish',before:initial,after:{...initial,status:'active'}};mockAttempt.mockResolvedValue(retained);await mount();expect(output.ready).toBe(false);expect(output.needsCheck).toBe(true);mockAttempt.mockResolvedValue(null);await act(async()=>{await output.run('check');});expect(mockCheck).toHaveBeenCalledTimes(1);expect(mockChange).not.toHaveBeenCalled();});
+it('keeps recovery available when reading the retained attempt also fails',async()=>{await mount();mockChange.mockRejectedValue(Error('offline'));mockAttempt.mockRejectedValue(Error('storage unreadable'));await act(async()=>{await output.run('publish');});expect(output.needsCheck).toBe(true);expect(output.ready).toBe(false);});
+it('requires a fresh check after a confirmed rejection, then permits another action',async()=>{await mount();mockChange.mockRejectedValueOnce(Error('Check the saved status'));await act(async()=>{await output.run('publish');});expect(output.ready).toBe(false);expect(output.needsCheck).toBe(true);await act(async()=>{await output.run('check');});expect(output.ready).toBe(true);expect(output.needsCheck).toBe(false);});

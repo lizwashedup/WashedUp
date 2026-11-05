@@ -1,0 +1,516 @@
+[
+  {
+    "kind": "authority",
+    "value": {
+      "md5": "d9a2d97a0ef34d456087e6df78a8c73d",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_community_leader(p_community_id uuid, p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select (\n    p_user_id = auth.uid()\n    or is_admin(auth.uid()) or has_role(auth.uid(), 'admin'::app_role)\n    or auth.role() = 'service_role'\n  )\n  and public.creator_community_is_visible(p_community_id)\n  and exists (\n    select 1 from community_members\n    where community_id = p_community_id and user_id = p_user_id\n      and status = 'active' and role in ('leader', 'co_leader')\n  );\n$function$\n"
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "anon=r/postgres",
+        "authenticated=r/postgres"
+      ],
+      "name": "creator_page_join_settings_version",
+      "type": "integer",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "anon=r/postgres",
+        "authenticated=r/postgres"
+      ],
+      "name": "main_chat_name",
+      "type": "text",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "accent_color",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "created_by",
+      "type": "uuid",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "description",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "guidelines_url",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "handle",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "id",
+      "type": "uuid",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "join_intro_question",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "join_welcome_message",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "name",
+      "type": "text",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "status",
+      "type": "community_status",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": [
+        "authenticated=w/postgres",
+        "anon=w/postgres"
+      ],
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "anon_update": true,
+      "authenticated_update": true
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "city",
+      "type": "text",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "discoverable",
+      "type": "boolean",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "join_ask_reason",
+      "type": "boolean",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "join_ask_rules_confirm",
+      "type": "boolean",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "join_ask_source",
+      "type": "boolean",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "join_open_question",
+      "type": "text",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "join_policy",
+      "type": "text",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "purpose",
+      "type": "text",
+      "anon_update": false,
+      "authenticated_update": false
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_accent_color_check",
+      "definition": "CHECK ((accent_color ~ '^#[0-9A-Fa-f]{6}$'::text))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_city_check",
+      "definition": "CHECK (((city IS NULL) OR ((char_length(city) >= 2) AND (char_length(city) <= 60))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_creator_page_join_settings_version_check",
+      "definition": "CHECK ((creator_page_join_settings_version >= 0))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_description_check",
+      "definition": "CHECK ((char_length(description) <= 2000))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_guidelines_url_check",
+      "definition": "CHECK (((guidelines_url IS NULL) OR (guidelines_url ~* '^https?://'::text)))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_handle_check",
+      "definition": "CHECK ((handle ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'::text))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_join_intro_question_check",
+      "definition": "CHECK (((join_intro_question IS NULL) OR ((char_length(join_intro_question) >= 1) AND (char_length(join_intro_question) <= 200))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_join_open_question_length_check",
+      "definition": "CHECK (((join_open_question IS NULL) OR (char_length(join_open_question) <= 200)))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_join_policy_allowed_check",
+      "definition": "CHECK ((join_policy = ANY (ARRAY['open'::text, 'approval_required'::text])))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_join_policy_check",
+      "definition": "CHECK ((join_policy = ANY (ARRAY['approval_required'::text, 'open'::text])))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_join_welcome_message_check",
+      "definition": "CHECK (((join_welcome_message IS NULL) OR ((char_length(join_welcome_message) >= 1) AND (char_length(join_welcome_message) <= 1000))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_name_check",
+      "definition": "CHECK (((char_length(name) >= 2) AND (char_length(name) <= 60)))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "communities_purpose_check",
+      "definition": "CHECK (((purpose IS NULL) OR ((char_length(purpose) >= 10) AND (char_length(purpose) <= 140))))"
+    }
+  },
+  {
+    "kind": "helper",
+    "value": {
+      "md5": "4c3bf6aa1883eb85c377e75e8fe63133",
+      "name": "creator_page_is_visible",
+      "signature": "creator_page_is_visible(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_page_is_visible(p_page_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT EXISTS(SELECT 1 FROM public.creator_page_publications p\n WHERE p.page_id=p_page_id AND public.creator_page_audience_matches(p.audience,auth.uid())\n AND (p.page_kind='organization' OR EXISTS(SELECT 1 FROM public.communities c WHERE c.id=p.page_id AND c.status='active')));\n$function$\n"
+    }
+  },
+  {
+    "kind": "helper",
+    "value": {
+      "md5": "d785b394b25bf7ebb0eabdd3ab8a2108",
+      "name": "is_community_member",
+      "signature": "is_community_member(uuid,uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_community_member(p_community_id uuid, p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select (\n    p_user_id = auth.uid()\n    or is_admin(auth.uid()) or has_role(auth.uid(), 'admin'::app_role)\n    or auth.role() = 'service_role'\n  )\n  and public.creator_community_is_visible(p_community_id)\n  and exists (\n    select 1 from community_members\n    where community_id = p_community_id and user_id = p_user_id and status = 'active'\n  );\n$function$\n"
+    }
+  },
+  {
+    "kind": "helper",
+    "value": {
+      "md5": "f8b427f7f67d2f16eb4294b6a56b8d6a",
+      "name": "creator_community_is_visible",
+      "signature": "creator_community_is_visible(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_community_is_visible(p_community_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT CASE WHEN EXISTS(SELECT 1 FROM public.creator_page_drafts WHERE id=p_community_id)\n OR EXISTS(SELECT 1 FROM public.creator_page_publications WHERE page_id=p_community_id)\n THEN public.creator_page_is_visible(p_community_id)\n ELSE EXISTS(SELECT 1 FROM public.communities c WHERE c.id=p_community_id AND\n  (c.status='active' OR public.is_admin(auth.uid()) OR auth.role()='service_role'\n   OR EXISTS(SELECT 1 FROM public.community_members m WHERE m.community_id=c.id AND m.user_id=auth.uid() AND m.status='active'))) END;\n$function$\n"
+    }
+  },
+  {
+    "kind": "policies_digest",
+    "value": {
+      "md5": "422a4716b340e3fb9b758f6c34bfbb15"
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "DELETE",
+      "qual": "(is_admin(( SELECT auth.uid() AS uid)) OR has_role(( SELECT auth.uid() AS uid), 'admin'::app_role))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "communities",
+      "permissive": "PERMISSIVE",
+      "policyname": "communities_delete",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "((status = 'active'::community_status) OR is_community_member(id, ( SELECT auth.uid() AS uid)) OR is_admin(( SELECT auth.uid() AS uid)) OR has_role(( SELECT auth.uid() AS uid), 'admin'::app_role))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "communities",
+      "permissive": "PERMISSIVE",
+      "policyname": "communities_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "(creator_community_is_visible(id) OR is_admin(auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "communities",
+      "permissive": "RESTRICTIVE",
+      "policyname": "creator_page_community_visibility",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "UPDATE",
+      "qual": "(is_community_leader(id, ( SELECT auth.uid() AS uid)) OR is_admin(( SELECT auth.uid() AS uid)) OR has_role(( SELECT auth.uid() AS uid), 'admin'::app_role))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "communities",
+      "permissive": "PERMISSIVE",
+      "policyname": "communities_update",
+      "schemaname": "public",
+      "with_check": "(is_community_leader(id, ( SELECT auth.uid() AS uid)) OR is_admin(( SELECT auth.uid() AS uid)) OR has_role(( SELECT auth.uid() AS uid), 'admin'::app_role))"
+    }
+  },
+  {
+    "kind": "qa",
+    "value": {
+      "id": "ed31b9f3-2b78-4690-88b2-c05b74265a11",
+      "name": "WashedUp Discovery QA",
+      "status": "archived",
+      "purpose": "Private isolated QA of discovery controls. No ordinary members or invitations.",
+      "join_policy": "approval_required",
+      "discoverable": false,
+      "active_members": 1
+    }
+  },
+  {
+    "kind": "table",
+    "value": {
+      "acl": [
+        "postgres=arwdDxtm/postgres",
+        "anon=ardxtm/postgres",
+        "authenticated=ardxtm/postgres",
+        "service_role=arwdDxtm/postgres"
+      ],
+      "rls": true,
+      "force_rls": false
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "enabled": "O",
+      "routine": "creator_page_community_status_guard()",
+      "definition": "CREATE TRIGGER creator_page_community_status BEFORE INSERT OR UPDATE OF status ON public.communities FOR EACH ROW EXECUTE FUNCTION creator_page_community_status_guard()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.creator_page_community_status_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nBEGIN\n IF NEW.status='active' AND EXISTS(SELECT 1 FROM public.creator_page_drafts WHERE id=NEW.id)\n AND NOT EXISTS(SELECT 1 FROM public.creator_page_publications WHERE page_id=NEW.id) THEN\n  RAISE EXCEPTION 'Publish the approved page first' USING ERRCODE='PT409'; END IF;\n RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "enabled": "O",
+      "routine": "creator_page_join_settings_revision()",
+      "definition": "CREATE TRIGGER creator_page_join_settings_revision BEFORE UPDATE OF join_policy, join_welcome_message, join_intro_question, guidelines_url, join_ask_reason, join_ask_source, join_ask_rules_confirm, join_open_question, creator_page_join_settings_version ON public.communities FOR EACH ROW EXECUTE FUNCTION creator_page_join_settings_revision()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.creator_page_join_settings_revision()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO ''\nAS $function$\nBEGIN\n NEW.creator_page_join_settings_version := OLD.creator_page_join_settings_version + CASE WHEN\n ROW(NEW.join_policy,NEW.join_welcome_message,NEW.join_intro_question,NEW.guidelines_url,\n NEW.join_ask_reason,NEW.join_ask_source,NEW.join_ask_rules_confirm,NEW.join_open_question)\n IS DISTINCT FROM ROW(OLD.join_policy,OLD.join_welcome_message,OLD.join_intro_question,OLD.guidelines_url,\n OLD.join_ask_reason,OLD.join_ask_source,OLD.join_ask_rules_confirm,OLD.join_open_question)\n OR NEW.creator_page_join_settings_version<>OLD.creator_page_join_settings_version THEN 1 ELSE 0 END;\n RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "enabled": "O",
+      "routine": "enforce_reserved_community_handle()",
+      "definition": "CREATE TRIGGER enforce_reserved_community_handle_trigger BEFORE INSERT OR UPDATE OF handle ON public.communities FOR EACH ROW EXECUTE FUNCTION enforce_reserved_community_handle()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.enforce_reserved_community_handle()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\nbegin\n  if new.handle is null then\n    return new;\n  end if;\n  if lower(new.handle) in ('washedup', 'contributors') then\n    if auth.uid() is null\n       or public.is_admin(auth.uid())\n       or public.has_role(auth.uid(), 'admin'::app_role) then\n      return new;\n    end if;\n    raise exception 'That handle is reserved.';\n  end if;\n  return new;\nend;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "enabled": "O",
+      "routine": "update_updated_at_column()",
+      "definition": "CREATE TRIGGER update_communities_updated_at BEFORE UPDATE ON public.communities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.update_updated_at_column()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\nBEGIN\n  NEW.updated_at = NOW();\n  RETURN NEW;\nEND;\n$function$\n"
+    }
+  }
+]

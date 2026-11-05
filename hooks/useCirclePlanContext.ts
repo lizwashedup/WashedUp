@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { readCircleRequest } from '../lib/circles/readCircleRequest';
 
 export interface CirclePlanContext {
   is_circle_plan: boolean;
@@ -90,12 +91,12 @@ export function useCirclePlanContext(eventId: string | null | undefined, options
       if (!eventId || !viewerId || provenanceId !== eventId || (circleId !== null && !isUuid(circleId))) {
         throw new CirclePlanContextUnavailableError();
       }
-      const { data: auth, error: authError } = await supabase.auth.getUser();
+      const { data: auth, error: authError } = await readCircleRequest(supabase.auth.getUser());
       requireCurrent();
       if (authError) throw authError;
       if (auth.user?.id !== viewerId) throw new CirclePlanContextUnavailableError('This account changed. Please try again.');
       if (circleId === null) return { is_circle_plan: false };
-      const { data, error } = await supabase.rpc('get_circle_plan_context', { p_event_id: eventId }).abortSignal(signal);
+      const { data, error } = await readCircleRequest(supabase.rpc('get_circle_plan_context', { p_event_id: eventId }).abortSignal(signal));
       requireCurrent();
       if (error) throw error;
       return parseCirclePlanContextReceipt(data, circleId);

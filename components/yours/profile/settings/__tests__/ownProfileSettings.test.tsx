@@ -4,6 +4,7 @@ import { Text, TextInput, TouchableOpacity, Share, Keyboard, Platform } from 're
 import ProfileScreen from '../../../../../app/(tabs)/profile';
 import { BrandedAlert } from '../../../../BrandedAlert';
 import SettingsPortrait from '../SettingsPortrait';
+import { ProfileCreatorSection } from '../ProfileCreatorSection';
 import { Image } from 'expo-image';
 import { deliberateSignOutAt, lastUnauthRedirectAt } from '../../../../../lib/navState';
 
@@ -73,6 +74,7 @@ const button = (label: string) => tree!.root.findAllByType(TouchableOpacity).fin
 const field = (label: string) => tree!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === label)!;
 const text = (value: string) => tree!.root.findAllByType(Text).some(node => node.props.children === value);
 const alert = () => tree!.root.findByType(BrandedAlert).props;
+const creatorState = () => tree!.root.findByType(ProfileCreatorSection).props;
 const press = async (node: any) => { act(() => { node.props.onPress(); }); await flush(); };
 const dismissPhotoChooser = async () => { act(() => { alert().onDismiss?.(); }); await flush(); };
 const edit = async () => { await press(byLabel('Edit profile')); };
@@ -199,17 +201,19 @@ it('falls back to the real name initial for a broken portrait and isolates error
 it('uses the existing native handle share and ticket destination', async () => {
   await mount(); await press(byLabel('Share your handle')); expect(Share.share).toHaveBeenCalledWith({ message: '@liz' }); await press(button('your tickets')); expect(mockPush).toHaveBeenCalledWith('/tickets');
 });
-it('keeps approved organization access when grants and its optional name fail', async () => {
+it('keeps management reachable when optional creator reads fail', async () => {
   mockAccess.mockResolvedValue({ hasEventHostGrant: true, ledCommunities: [] }); mockGrants.mockRejectedValue(new Error('grants offline')); mockOrganizer.mockRejectedValue(new Error('name offline'));
-  await mount(); expect(text('Some creator details couldn’t load.')).toBe(true); expect(button('switch to your events')).toBeDefined(); await press(button('switch to your events')); expect(mockReplace).toHaveBeenCalledWith('/(creator)/organizer-home');
+  await mount(); expect(text('Some creator details couldn’t load.')).toBe(true);
+  await press(byLabel('Open your management tools')); expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
 });
-it('keeps successful pending grants when access fails, and clears only recovered failure on retry', async () => {
-  mockAccess.mockRejectedValueOnce(new Error('offline')); mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]); await mount(); expect(text('needs more info')).toBe(true); expect(button('putting on events')).toBeDefined();
-  await press(byLabel('Try again to load creator spaces')); expect(text('Some creator details couldn’t load.')).toBe(false); expect(button('putting on events')).toBeDefined();
+it('keeps application status reachable through the directory and clears recovered errors on retry', async () => {
+  mockAccess.mockRejectedValueOnce(new Error('offline')); mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]); await mount();
+  expect(byLabel('Open your management tools')).toBeDefined(); await press(byLabel('Try again to load creator spaces'));
+  expect(text('Some creator details couldn’t load.')).toBe(false); expect(byLabel('Open your management tools')).toBeDefined();
 });
-it('preserves one selected community route and blocks a delayed old row after leaving', async () => {
-  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'club', name: 'Sunset Club', status: 'active' }], hasEventHostGrant: false }); await mount(); const row = button('switch to sunset club & your events');
-  await press(row); expect(mockSelected).toHaveBeenCalledWith('club'); expect(mockReplace).toHaveBeenCalledWith('/(creator)/today'); await press(row); expect(mockReplace).toHaveBeenCalledTimes(1);
+it('opens the named directory instead of silently selecting a community, and ignores an old row after leaving', async () => {
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'club', name: 'Sunset Club', status: 'active' }], hasEventHostGrant: false }); await mount(); const row = byLabel('Open your management tools');
+  await press(row); expect(mockSelected).not.toHaveBeenCalled(); expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage'); await press(row); expect(mockPush).toHaveBeenCalledTimes(1);
 });
 it('preserves both delete stages and the typed confirmation gate', async () => {
   await mount(); await press(byLabel('Delete account')); expect(text('Are you sure?')).toBe(true); expect(field('Type DELETE to confirm')).toBeUndefined();
@@ -260,11 +264,11 @@ it('retires a logout confirmation after account replacement and retains the curr
   await press(byLabel('Log out')); const info = alert(); act(() => { info.buttons[1].onPress(); info.buttons[1].onPress(); info.onClose(); }); await flush(); expect(mockForget).toHaveBeenCalledTimes(1); expect(mockSignOut).toHaveBeenCalledTimes(1); expect(deliberateSignOutAt.ts).toBeGreaterThan(0);
 });
 
-it('opens contextual Creator space from profile without replacing the personal navigation', async () => {
+it('opens management inside the personal navigation', async () => {
   mockPagesEnabled = true;
   await mount();
-  await press(button('Creator space'));
-  expect(mockPush).toHaveBeenCalledWith('/creator/pages');
+  await press(byLabel('Open your management tools'));
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
   expect(mockReplace).not.toHaveBeenCalled();
   expect(mockSelected).not.toHaveBeenCalled();
 });
@@ -320,4 +324,85 @@ it('retains edits and shows retry guidance for a timeout in the live appearance'
   expect(alert().message).toBe('Your changes are still here. Try saving again.');
   expect(field('Display name').props.value).toBe('Retained edit');
   expect(byLabel('Save changes').props.disabled).toBe(false);
+});
+
+it('recovers a stalled creator access read without losing confirmed pending applications', async () => {
+  jest.useFakeTimers();
+  try {
+    const stalled = deferred<any>();
+    mockAccess.mockReturnValueOnce(stalled.promise);
+    mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]);
+    await mount();
+    await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
+    expect(text('Some creator details couldn’t load.')).toBe(true);
+    expect(creatorState().pendingGrants).toEqual([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]);
+    expect(byLabel('Open your management tools')).toBeDefined();
+    expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
+    mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'current', name: 'Current Club', status: 'active' }], hasEventHostGrant: false });
+    await press(byLabel('Try again to load creator spaces'));
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+    expect(byLabel('Open your management tools')).toBeDefined();
+    stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+    expect(byLabel('Open your management tools')).toBeDefined();
+    expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+  } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+it('recovers a stalled optional organizer name while retaining confirmed access', async () => {
+  jest.useFakeTimers();
+  try {
+    const stalled = deferred<any>();
+    mockAccess.mockResolvedValue({ hasEventHostGrant: true, ledCommunities: [] });
+    mockOrganizer.mockReturnValueOnce(stalled.promise);
+    await mount();
+    await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
+    expect(text('Some creator details couldn’t load.')).toBe(true);
+    expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+    expect(byLabel('Open your management tools')).toBeDefined();
+    expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
+    await press(byLabel('Try again to load creator spaces'));
+    expect(text('Some creator details couldn’t load.')).toBe(false);
+    stalled.resolve({ display_name: 'Old organizer name' }); await flush();
+    expect(creatorState().organizerName).toBeNull();
+    expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+    expect(byLabel('Open your management tools')).toBeDefined();
+  } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+it('restarts an interrupted creator read on quick refocus without reloading the cached profile', async () => {
+  const stalled = deferred<any>();
+  mockAccess.mockReturnValueOnce(stalled.promise);
+  await mount();
+  const profileReads = mockRead.mock.calls.length;
+  mockFocused = false; await update();
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'current', name: 'Current Club', status: 'active' }], hasEventHostGrant: false });
+  mockFocused = true; await update();
+  expect(mockAccess).toHaveBeenCalledTimes(2);
+  expect(mockRead).toHaveBeenCalledTimes(profileReads);
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+  expect(byLabel('Open your management tools')).toBeDefined();
+  stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['current']);
+});
+
+
+it.each([false, true])('keeps confirmed community/event access behind one guarded directory entry with appearance=%s', async appearance => {
+  mockAppearance = appearance;
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'first', name: 'First club', status: 'active' }, { id: 'second', name: 'Second club', status: 'active' }], hasEventHostGrant: true });
+  mockOrganizer.mockResolvedValue({ display_name: 'Local Events' });
+  await mount();
+  expect(button('switch to first club & your events')).toBeUndefined();
+  expect(button('switch to second club & your events')).toBeUndefined();
+  expect(button('switch to local events & your events')).toBeUndefined();
+  expect(creatorState().creatorAccess?.ledCommunities.map((row: any) => row.id)).toEqual(['first', 'second']);
+  expect(creatorState().creatorAccess?.hasEventHostGrant).toBe(true);
+  expect(creatorState().organizerName).toBe('Local Events');
+  expect(text('You manage')).toBe(true);
+  const grouped = byLabel('Open your management tools');
+  await press(grouped);
+  expect(mockSelected).not.toHaveBeenCalled();
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage');
+  await press(grouped);
+  expect(mockSelected).not.toHaveBeenCalled(); expect(mockPush).toHaveBeenCalledTimes(1); expect(mockReplace).not.toHaveBeenCalled();
 });

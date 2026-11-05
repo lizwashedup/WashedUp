@@ -72,10 +72,11 @@ import { pushRegistrationFeedback } from '../components/notifications/pushRegist
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import { pendingTransferRoute } from '../lib/ticketTransfer';
 import { clearPendingDestination, consumePendingDestination, peekPendingCheckout, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { subscribeAppLinks } from '../lib/subscribeAppLinks';
 import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
-import { maybeRequestReviewAfterTopRating } from '../lib/reviewAsk';
+import { useRootModalHandoff, ROOT_MODAL_HANDOFF_MS as MODAL_HANDOFF_MS } from '../hooks/useRootModalHandoff';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import PushPrimerModal from '../components/PushPrimerModal';
 import VideoSplash from '../components/VideoSplash';
@@ -389,7 +390,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const surveyCheckedRef = useRef(false);
   const [surveyCheckDone, setSurveyCheckDone] = useState(false);
   const [reviewCheckDone, setReviewCheckDone] = useState(false);
-  const [reviewSheetPending, setReviewSheetPending] = useState(false);
   const reviewCheckIdentityRef = useRef<typeof authIdentityRef.current | null>(null);
   const [showPushPrimer, setShowPushPrimer] = useState(false);
   const pushPrimerCheckedRef = useRef(false);
@@ -402,6 +402,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   const pushPrimerAttemptRef = useRef<object | null>(null);
   const pushPrimerAnalyticsVisitRef = useRef<typeof pushPrimerVisitRef.current>(null);
   const primerIdentity = authIdentityRef.current;
+  const { modalLocked, reviewSheetPending, handoffModal, requestReview, reset: resetModalHandoff } = useRootModalHandoff(
+    primerIdentity, () => mountedRef.current && authIdentityRef.current === primerIdentity,
+  );
   const { fonts: primerFonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
 
   const retirePushPrimer = () => {
@@ -424,8 +427,8 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setReviewCheckDone(false);
     reviewCheckIdentityRef.current = null;
     setSurveyPlan(null);
-    setReviewSheetPending(false);
-  }, []);
+    resetModalHandoff();
+  }, [resetModalHandoff]);
   useEffect(() => resetAccountOwnedUi(), [primerIdentity, resetAccountOwnedUi]);
 
   // ── Root-modal sequencer ──────────────────────────────────────────────────
@@ -438,13 +441,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
   // handoff window after a close, so the closing modal fully unmounts before
   // the next mounts. Precedence (explicit): survey > review > mark >
   // pushPrimer, enforced by the render gates below. One modal at a time, ever.
-  const MODAL_HANDOFF_MS = 400;
-  const [modalLocked, setModalLocked] = useState(false);
-  const handoffModal = (close: () => void) => {
-    close();
-    setModalLocked(true);
-    setTimeout(() => setModalLocked(false), MODAL_HANDOFF_MS);
-  };
+  // Timer ownership and retirement live in useRootModalHandoff.
 
   useEffect(() => {
     // authIdentityRef advances synchronously inside the Supabase callback,
@@ -543,12 +540,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     setPlanPrimerRequest(null);
     pushPrimerCheckedRef.current = true;
     retirePushPrimer();
-    setReviewSheetPending(true);
-    setTimeout(() => {
-      void maybeRequestReviewAfterTopRating().finally(() =>
-        setReviewSheetPending(false),
-      );
-    }, MODAL_HANDOFF_MS + 60);
+    requestReview();
   };
 
   // Pre-permission primer gate. Native only. Fires once per cold launch
@@ -752,7 +744,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     // OneSignal click handler. Buffers cold-start taps until a listener
     // attaches, so this catches both warm-foreground taps and taps that
     // launched the app from terminated state.
+    let cancelled = false;
     const onClick = (event: any) => {
+      // Removing a listener does not invalidate a callback already queued by the SDK.
+      if (cancelled) return;
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
       if (type === 'operator_grant') { safePush('/creator/apply'); return; }
@@ -843,7 +838,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // this push, and the creator shell itself admits by grant, so a
         // non-creator tapping a stale push still gets redirected out of the
         // shell safely while the flag keeps the surface dark to the public.
-        safePush('/(creator)/members');
+        safePush('/(tabs)/friends/manage/(tools)/members');
       } else if (COMMUNITIES_ENABLED && type === 'community_event') {
         // "just posted <event>" lands on Scene, where the event lives. The
         // payload carries no event id by design (event_id is the plans FK).
@@ -872,7 +867,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
     };
 
-    let cancelled = false;
     let attached: ((event: any) => void) | null = null;
     const stopExpoResponses = subscribeExpoNotificationResponses(data => {
       if (!cancelled) onClick({ notification: { additionalData: data } });
@@ -960,21 +954,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
-    Linking.getInitialURL()
-      .then((url) => {
-        if (!url) return;
-        parseSessionFromUrl(url);
-        if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
-        captureDestination(url);
-      })
-      .catch((e) => logError(e, 'layout.getInitialURL'));
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      if (!url) return;
+    return subscribeAppLinks(Linking, url => {
       parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
       captureDestination(url);
-    });
-    return () => sub.remove();
+    }, error => logError(error, 'layout.getInitialURL'));
   }, []);
 
   useEffect(() => {
@@ -1467,6 +1451,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
           members={surveyMembers}
           userId={authedUserId}
           onComplete={(topRated) => {
+            if (!mountedRef.current || authIdentityRef.current !== primerIdentity || primerIdentity.userId !== authedUserId) return;
             handoffModal(() => setSurveyPlan(null));
             // TOP rating: fire the native review ask after this modal unmounts.
             if (topRated) fireReviewAfterSurvey();

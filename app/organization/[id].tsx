@@ -1,3 +1,4 @@
+import { OrganizationManageLink } from '../../components/creator/OrganizationManageLink';
 import ProfileButton from '../../components/ProfileButton';
 import { EventMediaImage } from '../../components/events/EventMediaImage';
 /**
@@ -217,7 +218,7 @@ function LegacyOrganizationProfileScreen() {
 
         {isOwnPage ? (
           // LIZ COPY
-          <Text style={styles.ownPageNote}>this is your organization's public page.</Text>
+          <OrganizationManageLink organizationId={id} />
         ) : (
           !!userId && !!followState?.available && (
             <TouchableOpacity

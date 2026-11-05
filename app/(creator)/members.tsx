@@ -20,7 +20,6 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticSuccess, hapticLight } from '../../lib/haptics';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 import {
   getCreatorAccess,
   getCommunityMembers,
@@ -178,7 +177,7 @@ export default function CreatorMembersScreen() {
   if (access && !isLeaderAccess(access) && !canManageMembers(access)) return <Redirect href={creatorLandingRoute(access)} />;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.terracotta} />
@@ -188,8 +187,8 @@ export default function CreatorMembersScreen() {
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
         >
-          <Text style={styles.title}>members</Text>
-          <CommunitySwitcher access={access} />
+
+          <Text style={styles.title}>Members</Text>
 
           {CO_CREATOR_INVITES_ENABLED && (
             <TouchableOpacity

@@ -1,176 +1,136 @@
-/**
- * Member invite claim screen (Build 35 Screen 56). Reached via the
- * washedupapp://invite/member/{token} deep link (lib/memberInvites'
- * buildMemberInviteLink). Preview is anon-callable and read-only -- opening
- * this screen never consumes or grants the invite. Acceptance always goes
- * through accept_member_invite() server-side, which is the one and only
- * place the binding check runs; this screen never decides binding itself, it
- * only shows what the server said.
- *
- * Behind MEMBER_INVITES_ENABLED (constants/FeatureFlags.ts) -- a direct deep
- * link still resolves this route, but the screen renders nothing extra while
- * the flag is off (same posture as app/invite/co-creator/[token].tsx).
- */
-
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+/** Recipient-bound invitation claim. Preview may mark a link viewed; only Join accepts it. */
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { View, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack, Redirect } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { ArrowLeft } from 'lucide-react-native';
 import Colors from '../../../constants/Colors';
-import { Fonts, FontSizes, LineHeights } from '../../../constants/Typography';
+import { FontSizes, LineHeights } from '../../../constants/Typography';
 import { MEMBER_INVITES_ENABLED } from '../../../constants/FeatureFlags';
-import { friendlyError } from '../../../lib/friendlyError';
+import { ScaledText as Text } from '../../../components/ScaledText';
+import ProfileButton from '../../../components/ProfileButton';
+import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
+import { useObservedUser } from '../../../hooks/useObservedUser';
 import { hapticSuccess } from '../../../lib/haptics';
-import { supabase } from '../../../lib/supabase';
-import {
-  previewMemberInvite,
-  acceptMemberInviteByToken,
-  type MemberInvitePreview,
-} from '../../../lib/memberInvites';
+import type { CreatorPageScope } from '../../../lib/creatorPageReview';
+import { effectiveMemberInviteStatus } from '../../../lib/memberInvitePresentation';
+import { previewMemberInvite, acceptMemberInviteByToken, MemberInviteAcceptanceUnknown, type MemberInvitePreview } from '../../../lib/memberInvites';
 
 export default function MemberInviteClaimScreen() {
-  const router = useRouter();
+  return MEMBER_INVITES_ENABLED ? <EnabledClaim /> : <Redirect href="/(tabs)/plans" />;
+}
+function EnabledClaim() {
   const { token } = useLocalSearchParams<{ token: string }>();
-  const [loading, setLoading] = useState(true);
+  const account = useObservedUser({ allowSignedOut: true });
+  const focused = useIsFocused();
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  return <ClaimFrame signedIn={!!account.viewerId}>
+    {account.isLoading ? <ActivityIndicator accessibilityLabel="Checking your account" color={Colors.terracotta} />
+      : account.error ? <><Text style={[s.title, { fontFamily: fonts.display }]}>Couldn’t check your account</Text>
+          <Text style={[s.body, { fontFamily: fonts.regular }]}>Try again to view this invitation.</Text><Action title="Try again" onPress={account.retry} /></>
+      : focused ? <ClaimVisit key={`${typeof token === 'string' ? token : ''}:${account.epoch}`} token={typeof token === 'string' ? token : ''}
+          viewerId={account.viewerId ?? null} accountIsCurrent={account.isCurrent} /> : null}
+  </ClaimFrame>;
+}
+function ClaimFrame({ children, signedIn }: { children: React.ReactNode; signedIn: boolean }) {
+  const router = useRouter();
+  return <SafeAreaView style={s.container} edges={['top', 'bottom']}>
+    <Stack.Screen options={{ headerShown: false }} />
+    <View style={s.header}>
+      <TouchableOpacity accessibilityLabel="Back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/plans')} style={s.headerBtn}>
+        <ArrowLeft size={22} color={Colors.text1} strokeWidth={2.5} />
+      </TouchableOpacity>
+      {signedIn && <ProfileButton compact stacked />}
+    </View>
+    <ScrollView contentContainerStyle={s.content}>{children}</ScrollView>
+  </SafeAreaView>;
+}
+function Action({ title, onPress, disabled = false }: { title: string; onPress: () => void; disabled?: boolean }) {
+  const { fonts } = useAfterglowFonts(true, 'creator');
+  return <TouchableOpacity accessibilityRole="button" accessibilityLabel={title} disabled={disabled} accessibilityState={{ disabled }}
+    onPress={onPress} style={[s.primaryBtn, disabled && s.disabled]}><Text numberOfLines={1} adjustsFontSizeToFit style={[s.buttonText, { fontFamily: fonts.semibold }]}>{title}</Text></TouchableOpacity>;
+}
+function ClaimVisit({ token, viewerId, accountIsCurrent }: { token: string; viewerId: string | null; accountIsCurrent: () => boolean }) {
+  const router = useRouter();
+  const { fonts } = useAfterglowFonts(true, 'creator');
   const [preview, setPreview] = useState<MemberInvitePreview | null>(null);
-  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [readFailed, setReadFailed] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [{ data: userData }, previewResult] = await Promise.all([
-        supabase.auth.getUser(),
-        typeof token === 'string' ? previewMemberInvite(token).catch(() => null) : Promise.resolve(null),
-      ]);
-      if (cancelled) return;
-      setSignedIn(!!userData.user);
-      setPreview(previewResult);
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  const handleAccept = async () => {
-    if (typeof token !== 'string' || accepting) return;
-    setAccepting(true);
-    setError(null);
+  const [unknown, setUnknown] = useState(false);
+  const [acceptedCommunity, setAcceptedCommunity] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const mounted = useRef(false), readId = useRef(0), lock = useRef(false);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; readId.current++; }; }, []);
+  const scope = useMemo<CreatorPageScope | null>(() => viewerId ? {
+    userId: viewerId, isCurrent: () => mounted.current && accountIsCurrent(),
+  } : null, [viewerId, accountIsCurrent]);
+  const current = () => mounted.current && accountIsCurrent();
+  const refresh = async () => {
+    const id = ++readId.current;
+    setLoading(true); setReadFailed(false); setError(null);
     try {
-      await acceptMemberInviteByToken(token);
-      hapticSuccess();
-      setAccepted(true);
-    } catch (e) {
-      // includes the "this invite is not for you" binding refusal -- shown
-      // plainly rather than as a generic failure, since it is a meaningful,
-      // expected outcome for someone who opened a forwarded link.
-      setError(friendlyError(e, 'This invite could not be accepted.'));
-    } finally {
-      setAccepting(false);
-    }
+      const result = token.trim() ? await previewMemberInvite(token) : null;
+      if (!current() || id !== readId.current) return;
+      setPreview(result); setUnknown(false); setNow(Date.now());
+    } catch {
+      if (current() && id === readId.current) setReadFailed(true);
+    } finally { if (current() && id === readId.current) setLoading(false); }
   };
-
-  if (!MEMBER_INVITES_ENABLED) return <Redirect href="/(tabs)/plans" />;
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} hitSlop={12}>
-          <ArrowLeft size={22} color={Colors.text1} strokeWidth={2.5} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.content}>
-        {loading ? (
-          <ActivityIndicator size="large" color={Colors.terracotta} />
-        ) : !preview ? (
-          <>
-            <Text style={styles.title}>This invite isn&apos;t valid</Text>
-            <Text style={styles.body}>It may have been canceled, or the link is incomplete.</Text>
-          </>
-        ) : accepted ? (
-          <>
-            <Text style={styles.title}>You&apos;re in</Text>
-            <Text style={styles.body}>You're a member of {preview.communityName}.</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(tabs)/plans')}>
-              <Text style={styles.primaryBtnText}>See what's on</Text>
-            </TouchableOpacity>
-          </>
-        ) : preview.status !== 'pending' ? (
-          <>
-            <Text style={styles.title}>
-              {preview.status === 'accepted' ? 'This invite was already used' : preview.status === 'expired' ? 'This invite has expired' : 'This invite was canceled'}
-            </Text>
-            <Text style={styles.body}>Ask {preview.invitedByName} for a new one if you still want to join {preview.communityName}.</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.eyebrow}>You're invited</Text>
-            <Text style={styles.title}>{preview.invitedByName} invited you to join {preview.communityName}</Text>
-            {preview.inviteMessage && <Text style={styles.body}>&ldquo;{preview.inviteMessage}&rdquo;</Text>}
-
-            {error && <Text style={styles.error}>{error}</Text>}
-
-            {signedIn ? (
-              <TouchableOpacity
-                style={[styles.primaryBtn, accepting && styles.primaryBtnDisabled]}
-                onPress={handleAccept}
-                disabled={accepting}
-              >
-                {accepting ? <ActivityIndicator size="small" color={Colors.white} /> : <Text style={styles.primaryBtnText}>Join {preview.communityName}</Text>}
-              </TouchableOpacity>
-            ) : (
-              <>
-                <Text style={styles.body}>Sign in or create an account, then come back to this link to accept.</Text>
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/(auth)/phone-entry')}>
-                  <Text style={styles.primaryBtnText}>Sign in or create an account</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </>
-        )}
-      </View>
-    </SafeAreaView>
-  );
+  useEffect(() => { void refresh(); const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
+  const accept = async () => {
+    if (!scope?.isCurrent() || !preview || lock.current || unknown || loading || readFailed) return;
+    const status = effectiveMemberInviteStatus(preview.status, preview.expiresAt);
+    if (status !== 'pending' && status !== 'viewed') { setNow(Date.now()); return; }
+    lock.current = true; setAccepting(true); setError(null);
+    try {
+      const result = await acceptMemberInviteByToken(token, scope, preview.communityId);
+      if (!scope.isCurrent()) return;
+      setAcceptedCommunity(result.communityId); hapticSuccess();
+    } catch (failure) {
+      if (!scope.isCurrent()) return;
+      if (failure instanceof MemberInviteAcceptanceUnknown) { setUnknown(true); setError(failure.message); }
+      else {
+        const message = (failure as { message?: string })?.message;
+        setError(message === 'this invite is not for you' ? 'This invitation is for a different account. Sign in with the account that was invited.'
+          : message === 'Community unavailable' ? 'This community isn’t available to your account.'
+          : message === 'cannot accept: banned from this community' ? 'You can’t join this community.'
+          : message === 'this invite has expired' ? 'This invitation has expired. Ask for a new link.'
+          : message === 'this invite is no longer available' ? 'This invitation is no longer available. Check its status.'
+          : 'Couldn’t join right now. Check the invitation status and try again.');
+      }
+    } finally { if (scope.isCurrent()) { lock.current = false; setAccepting(false); } }
+  };
+  const title = [s.title, { fontFamily: fonts.display }], body = [s.body, { fontFamily: fonts.regular }];
+  if (loading) return <ActivityIndicator accessibilityLabel="Loading invitation" color={Colors.terracotta} />;
+  if (readFailed) return <><Text style={title}>Couldn’t load this invitation</Text><Text style={body}>Check your connection and try again.</Text><Action title="Try again" onPress={refresh} /></>;
+  if (!preview) return <><Text style={title}>Invitation not found</Text><Text style={body}>Check that you opened the full link, or ask the creator for a new one.</Text></>;
+  if (acceptedCommunity) return <><Text style={title}>You’re in</Text><Text style={body}>You’re a member of {preview.communityName}.</Text>
+    <Action title="Open community" onPress={() => router.replace(`/community/${acceptedCommunity}` as never)} /></>;
+  const status = effectiveMemberInviteStatus(preview.status, preview.expiresAt, now);
+  if (status !== 'pending' && status !== 'viewed') return <><Text style={title}>{status === 'accepted' ? 'This invitation was already accepted' : status === 'expired' ? 'This invitation has expired' : 'This invitation was canceled'}</Text>
+    <Text style={body}>{status === 'accepted' ? 'If you joined, you can find the community in Yours.' : `Ask ${preview.invitedByName} for a new link if you’d still like to join.`}</Text></>;
+  return <><Text style={title}>Join {preview.communityName}</Text><Text style={body}>{preview.invitedByName} invited you.</Text>
+    {!!preview.inviteMessage && <Text style={body}>{preview.inviteMessage}</Text>}
+    {!!error && <Text accessibilityRole="alert" style={[body, s.error]}>{error}</Text>}
+    {viewerId ? <>
+      <Action title={accepting ? 'Joining…' : 'Join community'} disabled={accepting || unknown} onPress={accept} />
+      {!!error && !accepting && <Action title="Check invitation status" onPress={refresh} />}
+    </> : <><Text style={body}>Sign in to the account that was invited, then reopen this link.</Text>
+      <Action title="Sign in" onPress={() => router.push('/(auth)/phone-entry')} /></>}
+  </>;
 }
-
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.cream },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 },
-  headerBtn: { padding: 4 },
-  content: { flex: 1, padding: 24, justifyContent: 'center', gap: 12 },
-  eyebrow: {
-    fontFamily: Fonts.sansSemibold,
-    fontSize: FontSizes.caption,
-    color: Colors.brand,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: FontSizes.displayLG,
-    lineHeight: LineHeights.displayLG,
-    color: Colors.text1,
-  },
-  body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.text2 },
-  error: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
-  primaryBtn: {
-    backgroundColor: Colors.brand,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
-    shadowColor: Colors.brand,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  primaryBtnDisabled: { opacity: 0.6 },
-  primaryBtnText: { fontFamily: Fonts.sansSemibold, fontSize: FontSizes.bodyMD, color: Colors.white },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
+  headerBtn: { minWidth: 44, minHeight: 44, justifyContent: 'center' },
+  content: { flexGrow: 1, padding: 24, justifyContent: 'center', gap: 16 },
+  title: { fontSize: FontSizes.displayLG, lineHeight: LineHeights.displayLG, color: Colors.text1 },
+  body: { fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.text2 },
+  error: { color: Colors.errorBrand },
+  primaryBtn: { minHeight: 48, backgroundColor: Colors.brand, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, alignItems: 'center' },
+  disabled: { opacity: 0.6 },
+  buttonText: { fontSize: FontSizes.bodyMD, lineHeight: LineHeights.bodyMD, color: Colors.white, textAlign: 'center' },
 });

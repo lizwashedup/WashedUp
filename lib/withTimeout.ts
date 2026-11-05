@@ -10,13 +10,16 @@
 export function withTimeout<T>(p: PromiseLike<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (v: T) => {
       if (done) return;
       done = true;
+      if (timer !== undefined) clearTimeout(timer);
       resolve(v);
     };
     p.then(finish, () => finish(fallback));
-    setTimeout(() => finish(fallback), ms);
+    // A synchronous thenable can finish before a timer is needed.
+    if (!done) timer = setTimeout(() => finish(fallback), ms);
   });
 }
 
@@ -31,12 +34,14 @@ export function withTimeout<T>(p: PromiseLike<T>, ms: number, fallback: T): Prom
 export function withDeadline<T>(p: PromiseLike<T>, ms: number, label = 'request'): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (cb: (v: any) => void, v: any) => {
       if (done) return;
       done = true;
+      if (timer !== undefined) clearTimeout(timer);
       cb(v);
     };
     p.then((v) => settle(resolve, v), (e) => settle(reject, e));
-    setTimeout(() => settle(reject, new Error(`${label} timed out after ${ms}ms`)), ms);
+    if (!done) timer = setTimeout(() => settle(reject, new Error(`${label} timed out after ${ms}ms`)), ms);
   });
 }

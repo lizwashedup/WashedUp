@@ -10,6 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { readCircleRequest } from '../lib/circles/readCircleRequest';
 
 export interface CirclePlanRow {
   id: string;
@@ -40,7 +41,7 @@ export function useCirclePlans(circleId: string | null | undefined, scope?: Circ
       };
       requireCurrent();
       if (scope) {
-        const { data: auth, error: authError } = await supabase.auth.getUser();
+        const { data: auth, error: authError } = await readCircleRequest(supabase.auth.getUser());
         requireCurrent();
         if (authError) throw authError;
         if (auth.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
@@ -52,7 +53,7 @@ export function useCirclePlans(circleId: string | null | undefined, scope?: Circ
         .eq('circle_id', circleId)
         .in('status', ['forming', 'active', 'full'])
         .order('start_time', { ascending: true });
-      const { data, error } = await (scope ? request.abortSignal(signal) : request);
+      const { data, error } = await readCircleRequest(scope ? request.abortSignal(signal) : request);
       requireCurrent();
       // A failed request does not establish that this circle has no plans.
       if (error) throw error;

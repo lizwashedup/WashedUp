@@ -16,7 +16,7 @@ export function PageAction({ title, onPress, disabled, primary = false, quiet = 
 }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   return <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} accessibilityState={{ disabled: !!disabled }}
-    disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, primary && s.primary, compact && s.compact, quiet && s.quiet, disclosure && s.disclosure, sunset && primary && s.sunset, sunset && primary && !!leadingIcon && s.sunsetWithIcon, pressed && sunset && s.sunsetPressed, disabled && s.disabled]}>
+    disabled={disabled} onPress={onPress} style={({ pressed }) => [s.action, primary && s.primary, compact && s.compact, quiet && s.quiet, disclosure && s.disclosure, sunset && primary && s.sunset, sunset && primary && !!leadingIcon && s.sunsetWithIcon, pressed && s.pressed, pressed && sunset && s.sunsetPressed, disabled && s.disabled]}>
     {sunset && primary && <CreatorActionFill />}
     <View style={[s.actionContent, disclosure && s.disclosureContent]}>
       {leadingIcon && <View style={s.leadingIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{leadingIcon}</View>}
@@ -25,16 +25,20 @@ export function PageAction({ title, onPress, disabled, primary = false, quiet = 
     {disclosure && <ChevronRight size={17} color={C.muted} />}
   </Pressable>;
 }
-export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef }: {
+export function PageFrame({ children, title = 'Your page', footer, busy, onBack, contentKey, onRefresh, refreshing = false, scrollRef, onContentSizeChange, onViewportLayout, onScrollBeginDrag, innerViewRef, inTabs = false, stackedProfile = false, scrollingTitle = false }: {
   children: React.ReactNode; title?: string; footer?: React.ReactNode; busy?: boolean; onBack?: () => void; contentKey?: string; onRefresh?: () => void; refreshing?: boolean;
   scrollRef?: React.Ref<ScrollView>;
   innerViewRef?: React.ComponentProps<typeof ScrollView>['innerViewRef'];
   onContentSizeChange?: React.ComponentProps<typeof ScrollView>['onContentSizeChange'];
   onViewportLayout?: React.ComponentProps<typeof ScrollView>['onLayout'];
   onScrollBeginDrag?: React.ComponentProps<typeof ScrollView>['onScrollBeginDrag'];
+  inTabs?: boolean;
+  stackedProfile?: boolean;
+  /** Keep large directory titles readable without consuming the fixed navigation area. */
+  scrollingTitle?: boolean;
 }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
-  return <SafeAreaView style={s.root} edges={['top', 'bottom']}>
+  return <SafeAreaView style={s.root} edges={inTabs ? ['top'] : ['top', 'bottom']}>
     <Stack.Screen options={{ headerShown: false }} />
     <StatusBar style="dark" />
     <View style={s.header}>
@@ -42,11 +46,12 @@ export function PageFrame({ children, title = 'Your page', footer, busy, onBack,
         onPress={onBack ?? (() => router.canGoBack() ? router.back() : router.replace('/(tabs)/friends' as never))}>
         <ArrowLeft size={20} color={C.ink} />
       </Pressable>
-      <ScaledText numberOfLines={2} style={{ ...T.body, fontFamily: fonts.medium, color: C.ink, flex: 1, minWidth: 0 }}>{title}</ScaledText>
+      {scrollingTitle ? <View style={s.headerSpace} /> : <ScaledText numberOfLines={2} style={{ ...T.body, fontFamily: fonts.medium, color: C.ink, flex: 1, minWidth: 0 }}>{title}</ScaledText>}
       {busy && <ActivityIndicator accessibilityLabel="Saving" color={C.clay} />}
-      <ProfileButton compact/>
+      <ProfileButton compact stacked={stackedProfile}/>
     </View>
-    <ScrollView innerViewRef={innerViewRef} ref={scrollRef} onScrollBeginDrag={onScrollBeginDrag} onContentSizeChange={onContentSizeChange} onLayout={onViewportLayout} key={contentKey} refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.terracotta} /> : undefined} contentContainerStyle={[s.body, !!footer && s.bodyWithFooter]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+    <ScrollView style={scrollingTitle ? s.scroll : undefined} innerViewRef={innerViewRef} ref={scrollRef} onScrollBeginDrag={onScrollBeginDrag} onContentSizeChange={onContentSizeChange} onLayout={onViewportLayout} key={contentKey} refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.terracotta} /> : undefined} contentContainerStyle={[s.body, !!footer && s.bodyWithFooter]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      {scrollingTitle && <ScaledText accessibilityRole="header" style={[s.scrollingTitle, { fontFamily: fonts.medium }]}>{title}</ScaledText>}
       {children}
     </ScrollView>
     {footer && <View style={s.footer}>{footer}</View>}
@@ -67,6 +72,9 @@ export const pageStyles = StyleSheet.create({
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.paper },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, minHeight: 56 },
+  headerSpace: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollingTitle: { ...T.title, color: C.ink, marginBottom: 16 },
   back: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   body: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 28 },
   bodyWithFooter: { paddingBottom: 16 },
@@ -86,4 +94,5 @@ const s = StyleSheet.create({
   disclosure: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 0, borderRadius: 0, paddingHorizontal: 0, gap: 12 },
   disclosureText: { flexShrink: 1, textAlign: 'left' },
   disabled: { opacity: 0.5 },
+  pressed: { opacity: 0.75 },
 });

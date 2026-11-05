@@ -1,3 +1,5 @@
+import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
 import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
 import {listCreatorEventTemplates,deleteCreatorEventTemplate,creatorTemplateRoute,type PageEventLibraryTemplate} from '../../lib/creatorPageEventTemplateLibrary';
@@ -22,7 +24,7 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { Plus, X, ArrowUpRight, FileText, Ticket, Users, ScanLine, Wallet, RotateCcw } from 'lucide-react-native';
@@ -39,8 +41,6 @@ import { useLedCommunity } from '../../lib/selectedCommunity';
 import { eventBelongsToWorkspace, useWorkspace } from '../../lib/workspaceContext';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { WorkspaceSwitcher } from '../../components/creator/WorkspaceSwitcher';
-import { CommunitySwitcher } from '../../components/creator/CommunitySwitcher';
 
 type Segment = 'attention' | 'next' | 'drafts' | 'later' | 'past' | 'templates';
 
@@ -99,10 +99,13 @@ export default function CreatorEventsScreen() {
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [segment, setSegment] = useState<Segment>('attention');
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const [segment, setSegment] = useState<Segment>(section === 'drafts' ? 'drafts' : 'attention');
+  useFocusEffect(useCallback(() => { if (section === 'drafts') setSegment('drafts'); }, [section]));
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
+  const canStartEvent = workspace === 'organization' || workspace === 'community' && community?.status === 'active';
 
   const eventsQuery = useQuery({
     queryKey: ['creator-events-tab', workspace, community?.id],
@@ -345,7 +348,7 @@ export default function CreatorEventsScreen() {
       case 'next':
         return next
           ? renderEventCard(next)
-          : <Text style={styles.empty}>{EMPTY_HINTS.next}</Text>;
+          : <Text style={styles.empty}>{canStartEvent ? EMPTY_HINTS.next : 'Scheduled events appear here. You can also check your saved drafts and past events.'}</Text>;
       case 'drafts':
         return drafts.length > 0
           ? drafts.map((e) => renderEventCard(e, { draft: true }))
@@ -404,20 +407,20 @@ export default function CreatorEventsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={Colors.terracotta} />}
       >
         {/* LIZ COPY */}
-        <Text style={styles.kicker}>creator mode</Text>
-        <Text style={styles.title}>Events</Text>
-        <WorkspaceSwitcher access={access} stayOnEvents />
-        {workspace === 'community' && <CommunitySwitcher access={access} />}
 
-        <TouchableOpacity
+        <Text style={styles.kicker}>Manage</Text>
+        <Text style={styles.title}>Events</Text>
+        {workspace === 'community' && <CommunitySetupNotice community={community} onNavigate={route => router.push(route as never)} />}
+
+        {canStartEvent && <TouchableOpacity
           style={styles.postBtn}
-          onPress={() => router.push('/creator/event-form')}
+          onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/(tabs)/friends/manage') as never)}
           accessibilityRole="button"
           accessibilityLabel="New event"
         >
@@ -426,7 +429,7 @@ export default function CreatorEventsScreen() {
             <Plus size={16} color={Colors.white} strokeWidth={2.5} />
             <Text style={styles.postBtnText}>New event</Text>
           </View>
-        </TouchableOpacity>
+        </TouchableOpacity>}
 
         {/* Six labels cannot stay readable in one compressed phone-width
             row. Keep the underline-tab pattern and let the row scroll. */}

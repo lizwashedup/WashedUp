@@ -23,84 +23,20 @@ import {
   mergeChatBurst,
   olderChatFilter,
   oldestChatCursor,
-  replaceNewestChatPage,
   toChronologicalChatPage,
 } from '../lib/chatPaging';
 
-export interface MessageReaction {
-  user_id: string;
-  reaction: string;
-}
-
-export interface ReplyTo {
-  id: string;
-  content: string;
-  sender_name: string | null;
-}
-
-export interface ChatMessage {
-  mention_data?: ChatMentionDocument | null;
-  id: string;
-  // A message is parented by EITHER an event (plan) OR a circle, never both
-  // (DB XOR constraint). Both optional here so the same shape serves both.
-  event_id?: string | null;
-  circle_id?: string | null;
-  user_id: string;
-  content: string;
-  message_type: 'user' | 'system' | 'location' | 'audio';
-  image_url?: string | null;
-  audio_url?: string | null;
-  duration_seconds?: number | null;
-  created_at: string;
-  reply_to_message_id?: string | null;
-  // A system message carrying ref_event_id renders as a compact plan card
-  // (delivered by invite_person_to_plan / invite_people_to_plan).
-  ref_event_id?: string | null;
-  reply_to?: ReplyTo | null;
-  reactions?: MessageReaction[];
-  sender?: {
-    id: string;
-    first_name: string | null;
-    avatar_url: string | null;
-  } | null;
-}
-
-/**
- * A chat conversation is keyed by either a plan (event) or a circle. The hook
- * switches its data source, realtime channel, and read path on this key. Plan
- * chats behave exactly as before; the circle branch is reachable only behind
- * GROUPS_ENABLED + the gated circle route.
- */
-export type ConversationKey =
-  | { kind: 'event'; id: string }
-  | { kind: 'circle'; id: string };
-
-/** A caller may additionally retire an entry when its admission gate closes. */
-export interface ChatOperationScope {
-  readonly userId: string;
-  readonly isCurrent: () => boolean;
-}
-
-export class ObsoleteChatOperationError extends Error {
-  constructor() {
-    super('This chat action belongs to a previous visit.');
-    this.name = 'ObsoleteChatOperationError';
-  }
-}
-export function isObsoleteChatOperation(error: unknown): error is ObsoleteChatOperationError {
-  return error instanceof ObsoleteChatOperationError;
-}
-type ChatReactionIntent = { selected: string; desired: string | null; scope: ChatOperationScope };
-
-export class UnconfirmedChatReactionError extends Error {
-  constructor(readonly retry: () => Promise<void>) {
-    super('We could not confirm your reaction. Retry checks first and keeps the same change.');
-    this.name = 'UnconfirmedChatReactionError';
-  }
-}
-export function isUnconfirmedChatReaction(error: unknown): error is UnconfirmedChatReactionError {
-  return error instanceof UnconfirmedChatReactionError;
-}
+// Preserve the existing public hook imports while keeping the shared model
+// independent of React, subscriptions and mutation lifetimes.
+export type { MessageReaction, ReplyTo, ChatMessage, ConversationKey, ChatOperationScope } from '../lib/chatMessageModel';
+export { ObsoleteChatOperationError, isObsoleteChatOperation, UnconfirmedChatReactionError, isUnconfirmedChatReaction } from '../lib/chatMessageModel';
+import {
+  ObsoleteChatOperationError, isObsoleteChatOperation,
+  UnconfirmedChatReactionError, isUnconfirmedChatReaction,
+  type MessageReaction, type ReplyTo, type ChatMessage,
+  type ConversationKey, type ChatOperationScope, type ChatReactionIntent,
+} from '../lib/chatMessageModel';
+import { attachSenders, reconcileNewestMessages } from '../lib/chatMessageReads';
 
 function assertChatScope(scope: ChatOperationScope): void {
   if (!scope.userId || !scope.isCurrent()) throw new ObsoleteChatOperationError();
@@ -108,57 +44,6 @@ function assertChatScope(scope: ChatOperationScope): void {
 async function scopedChatRequest<T>(scope: ChatOperationScope, request: () => PromiseLike<T>): Promise<T> {
   assertChatScope(scope);
   try { return await request(); } finally { assertChatScope(scope); }
-}
-
-async function attachSenders(messages: any[]): Promise<ChatMessage[]> {
-  const allIds = messages.map(m => m.user_id).filter(Boolean);
-  const userIds = allIds.filter((id: string, i: number) => allIds.indexOf(id) === i);
-  if (userIds.length === 0) return messages as ChatMessage[];
-
-  const { data: profiles, error: profileError } = await requestWithDeadline(supabase
-    .from('profiles_public')
-    .select('id, first_name_display, profile_photo_url')
-    .in('id', userIds), 12_000);
-  if (profileError) throw profileError;
-
-  const profileMap: Record<string, any> = {};
-  (profiles ?? []).forEach((p: any) => {
-    profileMap[p.id] = {
-      id: p.id,
-      first_name: p.first_name_display ?? null,
-      avatar_url: p.profile_photo_url ?? null,
-    };
-  });
-
-  return messages.map(m => ({
-    ...m,
-    message_type: m.message_type ?? 'user',
-    sender: profileMap[m.user_id] ?? null,
-  })) as ChatMessage[];
-}
-
-// Reconcile a newest-page snapshot without undoing activity that happened
-// while the read was pending. Object identity distinguishes the unchanged
-// snapshot rows from realtime/local edits; UUIDs still identify actual sends.
-function reconcileNewestMessages(
-  current: ChatMessage[],
-  page: ChatMessage[],
-  startedWith: ReadonlyMap<string, ChatMessage>,
-  hasMore: boolean,
-): ChatMessage[] {
-  const currentById = new Map(current.map(message => [message.id, message]));
-  const persisted = current.filter(message => !message.id.startsWith('optimistic-'));
-  const unchanged = persisted.filter(message => startedWith.get(message.id) === message);
-  const changed = persisted.filter(message => startedWith.get(message.id) !== message);
-  const refreshed = (hasMore ? replaceNewestChatPage(unchanged, page) : page).filter(message =>
-    // A row removed locally during the request must not reappear from its
-    // earlier server snapshot. Keep the original page boundary for history.
-    !startedWith.has(message.id) || currentById.has(message.id),
-  );
-  const confirmedIds = new Set([...refreshed, ...changed].map(message => message.id));
-  const optimistic = current.filter(message => message.id.startsWith('optimistic-') &&
-    !confirmedIds.has(message.id.slice('optimistic-'.length)));
-  return mergeChatBurst(mergeChatBurst(refreshed, changed), optimistic);
 }
 
 export function useChat(key: ConversationKey, anchorId: string | null = null) {

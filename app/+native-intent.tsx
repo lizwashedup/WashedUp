@@ -55,7 +55,7 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
     // Email confirmation never adopts fragment/query sessions or uses recovery routing.
     if (pathname === '/email-confirmation' || pathname === '/email-confirmation/done') return '/email-confirmation';
     if (pathname.startsWith('/auth/callback')) return path;
-    if (pathname.startsWith('/app/creator')) return '/(creator)/events';
+    if (pathname.startsWith('/app/creator')) return '/(tabs)/friends/manage/(tools)/events';
 
     const appPlan = pathname.match(/^\/app\/plan\/([A-Za-z0-9-]+)$/);
     if (appPlan) return `/plan/${appPlan[1]}${search}`;

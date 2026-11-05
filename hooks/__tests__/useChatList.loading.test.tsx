@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useChatList } from '../useChatList';
 
+let mockIncoming: (payload: any) => Promise<void>;
 let mockMembership: (viewer: string) => Promise<any>;
 let mockCircles: (viewer: string) => Promise<any>;
 let mockEnrichment: (table: string, columns: string, viewer: string) => Promise<any>;
@@ -24,7 +25,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
       },
     }; return query;
   },
-  channel: () => { const channel = { on: () => channel, subscribe: () => channel }; return channel; },
+  channel: () => { const channel = { on: (_e: any, _f: any, cb: any) => { mockIncoming = cb; return channel; }, subscribe: () => channel }; return channel; },
   removeChannel: jest.fn(),
 } }));
 let tree: ReactTestRenderer;
@@ -201,4 +202,113 @@ it('ignores an earlier circle completion after the newer same-account retry', as
   await act(async () => oldCircle.resolve(circleMembership('Stale circle title')));
   expect(value.chats.map(chat => chat.title)).toEqual(['Current circle title']);
   expect(value.loadError).toBe(false);
+});
+
+
+it('keeps a live plan preview when the slower circle branch completes', async () => {
+  const circle = deferred(); mockCircles = () => circle.promise;
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-circle-race');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  expect(value.chats[0].last_message).toBe('Aster: New arrival');
+  await act(async () => circle.resolve(circleMembership()));
+  expect(value.chats.find(chat => chat.kind === 'event')).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+});
+
+it('keeps the latest live preview through a failed refresh', async () => {
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-failed-refresh');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+  expect(value.loadError).toBe(true);
+});
+
+
+it('keeps a removed conversation absent when the next refresh fails', async () => {
+  useDetailedEnrichment();
+  await mount('removed-chat-cache');
+  act(() => value.removeChat(event.id));
+  expect(value.chats).toEqual([]);
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats).toEqual([]);
+});
+
+it('ignores an old account removal callback after switching accounts', async () => {
+  useDetailedEnrichment();
+  await mount('remove-account-old');
+  const oldRemove = value.removeChat;
+  await act(async () => tree.update(<Probe viewer="remove-account-new" />));
+  act(() => oldRemove(event.id));
+  expect(value.chats).toHaveLength(1);
+});
+
+it('does not restore a confirmed circle departure from a refresh that started before leaving', async () => {
+  mockCircles = async () => circleMembership(); useDetailedEnrichment();
+  await mount('removed-circle-pending-read');
+  const stale = deferred(); mockCircles = () => stale.promise;
+  let refresh!: Promise<void>;
+  act(() => { refresh = value.refetch(true); });
+  act(() => value.removeChat('circle-independent'));
+  expect(value.chats.some(chat => chat.kind === 'circle')).toBe(false);
+  await act(async () => { stale.resolve(circleMembership()); await refresh; });
+  expect(value.chats.some(chat => chat.kind === 'circle')).toBe(false);
+  expect(value.chats.some(chat => chat.kind === 'event')).toBe(true);
+  expect(value.loading).toBe(false); expect(value.loadError).toBe(false);
+  // A later explicit read may reflect a real rejoin; removal is not a lifetime ban.
+  mockCircles = async () => circleMembership('Rejoined circle');
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats.find(chat => chat.kind === 'circle')?.title).toBe('Rejoined circle');
+});
+
+it('retains a live ordinary preview on remount when the server is offline', async () => {
+  useDetailedEnrichment('Initial preview');
+  await mount('live-preview-remount');
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  act(() => tree.unmount());
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await mount('live-preview-remount');
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+});
+
+it.each(['event', 'circle'] as const)('keeps a newer live %s preview when an older successful read finishes last', async kind => {
+  mockCircles = async () => circleMembership(); useDetailedEnrichment();
+  await mount(`live-${kind}-successful-read-race`);
+  const originalEnrichment = mockEnrichment, stale = deferred();
+  const id = kind === 'event' ? event.id : 'circle-independent';
+  mockEnrichment = (table, columns, viewer) => table === `${kind}s` ? stale.promise : originalEnrichment(table, columns, viewer);
+  let refresh!: Promise<void>; act(() => { refresh = value.refetch(true); });
+  await act(async () => { await mockIncoming({ new: { [`${kind}_id`]: id, user_id: 'synthetic-peer', content: 'Newest arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  await act(async () => { stale.resolve({ data: [{ id, latest_message: [{ content: 'Older snapshot', user_id: 'synthetic-peer', created_at: '2026-09-20T21:00:00Z' }] }], error: null }); await refresh; });
+  expect(value.chats.find(chat => chat.conversationId === id)).toEqual(expect.objectContaining({ last_message: 'Aster: Newest arrival', last_message_at: '2026-09-20T22:00:00Z', unread_count: 1 }));
+  expect(value.loadError).toBe(false);
+  // A subsequent authoritative refresh may reflect a deletion/edit or a read
+  // on another device. Live previews must not become permanent overrides.
+  mockEnrichment = originalEnrichment;
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats.find(chat => chat.conversationId === id)?.unread_count).toBe(0);
+  expect(value.chats.find(chat => chat.conversationId === id)?.last_message).toBe(kind === 'event' ? 'Aster: Plan preview' : 'Aster: Circle preview');
+});
+
+it('lets a successful read remove a conversation even when its preview changed during the read', async () => {
+  useDetailedEnrichment(); await mount('live-preview-membership-removal');
+  const pending = deferred(); mockMembership = () => pending.promise;
+  let refresh!: Promise<void>; act(() => { refresh = value.refetch(true); });
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  await act(async () => { pending.resolve({ data: [], error: null }); await refresh; });
+  expect(value.chats).toEqual([]);
+});
+
+it('uses a caught-up read without double-counting the live arrival', async () => {
+  useDetailedEnrichment(); await mount('live-preview-caught-up-read');
+  const originalEnrichment = mockEnrichment, pending = deferred();
+  mockEnrichment = (table, columns, viewer) => table === 'events' ? pending.promise : table === 'messages'
+    ? Promise.resolve({ data: [{ event_id: event.id, created_at: '2026-09-20T22:00:00Z' }], error: null })
+    : originalEnrichment(table, columns, viewer);
+  let refresh!: Promise<void>; act(() => { refresh = value.refetch(true); });
+  await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
+  await act(async () => { pending.resolve({ data: [{ id: event.id, latest_message: [{ content: 'New arrival', user_id: 'synthetic-peer', created_at: '2026-09-20T22:00:00Z' }] }], error: null }); await refresh; });
+  expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
 });

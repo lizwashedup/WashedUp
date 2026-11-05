@@ -11,6 +11,7 @@ import { loadPageEditing, persistPageEditor, savePageEditing, submitPageEditing,
   pageCreatorProblems, pageAudienceOptions, attachPageCover, type PageEditorRecord } from '../../../lib/creatorPageEditor';
 import { pickPageCover, uploadPageCover, checkPageCover, clearPageCoverAttempt, resetUnreadablePageCoverAttempt } from '../../../lib/creatorPageMedia';
 import { PageCover } from './PageCover';
+import { CommunityJoiningChoice } from '../CommunityJoiningChoice';
 import { Field } from '../ApplyFormKit';
 import { useApplicationFormGuidance } from '../useApplicationFormGuidance';
 import { CommunityClassificationFields, CommunityClassificationSummary } from './CommunityClassificationFields';
@@ -57,7 +58,7 @@ export default function CreatorPageEditorScreen({ pageId }: { pageId: string }) 
   const record = working?.scope === scope ? working.record : undefined;
   const recordRef = useRef(record);
   useLayoutEffect(() => { recordRef.current = record; }, [record]);
-  const pageProblems = record ? pageDraftProblems(record, data?.gender ?? null) : {};
+  const pageProblems = record ? pageDraftProblems(record, data?.gender ?? null, data?.published) : {};
   const formProblems = stage === 'creator' && !Object.keys(pageProblems).length && record ? pageCreatorProblems(record.creator) : pageProblems;
   const scrollContentRef = useRef<View>(null!);
   const guidance = useApplicationFormGuidance(Object.keys(formProblems), formProblems, { scope, stage });
@@ -185,7 +186,7 @@ export default function CreatorPageEditorScreen({ pageId }: { pageId: string }) 
   };
   const save = (next: 'preview' | 'stay') => {
     if (!record || !data || (next === 'preview' && (pendingPhoto || data.coverAttemptError) && !record.pending)) return;
-    if (next === 'preview' && !record.pending) { setMessage(undefined); const problems = pageDraftProblems(record, data.gender); setErrors(problems); if (Object.keys(problems).length) { setRevealPending(true); return; } }
+    if (next === 'preview' && !record.pending) { setMessage(undefined); const problems = pageDraftProblems(record, data.gender, data.published); setErrors(problems); if (Object.keys(problems).length) { setRevealPending(true); return; } }
     void run('save', async owned => {
       const saved = await savePageEditing(record, data.saved, owned);
       if (!owned.isCurrent()) return;
@@ -193,14 +194,14 @@ export default function CreatorPageEditorScreen({ pageId }: { pageId: string }) 
       if (owned.isCurrent()) {
         setWorking({ scope: scope!, record: saved });
         if (next === 'stay') setMessage('Draft saved. Keep editing or continue to preview when you’re ready.');
-        else setStage(pendingPhoto || data.coverAttemptError || Object.keys(pageDraftProblems(saved, data.gender)).length ? 'page' : 'preview');
+        else setStage(pendingPhoto || data.coverAttemptError || Object.keys(pageDraftProblems(saved, data.gender, data.published)).length ? 'page' : 'preview');
       }
     });
   };
   const submit = () => {
     if (!record || !data || pendingPhoto || data.coverAttemptError || (coverId && !coverReady)) return;
     setMessage(undefined);
-    const pageErrors = record.pending?.kind === 'submit' ? {} : pageDraftProblems(record, data.gender);
+    const pageErrors = record.pending?.kind === 'submit' ? {} : pageDraftProblems(record, data.gender, data.published);
     const problems = Object.keys(pageErrors).length ? pageErrors : pageCreatorProblems(record.creator);
     setErrors(problems); if (Object.keys(problems).length) { if (Object.keys(pageErrors).length) setStage('page'); setRevealPending(true); return; }
     void run('submission', async owned => { await submitPageEditing(record, owned); if (owned.isCurrent()) router.dismissTo(`/creator/page?id=${pageId}` as never); });
@@ -290,6 +291,9 @@ export default function CreatorPageEditorScreen({ pageId }: { pageId: string }) 
             <Text style={[s.rowTitle, { fontFamily: fonts.medium }]}>{record.pageData.audience === option.key ? '● ' : '○ '}{option.label}</Text>
           </Pressable>)}{failure('audience')}
         </View> : <Text style={[look.body, { fontFamily: fonts.regular }]}>Your organization has events and followers. It does not include community membership or admission questions.</Text>}
+        {record.kind === 'community' && !data?.published && <CommunityJoiningChoice value={record.pageData.join_policy}
+          onChange={method => field('join_policy', method)} disabled={!canEdit} error={errors.join_policy}
+          onLayout={guidance.field('join_policy').onLayout} />}
         <PageAction quiet title="Save draft" disabled={!canEdit} onPress={() => save('stay')} />
       </> : stage === 'preview' ? <>
         <View style={look.preview}>
