@@ -17,7 +17,7 @@ let tree: ReturnType<typeof create>;
 async function mount() { let current!: ReturnType<typeof useCreatorWaitlist>, epoch = 1; function Harness() { const captured = epoch; current = useCreatorWaitlist({ eventId: 'plan', viewerId: 'creator', epoch, isCurrent: () => captured === epoch }); return null; } await act(async () => { tree = create(<Harness />); }); return { get current() { return current; }, retire: () => epoch++, replace: async () => { epoch++; await act(async () => tree.update(<Harness />)); }, blur: () => act(() => mockBlur()), focus: async () => { await act(async () => { mockBlur = mockFocus(); }); } }; }
 beforeEach(() => { mockAuth.mockReset().mockResolvedValue(auth()); mockMeta.mockReset().mockResolvedValue(response(meta)); mockRows.mockReset().mockResolvedValue([row, { ...row, user_id: 'later', queue_position: 2 }]); mockGrant.mockReset().mockResolvedValue(1); mockClose.mockReset().mockResolvedValue(undefined); mockOpen.mockReset().mockResolvedValue(undefined); mockInvalidate.mockReset().mockResolvedValue(undefined); });
 afterEach(() => { if (tree)
-    act(() => tree.unmount()); });
+    act(() => tree.unmount()); jest.useRealTimers(); });
 it('reads a validated creator queue before enabling actions', async () => { const h = await mount(); expect(h.current.canAct).toBe(true); expect(h.current.data?.slotsUsed).toBe(0); expect(mockRows).toHaveBeenCalledWith('plan'); });
 it.each([{ ...meta, creator_user_id: 'other' }, { ...meta, id: 'other' }, { ...meta, exception_slots_used: undefined }, { ...meta, waitlist_closed: undefined }, { ...meta, start_time: 'bad' }])('does not enable controls with invalid metadata %p', async (data) => { mockMeta.mockResolvedValue(response(data)); const h = await mount(); expect(h.current.canAct).toBe(false); expect(mockRows).not.toHaveBeenCalled(); });
 it.each([null, [{ ...row, queue_position: 0 }], [{ ...row, user_id: null }], [row, row]])('rejects malformed queue data %p', async (data) => { mockRows.mockResolvedValue(data); const h = await mount(); expect(h.current.canAct).toBe(false); });
@@ -36,3 +36,29 @@ it('does not write after its account retires during the preflight read', async (
 it('retains an uncertain grant after leaving and returning to the mounted route', async () => { const h = await mount(), p = deferred(); mockGrant.mockReturnValueOnce(p.promise); let work!: Promise<void>; await act(async () => { work = h.current.grant('next'); }); h.blur(); await act(async () => { p.resolve(null); await work; }); await h.focus(); expect(h.current.attempt?.phase).toBe('unknown'); expect(mockGrant).toHaveBeenCalledTimes(1); });
 it('refreshes a new visit after an in-flight grant settles', async () => { const h = await mount(), p = deferred(); mockGrant.mockReturnValueOnce(p.promise); let work!: Promise<void>; await act(async () => { work = h.current.grant('next'); }); h.blur(); await h.focus(); mockRows.mockResolvedValue([{ ...row, exception_status: 'invited' }]); await act(async () => { p.resolve(1); await work; }); expect(h.current.data?.rows[0].exception_status).toBe('invited'); expect(h.current.attempt).toBeNull(); expect(mockGrant).toHaveBeenCalledTimes(1); });
 it('does not pause invitations for an ended plan', async () => { mockMeta.mockResolvedValue(response({ ...meta, status: 'cancelled' })); const h = await mount(); await act(async () => h.current.setClosed(true)); expect(mockClose).not.toHaveBeenCalled(); expect(h.current.canAct).toBe(false); });
+
+const advance = async (ms: number) => { await act(async () => { await jest.advanceTimersByTimeAsync(ms); }); };
+it.each(['auth','metadata','queue'])('recovers a stalled initial %s read without showing an empty queue',async stage=>{
+ jest.useFakeTimers();const p=deferred();const target=stage==='auth'?mockAuth:stage==='metadata'?mockMeta:mockRows;target.mockReturnValueOnce(p.promise);const h=await mount();
+ expect(h.current.loading).toBe(true);await advance(12001);expect(h.current.loading).toBe(false);expect(h.current.error).toContain('Couldn’t refresh');expect(h.current.data).toBeNull();expect(h.current.canAct).toBe(false);
+ await act(async()=>{p.resolve(stage==='auth'?auth():stage==='metadata'?response(meta):[]);});expect(h.current.data).toBeNull();
+ await act(async()=>h.current.refresh());expect(h.current.data?.rows).toHaveLength(2);expect(h.current.canAct).toBe(true);
+});
+it.each(['auth','metadata','queue'])('releases a stalled %s grant preflight and retries only the original action',async stage=>{
+ const h=await mount();jest.useFakeTimers();const p=deferred();const target=stage==='auth'?mockAuth:stage==='metadata'?mockMeta:mockRows;target.mockReturnValueOnce(p.promise);let work!:Promise<void>;
+ act(()=>{work=h.current.grant('next')});await advance(12001);expect(h.current.busy).toBe(false);expect(h.current.attempt?.phase).toBe('failed');expect(mockGrant).not.toHaveBeenCalled();
+ await act(async()=>{p.resolve(stage==='auth'?auth():stage==='metadata'?response(meta):[row]);await work});expect(mockGrant).not.toHaveBeenCalled();await act(async()=>h.current.retry());expect(mockGrant.mock.calls).toEqual([['plan','next']]);
+});
+it('keeps a confirmed grant final when the follow-up queue read stalls',async()=>{
+ const h=await mount();jest.useFakeTimers();const p=deferred();mockRows.mockResolvedValueOnce([row]).mockReturnValueOnce(p.promise);let work!:Promise<void>;act(()=>{work=h.current.grant('next')});await advance(12001);
+ expect(h.current.busy).toBe(false);expect(h.current.attempt).toBeNull();expect(h.current.data).toBeNull();expect(h.current.error).toContain('Couldn’t refresh');expect(mockGrant).toHaveBeenCalledTimes(1);
+ await act(async()=>{p.resolve([]);await work});mockRows.mockResolvedValue([{...row,exception_status:'invited'}]);await act(async()=>h.current.retry());expect(mockGrant).toHaveBeenCalledTimes(1);expect(h.current.data?.rows[0].exception_status).toBe('invited');
+});
+it('retains an uncertain pause across a stalled reconciliation read without repeating it',async()=>{
+ mockClose.mockRejectedValueOnce(Error('lost receipt'));const h=await mount();await act(async()=>h.current.setClosed(true));jest.useFakeTimers();mockMeta.mockReturnValueOnce(new Promise(()=>{}));let read!:Promise<void>;act(()=>{read=h.current.retry()});await advance(12001);
+ expect(h.current.loading).toBe(false);expect(h.current.attempt?.phase).toBe('unknown');expect(h.current.canAct).toBe(false);expect(mockClose).toHaveBeenCalledTimes(1);
+ mockMeta.mockResolvedValue(response({...meta,waitlist_closed:true}));await act(async()=>h.current.retry());expect(h.current.attempt).toBeNull();expect(mockClose).toHaveBeenCalledTimes(1);
+});
+it('does not time out or repeat a submitted grant',async()=>{
+ const h=await mount(),p=deferred();mockGrant.mockReturnValueOnce(p.promise);jest.useFakeTimers();let work!:Promise<void>;act(()=>{work=h.current.grant('next')});await advance(30000);expect(h.current.busy).toBe(true);await act(async()=>h.current.retry());expect(mockGrant).toHaveBeenCalledTimes(1);await act(async()=>{p.resolve(1);await work});expect(h.current.attempt).toBeNull();
+});
