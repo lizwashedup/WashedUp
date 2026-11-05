@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { getPlanChatTiming } from './planChatExpiry';
-import { formatChatPreview, type ChatPreview } from './chatPreview';
+import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chatPreview';
 
 type ScopedRead = <T>(work: PromiseLike<T>) => Promise<T>;
 type FirstPaint = { cachedRows: () => ChatPreview[]; publish: (rows: ChatPreview[]) => void };
@@ -142,7 +142,7 @@ export async function fetchEventChatPreviews(userId: string, names: Map<string, 
     const unreadMap: Record<string, number> = {};
     (otherMessages ?? []).forEach((msg: any) => {
       const lastRead = readMap[msg.event_id];
-      if (!lastRead || msg.created_at > lastRead) {
+      if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
         unreadMap[msg.event_id] = (unreadMap[msg.event_id] ?? 0) + 1;
       }
     });
