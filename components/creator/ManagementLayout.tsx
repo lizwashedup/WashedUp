@@ -29,7 +29,12 @@ export default function ManagementLayout() {
   const organizationName = useCreatorPageRead(workspace === 'organization' && access?.hasEventHostGrant ? scope : null, loadManagedOrganizationName);
   const segments = useSegments();
   const { fromCommunityId, fromManagementDirectory } = useGlobalSearchParams<{ fromCommunityId?: string; fromManagementDirectory?: string }>();
-  const screen = segments[segments.length - 1] as ManagementScreen;
+  // The global segments can still describe the editor, or just this parent,
+  // while dismissTo restores its nested navigator. Neither is a denied tool.
+  // Unmounting the Stack in that interval discards the requested destination
+  // and can repeatedly redirect as the navigator registers again.
+  const toolsIndex = segments.indexOf('(tools)' as never);
+  const screen = toolsIndex >= 0 ? segments[toolsIndex + 1] as ManagementScreen | undefined : undefined;
   useEffect(() => { void hydrateSelectedCommunity(); void hydrateWorkspace(); }, []);
 
   if (isLoading) return <View style={styles.loading}><ActivityIndicator accessibilityLabel="Checking management access" color={Colors.terracotta} /></View>;
@@ -42,8 +47,8 @@ export default function ManagementLayout() {
   const permitted = managementAccess(access!, workspace, community);
   // The main tabs keep this stack mounted. A global route change to Plans or
   // a focused editor must never pull the person back into management.
-  if (focused && !permitted.screens.includes(screen)) return <Redirect href={permitted.home} />;
-  const home = permitted.home.endsWith('/' + screen);
+  if (focused && screen && !permitted.screens.includes(screen)) return <Redirect href={permitted.home} />;
+  const home = !!screen && permitted.home.endsWith('/' + screen);
   const identity = workspace === 'community' ? community?.name ?? 'Your community' : organizationName.data ?? 'Your organization';
   const homeTitle = workspace === 'organization' ? organizationName.data ? `Manage ${organizationName.data}` : 'Manage organization' : community ? `Manage ${community.name}` : 'Manage community';
   const returnToDirectory = fromManagementDirectory === '1' || home;
