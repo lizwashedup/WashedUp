@@ -10,7 +10,7 @@ import { AfterglowFallbackFonts, AfterglowType, Fonts } from '../../../../consta
 import { AfterglowColors } from '../../../../constants/Colors';
 const mockCircle=jest.fn(),mockSigned=jest.fn();
 jest.mock('../../../../hooks/useCircle',()=>({useCircle:(id:string|null)=>mockCircle(id)}));
-jest.mock('../../../../hooks/useSignedAlbumUrls',()=>({useSignedAlbumUrls:(paths:string[])=>mockSigned(paths)}));
+jest.mock('../../../../hooks/useSignedAlbumUrls',()=>({useSignedAlbumUrls:(...args:unknown[])=>mockSigned(...args)}));
 jest.mock('../../../../lib/circles/coverUrl',()=>({buildCircleCoverUrl:(id:string,cover:string|null)=>cover?`https://example.invalid/${id}/${cover}`:null}));
 jest.mock('../../../../lib/haptics',()=>({hapticSelection:jest.fn()}));
 jest.mock('../../../ProfileButton',()=>()=>null);
@@ -25,7 +25,7 @@ function actionStyle(button:any){return StyleSheet.flatten(typeof button.props.s
 beforeEach(()=>{jest.clearAllMocks();mockCircle.mockReturnValue({data:null});mockSigned.mockReturnValue({data:{}});});
 afterEach(()=>cleanup.splice(0).forEach(fn=>fn()));
 it('preserves the manual cover priority and compact readable native row',()=>{const f=render(<CircleCard circle={base} members={[]} onPress={jest.fn()} appearance={appearance}/>);expect(mockCircle).toHaveBeenCalledWith(null);expect(f.photos()[0].props.source.uri).toContain('c1/cover1');const row=f.button('Saturday friends, 6 people');expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(44);expect(row.findAllByType(View).some(n=>StyleSheet.flatten(n.props.style)?.minHeight===92)).toBe(true);const name=f.tree.root.findAllByType(Text).find(n=>n.props.children==='Saturday friends')!;expect(name.props.numberOfLines).toBeUndefined();expect(StyleSheet.flatten(name.props.style).fontFamily).toBe(appearance.fonts.medium);expect(f.text()).not.toContain('plans this week');});
-it('uses the existing signed album mosaic when no manual cover exists',()=>{mockCircle.mockReturnValue({data:{recent_together:[{media_path:'p1'},{media_path:'p2'}]}});mockSigned.mockReturnValue({data:{p1:'https://example.invalid/one.jpg',p2:'https://example.invalid/two.jpg'}});const f=render(<CircleCard circle={{...base,cover_upload_id:null}} members={[]} onPress={jest.fn()} appearance={appearance}/>);expect(mockCircle).toHaveBeenCalledWith('c1');expect(mockSigned).toHaveBeenCalledWith(['p1','p2']);expect(f.photos().map(p=>p.props.source.uri)).toEqual(['https://example.invalid/one.jpg','https://example.invalid/two.jpg']);});
+it('uses the existing signed album mosaic when no manual cover exists',()=>{mockCircle.mockReturnValue({data:{recent_together:[{media_path:'p1'},{media_path:'p2'}]}});mockSigned.mockReturnValue({data:{p1:'https://example.invalid/one.jpg',p2:'https://example.invalid/two.jpg'}});const f=render(<CircleCard circle={{...base,cover_upload_id:null}} members={[]} onPress={jest.fn()} appearance={appearance}/>);expect(mockCircle).toHaveBeenCalledWith('c1');expect(mockSigned).toHaveBeenCalledWith(['p1','p2'], undefined);expect(f.photos().map(p=>p.props.source.uri)).toEqual(['https://example.invalid/one.jpg','https://example.invalid/two.jpg']);});
 it('falls back from a broken manual photo and resets for a replacement cover',()=>{const f=render(<CircleCard circle={base} members={[]} onPress={jest.fn()} appearance={appearance}/>);act(()=>f.photos()[0].props.onError());expect(f.photos()).toHaveLength(0);expect(f.text()).toContain('S');expect(StyleSheet.flatten(f.tree.root.findAllByType(Text).find(n=>n.props.children==='S')!.props.style).fontSize).toBe(AfterglowType.identity.fontSize);f.update(<CircleCard circle={{...base,cover_upload_id:'cover2'}} members={[]} onPress={jest.fn()} appearance={appearance}/>);expect(f.photos()[0].props.source.uri).toContain('cover2');});
 it('labels actual message recency rather than member presence',()=>{const date=new Date(Date.now()-120*60*1000).toISOString();const f=render(<CircleCard circle={{...base,last_message_at:date}} members={[]} onPress={jest.fn()} appearance={appearance}/>);expect(f.text()).toContain('2h ago');expect(f.text()).not.toContain('Last message');const activity=f.tree.root.findAllByType(Text).find(n=>n.props.accessibilityLabel==='Last message 2h ago')!;expect(StyleSheet.flatten(activity.props.style).fontSize).toBeGreaterThanOrEqual(13);expect(f.button('Saturday friends, 6 people, last message 2h ago')).toBeDefined();expect(f.text()).not.toContain('active');});
 it('keeps member overflow tied to the real count and full-color portrait fallback',()=>{const members=[{user_id:'bea',name:'Bea',photo_url:'https://example.invalid/bea.jpg'}];const f=render(<CircleMemberStack members={members} memberCount={6} appearance={appearance}/>);expect(f.text()).toContain('+5');expect(StyleSheet.flatten(f.photos()[0].props.style).opacity).toBeUndefined();act(()=>f.photos()[0].props.onError());expect(f.photos()).toHaveLength(0);expect(f.text()).toContain('B');});
@@ -104,4 +104,11 @@ it('remeasures mounted circle count, description and New circle label without re
   for(const fontScale of [1.35,1]) {act(()=>Dimensions.set({window:{...previous,width:390,fontScale}}));labels.forEach((label,i)=>expect(leaf(label)).not.toBe(before[i]));expect(f.button('New circle')).toBe(button);expect(f.tree.root.findByType(CirclesSummaryHeader)).toBe(header);before=labels.map(leaf);}
   act(()=>button.props.onPress());expect(onCreate).toHaveBeenCalledTimes(1);
  } finally {act(()=>Dimensions.set({window:previous}));}
+});
+
+it('passes the detail account generation to living photo signing',()=>{
+  const isCurrent=()=>true;
+  mockCircle.mockReturnValue({data:{recent_together:[{media_path:'private'}]},viewerId:'alice',viewerEpoch:8,isCurrentViewer:isCurrent});
+  render(<CircleCard circle={{...base,cover_upload_id:null}} members={[]} onPress={jest.fn()}/>);
+  expect(mockSigned).toHaveBeenCalledWith(['private'],{userId:'alice',epoch:8,isCurrent});
 });
