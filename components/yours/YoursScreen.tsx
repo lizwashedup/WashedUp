@@ -457,13 +457,12 @@ export default function YoursScreen() {
               disabled={requestsRead.isFetching || requestsRetry === scope} onPress={() => { void retryRequests(); }} />
           </ScrollView>}
           {requests.length > 0 && !(tab === 'people' && state === 'populated') && (
-            <RequestBanner
-              appearance={appearance}
-              count={requests.length}
-              onPress={openRequestsSheet}
-            />
+            <ScrollView style={[styles.requestBannerArea, { maxHeight: height * 0.3 }]} keyboardShouldPersistTaps="handled">
+              <RequestBanner appearance={appearance} count={requests.length} onPress={openRequestsSheet} />
+            </ScrollView>
           )}
 
+          <View style={[styles.fill, { minHeight: height * 0.22 }]}>
           {tab === 'people' && <>
             {peopleFailure && <View style={styles.peopleRecovery}>
               <Text accessibilityRole="alert" style={[styles.recoveryText, appearance && { fontFamily: fonts.regular }]}>
@@ -505,6 +504,7 @@ export default function YoursScreen() {
               />
             </View>
           )}
+          </View>
         </>}
 
       {!!uid && (
@@ -625,9 +625,10 @@ const styles = StyleSheet.create({
   tabRow: { flexShrink: 0 },
   // Keep the profile header, section tabs and body reachable when management
   // titles wrap at accessibility sizes. The entry's routes/state stay mounted.
-  managementOverview: { flexGrow: 0, flexShrink: 0 },
+  managementOverview: { flexGrow: 0, flexShrink: 1 },
+  requestBannerArea: { flexGrow: 0, flexShrink: 1 },
   peopleRecovery: { marginHorizontal: 20, marginTop: 12, marginBottom: 4, padding: 12, gap: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
-  requestsRecovery: { flexGrow: 0, flexShrink: 0, marginHorizontal: 20, marginTop: 12, marginBottom: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
+  requestsRecovery: { flexGrow: 0, flexShrink: 1, marginHorizontal: 20, marginTop: 12, marginBottom: 4, backgroundColor: CreatorSurfaceColors.sunsetGoldLight, borderWidth: 1, borderColor: CreatorSurfaceColors.goldEdge, borderRadius: 14 },
   requestsRecoveryContent: { padding: 12, gap: 4 },
   recoveryText: { ...AfterglowType.body, fontFamily: Fonts.sans, color: AfterglowColors.ink },
   addPill: {
