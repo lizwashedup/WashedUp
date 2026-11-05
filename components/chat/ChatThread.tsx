@@ -687,17 +687,37 @@ function ChatThread(props: ChatThreadProps) {
   // conditionally skipped (an early return before these hooks would throw
   // "rendered fewer hooks" if infoError flipped true after a successful render).
 
+  const reportMembersAttempt = useRef<object | null>(null);
+  const [loadingReportMembers, setLoadingReportMembers] = useState(false);
+  const reportMenuVisit = useRef<object | null>(null);
+  useFocusEffect(useCallback(() => {
+    const visit = {}; reportMenuVisit.current = visit;
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
+    return () => {
+      if (reportMenuVisit.current !== visit) return;
+      reportMenuVisit.current = null; reportMembersAttempt.current = null;
+    };
+  }, [entry]));
   const handleReportMenu = useCallback(async () => {
-    if (!isCurrentEntry()) return;
+    const visit = reportMenuVisit.current;
+    const current = () => isCurrentEntry() && !!visit && reportMenuVisit.current === visit;
+    if (!current() || reportMembersAttempt.current) return;
+    const menuScope = { userId: moderationScope.userId, isCurrent: () => current() && moderationScope.isCurrent() };
+    const attempt = {}; reportMembersAttempt.current = attempt; setLoadingReportMembers(true);
     // The full member list (avatar row is capped) comes from the per-kind wrapper:
     // plans query event_members, circles query circle_members.
     let reportMembers: { id: string; name: string }[];
     try { reportMembers = (await props.fetchReportMembers?.()) ?? []; }
     catch {
-      if (isCurrentEntry()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
+      if (current()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
       return;
+    } finally {
+      if (reportMembersAttempt.current === attempt) {
+        reportMembersAttempt.current = null;
+        if (current()) setLoadingReportMembers(false);
+      }
     }
-    if (!isCurrentEntry()) return;
+    if (!current()) return;
 
     if (reportMembers.length === 0) {
       setAlertInfo({ title: 'No other members', message: 'There are no other members in this chat to report.' });
@@ -710,16 +730,16 @@ function ChatThread(props: ChatThreadProps) {
       ActionSheetIOS.showActionSheetWithOptions(
         { options: [...memberNames, 'Cancel'], cancelButtonIndex: memberNames.length, title: 'Members' },
         (idx) => {
-          if (!isCurrentEntry() || idx < 0 || idx >= reportMembers.length) return;
+          if (!current() || idx < 0 || idx >= reportMembers.length) return;
           const member = reportMembers[idx];
           setTimeout(() => {
-            if (!isCurrentEntry()) return;
+            if (!current()) return;
             ActionSheetIOS.showActionSheetWithOptions(
               { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
               (actionIdx) => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
-                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope);
+                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope);
               },
             );
           }, 300);
@@ -733,15 +753,15 @@ function ChatThread(props: ChatThreadProps) {
           ...reportMembers.map((member) => ({
             text: member.name,
             onPress: () => {
-              if (!isCurrentEntry()) return;
+              if (!current()) return;
               setTimeout(() => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 setAlertInfo({
                   title: member.name,
                   message: '',
                   buttons: [
-                    { text: 'Report User', onPress: () => { if (isCurrentEntry()) { setReportTarget(member); setShowReport(true); } } },
-                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope) },
+                    { text: 'Report User', onPress: () => { if (current()) { setReportTarget(member); setShowReport(true); } } },
+                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope) },
                     { text: 'Cancel', style: 'cancel' },
                   ],
                 });
@@ -1346,6 +1366,7 @@ function ChatThread(props: ChatThreadProps) {
     setLocationPickerOpen(false); setActivePanel(null);
     setOverlayMessage(null); setReactionDetails(null); setReactionPickerMsgId(null); setPhotoViewUrl(null);
     setAlertInfo(null); setMiniProfileUserId(null); setShowReport(false); setReportTarget(null);
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
     setRecordingMode('idle'); setDraft(null); setAudioSending(false); setAudioError(null); setVoiceDockHeight(0);
     voiceCapture.current = null; voiceStopAttempt.current = null; audioSendAttempt.current = null; audioSession.current = null;
   }, [entry]);
@@ -1576,8 +1597,8 @@ function ChatThread(props: ChatThreadProps) {
             </TouchableOpacity>}
             {props.headerMenu.type === 'plus' ? <TouchableOpacity ref={plusBtnRef} onPress={openPlusFromButton} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="Add people or make a plan">
               <Ionicons name="add" size={24} color={AfterglowColors.clay} />
-            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
-              <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />
+            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} disabled={loadingReportMembers} accessibilityState={{ disabled: loadingReportMembers, busy: loadingReportMembers }} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
+              {loadingReportMembers ? <ActivityIndicator size="small" color={AfterglowColors.ink} /> : <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />}
             </TouchableOpacity>}
           </>}
         /> : <View style={chatStyles.header}>
@@ -1623,12 +1644,14 @@ function ChatThread(props: ChatThreadProps) {
           ) : (
             <TouchableOpacity
               onPress={handleReportMenu}
+              disabled={loadingReportMembers}
+              accessibilityState={{ disabled: loadingReportMembers, busy: loadingReportMembers }}
               style={chatStyles.ellipsisBtn}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               accessibilityRole="button"
               accessibilityLabel="More options"
             >
-              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
+              {loadingReportMembers ? <ActivityIndicator size="small" color={Colors.warmGray} /> : <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />}
             </TouchableOpacity>
           )}
           <ProfileButton compact/>
