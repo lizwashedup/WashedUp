@@ -18,6 +18,7 @@ const mockPhoneSync = jest.fn();
 const mockVerifyOtp = jest.fn();
 const mockGetUser = jest.fn();
 const mockGetSession = jest.fn();
+const mockSetSession = jest.fn();
 const mockAuthListeners = new Set<(event: string, session: any) => any>();
 const mockClickListeners = new Set<(event: any) => void>();
 const mockExpoListeners = new Set<(data: Record<string, unknown>) => void>();
@@ -81,6 +82,7 @@ jest.mock('../../hooks/useProfile', () => ({
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: {
     getSession: (...args: any[]) => mockGetSession(...args),
+    setSession: (...args: any[]) => mockSetSession(...args),
     getUser: (...args: any[]) => mockGetUser(...args),
     onAuthStateChange: (callback: (event: string, session: any) => any) => { mockAuthListeners.add(callback); return { data: { subscription: { unsubscribe: () => mockAuthListeners.delete(callback) } } }; },
     verifyOtp: (...args: any[]) => mockVerifyOtp(...args),
@@ -155,6 +157,7 @@ beforeEach(async () => {
   mockPhoneSync.mockReset().mockResolvedValue({ error: null });
   mockGetUser.mockReset().mockImplementation(async () => ({ data: { user: mockUser } }));
   mockGetSession.mockReset().mockImplementation(async () => ({ data: { session: mockUser ? { user: mockUser } : null } }));
+  mockSetSession.mockReset().mockResolvedValue({ error: null });
   mockVerifyOtp.mockReset().mockImplementation(async () => {
     mockUser = { id: 'person-a', phone: '+12025550100' };
     for (const callback of mockAuthListeners) void callback(mockVerifyEvent, { user: mockUser });
@@ -686,4 +689,67 @@ it('ignores a buffered OneSignal callback retained after root cleanup', async ()
   const count = mockRoutes.length;
   act(() => callback({ notification: { additionalData: { type: 'new_message', topicId: '33333333-3333-4333-8333-333333333333' } } })); await flush();
   expect(mockRoutes).toHaveLength(count);
+});
+
+describe('recovery link feedback lifetime', () => {
+  let deliver: (event: { url: string }) => void;
+  const recoveryUrl = (label: string) => `washedup://auth/callback#type=recovery&access_token=fictional-${label}&refresh_token=fictional-refresh-${label}`;
+  const expiredAlert = () => tree!.root.findAllByType('AlertFixture' as any).some(node => node.props.visible && node.props.title === 'Link expired');
+  beforeEach(() => {
+    jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
+      deliver = listener; return { remove: jest.fn() } as unknown as ReturnType<typeof Linking.addEventListener>;
+    });
+  });
+  const send = async (url: string) => { act(() => deliver({ url })); await flush(); };
+
+  it.each(['fragment', 'query'])('still opens the current successful recovery from %s tokens', async format => {
+    await mount(); const url = recoveryUrl('current');
+    await send(format === 'query' ? url.replace('#', '?') : url);
+    expect(mockSetSession).toHaveBeenCalledWith({ access_token: 'fictional-current', refresh_token: 'fictional-refresh-current' });
+    expect(mockRoutes.at(-1)?.href).toBe('/reset-password');
+    await tick(500); expect(expiredAlert()).toBe(false);
+  });
+
+  it('retires an expired-link alert when a newer recovery succeeds', async () => {
+    await mount(); await send('washedup://auth/callback?type=recovery');
+    await tick(200); await send(recoveryUrl('newer')); await tick(500);
+    expect(mockRoutes.at(-1)?.href).toBe('/reset-password');
+    expect(expiredAlert()).toBe(false);
+  });
+
+  it('clears its already-visible expiry feedback when a newer recovery succeeds', async () => {
+    await mount(); await send('washedup://auth/callback?type=recovery');
+    await tick(500); expect(expiredAlert()).toBe(true);
+    await send(recoveryUrl('newer')); expect(expiredAlert()).toBe(false);
+    expect(mockRoutes.at(-1)?.href).toBe('/reset-password');
+  });
+
+  it('presents a rejected session request as retryable instead of an unhandled rejection', async () => {
+    mockSetSession.mockRejectedValueOnce(new Error('offline'));
+    await mount(); await send(recoveryUrl('offline')); await tick(500);
+    expect(mockRoutes.at(-1)?.href).toBe('/login');
+    expect(tree!.root.findAllByType('AlertFixture' as any).some(node => node.props.visible && node.props.title === 'Could not open link')).toBe(true);
+    await send(recoveryUrl('retry'));
+    expect(mockRoutes.at(-1)?.href).toBe('/reset-password');
+    expect(tree!.root.findAllByType('AlertFixture' as any).some(node => node.props.visible && node.props.title === 'Could not open link')).toBe(false);
+  });
+
+  it('does not let an older recovery failure redirect a newer successful recovery', async () => {
+    const older = deferred<any>(); mockSetSession.mockReturnValueOnce(older.promise);
+    await mount(); await send(recoveryUrl('older')); await send(recoveryUrl('newer'));
+    const count = mockRoutes.length;
+    older.resolve({ error: new Error('expired') }); await flush(); await tick(500);
+    expect(mockRoutes).toHaveLength(count);
+    expect(mockRoutes.at(-1)?.href).toBe('/reset-password');
+    expect(expiredAlert()).toBe(false);
+  });
+
+  it('does not navigate when a dispatched recovery resolves after root cleanup', async () => {
+    const pending = deferred<any>(); mockSetSession.mockReturnValueOnce(pending.promise);
+    await mount(); await send(recoveryUrl('retired'));
+    await act(async () => tree!.unmount()); tree = undefined;
+    const count = mockRoutes.length;
+    pending.resolve({ error: null }); await flush();
+    expect(mockRoutes).toHaveLength(count);
+  });
 });
