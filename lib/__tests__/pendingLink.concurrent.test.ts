@@ -135,3 +135,19 @@ it('does not let a clear queued before a newer stash remove the new route', asyn
   await clearing; await saving;
   expect(await consumePendingDestination()).toBe(newLink);
 });
+
+it('releases a stalled read without letting its late response erase a newer queued link', async () => {
+  jest.useFakeTimers();
+  try {
+    await stashPendingDestination(oldLink);
+    const started = deferred<void>(), read = deferred<string | null>();
+    jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => { started.resolve(); return read.promise; });
+    const consuming = consumePendingDestination(); await started.promise;
+    const saving = stashPendingDestination(newLink);
+    await jest.advanceTimersByTimeAsync(12_000);
+    expect(await consuming).toBeNull(); await saving;
+    read.resolve(oldLink); await Promise.resolve();
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    expect(await consumePendingDestination()).toBe(newLink);
+  } finally { jest.useRealTimers(); }
+});

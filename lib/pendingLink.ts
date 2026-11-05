@@ -18,6 +18,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { requestWithDeadline } from './requestWithDeadline';
 
 const DESTINATION_KEY = 'pendingLinkDestination';
 const CHECKOUT_KEY = 'pendingCheckoutOrderId';
@@ -92,7 +93,9 @@ export async function consumePendingDestination(
   try {
     return await mutateDestination(async () => {
       if (!current()) return null;
-      const href = await AsyncStorage.getItem(DESTINATION_KEY);
+      // Only the read may time out: a dispatched write/removal must settle
+      // before another mutation can safely use this same storage key.
+      const href = await requestWithDeadline(AsyncStorage.getItem(DESTINATION_KEY), 12_000);
       if (!current()) return null;
       if (href) await AsyncStorage.removeItem(DESTINATION_KEY);
       // A dispatched removal cannot be undone. Newer stashes wait behind it;
