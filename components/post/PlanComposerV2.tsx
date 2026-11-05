@@ -795,7 +795,7 @@ export default function PlanComposerV2() {
     const write = beginWrite();
     if (!write) return;
     try {
-      const { data: { user }, error: identityError } = await supabase.auth.getUser();
+      const { data: { user }, error: identityError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!ownsWrite(write)) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       if (params.draftId) {
@@ -947,7 +947,7 @@ export default function PlanComposerV2() {
     // guard against a re-submit racing the insert (alongside confirmVisible).
     // submittingRef is the synchronous guard above (see its declaration).
     try {
-      const { data: { user }, error: identityError } = await supabase.auth.getUser();
+      const { data: { user }, error: identityError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!ownsWrite(write)) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       let insertedEvent: { id: string } | null = null;
