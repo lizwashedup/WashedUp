@@ -2,7 +2,9 @@ import React from 'react';
 import {act,create,type ReactTestRenderer} from 'react-test-renderer';
 import {TextInput, TouchableOpacity, RefreshControl} from 'react-native';
 import {PageAction} from '../../../components/creator/pages/PageFrame';
-const mockAccess=jest.fn(),mockSelected=jest.fn(),mockParams=jest.fn(),mockQuery=jest.fn(),mockAdd=jest.fn();
+const mockAccess=jest.fn(),mockSelected=jest.fn(),mockParams=jest.fn(),mockQuery=jest.fn(),mockAdd=jest.fn(),mockSaveIdentity=jest.fn();
+let mockScope:any,mockLive:boolean;
+jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{epoch:1}})}));
 jest.mock('../../../hooks/useCreatorAccessRead',()=>({useCreatorAccessRead:()=>mockAccess()}));
 jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockSelected()}));
 jest.mock('../../../lib/creatorMode',()=>({isAdminTierRole:(role:string)=>['leader','co_leader','admin'].includes(role)}));
@@ -11,8 +13,9 @@ jest.mock('@tanstack/react-query',()=>({useQuery:(args:unknown)=>mockQuery(args)
 jest.mock('../../../components/ProfileButton',()=>()=>null);
 jest.mock('../../../components/creator/BlockEditorCard',()=>({BlockEditorCard:()=>null}));
 jest.mock('../../../components/BrandedAlert',()=>({BrandedAlert:()=>null}));
-jest.mock('../../../lib/communityBlocks',()=>({addBlock:(...args:unknown[])=>mockAdd(...args),getBlocksForEditor:jest.fn(),getCommunityIdentity:jest.fn(),BLOCK_TYPE_INFO:{},IDENTITY_NAME_MAX:60,IDENTITY_NAME_MIN:2,IDENTITY_PURPOSE_MAX:200,IDENTITY_PURPOSE_MIN:5}));
+jest.mock('../../../lib/communityBlocks',()=>({addBlock:(...args:unknown[])=>mockAdd(...args),updateCommunityIdentity:(...args:unknown[])=>mockSaveIdentity(...args),getBlocksForEditor:jest.fn(),getCommunityIdentity:jest.fn(),BLOCK_TYPE_INFO:{},IDENTITY_NAME_MAX:60,IDENTITY_NAME_MIN:2,IDENTITY_PURPOSE_MAX:200,IDENTITY_PURPOSE_MIN:5}));
 import EditPageScreen from '../edit-page';
+import {BrandedAlert} from '../../../components/BrandedAlert';
 function text(node:any):string{return typeof node==='string'?node:Array.isArray(node)?node.map(text).join(' '):node?.children?text(node.children):'';}
 let tree:ReactTestRenderer;
 let mockBlocksRead: any, mockIdentityRead: any;
@@ -20,6 +23,7 @@ const mockRefreshBlocks = jest.fn(), mockRefreshIdentity = jest.fn();
 const exact={id:'exact',name:'Exact community',role:'leader',status:'active'},other={id:'other',name:'Other community',role:'leader',status:'active'};
 beforeEach(() => {
  jest.clearAllMocks();
+ mockLive=true;mockScope={userId:'alice',isCurrent:()=>mockLive};
  mockParams.mockReturnValue({communityId:'exact'});
  mockAccess.mockReturnValue({data:{ledCommunities:[exact,other]},isLoading:false,isError:false});
  mockSelected.mockReturnValue(other);
@@ -109,4 +113,43 @@ it('refreshes both page sections and identity from the existing pull-to-refresh 
  expect(mockRefreshBlocks).toHaveBeenCalledTimes(1);
  expect(mockRefreshIdentity).toHaveBeenCalledTimes(1);
  expect(mockAdd).not.toHaveBeenCalled();
+});
+
+it('explains leader-only identity fields to an admin without presenting an unusable Save action',async()=>{
+ mockAccess.mockReturnValue({data:{ledCommunities:[{...exact,role:'admin'},other]},isLoading:false,isError:false});
+ await act(async()=>{tree=create(<EditPageScreen/>);});openBasics();
+ expect(text(tree.toJSON())).toContain('Only this community’s leader or co-leader');
+ expect(field('community name').props.editable).toBe(false);
+ expect(field('Short community description').props.editable).toBe(false);
+ expect(tree.root.findAllByType(TouchableOpacity).some(node=>node.props.accessibilityLabel==='Save name and description')).toBe(false);
+ expect(mockSaveIdentity).not.toHaveBeenCalled();
+});
+
+it('preserves entered identity text when a save has no confirmed result',async()=>{
+ mockSaveIdentity.mockRejectedValue(Error('Couldn’t confirm the saved name and description.'));
+ await act(async()=>{tree=create(<EditPageScreen/>);});openBasics();
+ act(()=>field('community name').props.onChangeText('Updated name'));
+ const save=tree.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==='Save name and description')!;
+ await act(async()=>save.props.onPress());
+ expect(mockSaveIdentity).toHaveBeenCalledWith('exact',{name:'Updated name',purpose:'Meet for walks'},expect.objectContaining({userId:'alice'}));
+ expect(field('community name').props.value).toBe('Updated name');
+ expect(tree.root.findByType(BrandedAlert).props.title).toBe('Couldn’t confirm save');
+});
+
+it('shows Saved only after confirmation and clears it when the name changes',async()=>{
+ mockSaveIdentity.mockResolvedValue(undefined);
+ await act(async()=>{tree=create(<EditPageScreen/>);});openBasics();
+ const save=tree.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==='Save name and description')!;
+ await act(async()=>save.props.onPress());expect(text(tree.toJSON())).toContain('Saved.');
+ act(()=>field('community name').props.onChangeText('Next edit'));expect(text(tree.toJSON())).not.toContain('Saved.');
+});
+
+it('blocks a same-frame duplicate save and ignores a late result after leaving',async()=>{
+ let resolve!:()=>void;mockSaveIdentity.mockReturnValue(new Promise<void>(done=>{resolve=done;}));
+ await act(async()=>{tree=create(<EditPageScreen/>);});openBasics();
+ const save=tree.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==='Save name and description')!;
+ let saving!:Promise<void>;
+ act(()=>{saving=save.props.onPress();void save.props.onPress();});expect(mockSaveIdentity).toHaveBeenCalledTimes(1);
+ mockLive=false;await act(async()=>{resolve();await saving;});
+ expect(text(tree.toJSON())).not.toContain('Saved.');expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);
 });

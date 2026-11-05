@@ -43,23 +43,35 @@ export default function CreatorCommunityScreen() {
       style={styles.inlineAction} onPress={() => void access.refetch()}><Text style={styles.liveBannerLink}>{access.isFetching ? 'Checking…' : 'Try again'}</Text></TouchableOpacity>
   </View>;
   if (!community || !isAdminTierRole(community.role)) return focused ? <Redirect href="/(tabs)/friends/manage" /> : null;
-  return <CommunitySettings key={community.id} community={community} refreshing={access.isFetching} refresh={() => void access.refetch()} />;
+  const props = { community, refreshing: access.isFetching, refresh: () => void access.refetch() };
+  // Admin tools and lifecycle settings have different deployed permissions.
+  // Do not mount leader-only reads (or retain their dialogs) for another role.
+  return ['leader', 'co_leader'].includes(community.role)
+    ? <LeaderCommunitySettings key={`${community.id}:${community.role}`} {...props} />
+    : <CommunitySettings key={`${community.id}:${community.role}`} {...props} publication={null} />;
 }
 
-function CommunitySettings({ community, refreshing, refresh }: { community: LedCommunity; refreshing: boolean; refresh: () => void }) {
+type SettingsProps = { community: LedCommunity; refreshing: boolean; refresh: () => void };
+
+function LeaderCommunitySettings(props: SettingsProps) {
+  const publication = useCommunityPublication(props.community.id);
+  return <CommunitySettings {...props} publication={publication} />;
+}
+
+function CommunitySettings({ community, refreshing, refresh, publication }: SettingsProps & {
+  publication: ReturnType<typeof useCommunityPublication> | null;
+}) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
-  const publication = useCommunityPublication(community.id);
-  const status = publication.state?.status ?? community.status;
+  const status = publication?.state?.status ?? community.status;
   const [alertInfo, setAlertInfo] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
-  useEffect(() => { setAlertInfo(null); }, [publication.scope]);
-  const publishing = publication.activeAction === 'publish';
-  const archiving = publication.activeAction === 'archive';
-  const canArchive = ['leader', 'co_leader'].includes(community.role);
+  useEffect(() => { setAlertInfo(null); }, [publication?.scope]);
+  const publishing = publication?.activeAction === 'publish';
+  const archiving = publication?.activeAction === 'archive';
   const handlePublish = () => {
-    if (!publication.ready || status !== 'draft') return;
+    if (!publication?.ready || status !== 'draft') return;
     setAlertInfo({
       title: 'Publish this page?',
       message: publication.state?.discoverable
@@ -72,7 +84,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
     });
   };
   const handleArchive = () => {
-    if (!publication.ready || !canArchive || status === 'archived') return;
+    if (!publication?.ready || status === 'archived') return;
     setAlertInfo({
       title: 'Archive this community?',
       message: 'This hides your page from discovery and closes it to new members. Existing members keep their chat and access. You can’t undo this from here.',
@@ -91,27 +103,29 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={Colors.terracotta} />}
         >
           <Text accessibilityRole="header" style={styles.title}>Community settings</Text>
-          <Text style={styles.intro}>Edit your page and choose how people join.</Text>
+          <Text style={styles.intro}>{community.name}</Text>
 
-          <CommunityPublicationFeedback publication={publication} />
+          {publication ? <CommunityPublicationFeedback publication={publication} /> : <Text style={styles.intro}>
+            Joining and visibility settings are managed by this community’s leader or co-leader.
+          </Text>}
           <View style={styles.hubStack}>
             <TouchableOpacity
               style={styles.editPageCard}
               onPress={() => router.push('/creator/edit-page')}
               accessibilityRole="button"
               accessibilityLabel="Edit community"
-              accessibilityHint="Change your name, cover photo, description and page sections."
+              accessibilityHint={publication ? 'Change your name, cover photo, description and page sections.' : 'Open your community’s page content.'}
             >
               <View style={styles.editPageTextWrap}>
                 <Text numberOfLines={1} adjustsFontSizeToFit style={styles.editPageTitle}>Edit community</Text>
                 <Text style={styles.editPageHint}>
-                  Change your name, cover photo, description and page sections.
+                  {publication ? 'Change your name, cover photo, description and page sections.' : 'Open your community’s page content.'}
                 </Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
             </TouchableOpacity>
 
-            <TouchableOpacity
+            {publication && <TouchableOpacity
               style={styles.editPageCard}
               onPress={() => router.push('/creator/join-gate')}
               accessibilityRole="button"
@@ -125,8 +139,8 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
                 </Text>
               </View>
               <ChevronRight size={20} color={Colors.terracotta} strokeWidth={2.5} />
-            </TouchableOpacity>
-            {PUBLIC_PAGE_CONTROL_ENABLED && <TouchableOpacity style={styles.editPageCard}
+            </TouchableOpacity>}
+            {publication && PUBLIC_PAGE_CONTROL_ENABLED && <TouchableOpacity style={styles.editPageCard}
               onPress={() => router.push('/creator/public-page' as never)} accessibilityRole="button"
               accessibilityLabel="Visibility and link" accessibilityHint="Choose where people can find your community and manage its page status.">
               <View style={styles.editPageTextWrap}>
@@ -141,9 +155,10 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
               {/* LIZ COPY */}
               <Text style={styles.draftBannerTitle}>Draft community</Text>
               <Text style={styles.draftBannerBody}>
-                This page hasn’t been published. Review its details and joining settings before publishing.
+                {publication ? 'This page hasn’t been published. Review its details and joining settings before publishing.'
+                  : 'This page hasn’t been published. A leader or co-leader can publish it when it’s ready.'}
               </Text>
-              <TouchableOpacity
+              {publication && <TouchableOpacity
                 style={[styles.publishBtn, publishing && { opacity: 0.6 }]}
                 onPress={handlePublish}
                 disabled={!publication.ready}
@@ -159,7 +174,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
                   <Text style={styles.publishBtnText} numberOfLines={1}>Publish page</Text>
                 )}
                 </View>
-              </TouchableOpacity>
+              </TouchableOpacity>}
             </View>
           )}
 
@@ -211,7 +226,7 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
             </TouchableOpacity>
           </View>
 
-          {canArchive && (
+          {(publication || status === 'archived') && (
             <View style={styles.archiveSection}>
               {status === 'archived' ? (
                 <View style={styles.archivedBanner}>
@@ -229,10 +244,10 @@ function CommunitySettings({ community, refreshing, refresh }: { community: LedC
                   <TouchableOpacity
                     style={[styles.archiveBtn, archiving && styles.archiveBtnBusy]}
                     onPress={handleArchive}
-                    disabled={!publication.ready}
+                    disabled={!publication?.ready}
                     accessibilityRole="button"
                     accessibilityLabel="Archive this community"
-                    accessibilityState={{ disabled: !publication.ready, busy: archiving }}
+                    accessibilityState={{ disabled: !publication?.ready, busy: archiving }}
                   >
                     {archiving ? (
                       <ActivityIndicator size="small" color={Colors.errorRed} />

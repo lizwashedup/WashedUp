@@ -50,6 +50,8 @@ import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { hapticLight, hapticSuccess } from '../../lib/haptics';
 import { isAdminTierRole, type LedCommunity } from '../../lib/creatorMode';
 import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
 import { PageAction, PageFrame } from '../../components/creator/pages/PageFrame';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import {
@@ -105,16 +107,17 @@ export default function EditPageScreen() {
   // An explicit community never falls back to another identity after access changes.
   const requested = communityId === undefined ? selected : access.data?.ledCommunities.find(item => item.id === communityId);
   const community = requested && isAdminTierRole(requested.role) ? requested : null;
-  if (access.isLoading || access.isError || !community) return <PageFrame title="Edit community">
+  const { scope, account } = useCreatorPageScope(`community-editor:${community?.id}:${community?.role}`);
+  if (access.isLoading || access.isError || !community || !scope) return <PageFrame title="Edit community">
     {access.isLoading ? <ActivityIndicator accessibilityLabel="Checking community access" color={Colors.terracotta} /> : <>
       <Text style={styles.hint}>{access.isError ? 'Couldn’t check your community access.' : 'You don’t have editing access to this community.'}</Text>
       {access.isError && <PageAction title="Try again" onPress={() => void access.refetch()} />}
     </>}
   </PageFrame>;
-  return <CommunityPageEditor key={community.id} community={community} />;
+  return <CommunityPageEditor key={`${scope.userId}:${account.epoch}:${community.id}:${community.role}`} community={community} scope={scope} />;
 }
 
-function CommunityPageEditor({ community }: { community: LedCommunity }) {
+function CommunityPageEditor({ community, scope }: { community: LedCommunity; scope: CreatorPageScope }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<SectionKey | null>(null);
@@ -154,7 +157,13 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   };
   const [nameDraft, setNameDraft] = useState('');
   const [purposeDraft, setPurposeDraft] = useState('');
-  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identitySave, setIdentitySave] = useState<{ scope: CreatorPageScope; busy: boolean; saved: boolean }>();
+  const identityLock = React.useRef<object | null>(null);
+  const identitySaving = identitySave?.scope === scope && identitySave.busy;
+  const identitySaved = identitySave?.scope === scope && identitySave.saved;
+  // The deployed communities_update policy permits leader/co_leader;
+  // an admin's page-section access does not grant identity-field writes.
+  const canEditIdentity = ['leader', 'co_leader'].includes(community.role);
   const identitySeeded = React.useRef(false);
   React.useEffect(() => {
     if (identity && !identitySeeded.current) {
@@ -182,7 +191,7 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
   };
 
   const handleSaveIdentity = async () => {
-    if (!pageReady || identitySaving) return;
+    if (!scope.isCurrent() || !pageReady || !canEditIdentity || identityLock.current) return;
     const name = nameDraft.trim();
     const purpose = purposeDraft.trim();
     if (name.length < IDENTITY_NAME_MIN || name.length > IDENTITY_NAME_MAX) {
@@ -195,18 +204,24 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
       showError('Check the description', `between ${IDENTITY_PURPOSE_MIN} and ${IDENTITY_PURPOSE_MAX} characters.`);
       return;
     }
-    setIdentitySaving(true);
+    const owned = scope, task = {};
+    identityLock.current = task;
+    const current = () => owned.isCurrent() && identityLock.current === task;
+    setIdentitySave({ scope: owned, busy: true, saved: false });
     try {
-      await updateCommunityIdentity(community.id, { name, purpose });
+      await updateCommunityIdentity(community.id, { name, purpose }, { userId: owned.userId, isCurrent: current });
+      if (!current()) return;
+      setIdentitySave({ scope: owned, busy: true, saved: true });
       hapticSuccess();
       // the switcher, nav, and every other creator surface reads the name
       // from creator-access -- refresh it too, not just this screen's copy.
       queryClient.invalidateQueries({ queryKey: identityKey });
       queryClient.invalidateQueries({ queryKey: ['creator-access'] });
     } catch (e) {
-      showError('That did not save', friendlyError(e, 'Try again in a moment.'));
+      if (current()) showError('Couldn’t confirm save', friendlyError(e, 'Your edits are still here. Check the saved details before trying again.'));
     } finally {
-      setIdentitySaving(false);
+      if (current()) setIdentitySave(old => old?.scope === owned ? { ...old, busy: false } : old);
+      if (identityLock.current === task) identityLock.current = null;
     }
   };
 
@@ -320,30 +335,33 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
 
   const renderIdentityFields = () => (
     <View style={styles.identityCard}>
+      {!canEditIdentity && <Text style={styles.hint}>Only this community’s leader or co-leader can change its name and short description.</Text>}
       <Text style={styles.fieldLabel}>community name</Text>
       <TextInput
         style={styles.input}
         value={nameDraft}
-        onChangeText={setNameDraft}
+        onChangeText={value => { setNameDraft(value); setIdentitySave(undefined); }}
         maxLength={IDENTITY_NAME_MAX}
         autoCapitalize="words"
         inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
         accessibilityLabel="community name"
+        editable={canEditIdentity && !identitySaving}
       />
       {/* LIZ COPY (proposed) */}
       <Text style={styles.fieldLabel}>short description</Text>
       <TextInput
         style={[styles.input, styles.inputMultiline]}
         value={purposeDraft}
-        onChangeText={setPurposeDraft}
+        onChangeText={value => { setPurposeDraft(value); setIdentitySave(undefined); }}
         maxLength={IDENTITY_PURPOSE_MAX}
         multiline
         placeholder="What do you do together?" /* LIZ COPY */
         placeholderTextColor={Colors.inkSoft}
         inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
         accessibilityLabel="Short community description"
+        editable={canEditIdentity && !identitySaving}
       />
-      <TouchableOpacity
+      {canEditIdentity && <TouchableOpacity
         style={[styles.saveBtn, identitySaving && styles.saveBtnDisabled]}
         onPress={handleSaveIdentity}
         disabled={identitySaving}
@@ -355,7 +373,8 @@ function CommunityPageEditor({ community }: { community: LedCommunity }) {
         ) : (
           <Text style={styles.saveBtnText}>save</Text>
         )}
-      </TouchableOpacity>
+      </TouchableOpacity>}
+      {identitySaved && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saved.</Text>}
     </View>
   );
 

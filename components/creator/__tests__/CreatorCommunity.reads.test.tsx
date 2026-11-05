@@ -13,11 +13,12 @@ jest.mock('../../../lib/haptics',()=>({hapticSuccess:jest.fn(),hapticWarning:jes
 jest.mock('../CreatorActionFill',()=>({CreatorActionFill:()=>null}));
 jest.mock('../../BrandedAlert',()=>({BrandedAlert:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
-jest.mock('../../../hooks/useCommunityPublication',()=>({useCommunityPublication:()=>mockPublication}));
+jest.mock('../../../hooks/useCommunityPublication',()=>({useCommunityPublication:jest.fn(()=>mockPublication)}));
 jest.mock('../CommunityPublicationFeedback',()=>({CommunityPublicationFeedback:()=>null}));
 import Screen from '../../../app/(creator)/community';
 import { BrandedAlert } from '../../BrandedAlert';
 import { Redirect } from 'expo-router';
+import { useCommunityPublication } from '../../../hooks/useCommunityPublication';
 let tree:ReactTestRenderer;
 const text=(node:any):string=>typeof node==='string'?node:Array.isArray(node)?node.map(text).join(''):(node?.children??[]).map(text).join('');
 const control=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
@@ -61,3 +62,35 @@ it('does not pull another app tab back into management after access changes',asy
 it('makes visibility settings reachable before a community is published',async()=>{mockCommunity.status='draft';await render();act(()=>control('Visibility and link').props.onPress());expect(mockPush).toHaveBeenCalledWith('/creator/public-page');});
 it('disables publication and archive while an earlier change is unconfirmed',async()=>{mockCommunity.status='draft';mockPublication.ready=false;await render();expect(control('Publish your page').props.disabled).toBe(true);expect(control('Archive this community').props.disabled).toBe(true);act(()=>control('Publish your page').props.onPress());expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);});
 it('explains the actual discovery choice in the publication confirmation',async()=>{mockCommunity.status='draft';mockPublication.state={status:'draft',discoverable:false};await render();act(()=>control('Publish your page').props.onPress());expect(tree.root.findByType(BrandedAlert).props.message).toContain('hidden from discovery');});
+
+it.each(['draft', 'active', 'archived'])('shows the selected admin’s %s community without mounting unavailable leader controls', async status => {
+ mockCommunity = {...mockCommunity, role:'admin', status};
+ mockAccess.data={ledCommunities:[mockCommunity,{id:'other',role:'leader'}]};
+ const visible=await render();
+ expect(useCommunityPublication).not.toHaveBeenCalled();
+ for(const label of ['Joining settings','Visibility and link','Publish your page','Archive this community']) expect(control(label)).toBeUndefined();
+ expect(visible).toContain('Our Sunday Table');
+ expect(visible).toContain('managed by this community’s leader or co-leader');
+ expect(visible).toContain(status==='draft'?'Draft community':status==='active'?'Published community':'Archived community');
+ expect(control('Help and permissions')).toBeDefined();
+});
+
+it('removes a pending publication dialog when the selected role changes to admin',async()=>{
+ mockCommunity.status='draft';await render();
+ act(()=>control('Publish your page').props.onPress());
+ expect(tree.root.findByType(BrandedAlert).props.visible).toBe(true);
+ mockCommunity={...mockCommunity,role:'admin'};
+ await act(async()=>tree.update(<Screen/>));
+ expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);
+ expect(control('Publish your page')).toBeUndefined();
+ expect(mockPublish).not.toHaveBeenCalled();
+});
+
+it('does not carry a publication dialog into another selected community',async()=>{
+ mockCommunity.status='draft';await render();
+ act(()=>control('Publish your page').props.onPress());
+ mockCommunity={...mockCommunity,id:'other',name:'Other community'};
+ await act(async()=>tree.update(<Screen/>));
+ expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);
+ expect(text(tree.toJSON())).toContain('Other community');
+});
