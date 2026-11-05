@@ -82,3 +82,28 @@ it('preserves unchanged handles, including an absent existing handle, and reject
   await update({ handle: 'a' }); expect(result!.status).toBe('invalid'); expect(result!.canSave).toBe(false);
   await tick(); expect(mockLookup).not.toHaveBeenCalled();
 });
+
+it('turns a stalled lookup into retryable error and ignores its late reply', async () => {
+  const stalled = deferred<any>(); mockLookup.mockReturnValueOnce(stalled.promise); await tick();
+  act(() => jest.advanceTimersByTime(11999)); await flush(); expect(result!.status).toBe('checking');
+  act(() => jest.advanceTimersByTime(1)); await flush();
+  expect(result!.status).toBe('error'); expect(result!.canSave).toBe(false);
+  act(() => result!.retry()); await tick();
+  expect(result!.status).toBe('available'); expect(result!.canSave).toBe(true);
+  expect(mockLookup).toHaveBeenCalledTimes(2);
+  stalled.resolve({ data: { id: 'other' }, error: null }); await flush();
+  expect(result!.status).toBe('available');
+});
+it('does not let a retired lookup timeout overwrite a newer handle result', async () => {
+  mockLookup.mockReturnValueOnce(new Promise(() => {})); await tick();
+  await update({ handle: 'second_name' }); await tick(); expect(result!.status).toBe('available');
+  act(() => jest.advanceTimersByTime(12000)); await flush();
+  expect(result!.status).toBe('available'); expect(result!.handle).toBe('second_name');
+});
+it('does not let a timeout from a closed edit visit affect reopening', async () => {
+  mockLookup.mockReturnValueOnce(new Promise(() => {})); await tick();
+  await update({ enabled: false });
+  act(() => jest.advanceTimersByTime(12000)); await flush(); expect(result!.status).toBe('idle');
+  await update({ enabled: true, scope: { userId: 'account-a', isCurrent: () => active } });
+  expect(result!.status).toBe('checking'); await tick(); expect(result!.status).toBe('available');
+});
