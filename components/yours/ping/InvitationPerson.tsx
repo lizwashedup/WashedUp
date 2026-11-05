@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { Check } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import Colors from '../../../constants/Colors';
@@ -16,10 +17,12 @@ export default function InvitationPerson({ person, selected, confirmed, disabled
   inline?: boolean;
   onPress: () => void;
 }) {
+  const { fontScale, width } = useWindowDimensions();
+  const inlineWidth = Math.min(76 * Math.max(1, fontScale), Math.max(76, width - 48));
   const name = person.first_name_display?.trim() || person.handle || COPY.pingPerson;
   const size = inline ? 52 : 44;
   return (
-    <Pressable style={inline ? styles.inline : styles.row} onPress={onPress} disabled={disabled || confirmed}
+    <Pressable style={inline ? [styles.inline, { width: inlineWidth }] : styles.row} onPress={onPress} disabled={disabled || confirmed}
       accessibilityRole="checkbox" accessibilityLabel={confirmed ? COPY.pingPersonConfirmed(name) : name}
       accessibilityState={{ checked: selected || confirmed, disabled: disabled || confirmed }}
       aria-checked={selected || confirmed} aria-disabled={disabled || confirmed}>
@@ -27,7 +30,7 @@ export default function InvitationPerson({ person, selected, confirmed, disabled
         pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden>
         {person.profile_photo_url
           ? <Image source={{ uri: person.profile_photo_url }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" accessible={false} />
-          : <Text style={styles.initial} accessible={false}>{Array.from(name)[0].toUpperCase()}</Text>}
+          : <Text style={styles.initial} accessible={false} allowFontScaling={false}>{Array.from(name)[0].toUpperCase()}</Text>}
       </View>
       <Text style={[styles.name, inline && styles.inlineName]} numberOfLines={2}>{name}</Text>
       <View style={[styles.checkbox, inline && styles.inlineCheckbox, (selected || confirmed) && styles.checked]}>

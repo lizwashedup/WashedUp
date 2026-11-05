@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, Animated } from 'react-native';
+import { View, Pressable, ScrollView, StyleSheet, Animated } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import PingSheet from './PingSheet';
@@ -121,27 +122,29 @@ function PlanInvitations({ userId, planId, people, operationScope, onDone, onBus
   return (
     <Animated.View style={[styles.wrap, { opacity }]}>
       <View accessibilityElementsHidden={sheet} aria-hidden={sheet} importantForAccessibility={sheet ? 'no-hide-descendants' : 'auto'} style={styles.content}>
-        <Text style={styles.prompt}>{COPY.pingPrompt}</Text>
-        <Text style={styles.helper}>{COPY.pingHelp}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} onScrollBeginDrag={engage}>
-          {people.slice(0, 8).map(person => <InvitationPerson key={person.user_id} person={person} inline
-            selected={selected.has(person.user_id)} confirmed={confirmed.has(person.user_id)} disabled={busy}
-            onPress={() => toggle(person.user_id)} />)}
+        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} onScrollBeginDrag={engage}>
+          <Text style={styles.prompt}>{COPY.pingPrompt}</Text>
+          <Text style={styles.helper}>{COPY.pingHelp}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} onScrollBeginDrag={engage}>
+            {people.slice(0, 8).map(person => <InvitationPerson key={person.user_id} person={person} inline
+              selected={selected.has(person.user_id)} confirmed={confirmed.has(person.user_id)} disabled={busy}
+              onPress={() => toggle(person.user_id)} />)}
+          </ScrollView>
+          <View style={styles.selectionLine}>
+            <Text style={styles.helper} accessibilityLiveRegion="polite">{COPY.pingSelected(selected.size)}</Text>
+            <Pressable style={styles.seeAll} disabled={busy} onPress={() => { engage(); if (!busyRef.current) setSheet(true); }}
+              accessibilityRole="button" accessibilityState={{ disabled: busy }}>
+              <Text style={[styles.seeAllText, busy && styles.disabled]}>{COPY.pingSeeAll}</Text>
+            </Pressable>
+          </View>
+          {!!status && <Text style={styles.status} accessibilityRole="alert" accessibilityLiveRegion="polite">{status}</Text>}
         </ScrollView>
-        <View style={styles.selectionLine}>
-          <Text style={styles.helper} accessibilityLiveRegion="polite">{COPY.pingSelected(selected.size)}</Text>
-          <Pressable style={styles.seeAll} disabled={busy} onPress={() => { engage(); if (!busyRef.current) setSheet(true); }}
-            accessibilityRole="button" accessibilityState={{ disabled: busy }}>
-            <Text style={[styles.seeAllText, busy && styles.disabled]}>{COPY.pingSeeAll}</Text>
-          </Pressable>
-        </View>
-        {!!status && <Text style={styles.status} accessibilityRole="alert" accessibilityLiveRegion="polite">{status}</Text>}
         <Pressable style={[styles.btn, (busy || selected.size === 0) && styles.disabled]} disabled={busy || selected.size === 0}
           onPress={() => { void send(); }} accessibilityRole="button" accessibilityState={{ disabled: busy || selected.size === 0, busy }}>
-          <Text style={styles.btnText} numberOfLines={1}>{busy ? COPY.pingSending : COPY.pingButton}</Text>
+          <Text style={styles.btnText} numberOfLines={1} adjustsFontSizeToFit>{busy ? COPY.pingSending : COPY.pingButton}</Text>
         </Pressable>
         <Pressable style={styles.skip} disabled={busy} onPress={finish} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
-          <Text style={[styles.skipText, busy && styles.disabled]}>{COPY.pingSkip}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.skipText, busy && styles.disabled]}>{COPY.pingSkip}</Text>
         </Pressable>
       </View>
       <PingSheet visible={sheet} onClose={closeSheet} people={people} selectedIds={selected} confirmedIds={confirmed}
@@ -151,15 +154,17 @@ function PlanInvitations({ userId, planId, people, operationScope, onDone, onBus
 }
 
 const styles = StyleSheet.create({
-  wrap: { backgroundColor: Colors.parchment, paddingHorizontal: 24, paddingVertical: 16 },
-  content: { gap: 12 },
+  body: { flexShrink: 1, minHeight: 0 },
+  bodyContent: { gap: 12 },
+  wrap: { flexShrink: 1, maxHeight: '100%', backgroundColor: Colors.parchment, paddingHorizontal: 24, paddingVertical: 16 },
+  content: { flexShrink: 1, minHeight: 0, gap: 12 },
   prompt: { fontFamily: Fonts.sansBold, fontSize: FontSizes.displayMD, color: Colors.asphalt },
   helper: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
-  selectionLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  selectionLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   seeAll: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   seeAllText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   status: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.secondary },
-  btn: { minHeight: 48, backgroundColor: Colors.terracotta, borderRadius: 8, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  btn: { minHeight: 48, backgroundColor: Colors.terracotta, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.4 },
   btnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   skip: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
