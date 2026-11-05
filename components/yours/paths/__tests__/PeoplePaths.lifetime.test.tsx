@@ -224,3 +224,20 @@ it.each([true, false])('preserves the Past Plans search and pending request thro
     expect(f.rows()[0].props.state).toBe('requested'); expect(f.input().props.value).toBe('Bea');
   } finally { act(() => Dimensions.set({ window: previous })); }
 });
+
+
+it.each([true, false])('keeps the search hint separate from the live input across typing and text-size changes (legacy=%s)', async legacy => {
+  const previous = Dimensions.get('window');
+  const f = mount('backlog', undefined, legacy); await flush();
+  const input = f.input();
+  try {
+    expect(f.text()).toContain('Search people');
+    expect(input.props.placeholder).toBeUndefined();
+    for (const fontScale of [3.12, 1]) {
+      act(() => Dimensions.set({ window: { ...previous, width: 375, fontScale } })); await flush();
+      expect(f.input()).toBe(input); expect(f.text()).toContain('Search people');
+      f.type('Bea'); expect(f.input()).toBe(input); expect(f.text()).not.toContain('Search people');
+      f.type(''); expect(f.input()).toBe(input); expect(f.text()).toContain('Search people');
+    }
+  } finally { act(() => Dimensions.set({ window: previous })); }
+});

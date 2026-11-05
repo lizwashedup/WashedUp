@@ -26,7 +26,7 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
   const loading = backlog.isLoading || visit.reading;
   const failed = backlog.isError && !loading;
   const s = useMemo(() => appearance ? { ...styles, ...backlogAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
-  // Apply the full iOS text scale once, including the native placeholder,
+  // Apply the full iOS text scale once to the existing input,
   // without replacing the focused input or its controlled search value.
   const inputType = Platform.OS === 'ios' ? {
     fontSize: (appearance ? AfterglowType.body.fontSize : FontSizes.bodyMD) * fontScale,
@@ -37,12 +37,17 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
     <View style={s.wrap}>
       <View style={s.searchBox}>
         <Search size={18} color={appearance ? AfterglowColors.muted : Colors.tertiary} />
+        <View style={styles.inputWrap}>
         <TextInput value={q} allowFontScaling={Platform.OS === 'ios' ? false : undefined} onChangeText={value => {
           const next = value.trim().toLowerCase();
           if (next !== queryRef.current) { queryRef.current = next; visit.retireQuery(); }
           setInput({ userId, value });
-        }} placeholder="Search people from your plans" placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
+        }} placeholder={Platform.OS === 'ios' ? undefined : "Search people from your plans"} placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
           autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={[s.input, inputType]} />
+        {Platform.OS === 'ios' && !q && <View pointerEvents="none" style={styles.hintWrap} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <ScaledText accessible={false} allowFontScaling={false} numberOfLines={1} style={[s.input, inputType, styles.hintText, { color: appearance ? AfterglowColors.muted : Colors.tertiary }]}>Search people</ScaledText>
+        </View>}
+        </View>
       </View>
       {loading ? <ScrollView style={s.recovery} contentContainerStyle={s.feedback} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><ScaledText style={s.empty}>Loading people from your plans…</ScaledText></ScrollView> : failed ?
         <View style={s.recovery}>
@@ -96,6 +101,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     marginBottom: 8,
   },
+  inputWrap: { flex: 1, minWidth: 0 },
+  hintWrap: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
+  hintText: { flex: 0, minHeight: undefined },
   input: {
     flex: 1,
     minWidth: 0,
