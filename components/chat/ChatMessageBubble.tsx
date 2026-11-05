@@ -109,38 +109,8 @@ interface BubbleProps {
 // Anchored exact-match so legacy name-embedded lines are never double-prefixed.
 const BARE_SYSTEM_TEMPLATES = /^(joined the plan|had to leave the plan|cancelled this plan)$/i;
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, photoMaxWidth, conversationFonts, onReaction, onAddReaction, onViewReactions, reactionsDisabled, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
+function RegularMessageBubble({ message, isOwn, showAvatar, showName, isGrouped, currentUserId, contextTitle, onPhotoPress, photoMaxWidth, conversationFonts, onReaction, onAddReaction, onViewReactions, reactionsDisabled, onMessageLongPress, onStartReply, onReplyTap, onAvatarPress, mentionNames }: BubbleProps) {
   const messageAppearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? createChatMessageAppearance(conversationFonts) : null, [conversationFonts]);
-  if (message.message_type === 'system') {
-    // A system message carrying a plan reference renders as the compact plan card
-    // (invite delivery), not as system text.
-    if (message.ref_event_id) {
-      return (
-        <View style={bubbleStyles.systemRow}>
-          <ChatPlanCard eventId={message.ref_event_id} />
-        </View>
-      );
-    }
-    let displayContent = message.content;
-    // Current-era system rows store the bare verb phrase and carry the actor
-    // only in user_id, so the line rendered nameless ("joined Cali splash!").
-    // Prefix the sender's name for exactly those templates; older rows (the
-    // "X just joined the group!" era) already embed the name.
-    if (BARE_SYSTEM_TEMPLATES.test(displayContent.trim()) && message.sender?.first_name) {
-      displayContent = `${message.sender.first_name} ${displayContent.trim()}`;
-    }
-    if (contextTitle) {
-      displayContent = displayContent
-        .replace(/joined the plan/gi, `joined ${contextTitle}`)
-        .replace(/the plan/gi, contextTitle);
-    }
-    return (
-      <View style={bubbleStyles.systemRow}>
-        <Text style={[bubbleStyles.systemText, messageAppearance?.day]}>{displayContent}</Text>
-      </View>
-    );
-  }
-
   const handleLongPress = () => {
     hapticMedium();
     onMessageLongPress?.(message, isOwn);
@@ -410,6 +380,45 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn, showAvatar, 
       </View>
     </View>
   );
+}
+
+function SystemMessageBubble({ message, contextTitle, conversationFonts }: BubbleProps) {
+  const messageAppearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? createChatMessageAppearance(conversationFonts) : null, [conversationFonts]);
+
+  // A system message carrying a plan reference renders as the compact plan card
+  // (invite delivery), not as system text.
+  if (message.ref_event_id) {
+    return (
+      <View style={bubbleStyles.systemRow}>
+        <ChatPlanCard eventId={message.ref_event_id} />
+      </View>
+    );
+  }
+  let displayContent = message.content;
+  // Current-era system rows store the bare verb phrase and carry the actor
+  // only in user_id, so the line rendered nameless ("joined Cali splash!").
+  // Prefix the sender's name for exactly those templates; older rows (the
+  // "X just joined the group!" era) already embed the name.
+  if (BARE_SYSTEM_TEMPLATES.test(displayContent.trim()) && message.sender?.first_name) {
+    displayContent = `${message.sender.first_name} ${displayContent.trim()}`;
+  }
+  if (contextTitle) {
+    displayContent = displayContent
+      .replace(/joined the plan/gi, `joined ${contextTitle}`)
+      .replace(/the plan/gi, contextTitle);
+  }
+  return (
+    <View style={bubbleStyles.systemRow}>
+      <Text style={[bubbleStyles.systemText, messageAppearance?.day]}>{displayContent}</Text>
+    </View>
+  );
+}
+
+// Each message kind owns a stable hook sequence even if a row is replaced.
+const MessageBubble = memo(function MessageBubble(props: BubbleProps) {
+  return props.message.message_type === 'system'
+    ? <SystemMessageBubble {...props} />
+    : <RegularMessageBubble {...props} />;
 });
 
 export default MessageBubble;

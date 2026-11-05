@@ -7,6 +7,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Alert, Animated as NativeAnimated, FlatList, Keyboard, Platform, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import ChatThread from '../ChatThread';
+import MessageBubble from '../ChatMessageBubble';
+import { AfterglowFallbackFonts } from '../../../constants/Typography';
 import AttachmentPanel from '../AttachmentSheet';
 import MediaPanel from '../MediaPanel';
 import VoiceRecorder from '../VoiceRecorder';
@@ -174,6 +176,21 @@ it('advertises direct reply only while the conversation permits replies', async 
   expect(tree!.root.findByType(MessageActionsMenu).props.menu?.preview).toBe('Original message');
   expect(control('Cancel reply')).toBeUndefined();
   expect(mockSend).not.toHaveBeenCalled();
+});
+
+it.each(['user', 'system'] as const)('keeps message rendering valid when a %s row changes kind', async initialKind => {
+  const row = (kind: 'user' | 'system') => <MessageBubble
+    message={{ ...message('same-row'), message_type: kind, content: kind === 'system' ? 'joined the plan' : 'Hello again' } as any}
+    isOwn={false} showAvatar={false} showName={false} isGrouped={false}
+    currentUserId="account-a" contextTitle="A walk" photoMaxWidth={240}
+    conversationFonts={AfterglowFallbackFonts}
+  />;
+  await act(async () => { tree = create(row(initialKind)); });
+  const nextKind = initialKind === 'user' ? 'system' : 'user';
+  await act(async () => { tree!.update(row(nextKind)); });
+  expect(JSON.stringify(tree!.toJSON())).toContain(nextKind === 'system' ? 'Alex joined A walk' : 'Hello again');
+  await act(async () => { tree!.update(row(initialKind)); });
+  expect(JSON.stringify(tree!.toJSON())).toContain(initialKind === 'system' ? 'Alex joined A walk' : 'Hello again');
 });
 
 it('exposes a labeled 44-point edit cancel with the existing clear behavior', async () => {
