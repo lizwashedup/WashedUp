@@ -24,6 +24,8 @@ const mockClickListeners = new Set<(event: any) => void>();
 const mockExpoListeners = new Set<(data: Record<string, unknown>) => void>();
 const mockRoutes: Array<{ method: string; href: string }> = [];
 const mockGetOrder = jest.fn();
+const mockReferralDelivery = jest.fn();
+let mockYoursEnabled = false;
 const mockPushHook = jest.fn();
 const mockNavigate = (method: string, href: string) => {
   mockRoutes.push({ method, href }); mockPath = href; mockRedraw?.();
@@ -62,7 +64,7 @@ jest.mock('posthog-react-native', () => ({ PostHogProvider: ({ children }: any) 
 jest.mock('@gorhom/bottom-sheet', () => ({ BottomSheetModalProvider: ({ children }: any) => children }));
 jest.mock('@sentry/react-native', () => ({ init: () => {}, wrap: (component: any) => component, captureMessage: () => {} }));
 jest.mock('../../constants/LocalDevelopment', () => ({ LOCAL_DEVELOPMENT_ONLY: true }));
-jest.mock('../../constants/FeatureFlags', () => ({ PHONE_AUTH_ENABLED: true, YOURS_PAGE_ENABLED: false, COMMUNITIES_ENABLED: true }));
+jest.mock('../../constants/FeatureFlags', () => ({ PHONE_AUTH_ENABLED: true, get YOURS_PAGE_ENABLED() { return mockYoursEnabled; }, COMMUNITIES_ENABLED: true }));
 jest.mock('../../lib/expoNotificationResponses', () => ({ subscribeExpoNotificationResponses: (callback: (data: Record<string, unknown>) => void) => {
   mockExpoListeners.add(callback); return () => mockExpoListeners.delete(callback);
 } }));
@@ -103,7 +105,7 @@ jest.mock('../../lib/queryClient', () => ({ queryClient: new (require('@tanstack
 jest.mock('../../hooks/useSessionLogger', () => ({ useSessionLogger: () => {} }));
 jest.mock('../../lib/uploadAlbumMedia', () => ({ resumeAllPendingAlbumBatches: async () => {}, registerAlbumUploadResume: () => () => {} }));
 jest.mock('../../lib/logger', () => ({ logError: () => {} }));
-jest.mock('../../lib/yours/referralLink', () => ({ handleReferralUrl: () => {}, consumePendingReferral: () => {} }));
+jest.mock('../../lib/yours/referralLink', () => ({ handleReferralUrl: (...args: any[]) => mockReferralDelivery(...args), consumePendingReferral: () => {} }));
 jest.mock('../../lib/ticketTransfer', () => ({ pendingTransferRoute: async () => null }));
 jest.mock('../../lib/knownAccount', () => ({ forgetAccount: () => {}, rememberAccount: () => {} }));
 jest.mock('../../lib/reviewAsk', () => ({ maybeRequestReviewAfterTopRating: async () => {} }));
@@ -146,6 +148,7 @@ async function verify() {
 
 beforeEach(async () => {
   jest.useFakeTimers(); await AsyncStorage.clear(); queryClient.clear();
+  mockYoursEnabled = false; mockReferralDelivery.mockReset();
   mockPath = '/phone-entry'; mockUser = null; mockProfile = { onboarding_status: 'complete', referral_source: 'friend' }; mockNeedsPhone = false; mockBanned = false; mockMode = 'signup'; mockVerifyEvent = 'SIGNED_IN';
   mockRoutes.length = 0; mockAuthListeners.clear(); mockClickListeners.clear(); mockExpoListeners.clear(); mockGetOrder.mockReset(); mockPushHook.mockClear();
   cancelVerificationDestination();
@@ -752,4 +755,33 @@ describe('recovery link feedback lifetime', () => {
     pending.resolve({ error: null }); await flush();
     expect(mockRoutes).toHaveLength(count);
   });
+});
+
+
+describe('root referral scope ownership', () => {
+ let deliver: (event: {url:string}) => void;
+ beforeEach(() => {
+  mockYoursEnabled = true;
+  jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
+   deliver = listener; return { remove: jest.fn() } as unknown as ReturnType<typeof Linking.addEventListener>;
+  });
+ });
+ it('retires an in-progress referral when a newer non-referral link arrives', async () => {
+  await mount(); act(() => deliver({url:'https://washedup.app/r/FIRST'})); await flush();
+  const scope = mockReferralDelivery.mock.calls[0][1]; expect(scope.isCurrent()).toBe(true);
+  act(() => deliver({url:'https://washedup.app/app/plan/newer'})); await flush(); expect(scope.isCurrent()).toBe(false);
+ });
+ it('retires referral work on unmount', async () => {
+  await mount(); act(() => deliver({url:'https://washedup.app/r/FIRST'})); await flush();
+  const scope = mockReferralDelivery.mock.calls[0][1];
+  await act(async () => tree!.unmount()); tree = undefined; expect(scope.isCurrent()).toBe(false);
+ });
+ it('retires referral work across a batched A-B-A account change', async () => {
+  mockUser = {id:'person-a',phone:'+12025550100'}; await mount();
+  act(() => deliver({url:'https://washedup.app/r/FIRST'})); await flush(); const scope = mockReferralDelivery.mock.calls[0][1];
+  expect(scope.isCurrent()).toBe(true);
+  await emitAuth('SIGNED_IN',{id:'person-b',phone:'+12025550101'});
+  await emitAuth('SIGNED_IN',{id:'person-a',phone:'+12025550100'});
+  expect(scope.isCurrent()).toBe(false);
+ });
 });

@@ -13,9 +13,12 @@ jest.mock('../supabase', () => ({
 
 import { supabase } from '../supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { handleReferralUrl, parseReferralCode, resolveAndConnect } from '../yours/referralLink';
+import { handleReferralUrl, parseReferralCode } from '../yours/referralLink';
 
+import { claimReferralForRecipient } from '../yours/referralClaim';
+const recipientScope = { userId: 'recipient', isCurrent: () => true };
 const rpc = supabase.rpc as jest.Mock;
+const receipt = (data: unknown, error: unknown) => { const promise = Promise.resolve({ data, error }); return Object.assign(promise, { setHeader: () => promise }); };
 
 describe('referral URL boundary', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -75,23 +78,24 @@ describe('referral URL boundary', () => {
 describe('referral claim direction', () => {
   beforeEach(() => {
     rpc.mockReset();
+    jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: { user: { id: 'recipient' }, access_token: 'fictional-token' } }, error: null } as any);
   });
 
   it('claims one server-side inviter-to-recipient request', async () => {
     const inviterId = '11111111-1111-1111-1111-111111111111';
-    rpc.mockResolvedValue({ data: inviterId, error: null });
+    rpc.mockReturnValue(receipt(inviterId, null));
 
-    await expect(resolveAndConnect('JZJAAJU')).resolves.toBe(inviterId);
+    await expect(claimReferralForRecipient('JZJAAJU', recipientScope)).resolves.toEqual({ status: 'connected', inviterId });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('claim_referral_invite', {
       p_code: 'JZJAAJU',
     });
   });
 
-  it('returns null when the server rejects or cannot resolve the code', async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: 'invalid_referral_code' } });
+  it('reports unavailable when the server explicitly rejects the code', async () => {
+    rpc.mockReturnValue(receipt(null, { code: 'P0001', message: 'invalid_referral_code' }));
 
-    await expect(resolveAndConnect('BADCODE')).resolves.toBeNull();
+    await expect(claimReferralForRecipient('BADCODE', recipientScope)).resolves.toEqual({ status: 'unavailable' });
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 });
