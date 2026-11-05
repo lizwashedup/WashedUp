@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { Pressable, Text, TextInput, ScrollView } from 'react-native';
+const ReactNative = require('react-native');
 import PostPlanSurveyV3 from '../PostPlanSurveyV3';
 import type { SurveyProps, SurveyMember } from '../../../PostPlanSurvey';
 const mockRpc=jest.fn(),mockAuth=jest.fn(),mockHandled=jest.fn(),mockComplete=jest.fn();
@@ -123,4 +124,50 @@ it('keeps the confirmed already-connected receipt as a quiet completion', async(
  mount();attendance();press('Skip attendance');press('Add them');await flush();
  expect(mockComplete).toHaveBeenCalledTimes(1);
  expect(words()).not.toContain("Couldn't add everyone just now.");
+});
+
+function isInBody(node: any): boolean {
+ while (node) { if (node.type === ScrollView) return true; node = node.parent; }
+ return false;
+}
+it.each([
+ {width:375,height:667,scale:2,fontScale:1},
+ {width:390,height:844,scale:3,fontScale:2},
+])('keeps the heading and attendance summary scrollable with fixed escape controls at %p', dimensions=>{
+ const window = jest.spyOn(ReactNative,'useWindowDimensions').mockReturnValue(dimensions);
+ try {
+  mount();attendance();
+  expect(isInBody(tree.root.findAllByType(Text).find(n=>n.props.children==='Did these people attend?'))).toBe(true);
+  expect(isInBody(tree.root.findAllByType(Text).find(n=>n.props.children==='0 people marked ‘Didn’t show up.’'))).toBe(true);
+  expect(isInBody(control('Continue'))).toBe(false);
+  expect(isInBody(control('Not now'))).toBe(false);
+  press('Alex: Didn’t show up');press('Alex: Not sure');press('Skip attendance');
+  expect(control('Keep in touch with Alex')).toBeDefined();
+  expect(isInBody(control('Add them'))).toBe(false);
+  expect(isInBody(control('Not now'))).toBe(false);
+ } finally { window.mockRestore(); }
+});
+it('retains the fixed heading and summary on a roomy screen at ordinary text size',()=>{
+ const window = jest.spyOn(ReactNative,'useWindowDimensions').mockReturnValue({width:390,height:844,scale:3,fontScale:1});
+ try {
+  mount();attendance();
+  expect(isInBody(tree.root.findAllByType(Text).find(n=>n.props.children==='Did these people attend?'))).toBe(false);
+  expect(isInBody(tree.root.findAllByType(Text).find(n=>n.props.children==='0 people marked ‘Didn’t show up.’'))).toBe(false);
+ } finally { window.mockRestore(); }
+});
+
+it('reveals a failed attendance report in the scrolling layout and starts the keep step at its heading',async()=>{
+ const window = jest.spyOn(ReactNative,'useWindowDimensions').mockReturnValue({width:375,height:667,scale:2,fontScale:2});
+ try {
+  mockRpc.mockImplementation(name=>Promise.resolve(name==='report_no_show'?{error:new Error('offline')}:{data:null,error:null}));
+  mount();attendance();press('Alex: Didn’t show up');
+  const body=tree.root.findByType(ScrollView);
+  const end=jest.spyOn(body.instance,'scrollToEnd').mockImplementation(()=>{});
+  const top=jest.spyOn(body.instance,'scrollTo').mockImplementation(()=>{});
+  press('Continue');await flush();act(()=>body.props.onContentSizeChange());
+  expect(end).toHaveBeenCalledWith({animated:false});expect(control('Try again')).toBeDefined();
+  expect(isInBody(tree.root.findAllByType(Text).find(n=>n.props.accessibilityRole==='alert'))).toBe(true);
+  press('Skip remaining attendance reports');expect(top).toHaveBeenCalledWith({y:0,animated:false});
+  expect(control('Keep in touch with Bea')).toBeDefined();
+ } finally { window.mockRestore(); }
 });
