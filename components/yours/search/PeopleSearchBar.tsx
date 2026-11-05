@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, TextInput, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Search, X } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
@@ -19,12 +19,14 @@ export default function PeopleSearchBar({
   onChange: (next: string) => void;
   appearance?: { fonts: AfterglowFontFamilies };
 }) {
+  const { fontScale } = useWindowDimensions();
   const s = useMemo(() => appearance ? { ...styles, ...searchAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
   const iconColor = appearance ? AfterglowColors.muted : Colors.tertiary;
   return (
     <View style={s.wrap}>
       <Search size={SEARCH.iconSize} color={iconColor} />
       <TextInput
+        key={fontScale}
         style={s.input}
         value={value}
         onChangeText={onChange}
@@ -56,7 +58,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: SEARCH.fieldHeight,
+    minHeight: SEARCH.fieldHeight,
     borderRadius: SEARCH.fieldRadius,
     backgroundColor: Colors.creamWarm,
     borderWidth: 1,
