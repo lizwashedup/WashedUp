@@ -862,9 +862,14 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
+    let linkAttempt = 0;
     const stopLinks = subscribeAppLinks(Linking, url => {
+      const attempt = ++linkAttempt;
+      const identity = authIdentityRef.current;
       void parseSessionFromUrl(url);
-      if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
+      if (YOURS_PAGE_ENABLED) void handleReferralUrl(url, {
+        isCurrent: () => active && attempt === linkAttempt && authIdentityRef.current === identity && !isRecoveryRef.current,
+      });
       captureDestination(url);
     }, error => logError(error, 'layout.getInitialURL'));
     return () => {

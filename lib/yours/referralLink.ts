@@ -13,11 +13,13 @@
  * linking that survives an install without the link being re-opened. That
  * needs Branch/clipboard infra the app does not have.
  *
- * All operations are best-effort: already_connected / cannot_re_request /
- * blocked from send_people_request are swallowed (the scan is a soft action).
+ * Foreground handling is best-effort. The visible referral route owns retry
+ * feedback; both paths use the existing inviter-to-recipient claim operation.
  */
 import { supabase } from '../supabase';
 import { stashPendingReferral } from './pendingReferral';
+import { requestWithDeadline } from '../requestWithDeadline';
+import { claimReferralForRecipient } from './referralClaim';
 export { stashPendingReferral, consumePendingReferral } from './pendingReferral';
 
 /** Extract the <code> from a washedup.app/r/<code> or washedupapp://r/<code> URL. */
@@ -33,35 +35,22 @@ export function parseReferralCode(url: string): string | null {
   return path ? path[1] : null;
 }
 
-/**
- * Claim a referral code. The server resolves the inviter, records conversion,
- * and creates the inviter -> current-user pending request in one transaction.
- * Returns the inviter's user id so the route can land on their profile.
- */
-export async function resolveAndConnect(code: string): Promise<string | null> {
-  const { data: inviterId, error } = await supabase.rpc(
-    'claim_referral_invite',
-    { p_code: code },
-  );
-  if (error || !inviterId) return null;
-  return inviterId as string;
-}
-
-async function resolveAndSend(code: string): Promise<boolean> {
-  return (await resolveAndConnect(code)) !== null;
-}
-
+let latestDelivery = 0;
 /**
  * Handle a freshly received referral URL. Returns true if it was a
  * referral link (so the caller can skip other URL handlers).
  */
-export async function handleReferralUrl(url: string): Promise<boolean> {
+export async function handleReferralUrl(url: string, scope?: { isCurrent(): boolean }): Promise<boolean> {
   const code = parseReferralCode(url);
   if (!code) return false;
+  const delivery = ++latestDelivery;
+  const current = () => delivery === latestDelivery && (!scope || scope.isCurrent());
+  if (!current()) return true;
   try {
-    const { data } = await supabase.auth.getSession();
+    const { data, error } = await requestWithDeadline(supabase.auth.getSession(), 12_000);
+    if (!current() || error) return true;
     if (data.session?.user) {
-      await resolveAndSend(code);
+      await claimReferralForRecipient(code, { userId: data.session.user.id, isCurrent: current });
     } else {
       await stashPendingReferral(code);
     }
