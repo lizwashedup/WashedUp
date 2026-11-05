@@ -3,9 +3,10 @@ import { Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import ProfileRoute from '../profile/[id]';
 import { AfterglowFallbackFonts } from '../../constants/Typography';
-const mockRetry = jest.fn(), mockBack = jest.fn();
+const mockRetry = jest.fn(), mockBack = jest.fn(), mockReplace = jest.fn();
+let mockCanGoBack = true;
 let mockId: unknown = 'amelia', mockViewer: string | null = 'alice', mockEpoch = 0, mockLoading = false, mockError: Error | null = null, mockFocused = true, mockYoursEnabled = true, mockAppearanceEnabled = true;
-jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: mockId }), router: { back: () => mockBack() }, Redirect: (props: any) => require('react').createElement('Redirect', props) }));
+jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: mockId }), router: { back: () => mockBack(), canGoBack: () => mockCanGoBack, replace: (path: string) => mockReplace(path) }, Redirect: (props: any) => require('react').createElement('Redirect', props) }));
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: (props: any) => require('react').createElement('SafeArea', props, props.children) }));
 jest.mock('../../constants/FeatureFlags', () => ({ get YOURS_PAGE_ENABLED() { return mockYoursEnabled; }, get COMMUNITY_CHAT_GROUPING_ENABLED() { return mockAppearanceEnabled; } }));
@@ -14,7 +15,7 @@ jest.mock('../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ 
 jest.mock('../../components/yours/profile/PersonProfilePage', () => ({ __esModule: true, default: (props: any) => require('react').createElement('IndividualProfile', props) }));
 const cleanup: Array<() => void> = [];
 function mount() { let tree!: ReturnType<typeof create>; act(() => { tree = create(<ProfileRoute/>); }); let closed = false; const unmount = () => { if (!closed) act(() => tree.unmount()); closed = true; }; cleanup.push(unmount); return { tree, unmount, update: () => act(() => tree.update(<ProfileRoute/>)), text: () => tree.root.findAllByType(Text).map(n => n.props.children).flat().join(' '), button: (label: string) => tree.root.findAll(n => n.props.accessibilityLabel === label && n.props.onPress)[0] }; }
-beforeEach(() => { jest.clearAllMocks(); mockId = 'amelia'; mockViewer = 'alice'; mockEpoch = 0; mockLoading = false; mockError = null; mockFocused = true; mockYoursEnabled = true; mockAppearanceEnabled = true; mockRetry.mockReset().mockResolvedValue(undefined); });
+beforeEach(() => { jest.clearAllMocks(); mockCanGoBack = true; mockId = 'amelia'; mockViewer = 'alice'; mockEpoch = 0; mockLoading = false; mockError = null; mockFocused = true; mockYoursEnabled = true; mockAppearanceEnabled = true; mockRetry.mockReset().mockResolvedValue(undefined); });
 afterEach(() => cleanup.splice(0).forEach(fn => fn()));
 it('passes the currently observed viewer and existing target with the gated optional appearance', () => { const f = mount(); expect(f.tree.root.findByType('IndividualProfile' as any).props).toMatchObject({ userId: 'alice', targetId: 'amelia', appearance: { fonts: AfterglowFallbackFonts } }); mockViewer = 'bob'; mockEpoch++; f.update(); expect(f.tree.root.findByType('IndividualProfile' as any).props.userId).toBe('bob'); mockAppearanceEnabled = false; const legacy = mount(); expect(legacy.tree.root.findByType('IndividualProfile' as any).props.appearance).toBeUndefined(); });
 it('keeps the existing Yours-disabled redirect', () => { mockYoursEnabled = false; const f = mount(); expect(f.tree.root.findByType('Redirect' as any).props.href).toBe('/(tabs)/friends'); });
@@ -23,3 +24,5 @@ it.each([undefined, '', ['a', 'b']])('does not open a profile for an invalid tar
 it('retries account failure once while awaiting the same check', async () => { mockError = new Error('offline'); let resolve!: () => void; mockRetry.mockReturnValue(new Promise<void>(r => { resolve = r; })); const f = mount(); expect(f.text()).toContain('Couldn’t check your account'); const retry = f.button('Try again to check account').props.onPress; act(() => { retry(); retry(); }); expect(mockRetry).toHaveBeenCalledTimes(1); await act(async () => resolve()); });
 it.each(['target', 'account', 'focus', 'unmount'])('retires old error-page callbacks after %s changes', change => { mockError = new Error('offline'); const f = mount(); const retry = f.button('Try again to check account').props.onPress, back = f.button('Back').props.onPress; if (change === 'target') { mockId = 'luca'; f.update(); } if (change === 'account') { mockEpoch++; f.update(); } if (change === 'focus') { mockFocused = false; f.update(); mockFocused = true; f.update(); } if (change === 'unmount') f.unmount(); act(() => { retry(); back(); }); expect(mockRetry).not.toHaveBeenCalled(); expect(mockBack).not.toHaveBeenCalled(); });
 it('Back retires the route immediately and prevents duplicate navigation', () => { mockViewer = null; const f = mount(); const back = f.button('Back').props.onPress; act(() => { back(); back(); }); expect(mockBack).toHaveBeenCalledTimes(1); });
+
+it('returns a cold entry to Yours when no previous screen exists',()=>{mockViewer=null;mockCanGoBack=false;const f=mount();const back=f.button('Back').props.onPress;act(()=>{back();back();});expect(mockReplace).toHaveBeenCalledWith('/(tabs)/friends');expect(mockReplace).toHaveBeenCalledTimes(1);expect(mockBack).not.toHaveBeenCalled();});
