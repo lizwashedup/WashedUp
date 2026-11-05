@@ -69,7 +69,7 @@ it('keeps a pending Add visible and prevents close until the void RPC confirms s
 });
 it('guards rapid duplicate Add while auth preflight is unresolved', async () => {
   const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise); const f = mount();
-  const add = f.button('Add Bea').props.onPress; act(() => { add(); add(); });
+  const add = f.button('Add Bea').props.onPress; act(() => { add(); add(); }); await flush();
   expect(mockGetUser).toHaveBeenCalledTimes(1); await act(async () => auth.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush();
   expect(mockRpc).toHaveBeenCalledTimes(1);
 });
@@ -130,7 +130,8 @@ it.each(['success', 'failure'])('retired %s never updates, closes or opens Block
 });
 it('an unresolved earlier visit does not allow a duplicate request after reopen', async () => {
   const write = deferred<any>(); mockRpc.mockReturnValueOnce(write.promise); const f = mount(); await f.tap('Add Bea');
-  f.update({ visible: false }); f.update({ visible: true }); await f.tap('Add Bea');
+  f.update({ visible: false }); f.update({ visible: true });
+  await act(async () => jest.advanceTimersByTime(16000)); await flush(); await f.tap('Add Bea');
   expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.text()).toContain('earlier request');
   await act(async () => write.resolve({ error: null })); await flush();
 });
@@ -200,4 +201,48 @@ it('keeps the staged Block choice available without a reading deadline', async (
   const f = mount(); await f.tap('Decline Bea'); await f.tap('Confirm decline Bea');
   act(() => jest.advanceTimersByTime(60000)); expect(f.button('Block Bea')).toBeDefined(); expect(f.props.onClose).not.toHaveBeenCalled();
   await f.tap('No thanks, skip blocking'); expect(f.tree.root.findAllByType(BlockPrompt)).toHaveLength(0); expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+
+it.each(['accept', 'decline', 'block'] as const)('recovers a stalled %s account preflight without dispatching its late result', async kind => {
+  const f = mount();
+  if (kind === 'block') { await f.tap('Decline Bea'); await f.tap('Confirm decline Bea'); }
+  mockGetUser.mockClear(); mockRpc.mockClear();
+  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise);
+  if (kind === 'accept') await f.tap('Add Bea');
+  else if (kind === 'decline') { await f.tap('Decline Bea'); await f.tap('Confirm decline Bea'); }
+  else await f.tap('Block Bea');
+  await act(async () => jest.advanceTimersByTime(8000)); await flush();
+  expect(mockRpc).not.toHaveBeenCalled();
+  const retry = kind === 'accept' ? 'Try again to add Bea' : kind === 'decline' ? 'Try again to decline Bea' : 'Try again to block Bea';
+  expect(f.button(retry)).toBeDefined();
+  expect(f.button(retry).props.disabled).not.toBe(true);
+  expect(f.props.onClose).not.toHaveBeenCalled();
+  await act(async () => auth.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush();
+  expect(mockRpc).not.toHaveBeenCalled();
+  await f.tap(retry);
+  if (kind === 'decline') await f.tap('Confirm decline Bea');
+  expect(mockGetUser).toHaveBeenCalledTimes(2);
+  expect(mockRpc.mock.calls).toEqual([[kind === 'accept' ? 'accept_people_request' : 'decline_people_request',
+    kind === 'accept' ? { p_requester: 'Bea' } : { p_requester: 'Bea', p_block: kind === 'block' }]]);
+});
+
+it.each(['accept', 'decline', 'block'] as const)('uses one guarded account check for each confirmed %s action', async kind => {
+  const f = mount();
+  if (kind === 'block') { await f.tap('Decline Bea'); await f.tap('Confirm decline Bea'); }
+  mockGetUser.mockClear(); mockRpc.mockClear();
+  if (kind === 'accept') await f.tap('Add Bea');
+  else if (kind === 'decline') { await f.tap('Decline Bea'); await f.tap('Confirm decline Bea'); }
+  else await f.tap('Block Bea');
+  expect(mockGetUser).toHaveBeenCalledTimes(1);
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+it('allows a fresh retry before the expired account lookup settles without a late duplicate', async () => {
+  const auth = deferred<any>(); mockGetUser.mockReturnValueOnce(auth.promise); const f = mount();
+  await f.tap('Add Bea'); await act(async () => jest.advanceTimersByTime(8000)); await flush();
+  await f.tap('Try again to add Bea');
+  expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.rows().map(r => r.props.req.requester_user_id)).toEqual(['Zoe']);
+  await act(async () => auth.resolve({ data: { user: { id: 'alice' } }, error: null })); await flush();
+  expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.rows().map(r => r.props.req.requester_user_id)).toEqual(['Zoe']);
 });
