@@ -9,14 +9,13 @@ import {CreatorActionFill} from '../../components/creator/CreatorActionFill';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { Image } from 'expo-image';
 import { supabase } from '../../lib/supabase';
-import { UNREAD_CHATS_KEY } from '../../constants/QueryKeys';
+import { useTabBadgeData } from '../../hooks/useTabBadgeData';
 import { authedDest } from '../../lib/authRouting';
 import { fetchNeedsPhoneMigration } from '../../lib/authGate';
 import { getAuthProfile } from '../../hooks/useProfile';
 import { withTimeout } from '../../lib/withTimeout';
 import { YOURS_PAGE_ENABLED } from '../../constants/FeatureFlags';
 import SunriseIcon from '../../components/yours/icons/SunriseIcon';
-import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../../lib/yours/requestsSeen';
 import { SCENE_STAGE, getSeenSceneStage, SCENE_BADGE_KEY } from '../../lib/sceneStage';
 import { TermsReacceptance } from '../../components/legal/TermsReacceptance';
 import CreateMenuSheet, { type CreationKind } from '../../components/create/CreateMenuSheet';
@@ -35,62 +34,6 @@ function PostTabIcon() {
       <Ionicons name="add" size={28} color={Colors.white} />
     </View>
   );
-}
-
-async function fetchPendingRequestsCount(): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
-  const { data, error } = await supabase.rpc('get_incoming_people_requests', { p_user_id: user.id });
-  if (error || !Array.isArray(data)) return 0;
-  // Only count requests newer than the last time the user looked, so the badge
-  // clears on open and re-shows only for genuinely new requests.
-  const seen = await getRequestsSeenAt();
-  return data.filter((r: { requested_at?: string }) => {
-    const t = Date.parse(r?.requested_at ?? '');
-    return Number.isFinite(t) && t > seen;
-  }).length;
-}
-
-async function fetchHasPendingInvites(): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-  const { count } = await supabase
-    .from('plan_invites')
-    .select('id', { count: 'exact', head: true })
-    .eq('recipient_id', user.id)
-    .eq('status', 'pending');
-  return (count ?? 0) > 0;
-}
-
-async function fetchUnreadChatCount(): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
-
-  // Only count unread message notifications for events the user is
-  // currently a joined member of. Stale notifications from events the
-  // user left (or chats that haven't opened yet) were producing a
-  // phantom badge with no chat to show.
-  const [{ data: notifs }, { data: memberships }] = await Promise.all([
-    supabase
-      .from('app_notifications')
-      .select('event_id')
-      .eq('user_id', user.id)
-      .eq('type', 'new_message')
-      .eq('status', 'unread'),
-    supabase
-      .from('event_members')
-      .select('event_id')
-      .eq('user_id', user.id)
-      .eq('status', 'joined'),
-  ]);
-
-  const joinedEvents = new Set((memberships ?? []).map((r: any) => r.event_id));
-  const unreadChats = new Set(
-    (notifs ?? [])
-      .map((r: any) => r.event_id)
-      .filter((eid: string) => joinedEvents.has(eid)),
-  );
-  return unreadChats.size;
 }
 
 export default function TabLayout() {
@@ -211,35 +154,7 @@ export default function TabLayout() {
     return () => { cancelled = true; };
   }, [queryClient, verificationGateRevision]);
 
-  const { data: unreadChats = 0 } = useQuery({
-    queryKey: UNREAD_CHATS_KEY,
-    queryFn: fetchUnreadChatCount,
-    enabled: !!userId,
-    // Tab-bar badge poll runs for the whole session. Slowed from 30s to
-    // 60s to cut steady background DB/network load (incident 2026-05-18);
-    // opening Chats still invalidates this key for an immediate update.
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  const { data: hasPendingInvites = false } = useQuery({
-    queryKey: ['pending-invites-badge'],
-    queryFn: fetchHasPendingInvites,
-    enabled: !!userId,
-    // Low-churn signal; slowed 60s -> 120s to reduce background load.
-    staleTime: 60_000,
-    refetchInterval: 120_000,
-  });
-
-  // Pending people-requests count (Yours rebuild only). Drives the warm gold
-  // count badge on the Yours tab; cleared on open via markRequestsSeen.
-  const { data: pendingRequests = 0 } = useQuery({
-    queryKey: REQUESTS_BADGE_KEY,
-    queryFn: fetchPendingRequestsCount,
-    enabled: !!userId && YOURS_PAGE_ENABLED,
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
+  const { unreadChats, hasPendingInvites, pendingRequests } = useTabBadgeData();
 
   // Scene stage dot: shows when a new coming-soon stage lands via OTA,
   // clears on the first Scene open (stamped by ScenePage's focus effect,
