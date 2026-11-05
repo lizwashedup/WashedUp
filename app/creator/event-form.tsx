@@ -144,6 +144,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   const appearance = useMemo(() => ({ fonts, sunset: true }), [fonts]);
   // A page context comes only from the authorized saved-page/event gate, never route text.
   const operationScope = pageScope ?? creationScope;
+  const confirmedCreatedEvent = React.useRef<string | null>(null);
   const assertPageVisit = () => { if (operationScope && !operationScope.isCurrent()) throw new CreatorPageScopeExpired(); };
   const withPageScope = async <T,>(action: () => Promise<T>, readOnly = false): Promise<T> => {
     assertPageVisit();
@@ -160,11 +161,14 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     return result;
   };
   const createOperatorEvent: typeof existingCreateOperatorEvent = (...args) => withPageScope(async () => {
+    if (confirmedCreatedEvent.current) throw new Error('This draft already exists. Open it from Events before continuing.');
     if (creationContext && creationScope) {
       const selected = await prepareLegacyEventCreate(creationContext, creationScope);
       if (args[1] !== (selected.community?.id ?? null)) throw new Error('The event creator changed. Open the event again from Yours.');
     }
-    return creationScope ? existingCreateOperatorEvent(args[0], args[1], args[2], creationScope) : existingCreateOperatorEvent(...args);
+    const eventId = await (creationScope ? existingCreateOperatorEvent(args[0], args[1], args[2], creationScope) : existingCreateOperatorEvent(...args));
+    if (mediaUUID(eventId)) confirmedCreatedEvent.current = eventId;
+    return eventId;
   });
   const updateOperatorEvent: typeof updateExistingOperatorEvent = (...args) => withPageScope(() => updateExistingOperatorEvent(...args));
   const setOperatorEventCoords: typeof existingSetOperatorEventCoords = (...args) => withPageScope(() => existingSetOperatorEventCoords(...args));
@@ -178,7 +182,8 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     else router.back();
   };
   const queryClient = useQueryClient();
-  const { id, duplicateFrom, templateId, openPhotos, returnToTickets } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string }>();
+  const { id, duplicateFrom, templateId, openPhotos, returnToTickets, draftSettings } = useLocalSearchParams<{ id?: string; duplicateFrom?: string; templateId?: string; openPhotos?: string; returnToTickets?: string; draftSettings?: string }>();
+  const [draftSettingsNeedReview, setDraftSettingsNeedReview] = useState(draftSettings === 'check');
   const editing = !!id;
   const pageSave = useCreatorPageEventSave(pageContext?.pageId, id, pageScope);
   const editorScroll = React.useRef<ScrollView>(null);
@@ -660,6 +665,22 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     return saved;
   };
 
+  // Legacy draft fields and these settings use separate existing RPCs. Do not
+  // silently drop a selected free-event format or RSVP limit when saving.
+  const saveDraftSettings = async (eventId: string) => {
+    if (pageContext) return; // The page save already includes both atomically.
+    await setEventOfferType(eventId, offerType);
+    const capacity = ticketCapacity.trim() ? Number(ticketCapacity) : null;
+    await setEventTicketCapacity(eventId, capacity);
+    const saved = await withPageScope(() => getOperatorEvent(eventId), true);
+    if (saved?.id !== eventId || saved.ticket_capacity !== capacity) throw new Error('The saved capacity could not be confirmed.');
+  };
+  const needsDraftSettingsReview = () => {
+    if (pageContext || !draftSettingsNeedReview) return false;
+    showError('Review draft settings', 'Check the event type and capacity, then save the draft before continuing.');
+    return true;
+  };
+
   const offerAnnounce = (eventId: string) => {
     // LIZ COPY (taste call 9): opt-in, never automatic
     setAlertInfo({
@@ -723,6 +744,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   };
 
   const handleSave = async () => {
+    if (needsDraftSettingsReview()) return;
     if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields({ requireDate: true });
     if (!fields || saving || explicitSaveRef.current) return;
@@ -865,20 +887,45 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     explicitSaveRef.current = true;
     if (pageContext) Keyboard.dismiss();
     setSaving(true);
+    let savedEventId: string | undefined;
     try {
+      if (!pageContext && (!offerTypeColumnOpen || !ticketCapacityRpcOpen)) {
+        // An unavailable mount-time check must be retryable without discarding
+        // the form. Recheck capability only; never reseed over typed choices.
+        const [offer, capacity] = await withPageScope(() => requestWithDeadline(
+          Promise.all([probeOfferType(editing ? id : null), probeTicketCapacityRpc()]), 12_000), true);
+        setOfferTypeColumnOpen(offer.open);
+        setTicketCapacityRpcOpen(capacity);
+        if (!offer.open || !capacity) {
+          showError('Settings aren’t ready', 'Your edits are still here. Check your connection and try saving again.');
+          return;
+        }
+      }
       if (editing && id) {
         await autosaveInFlightRef.current?.catch(() => undefined);
         await saveEventFields(id, fields);
+        savedEventId = id;
         await syncCoords(id);
       } else {
         const communityId = fromCommunity && community ? community.id : null;
         const newId = await createOperatorEvent(fields, communityId, false);
+        savedEventId = newId;
         await syncCoords(newId);
       }
+      await saveDraftSettings(savedEventId);
+      setDraftSettingsNeedReview(false);
       hapticSuccess();
       afterSave();
       if (creationContext) router.dismissTo('/(tabs)/friends/manage/(tools)/events?section=drafts'); else leaveEditor();
     } catch (e) {
+      if (operationScope && !operationScope.isCurrent()) return;
+      if (!pageContext && savedEventId) {
+        // Continue with the already-created ID. The creation latch also blocks
+        // another create tap before this replacement screen finishes mounting.
+        afterSave();
+        router.replace(`/creator/event-form?id=${savedEventId}&draftSettings=check` as never);
+        return;
+      }
       showError(pageContext ? 'Check saved status' : 'That did not save', friendlyError(e, 'Try again in a moment.'));
     } finally {
       explicitSaveRef.current = false;
@@ -930,6 +977,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   };
 
   const handlePublishDraft = async () => {
+    if (needsDraftSettingsReview()) return;
     if (coverInProgress() || pageTemplateBlocked()) return;
     const fields = collectFields({ requireDate: true });
     if (!fields || !id || saving || explicitSaveRef.current || publicationUncertain.current) return;
@@ -1456,7 +1504,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
                 {autosaveState === 'saving'
                   ? 'saving…'
                   : autosaveState === 'saved' || currentSaveConfirmed
-                    ? 'saved just now'
+                    ? pageContext ? 'saved just now' : 'event details saved'
                     : 'not saved yet. your work is still here.'}
               </Text>
             )}
@@ -1471,6 +1519,9 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
             )}
 
             {saveRecovery}
+            {!pageContext && draftSettingsNeedReview && <Text accessibilityRole="alert" style={[styles.fieldHint, styles.savedLineProblem]}>
+              Your draft is saved, but its event type or capacity could not be confirmed. Review those settings and save the draft again before publishing.
+            </Text>}
             {statusRecovery}
             {templateRecovery}
             {pageContext && pagePublicationUncertain && <View style={[styles.sectionCard, styles.recoveryCard]}>
@@ -1721,8 +1772,8 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
                 isOfferTypeSellableToday). class_pack and subscription render
                 disabled with a "soon" tag and are never selectable -- that
                 stays an open founder decision, not guessed at here. */}
-            <Text style={styles.fieldLabel}>offer type</Text>
-            <Text style={styles.fieldHint}>choose how people join, from a free gathering to a paid event or course.</Text>
+            <Text style={styles.fieldLabel}>How people join</Text>
+            <Text style={styles.fieldHint}>Choose free RSVPs, tickets, or a class.</Text>
             <View style={styles.chipWrap}>
               {OFFER_TYPE_OPTIONS.map((o) => {
                 const sellable = isOfferTypeSellableToday(o.value);

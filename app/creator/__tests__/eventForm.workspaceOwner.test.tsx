@@ -2,7 +2,8 @@ import React from 'react';import {act,create,type ReactTestRenderer} from 'react
 let mockEntryProps:any, mockRouteParams:Record<string,string>|undefined,mockPagesEnabled=true;
 const mockPageId='f5d7644a-2ff5-4def-b0ab-d04b8250892b',mockEventId='0f860000-0000-4000-8000-000000000001',mockUser='0e6e1827-0f87-4e03-b42b-7ade8219725b';
 let mockAccess:any=null,mockSource:any=null,mockSourceTemplate:any=null;const mockCreate=jest.fn();
-const mockStorageRemove=jest.fn(),mockLegacyRead=jest.fn();
+const mockStorageRemove=jest.fn(),mockLegacyRead=jest.fn(),mockSetOffer=jest.fn(),mockSetCapacity=jest.fn();
+let mockSettingsOpen=true,mockSavedCapacity:number|null=null;
 const mockTemplateSave=jest.fn(),mockTemplateRead=jest.fn(),mockLegacyTemplate=jest.fn();let mockTemplate:any=null;
 const mockPoster=jest.fn();let mockTeamEntry=false;const mockPush=jest.fn(),mockReplace=jest.fn(),mockDismissTo=jest.fn(),mockCanGoBack=jest.fn();
 let mockEventStatus='Draft';let mockStatusReceipt:any=null;const mockStatusWrite=jest.fn(),mockStatusRead=jest.fn(),mockRefundAccess=jest.fn(),mockRefund=jest.fn();
@@ -29,7 +30,7 @@ jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){re
 jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>mockAccess?.ledCommunities[0]??null,setSelectedCommunityId:jest.fn()}));
 jest.mock('../../../lib/supabase',()=>({supabase:{auth:{onAuthStateChange:()=>({data:{subscription:{unsubscribe:()=>{}}}}),getUser:async()=>({data:{user:{id:mockUser}},error:null})}}}));
 jest.mock('../../../lib/ticketing',()=>({getTiers:()=>mockTiers(),getMyPayoutState:(...a:unknown[])=>mockPayout(...a),isPayoutReady:()=>true,getRefundAccess:(...a:unknown[])=>mockRefundAccess(...a),refundLiveOrdersOnCancel:(...a:unknown[])=>mockRefund(...a)}));
-jest.mock('../../../lib/creatorEvents',()=>({createOperatorEvent:(...a:unknown[])=>mockCreate(...a),pickAndUploadEventImage:(...a:unknown[])=>mockPoster(...a),EVENT_CATEGORIES:['Social'],saveEventTemplate:(...a:unknown[])=>mockLegacyTemplate(...a),getOperatorEvent:(...a:unknown[])=>mockLegacyRead(...a),updateOperatorEvent:(...a:unknown[])=>mockLegacyUpdate(...a),probeConfirmationMessage:async()=>({open:false,value:null}),probeOfferType:async()=>({open:false,value:null}),probeTicketCapacityRpc:async()=>false}));
+jest.mock('../../../lib/creatorEvents',()=>({createOperatorEvent:(...a:unknown[])=>mockCreate(...a),pickAndUploadEventImage:(...a:unknown[])=>mockPoster(...a),EVENT_CATEGORIES:['Social'],saveEventTemplate:(...a:unknown[])=>mockLegacyTemplate(...a),getOperatorEvent:(...a:unknown[])=>mockLegacyRead(...a),updateOperatorEvent:(...a:unknown[])=>mockLegacyUpdate(...a),probeConfirmationMessage:async()=>({open:false,value:null}),probeOfferType:async()=>({open:mockSettingsOpen,value:null}),probeTicketCapacityRpc:async()=>mockSettingsOpen,setEventOfferType:(...a:unknown[])=>mockSetOffer(...a),setEventTicketCapacity:(...a:unknown[])=>mockSetCapacity(...a)}));
 jest.mock('../../../lib/creatorPageReview',()=>({CreatorPageScopeExpired:class extends Error{},publishCreatorPageEvent:(...a:unknown[])=>mockPublish(...a)}));
 jest.mock('../../../components/creator/pages/CreatorPageEventGate',()=>({__esModule:true,default:({children}:any)=>children({pageId:mockPageId,name:'Page',ownerId:mockUser,kind:'organization',isPublished:true,entry:mockTeamEntry?'team':'owner'},mockScope,{id:mockEventId,title:'Earlier gate content',status:mockEventStatus,community_id:null})}));
 jest.mock('@react-native-async-storage/async-storage',()=>({__esModule:true,default:{getItem:async(k:string)=>mockStorage.get(k)??null,setItem:async(k:string,v:string)=>{mockStorage.set(k,v);},removeItem:(k:string)=>mockStorageRemove(k)}}));
@@ -48,7 +49,7 @@ async function settle(){for(let i=0;i<5;i++)await act(async()=>{await Promise.re
 async function mount(){await act(async()=>{tree=create(<EventForm/>);});await settle();}
 async function advance(){await act(async()=>{jest.advanceTimersByTime(1600);});await settle();}
 const button=(label:string)=>tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>(Array.isArray(t.props.children)?t.props.children.join(''):t.props.children)===label));
-beforeEach(()=>{jest.clearAllMocks();mockStateRead.mockReset();mockLegacyRead.mockReset();mockLegacyRead.mockImplementation(async()=>({...saved,id:mockEventId}));mockStorageRemove.mockImplementation(async(k:string)=>{mockStorage.delete(k);});mockRouteParams={};mockCreate.mockResolvedValue(mockEventId);mockAccess=null;mockSource=null;mockSourceTemplate=null;mockEntryProps=undefined;mockPagesEnabled=true;mockTemplate=null;mockTemplateRead.mockImplementation(async()=>mockTemplate);mockTemplateSave.mockImplementation(async a=>{mockTemplate={id:a.templateId,userId:mockUser,sourcePageId:a.pageId,sourceEventId:a.eventId,sourceUpdatedAt:a.expectedUpdatedAt,name:a.name,fields:{...saved.fields,event_date:'',start_time:null,end_time:null}};return mockTemplate;});mockTeamEntry=false;mockCanGoBack.mockReturnValue(true);mockEventStatus='Draft';mockStatusReceipt=null;mockStatusRead.mockImplementation(async()=>mockStatusReceipt);mockStatusWrite.mockImplementation(async(p,e,r,input)=>{mockStatusReceipt={pageId:p,eventId:e,requestId:r,userId:mockUser,...input,updatedAt:'2026-09-15T03:00:00Z'};saved={...saved,status:input.status,updatedAt:mockStatusReceipt.updatedAt};return mockStatusReceipt;});mockRefundAccess.mockResolvedValue({isOwner:true,isDelegate:false,canRefund:true});mockRefund.mockImplementation(async(_id,options)=>{await options?.beforeEach?.();return {refundedCount:0,failedCount:0};});mockReadiness.mockReset();mockCurrent=true;mockTiers.mockResolvedValue([]);mockPayout.mockResolvedValue(null);mockReadiness.mockResolvedValue({publishReady:true,publishReason:null,canManageTickets:true});jest.useFakeTimers();mockStorage.clear();mockCounter=0;receipt=null;saved={pageId:mockPageId,eventId:mockEventId,fields,updatedAt:'2026-09-15T01:00:00Z',status:'Draft',offerType:'free_event',ticketCapacity:null,latitude:null,longitude:null,canManageTickets:true};mockStateRead.mockImplementation(async()=>saved);mockAttemptRead.mockImplementation(async()=>receipt);mockSave.mockImplementation(async(_p,_e,id,input)=>{receipt={...saved,...input,updatedAt:`2026-09-15T01:01:${String(mockCounter).padStart(2,'0')}Z`,requestId:id,userId:mockUser};saved=receipt;return receipt;});});
+beforeEach(()=>{jest.clearAllMocks();mockSettingsOpen=true;mockSavedCapacity=null;mockSetOffer.mockReset();mockSetOffer.mockResolvedValue(undefined);mockSetCapacity.mockReset();mockSetCapacity.mockImplementation(async(_id:string,capacity:number|null)=>{mockSavedCapacity=capacity;});mockStateRead.mockReset();mockLegacyRead.mockReset();mockLegacyRead.mockImplementation(async()=>({...saved,id:mockEventId,ticket_capacity:mockSavedCapacity}));mockStorageRemove.mockImplementation(async(k:string)=>{mockStorage.delete(k);});mockRouteParams={};mockCreate.mockResolvedValue(mockEventId);mockAccess=null;mockSource=null;mockSourceTemplate=null;mockEntryProps=undefined;mockPagesEnabled=true;mockTemplate=null;mockTemplateRead.mockImplementation(async()=>mockTemplate);mockTemplateSave.mockImplementation(async a=>{mockTemplate={id:a.templateId,userId:mockUser,sourcePageId:a.pageId,sourceEventId:a.eventId,sourceUpdatedAt:a.expectedUpdatedAt,name:a.name,fields:{...saved.fields,event_date:'',start_time:null,end_time:null}};return mockTemplate;});mockTeamEntry=false;mockCanGoBack.mockReturnValue(true);mockEventStatus='Draft';mockStatusReceipt=null;mockStatusRead.mockImplementation(async()=>mockStatusReceipt);mockStatusWrite.mockImplementation(async(p,e,r,input)=>{mockStatusReceipt={pageId:p,eventId:e,requestId:r,userId:mockUser,...input,updatedAt:'2026-09-15T03:00:00Z'};saved={...saved,status:input.status,updatedAt:mockStatusReceipt.updatedAt};return mockStatusReceipt;});mockRefundAccess.mockResolvedValue({isOwner:true,isDelegate:false,canRefund:true});mockRefund.mockImplementation(async(_id,options)=>{await options?.beforeEach?.();return {refundedCount:0,failedCount:0};});mockReadiness.mockReset();mockCurrent=true;mockTiers.mockResolvedValue([]);mockPayout.mockResolvedValue(null);mockReadiness.mockResolvedValue({publishReady:true,publishReason:null,canManageTickets:true});jest.useFakeTimers();mockStorage.clear();mockCounter=0;receipt=null;saved={pageId:mockPageId,eventId:mockEventId,fields,updatedAt:'2026-09-15T01:00:00Z',status:'Draft',offerType:'free_event',ticketCapacity:null,latitude:null,longitude:null,canManageTickets:true};mockStateRead.mockImplementation(async()=>saved);mockAttemptRead.mockImplementation(async()=>receipt);mockSave.mockImplementation(async(_p,_e,id,input)=>{receipt={...saved,...input,updatedAt:`2026-09-15T01:01:${String(mockCounter).padStart(2,'0')}Z`,requestId:id,userId:mockUser};saved=receipt;return receipt;});});
 afterEach(()=>{act(()=>tree?.unmount());jest.useRealTimers();});
 
 import { setWorkspace } from '../../../lib/workspaceContext';
@@ -100,4 +101,48 @@ it('does not create after the selected community permission is revoked while fil
  act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Category: music'&&typeof n.props.onPress==='function')[0].props.onPress());
  mockAccess={...mockAccess,ledCommunities:[]};
  await act(async()=>{await button('save it as a draft')!.props.onPress();});expect(mockCreate).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();
+});
+
+async function prepareLegacyDraft() {
+ mockPagesEnabled=false;mockAccess={hasLeaderGrant:false,hasEventHostGrant:true,ledCommunities:[],isRevoked:false};
+ setWorkspace('organization');mockRouteParams={workspace:'organization'};await mount();
+ act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.onChangeText('Draft format test'));
+ act(()=>tree.root.findAll(n=>n.props.accessibilityLabel==='Category: music'&&typeof n.props.onPress==='function')[0].props.onPress());
+ act(()=>button('free event')!.props.onPress());
+ act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Event capacity')!.props.onChangeText('24'));
+}
+it('saves the chosen free-event format and capacity before returning to Drafts',async()=>{
+ await prepareLegacyDraft();await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockSetOffer).toHaveBeenCalledWith(mockEventId,'free_event');expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);
+ expect(mockLegacyRead).toHaveBeenCalledWith(mockEventId);expect(mockDismissTo).toHaveBeenCalledTimes(1);expect(mockReplace).not.toHaveBeenCalled();
+});
+it.each(['offer','capacity','read','mismatch'])('opens the existing draft for review after a partial %s settings save',async failure=>{
+ await prepareLegacyDraft();
+ if(failure==='offer')mockSetOffer.mockRejectedValue(new Error('Permission denied'));
+ if(failure==='capacity')mockSetCapacity.mockRejectedValue(new Error('Response lost'));
+ if(failure==='read')mockLegacyRead.mockRejectedValue(new Error('Connection unavailable'));
+ if(failure==='mismatch')mockLegacyRead.mockResolvedValue({id:mockEventId,ticket_capacity:12});
+ await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockDismissTo).not.toHaveBeenCalled();
+ expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}&draftSettings=check`);
+ await act(async()=>{await button('save it as a draft')!.props.onPress();});expect(mockCreate).toHaveBeenCalledTimes(1);
+});
+it('keeps a draft local when saving its settings is unavailable',async()=>{
+ mockSettingsOpen=false;await prepareLegacyDraft();await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockAlert.title).toBe('Settings aren’t ready');
+ mockSettingsOpen=true;await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockSetOffer).toHaveBeenCalledWith(mockEventId,'free_event');expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);
+});
+it('does not navigate or apply later settings after the creation visit retires',async()=>{
+ await prepareLegacyDraft();mockSetOffer.mockImplementation(async()=>{mockCurrent=false;});
+ await act(async()=>{await button('save it as a draft')!.props.onPress();});
+ expect(mockSetCapacity).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();expect(mockDismissTo).not.toHaveBeenCalled();
+});
+it('keeps partial-save guidance visible and blocks publication until the draft is saved again',async()=>{
+ mockPagesEnabled=false;mockRouteParams={id:mockEventId,draftSettings:'check'};
+ mockAccess={hasLeaderGrant:false,hasEventHostGrant:true,ledCommunities:[],isRevoked:false};
+ mockSource={...fields,id:mockEventId,status:'Draft',community_id:null,ticket_capacity:24};await mount();
+ expect(tree.root.findAllByType(Text).some(n=>n.props.accessibilityRole==='alert'&&String(n.props.children).includes('event type or capacity'))).toBe(true);
+ await act(async()=>{await button('publish it')!.props.onPress();});expect(mockAlert.title).toBe('Review draft settings');expect(mockLegacyUpdate).not.toHaveBeenCalled();
+ await act(async()=>{await button('keep it a draft')!.props.onPress();});expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);expect(mockBack).toHaveBeenCalledTimes(1);
 });
