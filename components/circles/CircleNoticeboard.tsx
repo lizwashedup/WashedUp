@@ -82,7 +82,7 @@ export default function CircleNoticeboard({
   // Sign every recent-together photo once; the strip and the living cover both
   // read from this map (album-media is private, so paths need signed URLs).
   const recentPhotos = payload.recent_together;
-  const { data: signed = {} } = useSignedAlbumUrls(recentPhotos.map((p) => p.media_path));
+  const { data: signed = {} } = useSignedAlbumUrls(recentPhotos.map((p) => p.media_path), plansScope);
 
   // Identity ladder: a manual cover wins; with none, the living cover is the
   // newest shared photo; with neither, CircleCover falls to the serif monogram.
