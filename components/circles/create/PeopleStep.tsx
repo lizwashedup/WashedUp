@@ -5,7 +5,8 @@
  * prerequisite instead.
  */
 import React, { useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, FlatList, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { Image } from 'expo-image';
 import { Check, UserPlus } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
@@ -84,9 +85,8 @@ export default function PeopleStep({
     (p) => selected.has(p.user_id),
   );
   if (people.length === 0) {
-    const EmptyContainer = appearance ? ScrollView : View;
     return (
-      <EmptyContainer {...(appearance ? { contentContainerStyle: styled.emptyWrap } : { style: styled.emptyWrap })}>
+      <ScrollView style={styled.flex} contentContainerStyle={styled.emptyWrap}>
         <View style={styled.emptyBubble}>
           <UserPlus size={CIRCLE.emptyIcon} color={appearance ? AfterglowColors.clay : Colors.terracotta} strokeWidth={1.5} />
         </View>
@@ -102,19 +102,19 @@ export default function PeopleStep({
         >
           <Text numberOfLines={1} style={styled.emptyCtaLabel}>{COPY.circleNoPeopleCta}</Text>
         </Pressable>
-      </EmptyContainer>
+      </ScrollView>
     );
   }
 
   return (
     <View style={styled.flex}>
-      <Text style={styled.title}>{COPY.circleStep2Title}</Text>
-      <Text style={styled.sub}>{COPY.circleStep2Sub}</Text>
-      {selected.size > 0 && (
-        <Text style={styled.count}>{COPY.circlePickedCount(selected.size)}</Text>
-      )}
-      {showSearch && <PeopleSearchBar value={query} onChange={setQuery} appearance={appearance}/>}
       <FlatList
+        ListHeaderComponent={<>
+          <Text style={styled.title}>{COPY.circleStep2Title}</Text>
+          <Text style={styled.sub}>{COPY.circleStep2Sub}</Text>
+          {selected.size > 0 && <Text style={styled.count}>{COPY.circlePickedCount(selected.size)}</Text>}
+          {showSearch && <PeopleSearchBar value={query} onChange={setQuery} appearance={appearance}/>}
+        </>}
         data={showSearch ? filtered : people}
         keyExtractor={(p) => p.user_id}
         renderItem={({ item }) => (
@@ -134,7 +134,7 @@ export default function PeopleStep({
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
+  flex: { flex: 1, minHeight: 0 },
   title: {
     fontFamily: Fonts.displayBold,
     fontSize: FontSizes.displaySM,
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   },
   checkOn: { backgroundColor: Colors.terracotta, borderColor: Colors.terracotta },
   // Empty (no people yet)
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  emptyWrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, paddingVertical: 24 },
   emptyBubble: {
     width: CIRCLE.emptyBubble,
     height: CIRCLE.emptyBubble,
