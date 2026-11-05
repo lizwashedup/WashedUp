@@ -35,6 +35,7 @@ import { readOwnProfile, saveOwnProfile, deleteOwnProfile, verifyProfileOwner, r
 import { pushRegistrationFeedback } from '../../components/notifications/pushRegistrationFeedback';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
 import { friendlyError } from '../../lib/friendlyError';
+import { withDeadline } from '../../lib/withTimeout';
 import { logError } from '../../lib/logger';
 import { PROFILE_PHOTO_KEY } from '../../constants/QueryKeys';
 import Colors, { AfterglowColors } from '../../constants/Colors';
@@ -68,6 +69,7 @@ export default function ProfileScreen() {
 type ProfileAppearance = { fonts: AfterglowFontFamilies };
 type PhotoSelection = { scope: ProfileOperationScope; kind: 'camera' | 'library' | null | undefined; started: boolean; alert: ProfileAlert | null };
 type ProfileAlert = { title: string; message?: string; buttons?: BrandedAlertButton[] };
+const CREATOR_READ_TIMEOUT_MS = 12_000;
 function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUser; appearance?: ProfileAppearance }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -162,6 +164,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     saveLock.current = null; photoLock.current = null; setPhotoSelection(null); setSaving(false); setPhotoBusy(false); setAlertInfo(null);
   };
   const readAttempt = useRef<object | null>(null), creatorsAttempt = useRef<object | null>(null);
+  const creatorsNeedRefresh = useRef(true);
   const lastProfileFocusFetchRef = useRef(0);
   const profileNeedsRefresh = useRef(false);
   const refreshCurrentProfile = useRef<(() => Promise<void>) | null>(null);
@@ -178,11 +181,15 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
   refreshCurrentProfile.current = () => fetchProfile(true);
   const fetchCreatorEntries = async () => {
     if (!pageScope.isCurrent() || creatorsAttempt.current) return;
+    creatorsNeedRefresh.current = true;
     const attempt = {}; creatorsAttempt.current = attempt; setLoadingCreators(true); setCreatorError(false);
     const scope = { userId, isCurrent: () => pageScope.isCurrent() && creatorsAttempt.current === attempt };
     try {
       await verifyProfileOwner(scope);
-      const [accessResult, grantsResult] = await Promise.allSettled([getCreatorAccess(), fetchMyGrants()]);
+      const [accessResult, grantsResult] = await Promise.allSettled([
+        withDeadline(getCreatorAccess(), CREATOR_READ_TIMEOUT_MS, 'Creator access'),
+        withDeadline(fetchMyGrants(), CREATOR_READ_TIMEOUT_MS, 'Creator applications'),
+      ]);
       await verifyProfileOwner(scope);
       requireProfileScope(scope);
       let failed = accessResult.status === 'rejected' || grantsResult.status === 'rejected';
@@ -194,7 +201,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
         setCreatorAccess(hasCreatorAccess(access) ? access : null);
         if (access?.hasEventHostGrant) {
           try {
-            const organizer = await getMyOrganizerProfile();
+            const organizer = await withDeadline(getMyOrganizerProfile(), CREATOR_READ_TIMEOUT_MS, 'Organizer name');
             await verifyProfileOwner(scope);
             requireProfileScope(scope);
             setOrganizerName(organizer?.display_name ?? null);
@@ -202,6 +209,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
         } else setOrganizerName(null);
       }
       requireProfileScope(scope);
+      creatorsNeedRefresh.current = failed;
       setCreatorError(failed);
     } catch (error) { if (scope.isCurrent() && !isObsoleteProfileOperation(error)) setCreatorError(true); }
     finally { if (scope.isCurrent()) { setLoadingCreators(false); creatorsAttempt.current = null; } }
@@ -210,9 +218,12 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
     if (!identityReady) { setLoading(pushViewer.isLoading); return; }
     if (!screenVisit) return;
     const now = Date.now();
-    if (!profileRef.current || profileNeedsRefresh.current || now - lastProfileFocusFetchRef.current > 20_000) {
-      lastProfileFocusFetchRef.current = now; void fetchProfile(); void fetchCreatorEntries();
+    const refreshProfile = !profileRef.current || profileNeedsRefresh.current || now - lastProfileFocusFetchRef.current > 20_000;
+    if (refreshProfile) {
+      lastProfileFocusFetchRef.current = now; void fetchProfile();
     }
+    // The profile cache must not suppress a creator read interrupted by leaving.
+    if (refreshProfile || creatorsNeedRefresh.current) void fetchCreatorEntries();
   }, [screenVisit, identityReady]);
 
   const openEditFlow = () => {

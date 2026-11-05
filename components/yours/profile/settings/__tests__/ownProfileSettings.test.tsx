@@ -321,3 +321,56 @@ it('retains edits and shows retry guidance for a timeout in the live appearance'
   expect(field('Display name').props.value).toBe('Retained edit');
   expect(byLabel('Save changes').props.disabled).toBe(false);
 });
+
+it('recovers a stalled creator access read without losing confirmed pending applications', async () => {
+  jest.useFakeTimers();
+  try {
+    const stalled = deferred<any>();
+    mockAccess.mockReturnValueOnce(stalled.promise);
+    mockGrants.mockResolvedValue([{ id: 'grant', track: 'event_host', status: 'needs_more_info' }]);
+    await mount();
+    await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
+    expect(text('Some creator details couldn’t load.')).toBe(true);
+    expect(text('needs more info')).toBe(true);
+    expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
+    mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'current', name: 'Current Club', status: 'active' }], hasEventHostGrant: false });
+    await press(byLabel('Try again to load creator spaces'));
+    expect(button('switch to current club & your events')).toBeDefined();
+    stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
+    expect(button('switch to current club & your events')).toBeDefined();
+    expect(button('switch to old club & your events')).toBeUndefined();
+  } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+it('recovers a stalled optional organizer name while retaining confirmed access', async () => {
+  jest.useFakeTimers();
+  try {
+    const stalled = deferred<any>();
+    mockAccess.mockResolvedValue({ hasEventHostGrant: true, ledCommunities: [] });
+    mockOrganizer.mockReturnValueOnce(stalled.promise);
+    await mount();
+    await act(async () => { jest.advanceTimersByTime(12_001); }); await flush();
+    expect(text('Some creator details couldn’t load.')).toBe(true);
+    expect(button('switch to your events')).toBeDefined();
+    expect(byLabel('Try again to load creator spaces').props.disabled).toBe(false);
+    await press(byLabel('Try again to load creator spaces'));
+    expect(text('Some creator details couldn’t load.')).toBe(false);
+    stalled.resolve({ display_name: 'Old organizer name' }); await flush();
+    expect(button('switch to your events')).toBeDefined();
+  } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+it('restarts an interrupted creator read on quick refocus without reloading the cached profile', async () => {
+  const stalled = deferred<any>();
+  mockAccess.mockReturnValueOnce(stalled.promise);
+  await mount();
+  const profileReads = mockRead.mock.calls.length;
+  mockFocused = false; await update();
+  mockAccess.mockResolvedValue({ ledCommunities: [{ id: 'current', name: 'Current Club', status: 'active' }], hasEventHostGrant: false });
+  mockFocused = true; await update();
+  expect(mockAccess).toHaveBeenCalledTimes(2);
+  expect(mockRead).toHaveBeenCalledTimes(profileReads);
+  expect(button('switch to current club & your events')).toBeDefined();
+  stalled.resolve({ ledCommunities: [{ id: 'old', name: 'Old Club', status: 'active' }], hasEventHostGrant: false }); await flush();
+  expect(button('switch to old club & your events')).toBeUndefined();
+});
