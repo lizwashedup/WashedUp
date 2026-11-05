@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 // import * as Crypto from 'expo-crypto'; // V2: re-enable with recordInvite (ghost avatars)
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { buildReferralLink } from '../lib/yours/invite';
 
 export class ObsoleteReferralOperation extends Error {
@@ -23,7 +24,7 @@ export function useReferral() {
       const check = () => { if (scope && !scope.isCurrent()) throw new ObsoleteReferralOperation(); };
       check();
       if (scope) {
-        const identity = await supabase.auth.getUser();
+        const identity = await requestWithDeadline(supabase.auth.getUser(), 8000);
         check();
         if (identity.error) throw identity.error;
         if (!identity.data.user || identity.data.user.id !== userId) throw new ObsoleteReferralOperation();
