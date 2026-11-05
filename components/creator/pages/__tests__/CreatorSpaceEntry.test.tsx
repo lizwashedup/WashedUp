@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, Dimensions } from 'react-native';
+import { Text, Dimensions, StyleSheet } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 const mockPush=jest.fn(),mockPrepare=jest.fn(),mockRefresh=jest.fn(),mockApplicationsRefresh=jest.fn();
 let mockActive=true,mockUser='alice',mockSpaces:any,mockApplications:any;
@@ -100,4 +100,24 @@ it('does not apply legacy organization shortcuts to page-team permissions',()=>{
 it('does not call a first approved setup another community',()=>{
  mockSpaces.data={spaces:[{...community,legacy:{workspace:'community',status:'approved'}}],invitations:[]};mount(true);
  expect(button('Start a community')).toBeDefined();expect(button('Start another community')).toBeUndefined();
+});
+
+it('reflows large-text organization shortcuts without losing expanded archives or their exact destinations',async()=>{
+ const previous=Dimensions.get('window');
+ try{
+  act(()=>Dimensions.set({window:{...previous,width:320,height:568,fontScale:1}}));
+  mockSpaces.data={spaces:[community,organization,{...community,id:'old',name:'Old Club',legacy:{...community.legacy,status:'archived'}}],invitations:[]};
+  mockRefresh.mockResolvedValue(mockSpaces.data);mount(true);
+  act(()=>button('Archived communities').props.onPress());
+  const settings=button('Organization settings for Sunset Studio'),archived=button('Manage Old Club');
+  act(()=>Dimensions.set({window:{...previous,width:320,height:568,fontScale:3.2}}));
+  expect(button('Organization settings for Sunset Studio')).toBe(settings);expect(button('Manage Old Club')).toBe(archived);
+  expect(StyleSheet.flatten(settings.props.style({pressed:false})).flex).toBe(0);
+  expect(StyleSheet.flatten(settings.parent!.props.style).flexDirection).toBe('column');
+  expect(text()).toContain('Communities');expect(text()).toContain('Organizations');
+  expect(button('Events for Sunset Studio')).toBeDefined();expect(button('Start another community')).toBeDefined();
+  await act(async()=>settings.props.onPress());
+  expect(mockPrepare).toHaveBeenCalledWith(organization,mockScope);
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/menu?fromManagementDirectory=1');
+ }finally{act(()=>Dimensions.set({window:previous}));}
 });

@@ -21,6 +21,7 @@ type Entry = { key: string; title: string; subtitle: string; action: string; ope
 export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string; expanded?: boolean }) {
   const { scope, account } = useCreatorPageScope('yours-creator-entry');
   const { height, fontScale } = useWindowDimensions();
+  const reflow = expanded && fontScale >= 1.5;
   const owned = scope?.userId === userId ? scope : null;
   const latestOwned = useRef(owned);
   useLayoutEffect(() => { latestOwned.current = owned; }, [owned]);
@@ -100,17 +101,17 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
     <Pressable cssInterop={false} accessibilityRole="button" accessibilityLabel={entry.action} accessibilityHint={entry.subtitle}
       disabled={disabled} accessibilityState={{ disabled }} onPress={() => { void run(entry); }}
       style={({ pressed }) => [s.entry, pressed && s.pressed]}>
-      {expanded && entry.kind && <View style={s.identity} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {expanded && !reflow && entry.kind && <View style={s.identity} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {entry.kind === 'community' ? <Users size={22} color={Colors.terracotta} /> : <Building2 size={22} color={Colors.terracotta} />}
       </View>}
       <View style={s.copy}><Text style={[s.title, { fontFamily: fonts.medium }]}>{entry.title}</Text>
         <Text style={[s.subtitle, { fontFamily: fonts.regular }]}>{expanded && entry.kind ? entry.subtitle.replace(/^(Community|Organization) · /, '') : entry.subtitle}</Text></View>
-      {busy && opening.key === entry.key ? <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} /> : <ChevronRight size={18} color={C.muted} />}
+      {busy && opening.key === entry.key ? <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} /> : !reflow && <ChevronRight size={18} color={C.muted} />}
     </Pressable>
-    {expanded && entry.shortcuts && <View style={s.shortcuts}>
+    {expanded && entry.shortcuts && <View style={[s.shortcuts, reflow && s.shortcutsStacked]}>
       {entry.shortcuts.map(shortcut => <Pressable cssInterop={false} key={shortcut.key} accessibilityRole="button" accessibilityLabel={shortcut.action}
         accessibilityHint={shortcut.subtitle} disabled={disabled} accessibilityState={{ disabled }}
-        onPress={() => { void run(shortcut); }} style={({ pressed }) => [s.shortcut, pressed && s.pressed]}>
+        onPress={() => { void run(shortcut); }} style={({ pressed }) => [s.shortcut, reflow && s.shortcutStacked, pressed && s.pressed]}>
         <Text numberOfLines={1} style={[s.link, { fontFamily: fonts.medium }]}>{shortcut.title}</Text>
         {busy && opening.key === shortcut.key && <ActivityIndicator accessibilityLabel="Opening management" color={Colors.terracotta} />}
       </Pressable>)}
@@ -127,7 +128,7 @@ export function CreatorSpaceEntry({ userId, expanded = false }: { userId: string
       const group = active.filter(entry => entry.kind === kind);
       if (!group.length) return null;
       return <View key={kind} style={s.section}>
-        <Text accessibilityRole="header" style={[s.sectionTitle, { fontFamily: fonts.display }]}>{kind === 'community' ? 'Communities' : 'Organizations'}</Text>
+        <Text accessibilityRole="header" style={[s.sectionTitle, reflow && s.sectionTitleReflow, { fontFamily: reflow ? fonts.medium : fonts.display }]}>{kind === 'community' ? 'Communities' : 'Organizations'}</Text>
         <Text style={[s.sectionHint, { fontFamily: fonts.regular }]}>{kind === 'community' ? 'Your groups, members and conversations.' : 'Your organization’s events and settings.'}</Text>
         {group.map(renderEntry)}
         {kind === 'community' && createLink('community', hasCommunity ? 'Start another community' : 'Start a community')}
@@ -168,9 +169,12 @@ const s = StyleSheet.create({
   entry: { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72 },
   identity: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.inputBg },
   section: { gap: 10, marginTop: 8, marginBottom: 8 }, sectionTitle: { ...T.pageSection, color: C.ink }, sectionHint: { ...T.caption, color: C.muted, marginBottom: 2 },
+  sectionTitleReflow: { ...T.body },
   secondary: { marginTop: 12, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line, paddingTop: 8 },
   shortcuts: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.line },
+  shortcutsStacked: { flexDirection: 'column' },
   shortcut: { flex: 1, minHeight: 48, paddingHorizontal: 12, paddingVertical: 12, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 },
+  shortcutStacked: { flex: 0, justifyContent: 'flex-start' },
   archiveToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   copy: { flex: 1, minWidth: 0, gap: 4 }, title: { ...T.title, color: C.ink }, subtitle: { ...T.caption, color: C.muted },
   pressed: { opacity: 0.8 }, linkTarget: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
