@@ -75,7 +75,7 @@ function VisibilitySettings({ community }: { community: LedCommunity }) {
         <Text style={body}>{active ? 'Choose whether eligible people can find this community while browsing WashedUp.'
           : 'Choose where your community will appear after you publish it.'}</Text>
         {!publication.discoveryAvailable && <Text style={body}>Discovery changes aren’t available yet. Your saved visibility stays the same.</Text>}
-        <PageAction title={state.discoverable ? 'In discovery ✓' : 'Show in discovery'} singleLine
+        <PageAction title={state.discoverable ? 'Show in discovery ✓' : 'Show in discovery'} singleLine
           primary={state.discoverable} disabled={!publication.ready || !publication.discoveryAvailable || state.discoverable} onPress={() => void publication.run('show')} />
         <PageAction title={!state.discoverable ? 'Link only ✓' : 'Link only'} singleLine
           primary={!state.discoverable} disabled={!publication.ready || !publication.discoveryAvailable || !state.discoverable} onPress={() => void publication.run('hide')} />

@@ -121,11 +121,11 @@ function CommunitySetup({ scope }: { scope: CreatorPageScope }) {
     finally { lock.current = false; if (current()) setBusy(false); else if (latest.current !== scope && latest.current.isCurrent()) { setBusy(false); void reload.current?.(); } }
   };
   return <PageFrame title={created ? 'Community created' : 'Start a community'}>
-    <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.display }]}>{created ? `${name} is ready.` : step === 'details' ? 'Bring your people together.' : name}</Text>
+    <Text accessibilityRole="header" style={[s.heading, { fontFamily: fonts.display }]}>{created ? `${name} is saved.` : step === 'details' ? 'Bring your people together.' : name}</Text>
     {loading && <ActivityIndicator accessibilityLabel="Checking community setup" color={Colors.terracotta} />}
     {!!message && <Text accessibilityRole="alert" style={[s.body, { fontFamily: fonts.regular }]}>{message}</Text>}
     {created ? <>
-      {body('Your page is a private draft. Finish its details, then publish when you’re ready.')}
+      {body('Open your community to see its current status and next steps.')}
       <PageAction primary singleLine title="View community" disabled={busy} onPress={() => { void open('/(tabs)/friends/manage/(tools)/today'); }} />
       <PageAction quiet singleLine title="Edit page" disabled={busy} onPress={() => { void open('/creator/edit-page'); }} />
       <PageAction quiet singleLine title="Invite people" disabled={busy} onPress={() => { void open('/creator/member-invites'); }} />

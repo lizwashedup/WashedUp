@@ -1,5 +1,7 @@
 # Community visibility — verified app changes and proposed backend repair
 
+**Subsequent status:** Liz approved this exact candidate, and it is now deployed with native creator QA and authenticated access checks complete. See [the production rollout record](direct-apply-evidence-20261104-community-discovery.md). The pre-deployment readiness record below is preserved; its not-deployed/approval-pending statements are superseded by that rollout. The updated UI remains local; no OTA or native build was published.
+
 ## What changes for creators
 
 Community settings now exposes **Visibility & link** before publication as well as afterward. It names the selected community, distinguishes Draft, Published and Archived, explains discovery separately from joining eligibility, and offers sharing only for a confirmed published page. Publishing, unpublishing and archiving require confirmation and verified saved state. Settings no longer reports success from a zero-row write.

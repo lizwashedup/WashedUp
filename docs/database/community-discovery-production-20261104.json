@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-04",
+  "approval": "Apply discovery fix and run isolated QA",
+  "project": "upstjumasqblszevlgik",
+  "source_commit": "c4e48d7a9812a1f4e8e1f8b642212f1f880e34dd",
+  "migration": "docs/database/review-only/20261104_community_discovery_control.sql",
+  "migration_sha256": "dbc56ee32d23f31d064310ad4a956d5bdfa61633e8f13c7ba5239ad389c3ad23",
+  "deployed": true,
+  "rollback_applied": false,
+  "ota_published": false,
+  "native_build_published": false,
+  "updated_ui_released": false,
+  "checks": {
+    "deployment": 11,
+    "authenticated_permissions": 5,
+    "cleanup": 8,
+    "all_passed": true
+  },
+  "qa": {
+    "id": "ed31b9f3-2b78-4690-88b2-c05b74265a11",
+    "name": "WashedUp Discovery QA",
+    "handle": "washedup-discovery-qa",
+    "final_status": "archived",
+    "final_discoverable": false,
+    "join_policy": "approval_required",
+    "only_creator_member": true,
+    "was_published": false,
+    "invited_or_messaged_ordinary_members": false
+  },
+  "native_discovery_sequence": [
+    false,
+    true,
+    false
+  ],
+  "native_reopen_retained_link_only": true,
+  "non_creator_account": "34900c70-6339-40c5-b294-6b0a01310175",
+  "non_creator_joined": false,
+  "baseline_and_final": {
+    "community_count": 12,
+    "community_digest": "ddb04567bf6f9798151e405a7c3ed689",
+    "membership_count": 93,
+    "membership_digest": "090d3dbc4b577e30cf8df7e329ebe80c",
+    "joining_routines_digest": "8326f005a8280ba90c512d85f7109bae"
+  },
+  "native_device": "iPhone 17 Pro Max / iOS 26.4 / Metro8872",
+  "local_copy_tests": {
+    "tests": 17,
+    "suites": 2,
+    "typescript_passed": true
+  },
+  "warning": "Pre-existing Supabase Auth retryable network-fetch warning inspected. Later authenticated operations succeeded; offline/resume recovery not certified.",
+  "remaining": [
+    "separate authorization and release of updated client",
+    "full community gender/age coverage",
+    "pending-request withdrawal",
+    "push and installed-app link/auth handoff",
+    "maximum text scrolling and narrow/physical/Android devices"
+  ]
+}

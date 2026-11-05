@@ -42,6 +42,8 @@ it('recovers an unknown request after reopening and offers only that same reques
 });
 it('loads a completed creation from its receipt without resending',async()=>{
  mockRead.mockResolvedValue(saved);mockCheck.mockResolvedValue('created');await mount();expect(action('View community')).toBeDefined();expect(mockCreate).not.toHaveBeenCalled();
+ expect(JSON.stringify(tree.toJSON())).toContain('current status and next steps');
+ expect(JSON.stringify(tree.toJSON())).not.toContain('Your page is a private draft');
 });
 it('fails closed on a missing capability or retired visit',async()=>{
  mockCapability.mockResolvedValue(null);await mount();expect(action('Continue').props.disabled).toBe(true);expect(mockCreate).not.toHaveBeenCalled();
