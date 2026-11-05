@@ -72,6 +72,7 @@ import { pushRegistrationFeedback } from '../components/notifications/pushRegist
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import { pendingTransferRoute } from '../lib/ticketTransfer';
 import { clearPendingDestination, consumePendingDestination, peekPendingCheckout, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { subscribeAppLinks } from '../lib/subscribeAppLinks';
 import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
@@ -951,21 +952,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
-    Linking.getInitialURL()
-      .then((url) => {
-        if (!url) return;
-        parseSessionFromUrl(url);
-        if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
-        captureDestination(url);
-      })
-      .catch((e) => logError(e, 'layout.getInitialURL'));
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      if (!url) return;
+    return subscribeAppLinks(Linking, url => {
       parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
       captureDestination(url);
-    });
-    return () => sub.remove();
+    }, error => logError(error, 'layout.getInitialURL'));
   }, []);
 
   useEffect(() => {
