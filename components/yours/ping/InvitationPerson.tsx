@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ScaledText as Text } from '../../ScaledText';
 import { Check } from 'lucide-react-native';
 import { Image } from 'expo-image';
@@ -17,10 +17,12 @@ export default function InvitationPerson({ person, selected, confirmed, disabled
   inline?: boolean;
   onPress: () => void;
 }) {
+  const { fontScale, width } = useWindowDimensions();
+  const inlineWidth = Math.min(76 * Math.max(1, fontScale), Math.max(76, width - 48));
   const name = person.first_name_display?.trim() || person.handle || COPY.pingPerson;
   const size = inline ? 52 : 44;
   return (
-    <Pressable style={inline ? styles.inline : styles.row} onPress={onPress} disabled={disabled || confirmed}
+    <Pressable style={inline ? [styles.inline, { width: inlineWidth }] : styles.row} onPress={onPress} disabled={disabled || confirmed}
       accessibilityRole="checkbox" accessibilityLabel={confirmed ? COPY.pingPersonConfirmed(name) : name}
       accessibilityState={{ checked: selected || confirmed, disabled: disabled || confirmed }}
       aria-checked={selected || confirmed} aria-disabled={disabled || confirmed}>
