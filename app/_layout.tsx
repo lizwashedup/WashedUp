@@ -902,8 +902,36 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
   // Handle auth callback deep link (password recovery)
   useEffect(() => {
+    let active = true;
+    let recoveryAttempt = 0;
+    let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let recoveryAlert: { title: string; message: string } | null = null;
+    const clearExpiryTimer = () => {
+      if (expiryTimer !== null) clearTimeout(expiryTimer);
+      expiryTimer = null;
+    };
     const parseSessionFromUrl = async (url: string) => {
-      if (!url || !url.includes('auth/callback')) return;
+      if (!active || !url || !url.includes('auth/callback')) return;
+      const attempt = ++recoveryAttempt;
+      const isCurrent = () => active && recoveryAttempt === attempt;
+      clearExpiryTimer();
+      if (recoveryAlert) {
+        const previous = recoveryAlert;
+        setLayoutAlert(current => current === previous ? null : current);
+        recoveryAlert = null;
+      }
+      const failRecovery = (title: string, message: string) => {
+        if (!isCurrent()) return;
+        isRecoveryRef.current = false;
+        setAuthResolved(true);
+        router.replace('/login');
+        expiryTimer = setTimeout(() => {
+          expiryTimer = null;
+          if (!isCurrent()) return;
+          recoveryAlert = { title, message };
+          setLayoutAlert(recoveryAlert);
+        }, 500);
+      };
 
       // Tokens may arrive in fragment (#) or query string (?) depending on email client
       const hashPart = url.split('#')[1] || '';
@@ -916,27 +944,24 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
 
       if (!accessToken || !refreshToken || type !== 'recovery') {
         // Link was tapped but tokens are missing (expired link or fragment stripped)
-        isRecoveryRef.current = false;
-        setAuthResolved(true);
-        router.replace('/login');
-        setTimeout(() => {
-          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired or is invalid. Please request a new one from the login screen.' });
-        }, 500);
+        failRecovery('Link expired', 'This password reset link has expired or is invalid. Please request a new one from the login screen.');
         return;
       }
 
       isRecoveryRef.current = true;
-      const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-      if (!error) {
-        setAuthResolved(true);
-        router.replace('/reset-password');
-      } else {
-        isRecoveryRef.current = false;
-        setAuthResolved(true);
-        router.replace('/login');
-        setTimeout(() => {
-          setLayoutAlert({ title: 'Link expired', message: 'This password reset link has expired. Please request a new one from the login screen.' });
-        }, 500);
+      try {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        // The auth provider owns the dispatched session change. Only this
+        // effect's current attempt may present its completion or redirect.
+        if (!isCurrent()) return;
+        if (!error) {
+          setAuthResolved(true);
+          router.replace('/reset-password');
+        } else {
+          failRecovery('Link expired', 'This password reset link has expired. Please request a new one from the login screen.');
+        }
+      } catch {
+        failRecovery('Could not open link', 'Please check your connection and reopen your password reset link.');
       }
     };
 
@@ -954,11 +979,17 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
-    return subscribeAppLinks(Linking, url => {
-      parseSessionFromUrl(url);
+    const stopLinks = subscribeAppLinks(Linking, url => {
+      void parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
       captureDestination(url);
     }, error => logError(error, 'layout.getInitialURL'));
+    return () => {
+      active = false;
+      recoveryAttempt += 1;
+      clearExpiryTimer();
+      stopLinks();
+    };
   }, []);
 
   useEffect(() => {
