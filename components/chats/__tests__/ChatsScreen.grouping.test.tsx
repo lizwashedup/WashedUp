@@ -199,3 +199,26 @@ it.each([true, false])('shows pending Plans until a visible plan row exists with
     press('All'); expect(texts()).toContain(parent.title);
   } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
 });
+
+it.each([
+  ['2026-11-04T12:00:00-08:00', '2026-11-04T19:30:00Z'],
+  ['2026-11-04T20:00:00.100001+00:00', '2026-11-04T20:00:00Z'],
+  ['2026-11-04T20:00:00.100001+00:00', '2026-11-04T20:00:00.100000Z'],
+])('orders mixed inbox rows by actual latest message time: %s versus %s', (newer, older) => {
+  (useChatList as jest.Mock).mockReturnValue({ chats: [{ ...plan, last_message_at: newer }], loading: false, refetch: jest.fn(), removeChat: jest.fn() });
+  mount({ data: [{ ...event, lastAt: older }] });
+  const items = tree.root.findByType(FlatList).props.data;
+  expect(items.map((item: any) => item.t)).toEqual(['chat', 'community']);
+});
+it('preserves equal-time order across equivalent timestamp spellings', () => {
+  (useChatList as jest.Mock).mockReturnValue({ chats: [{ ...plan, last_message_at: '2026-11-04T20:00:00+00:00' }], loading: false, refetch: jest.fn(), removeChat: jest.fn() });
+  mount({ data: [{ ...event, lastAt: '2026-11-04T20:00:00Z' }] });
+  expect(tree.root.findByType(FlatList).props.data.map((item: any) => item.t)).toEqual(['chat', 'community']);
+});
+it('keeps a missing timestamp below a dated row without changing unread counts', () => {
+  (useChatList as jest.Mock).mockReturnValue({ chats: [plan], loading: false, refetch: jest.fn(), removeChat: jest.fn() });
+  mount({ data: [{ ...event, lastAt: '2026-11-04T20:00:00Z' }] });
+  const items = tree.root.findByType(FlatList).props.data;
+  expect(items.map((item: any) => item.t)).toEqual(['community', 'chat']);
+  expect(items[0].row.unread).toBe(event.unread); expect(items[1].chat.unread_count).toBe(plan.unread_count);
+});

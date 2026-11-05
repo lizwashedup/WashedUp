@@ -20,6 +20,7 @@ const wLogo = require('../../../assets/images/w-logo-waves.png');
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useChatList, ChatPreview } from '../../../hooks/useChatList';
+import { comparePreviewTimes } from '../../../lib/chatPreview';
 import { consumeChatListDirty } from '../../../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../../../constants/QueryKeys';
 import {
@@ -335,7 +336,7 @@ export default function ChatsScreen() {
     return [...chatItems, ...communityItems].sort((a, b) => {
       const ka = a.t === 'chat' ? a.chat.last_message_at ?? '' : a.row.lastAt ?? '';
       const kb = b.t === 'chat' ? b.chat.last_message_at ?? '' : b.row.lastAt ?? '';
-      return kb.localeCompare(ka);
+      return comparePreviewTimes(kb, ka);
     });
   }, [activeChats, communityRows, communityInbox, section]);
   // Circle chats are persistent (never is_past), so pastChats is always empty in
