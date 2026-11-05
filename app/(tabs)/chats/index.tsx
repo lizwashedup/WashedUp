@@ -5,7 +5,6 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   RefreshControl,
   BackHandler,
@@ -45,13 +44,12 @@ import { CommunityChatHub } from '../../../components/chats/CommunityChatHub';
 import { projectCommunityChatInbox } from '../../../lib/communityChatInbox';
 import { SkeletonChatList } from '../../../components/SkeletonCard';
 import ProfileButton from '../../../components/ProfileButton';
-import CircleCover from '../../../components/yours/circles/CircleCover';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
-import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
+import { AfterglowType } from '../../../constants/Typography';
 import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
-import { ChatInboxRow } from '../../../components/chats/ChatInboxRow';
+import { ChatRow } from '../../../components/chats/ChatListRow';
+import { styles, revised } from '../../../components/chats/chatInboxStyles';
 import { ChatInboxHeading, ChatInboxFilters } from '../../../components/chats/ChatInboxHeading';
-import { getPlanChatTiming } from '../../../lib/planChatExpiry';
 
 // Chats sections (spec section 5). Only shown when GROUPS_ENABLED; otherwise the
 // list behaves exactly as it ships today (events only, no segmented control).
@@ -95,36 +93,6 @@ function ChatSegments({
   );
 }
 
-function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'now';
-  if (diffMins < 60) return `${diffMins}m`;
-  if (diffHours < 24) return `${diffHours}h`;
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays}d`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function formatEventDate(dateString: string): string {
-  const d = new Date(dateString);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrowStart = new Date(todayStart.getTime() + 86400000);
-  const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  if (dateStart.getTime() === todayStart.getTime()) return `Today at ${timeStr}`;
-  if (dateStart.getTime() === tomorrowStart.getTime()) return `Tomorrow at ${timeStr}`;
-  const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  return `${dayStr} at ${timeStr}`;
-}
-
 // Route a chat row to its screen by kind. Circle chats use the gated circle
 // route stub; plan chats keep the existing /(tabs)/chats/[id] route.
 function chatHref(chat: ChatPreview): string {
@@ -134,114 +102,6 @@ function chatHref(chat: ChatPreview): string {
 }
 
 const ChatSeparator = () => <View style={[styles.separator, COMMUNITY_CHAT_GROUPING_ENABLED && revised.separator]} />;
-
-const ChatRow = React.memo(function ChatRow({
-  chat,
-  onPress,
-  onLongPress,
-  conversationFonts,
-}: {
-  conversationFonts?: AfterglowFontFamilies;
-  chat: ChatPreview;
-  onPress: () => void;
-  // Circle rows only (doc 120): long-press opens the delete-chat /
-  // leave-circle confirm. Undefined on plan rows, so they are untouched.
-  onLongPress?: () => void;
-}) {
-  const hasUnread = chat.unread_count > 0;
-  if (conversationFonts) {
-    const hours = chat.kind === 'event' && !chat.is_past
-      ? getPlanChatTiming(chat.start_time, chat.end_time).remainingHours : null;
-    return <ChatInboxRow
-      identity={`${chat.kind}:${chat.conversationId}`} title={chat.title}
-      preview={chat.last_message ?? 'Be the first to say hello.'}
-      timestamp={chat.last_message_at ? formatTime(chat.last_message_at) : null}
-      image={chat.image_url} person={chat.is_dm} unread={chat.unread_count}
-      fonts={conversationFonts} onPress={onPress} onLongPress={onLongPress}
-      metadata={chat.kind === 'event' ? formatEventDate(chat.start_time) : null}
-      lifecycle={hours !== null && hours > 0 ? `Chat closes in ${hours} ${hours === 1 ? 'hour' : 'hours'}` : null}
-      past={chat.is_past}
-    />;
-  }
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      onLongPress={onLongPress}
-      activeOpacity={0.7}
-      style={[styles.row, hasUnread && styles.rowUnread, chat.is_past && styles.rowPast]}
-    >
-      <View style={styles.avatarContainer}>
-        {chat.kind === 'circle' && !chat.is_dm ? (
-          // Real circle rows use the same monogram cover as the Yours > Circles
-          // directory, not the w-logo plan placeholder. (DMs fall through to the
-          // image branch to show the counterpart's face.)
-          <CircleCover name={chat.title} coverUrl={null} />
-        ) : chat.image_url ? (
-          <Image
-            source={{ uri: chat.image_url }}
-            style={styles.avatar}
-            contentFit="cover"
-          />
-        ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Image
-              source={require('../../../assets/images/w-logo-waves.png')}
-              style={styles.avatarIcon}
-              contentFit="contain"
-            />
-          </View>
-        )}
-      </View>
-
-      <View style={styles.rowContent}>
-        <View style={styles.rowTop}>
-          <View style={styles.titleRow}>
-            {hasUnread && <View style={styles.unreadDot} />}
-            <Text style={[styles.planTitle, chat.is_past && styles.textPast]} numberOfLines={1}>
-              {chat.title}
-            </Text>
-          </View>
-          {chat.last_message_at && (
-            <Text style={styles.timestamp}>{formatTime(chat.last_message_at)}</Text>
-          )}
-        </View>
-
-        <View style={styles.rowBottom}>
-          <Text style={[styles.preview, chat.is_past && styles.textPast]} numberOfLines={1}>
-            {chat.last_message ?? 'No messages yet'}
-          </Text>
-        </View>
-
-        {/* Plan date pill + the 48h expiry countdown are event-only. Circle
-            chats are persistent and have no plan date (start_time is just the
-            circle's created_at), so neither belongs on a circle row. */}
-        {chat.kind === 'event' && (
-          <>
-            <View style={styles.datePill}>
-              <Text style={styles.datePillText}>{formatEventDate(chat.start_time)}</Text>
-            </View>
-            {!chat.is_past && new Date(chat.start_time) < new Date() && (() => {
-              const hl = getPlanChatTiming(chat.start_time, chat.end_time).remainingHours;
-              if (hl === null || hl <= 0) return null;
-              return (
-                <Text style={styles.countdownText}>
-                  {`chat stays active for ${hl} more ${hl === 1 ? 'hour' : 'hours'}`}
-                </Text>
-              );
-            })()}
-          </>
-        )}
-      </View>
-
-      {hasUnread && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{chat.unread_count > 9 ? '9+' : chat.unread_count}</Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-});
 
 export default function ChatsScreen() {
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
@@ -749,195 +609,3 @@ export default function ChatsScreen() {
     </SafeAreaView>
   );
 }
-
-const revised = StyleSheet.create({
-  container: { backgroundColor: AfterglowColors.paper },
-  separator: { backgroundColor: AfterglowColors.subtleLine },
-});
-
-const styles = StyleSheet.create({
-  loadErrorCard: { marginHorizontal:20, marginTop:24, padding:24, borderRadius:24, backgroundColor:Colors.cardBg, borderWidth:1, borderColor:Colors.border, alignItems:'flex-start', gap:12 },
-  loadErrorIcon: { width:48, height:48, borderRadius:24, backgroundColor:Colors.accentSubtle, alignItems:'center', justifyContent:'center', marginBottom:4 },
-  loadErrorTitle: { fontFamily:Fonts.sansBold, fontSize:FontSizes.bodyLG, color:Colors.asphalt },
-  loadErrorBody: { fontFamily:Fonts.sans, fontSize:FontSizes.bodyMD, color:Colors.secondary },
-  loadErrorButton: { minHeight:48, paddingHorizontal:24, borderRadius:24, justifyContent:'center', alignItems:'center', marginTop:8 },
-  loadErrorButtonText: { fontFamily:Fonts.sansBold, fontSize:FontSizes.bodyMD, color:Colors.white },
-  communityStatus: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  communityStatusText: { flex: 1, fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary },
-  communityRetry: { minHeight: 44, justifyContent: 'center' },
-  communityRetryText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.terracotta },
-  container: { flex: 1, backgroundColor: '#FAF5EC' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#2C1810',
-  },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  listContent: { paddingBottom: 32 },
-
-  segmentRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 4,
-  },
-  segmentTab: { marginRight: 24, paddingVertical: 8 },
-  segmentLabel: {
-    fontFamily: Fonts.sansMedium,
-    fontSize: FontSizes.bodyMD,
-    color: Colors.tertiary,
-  },
-  segmentLabelOn: { color: Colors.asphalt, fontFamily: Fonts.sansBold },
-  segmentUnderline: {
-    height: 2.5,
-    backgroundColor: Colors.terracotta,
-    borderRadius: 2,
-    marginTop: 6,
-  },
-
-  sectionLabel: {
-    fontWeight: '700',
-    fontSize: 11,
-    color: '#B5522E',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-
-  pastHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  pastHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pastLabel: {
-    fontWeight: '600',
-    fontSize: 14,
-    color: '#78695C',
-  },
-
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  rowUnread: {
-    backgroundColor: '#FAF0E8',
-  },
-  rowPast: { opacity: 0.55 },
-
-  avatarContainer: { position: 'relative' },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: '#F5EDE0',
-  },
-  avatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  avatarIcon: {
-    width: 44,
-    height: 44,
-  },
-
-  rowContent: { flex: 1, gap: 2 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  titleRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 6 },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#B5522E',
-  },
-  planTitle: { fontWeight: '700', fontSize: 15, color: '#2C1810', flex: 1 },
-  textPast: { color: '#A09385' },
-  timestamp: { fontSize: 12, color: '#A09385' },
-
-  badge: {
-    backgroundColor: '#B5522E',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-  badgeText: { color: '#FFFFFF', fontWeight: '700', fontSize: 11 },
-
-  rowBottom: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  preview: { fontSize: 13, color: '#78695C', flex: 1 },
-  datePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F5EDE0',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginTop: 4,
-  },
-  datePillText: { fontSize: 10, fontWeight: '500', color: '#78695C' },
-  countdownText: {
-    fontSize: 12,
-    color: '#78695C',
-    marginTop: 2,
-  },
-  separator: { height: 1, backgroundColor: '#F5EDE0', marginLeft: 84 },
-
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 12,
-  },
-  emptyLogo: {
-    width: 96,
-    height: 96,
-    marginBottom: 8,
-  },
-  emptyTitle: { fontWeight: '700', fontSize: 20, color: '#2C1810', textAlign: 'center' },
-  emptySubtitle: { fontSize: 15, color: '#78695C', textAlign: 'center', lineHeight: 22 },
-  emptyButton: {
-    backgroundColor: '#B5522E',
-    paddingHorizontal: 28,
-    paddingVertical: 13,
-    borderRadius: 999,
-    marginTop: 8,
-  },
-  emptyButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-
-  noActiveState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 32,
-    gap: 12,
-  },
-  noActiveText: { fontSize: 15, color: '#78695C', textAlign: 'center' },
-  noActiveButton: {
-    backgroundColor: '#B5522E',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  noActiveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
-});
