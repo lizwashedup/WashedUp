@@ -59,7 +59,7 @@ export function useTabBadgeData() {
       current();
       if (response.error) throw response.error;
       if (!Array.isArray(response.data)) throw new Error('People requests unavailable');
-      const seen = await requestWithDeadline(getRequestsSeenAt(), 12_000);
+      const seen = await requestWithDeadline(getRequestsSeenAt(userId!), 12_000);
       current();
       return response.data.filter((row: { requested_at?: string }) => {
         const time = Date.parse(row?.requested_at ?? '');
