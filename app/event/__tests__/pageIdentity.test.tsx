@@ -36,6 +36,7 @@ jest.mock('../../../components/creator/pages/CreatorPageEventGate',()=>({__esMod
 jest.mock('../../../constants/FeatureFlags',()=>({get CREATOR_PAGES_ENABLED(){return mockEnabled;},get COMMUNITIES_ENABLED(){return mockCommunities;},MEMBER_STATE_ENABLED:true,SCENE_DISCOVERY_ENABLED:true}));
 jest.mock('../../../hooks/usePublicPageScope',()=>({usePublicPageScope:()=>({scope:mockScope,account:{viewerId:mockScope?.userId,isLoading:false,error:mockAccountError,retry:mockAccountRetry}})}));
 jest.mock('../../../hooks/useBlock',()=>({useBlock:()=>({blockUser:jest.fn()})}));
+jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>({viewerId:mockScope.userId,epoch:0,isLoading:false,error:null,isCurrent:mockScope.isCurrent})}));
 jest.mock('../../../lib/supabase',()=>({supabase:{auth:{getUser:async()=>({data:{user:{id:'member'}}})}}}));
 jest.mock('../../../lib/publishedPageIdentity',()=>({loadPublishedEventPageIdentities:(...a:unknown[])=>mockLinks(...a),publishedPageRoute:(p:any)=>`/organization/${p.pageId}?identity=page`}));
 jest.mock('../../../lib/publishedOrganizationPage',()=>({loadPublishedOrganizationPage:(...a:unknown[])=>mockRelated(...a)}));
