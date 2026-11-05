@@ -647,7 +647,7 @@ describe('root link-delivery lifetime', () => {
     jest.mocked(Linking.getInitialURL).mockReturnValue(initial.promise);
     let onUrl!: (event: { url: string }) => void;
     jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
-      onUrl = listener; return { remove: jest.fn() };
+      onUrl = listener; return { remove: jest.fn() } as ReturnType<typeof Linking.addEventListener>;
     });
     await mount();
     act(() => onUrl({ url: 'https://washedup.app/app/plan/new-plan?invitation=kept' })); await flush();
@@ -659,7 +659,7 @@ describe('root link-delivery lifetime', () => {
     let onUrl!: (event: { url: string }) => void;
     const remove = jest.fn();
     jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
-      onUrl = listener; return { remove };
+      onUrl = listener; return { remove } as ReturnType<typeof Linking.addEventListener>;
     });
     await mount(); await act(async () => tree!.unmount()); tree = undefined;
     act(() => onUrl({ url: 'https://washedup.app/app/plan/retired-plan' })); await flush();
