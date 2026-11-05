@@ -33,13 +33,14 @@ import { useUpdateCircle, isObsoleteCircleUpdate, type UpdateCircleScope } from 
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
 import { supabase } from '../../lib/supabase';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { pickCoverPhoto } from '../../lib/circles/pickCover';
 import { buildCircleCoverUrl } from '../../lib/circles/coverUrl';
 import CircleCover from '../yours/circles/CircleCover';
 
 const FEEDBACK = {
   pick: 'Couldn’t open your photos. Try adding a cover again.',
-  upload: 'Your cover didn’t upload, so your circle details haven’t been saved. Try again.',
+  upload: 'Couldn’t confirm your cover upload, so your circle details haven’t been saved. Try again.',
   save: 'Couldn’t confirm the save. Your details are still here; try again.',
   identity: 'Couldn’t confirm your account. Try again before saving.',
   checking: 'Checking your account…',
@@ -200,11 +201,16 @@ function NameCircleVisit({
         coverUploadId = cover.id;
         if (!cover.complete) {
           stage = 'identity';
-          const account = await supabase.auth.getUser();
+          const account = await requestWithDeadline(supabase.auth.getUser(), 12_000);
           if (!isCurrent() || pending.current !== attempt) return;
           if (account.error || account.data.user?.id !== userId) throw new Error(FEEDBACK.identity);
           stage = 'upload';
-          await uploadBase64ToStorage('circle-covers', `${circleId}/${cover.id}`, cover.base64, { upsert: true });
+          // A lost upload response is safe to retry at the same path with the same bytes.
+          // The identity update below remains pending until its own receipt arrives.
+          await requestWithDeadline(
+            uploadBase64ToStorage('circle-covers', `${circleId}/${cover.id}`, cover.base64, { upsert: true }),
+            30_000,
+          );
           if (!isCurrent() || pending.current !== attempt) return;
           cover.complete = true;
         }
