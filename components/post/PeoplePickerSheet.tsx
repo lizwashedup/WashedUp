@@ -5,7 +5,7 @@
  * picked people so the composer turns them into invite chips. Excludes anyone
  * already a chip on the plan.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Modal, Pressable, SectionList, ActivityIndicator, StyleSheet,
 } from 'react-native';
@@ -82,12 +82,19 @@ export default function PeoplePickerSheet(props: Props) {
 
 function ObservedPeoplePicker(props: Props) {
   const viewer = useObservedUser();
-  return <AccountPeoplePicker key={`${viewer.viewerId}:${viewer.epoch}`} {...props} viewer={viewer} />;
+  const closeHandler = useRef<(() => void) | null>(null);
+  // Account changes reset selections, not the presented native window. Replacing
+  // a visible Modal during identity loading can overlap iOS presentations.
+  return <Modal visible={props.visible} transparent animationType="slide" statusBarTranslucent
+    onRequestClose={() => closeHandler.current?.()}>
+    <AccountPeoplePicker key={`${viewer.viewerId}:${viewer.epoch}`} {...props} viewer={viewer} closeHandler={closeHandler} />
+  </Modal>;
 }
 
-function AccountPeoplePicker({ viewer, ...props }: Props & { viewer: ReturnType<typeof useObservedUser> }) {
+type CloseHandler = React.MutableRefObject<(() => void) | null>;
+function AccountPeoplePicker({ viewer, ...props }: Props & { viewer: ReturnType<typeof useObservedUser>; closeHandler: CloseHandler }) {
   const userId = !viewer.error && !viewer.isLoading ? viewer.viewerId : undefined;
-  const query = useYoursGrid(userId);
+  const query = useYoursGrid(userId, { userId: userId ?? '', epoch: viewer.epoch, isCurrent: viewer.isCurrent });
   const [retrying, setRetrying] = useState(false);
   const retryRef = useRef(false);
   const mounted = useRef(false);
@@ -115,7 +122,6 @@ function AccountPeoplePicker({ viewer, ...props }: Props & { viewer: ReturnType<
 }
 
 function PeoplePickerContents({
-  visible,
   excludeIds,
   onClose,
   onConfirm,
@@ -125,7 +131,9 @@ function PeoplePickerContents({
   onRetry,
   isCurrent,
   appearance,
+  closeHandler,
 }: Props & {
+  closeHandler: CloseHandler;
   people: YoursGridPerson[];
   loading: boolean;
   error: boolean;
@@ -214,6 +222,10 @@ function PeoplePickerContents({
     if (!mounted.current || closed.current) return;
     closed.current = true; setSelected(new Set()); onClose();
   };
+  useLayoutEffect(() => {
+    closeHandler.current = close;
+    return () => { if (closeHandler.current === close) closeHandler.current = null; };
+  });
 
   const confirm = () => {
     if (!mounted.current || closed.current || !latest.current.isCurrent() || confirmed.current) return;
@@ -233,7 +245,6 @@ function PeoplePickerContents({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
       <View style={styles.backdrop}>
         <Pressable style={styles.backdropTap} onPress={close} accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} accessibilityViewIsModal>
@@ -295,7 +306,6 @@ function PeoplePickerContents({
           )}
         </View>
       </View>
-    </Modal>
   );
 }
 

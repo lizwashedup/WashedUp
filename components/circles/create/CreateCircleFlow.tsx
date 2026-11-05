@@ -41,7 +41,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   const readyRef = useRef(ready); readyRef.current = ready;
   const current = useCallback(() => live.current && readyRef.current && viewer.isCurrent() && visitRef.current === visit && visit.focused && !visit.retired, [visit, viewer.isCurrent]);
   const userId = ready ? viewer.viewerId : null;
-  const grid = useYoursGrid(userId), people = grid.data ?? [];
+  const grid = useYoursGrid(userId, { userId: userId ?? '', epoch: viewer.epoch, isCurrent: viewer.isCurrent }), people = grid.data ?? [];
   const createCircle = useCreateCircle(userId), setSuggestionStatus = useSetSuggestionStatus(userId);
   const [step, setStep] = useState(1), pageRevision = useRef(0);
   const [name, setName] = useState(''), [description, setDescription] = useState('');
