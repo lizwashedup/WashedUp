@@ -47,7 +47,7 @@ describe('redirectSystemPath (universal-link routing)', () => {
   });
 
   it('keeps the creator app-door guarantee', () => {
-    expect(call('https://washedup.app/app/creator/events')).toBe('/(creator)/events');
+    expect(call('https://washedup.app/app/creator/events')).toBe('/(tabs)/friends/manage/(tools)/events');
   });
 
   it('routes a Stripe success return into the native checkout handoff', () => {
