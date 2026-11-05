@@ -1,9 +1,9 @@
 import { ScaledText } from '../../ScaledText';
 import React, { useState, useMemo, useRef } from 'react';
-import { View, TextInput, FlatList, StyleSheet, ActivityIndicator, ScrollView, useWindowDimensions, Pressable } from 'react-native';
+import { View, TextInput, FlatList, StyleSheet, ActivityIndicator, ScrollView, useWindowDimensions, Pressable, Platform } from 'react-native';
 import { Search } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
-import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
+import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilies } from '../../../constants/Typography';
 import PersonRow from './PersonRow';
 import { usePlanHistoryBacklog } from '../../../hooks/usePlanHistoryBacklog';
 import type { PeopleConnectionScope } from '../../../hooks/usePeopleConnectionMutations';
@@ -26,23 +26,30 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
   const loading = backlog.isLoading || visit.reading;
   const failed = backlog.isError && !loading;
   const s = useMemo(() => appearance ? { ...styles, ...backlogAppearance(appearance.fonts) } : styles, [appearance?.fonts]);
+  // Apply the full iOS text scale once, including the native placeholder,
+  // without replacing the focused input or its controlled search value.
+  const inputType = Platform.OS === 'ios' ? {
+    fontSize: (appearance ? AfterglowType.body.fontSize : FontSizes.bodyMD) * fontScale,
+    lineHeight: (appearance ? AfterglowType.body.lineHeight : LineHeights.bodyMD) * fontScale,
+  } : undefined;
   const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
   return (
     <View style={s.wrap}>
       <View style={s.searchBox}>
         <Search size={18} color={appearance ? AfterglowColors.muted : Colors.tertiary} />
-        <TextInput key={fontScale} value={q} onChangeText={value => {
+        <TextInput value={q} allowFontScaling={Platform.OS === 'ios' ? false : undefined} onChangeText={value => {
           const next = value.trim().toLowerCase();
           if (next !== queryRef.current) { queryRef.current = next; visit.retireQuery(); }
           setInput({ userId, value });
         }} placeholder="Search people from your plans" placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
-          autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={s.input} />
+          autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={[s.input, inputType]} />
       </View>
       {loading ? <ScrollView style={s.recovery} contentContainerStyle={s.feedback} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><ScaledText style={s.empty}>Loading people from your plans…</ScaledText></ScrollView> : failed ?
-        <ScrollView style={s.recovery} contentContainerStyle={s.feedback} keyboardShouldPersistTaps="handled" accessibilityLiveRegion="polite"><ScaledText style={s.feedbackTitle}>Couldn’t load people from your plans.</ScaledText><ScaledText style={s.empty}>Your search is still here.</ScaledText>
-          <Pressable style={s.retry} accessibilityRole="button" accessibilityLabel="Try again to load people from your plans" onPress={() => { void visit.refresh(backlog.refetch); }}>
+        <View style={s.recovery}>
+          <ScrollView style={s.recovery} contentContainerStyle={s.feedback} keyboardShouldPersistTaps="handled" accessibilityLiveRegion="polite"><ScaledText style={s.feedbackTitle}>Couldn’t load people from your plans.</ScaledText><ScaledText style={s.empty}>Your search is still here.</ScaledText></ScrollView>
+          <Pressable style={[s.retry, s.recoveryRetry]} accessibilityRole="button" accessibilityLabel="Try again to load people from your plans" onPress={() => { void visit.refresh(backlog.refetch); }}>
             <ScaledText numberOfLines={1} style={s.retryText}>Try again</ScaledText>
-          </Pressable></ScrollView> : (
+          </Pressable></View> : (
         <FlatList data={list} keyExtractor={p => p.user_id} keyboardShouldPersistTaps="handled" contentContainerStyle={s.content}
           extraData={visit.rows} renderItem={({ item }) => {
             const status = visit.rows[item.user_id];
@@ -70,6 +77,7 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
 
 const styles = StyleSheet.create({
   recovery: { flex: 1 },
+  recoveryRetry: { flexShrink: 0, marginBottom: 16, paddingVertical: 10 },
   content: { paddingBottom: 24 },
   feedback: { paddingTop: 24, paddingBottom: 24, gap: 8 },
   feedbackTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.asphalt },
