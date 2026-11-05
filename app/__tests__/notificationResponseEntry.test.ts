@@ -1,14 +1,9 @@
-import { communityJoinPushRoute } from '../../lib/communityJoinNotification';
-import { memberReactionPushRoute } from '../../lib/memberReactionPushRoute';
+import { notificationDestination } from '../../lib/notificationDestination';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 jest.mock('../../lib/supabase', () => ({ supabase: {} }));
-import { attendeeMessagePushRoute } from '../../lib/attendeeMessageNotification';
-import { organizationPageUpdatePushRoute } from '../../lib/organizationPageUpdate';
-import { pageInvitationPushRoute } from '../../lib/pageInvitationNotification';
-import { communityChatPushRoute } from '../../lib/communityChatPushRoute';
 const source = fs.readFileSync(path.join(__dirname, '../_layout.tsx'), 'utf8');
 const start = source.indexOf('  useEffect(() => {\n    // OneSignal click handler.');
 const end = source.indexOf('\n  // Badge clearing moved', start);
@@ -19,8 +14,8 @@ function mount() {
   const push = jest.fn(), stopExpo = jest.fn(), add = jest.fn(), remove = jest.fn();
   let expo: ((data: Record<string, unknown>) => void) | undefined, cleanup: () => void = () => {};
   const subscribeExpoNotificationResponses = jest.fn((callback: (data: Record<string, unknown>) => void) => { expo = callback; return stopExpo; });
-  const context = { useEffect: (run: () => () => void) => { cleanup = run(); }, safePush: push,
-    communityJoinPushRoute, attendeeMessagePushRoute, organizationPageUpdatePushRoute, pageInvitationPushRoute, communityChatPushRoute, memberReactionPushRoute,
+  const context = { notificationDestination, useEffect: (run: () => () => void) => { cleanup = run(); }, safePush: push,
+
     COMMUNITIES_ENABLED: true, CREATOR_PAGES_ENABLED: true, YOURS_PAGE_ENABLED: true, COMMUNITY_CHAT_GROUPING_ENABLED: false,
     initOneSignal: async () => true, OneSignal: { Notifications: { addEventListener: add, removeEventListener: remove } },
     subscribeExpoNotificationResponses, __DEV__: false };
