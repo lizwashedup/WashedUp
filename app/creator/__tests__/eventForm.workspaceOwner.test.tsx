@@ -7,7 +7,7 @@ let mockSettingsOpen=true,mockSavedCapacity:number|null=null;
 const mockTemplateSave=jest.fn(),mockTemplateRead=jest.fn(),mockLegacyTemplate=jest.fn();let mockTemplate:any=null;
 const mockPoster=jest.fn();let mockTeamEntry=false;const mockPush=jest.fn(),mockReplace=jest.fn(),mockDismissTo=jest.fn(),mockCanGoBack=jest.fn();
 let mockEventStatus='Draft';let mockStatusReceipt:any=null;const mockStatusWrite=jest.fn(),mockStatusRead=jest.fn(),mockRefundAccess=jest.fn(),mockRefund=jest.fn();
-let mockCurrent=true;let mockAlert:any;const mockReadiness=jest.fn(),mockPayout=jest.fn(),mockTiers=jest.fn();
+let mockCurrent=true;let mockAlert:any;let mockBlocksProps:any;const mockReadiness=jest.fn(),mockPayout=jest.fn(),mockTiers=jest.fn();
 const mockScope={userId:mockUser,isCurrent:()=>mockCurrent},mockBack=jest.fn(),mockPublish=jest.fn(),mockLegacyUpdate=jest.fn(),mockSave=jest.fn(),mockStateRead=jest.fn(),mockAttemptRead=jest.fn(),mockStorage=new Map<string,string>();let mockCounter=0;
 jest.mock('expo-router',()=>({useRouter:()=>({back:mockBack,push:mockPush,replace:mockReplace,dismissTo:mockDismissTo,canGoBack:mockCanGoBack}),useLocalSearchParams:()=>mockRouteParams??({pageId:mockPageId,id:mockEventId,team:mockTeamEntry?'1':undefined}),useFocusEffect:(fn:()=>void)=>require('react').useEffect(fn,[fn]),Stack:{Screen:()=>null},Redirect:()=>null}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
@@ -18,7 +18,7 @@ jest.mock('lucide-react-native',()=>({ArrowLeft:()=>null,Check:()=>null,Plus:()=
 jest.mock('../../../components/ProfileButton',()=>({__esModule:true,default:()=>null}));
 jest.mock('../../../components/BrandedAlert',()=>({BrandedAlert:(props:any)=>{mockAlert=props;return null;}}));
 jest.mock('../../../components/keyboard/KeyboardDoneBar',()=>({KEYBOARD_DONE_ACCESSORY_ID:'done'}));
-jest.mock('../../../components/creator/DescriptionBlocksEditor',()=>({DescriptionBlocksEditor:()=>null}));
+jest.mock('../../../components/creator/DescriptionBlocksEditor',()=>({DescriptionBlocksEditor:(props:any)=>{mockBlocksProps=props;return null;}}));
 jest.mock('../../../components/composer/EditorialTitleField',()=>({__esModule:true,default:(p:any)=>require('react').createElement(require('react-native').TextInput,p)}));
 jest.mock('../../../components/composer/CollapsibleCalendar',()=>({__esModule:true,default:()=>null}));
 jest.mock('../../../components/composer/TimePicker',()=>({__esModule:true,default:()=>null}));
@@ -145,4 +145,82 @@ it('keeps partial-save guidance visible and blocks publication until the draft i
  expect(tree.root.findAllByType(Text).some(n=>n.props.accessibilityRole==='alert'&&String(n.props.children).includes('event type or capacity'))).toBe(true);
  await act(async()=>{await button('publish it')!.props.onPress();});expect(mockAlert.title).toBe('Review draft settings');expect(mockLegacyUpdate).not.toHaveBeenCalled();
  await act(async()=>{await button('keep it a draft')!.props.onPress();});expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);expect(mockBack).toHaveBeenCalledTimes(1);
+});
+
+const previewAction=()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Preview as guest')!.props.onPress;
+const runDraftEntry=(entry:string)=>entry==='preview'?previewAction()():mockBlocksProps.onUnlockMedia(entry);
+it.each(['preview','photos','video'])('retains free RSVPs and the capacity when %s first saves a draft',async entry=>{
+ await prepareLegacyDraft();await act(async()=>{await runDraftEntry(entry);});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockCreate.mock.calls[0][2]).toBe(false);
+ expect(mockSetOffer).toHaveBeenCalledWith(mockEventId,'free_event');expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);
+ expect(mockLegacyRead).toHaveBeenCalledWith(mockEventId);
+ expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}${entry==='photos'?'&openPhotos=1':''}`);
+ if(entry==='preview')expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
+ else expect(mockPush).not.toHaveBeenCalled();
+});
+it.each(['preview','photos','video'])('keeps %s on the confirmed draft when its settings response fails',async entry=>{
+ await prepareLegacyDraft();mockSetCapacity.mockRejectedValue(new Error('Response lost'));
+ await act(async()=>{await runDraftEntry(entry);});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockPush).not.toHaveBeenCalled();
+ expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}&draftSettings=check`);
+ await act(async()=>{await runDraftEntry(entry);});expect(mockCreate).toHaveBeenCalledTimes(1);
+});
+it.each(['preview','photos'])('does not create from %s before settings are available and retries without losing choices',async entry=>{
+ mockSettingsOpen=false;await prepareLegacyDraft();await act(async()=>{await runDraftEntry(entry);});
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();
+ expect(mockAlert.title).toBe('Settings aren’t ready');
+ mockSettingsOpen=true;await act(async()=>{await runDraftEntry(entry);});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockSetOffer).toHaveBeenCalledWith(mockEventId,'free_event');expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);
+});
+it.each(['preview','photos'])('shares an immediate draft-action lock when %s is tapped with another action',async entry=>{
+ await prepareLegacyDraft();
+ const preview=previewAction(),media=mockBlocksProps.onUnlockMedia,save=button('save it as a draft')!.props.onPress;
+ await act(async()=>{await Promise.all([entry==='preview'?preview():media('photos'),save(),preview(),media('video')]);});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockSetOffer).toHaveBeenCalledTimes(1);expect(mockSetCapacity).toHaveBeenCalledTimes(1);
+ expect(mockReplace).toHaveBeenCalledTimes(1);expect(mockDismissTo).not.toHaveBeenCalled();
+});
+it.each(['preview','photos'])('does not continue %s after the initiating creator visit retires',async entry=>{
+ await prepareLegacyDraft();mockSetOffer.mockImplementation(async()=>{mockCurrent=false;});
+ await act(async()=>{await runDraftEntry(entry);});
+ expect(mockSetCapacity).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
+});
+async function prepareExistingDraft(status='Draft'){
+ mockPagesEnabled=false;mockRouteParams={id:mockEventId};
+ mockAccess={hasLeaderGrant:false,hasEventHostGrant:true,ledCommunities:[],isRevoked:false};
+ mockSource={...fields,id:mockEventId,status,community_id:null,ticket_capacity:12};await mount();
+ act(()=>button('free event')!.props.onPress());
+ act(()=>tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Event capacity')!.props.onChangeText('24'));
+}
+it('saves the current settings of an existing draft before preview',async()=>{
+ await prepareExistingDraft();await act(async()=>{await previewAction()();});
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockLegacyUpdate).toHaveBeenCalledTimes(1);
+ expect(mockSetOffer).toHaveBeenCalledWith(mockEventId,'free_event');expect(mockSetCapacity).toHaveBeenCalledWith(mockEventId,24);
+ expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
+});
+it('keeps existing draft choices editable when preview cannot confirm their settings',async()=>{
+ await prepareExistingDraft();mockSetCapacity.mockRejectedValueOnce(new Error('Response lost'));
+ await act(async()=>{await previewAction()();});
+ expect(mockPush).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();
+ expect(tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Event capacity')!.props.value).toBe('24');
+ expect(tree.root.findAllByType(Text).some(n=>n.props.accessibilityRole==='alert'&&String(n.props.children).includes('event type or capacity'))).toBe(true);
+ await act(async()=>{await button('publish it')!.props.onPress();});expect(mockAlert.title).toBe('Review draft settings');
+ await act(async()=>{await previewAction()();});expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
+});
+it('previews the saved live event without writing its unsaved settings',async()=>{
+ await prepareExistingDraft('Live');await act(async()=>{await previewAction()();});
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockLegacyUpdate).not.toHaveBeenCalled();expect(mockSetOffer).not.toHaveBeenCalled();expect(mockSetCapacity).not.toHaveBeenCalled();
+ expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
+});
+
+it('keeps Save draft exclusive when preview and media are tapped before it finishes',async()=>{
+ await prepareLegacyDraft();const save=button('save it as a draft')!.props.onPress,preview=previewAction(),media=mockBlocksProps.onUnlockMedia;
+ await act(async()=>{await Promise.all([save(),preview(),media('photos')]);});
+ expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockSetCapacity).toHaveBeenCalledTimes(1);
+ expect(mockDismissTo).toHaveBeenCalledTimes(1);expect(mockReplace).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
+});
+it('opens the confirmed preview when replacement retires the creation screen synchronously',async()=>{
+ await prepareLegacyDraft();mockReplace.mockImplementationOnce(()=>{mockCurrent=false;});
+ await act(async()=>{await previewAction()();});
+ expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}`);
+ expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
 });
