@@ -1,3 +1,5 @@
+import { compareChatTimestamps } from './chatTimestamp';
+
 /**
  * Pure ordering rules shared by the live chat readers. Database rows use the
  * compound `(created_at, id)` order so a page boundary cannot lose messages
@@ -17,9 +19,8 @@ export interface ChatPageCursor {
 }
 
 export function compareChatSequence(a: ChatSequenceItem, b: ChatSequenceItem): number {
-  return a.created_at === b.created_at
-    ? a.id.localeCompare(b.id)
-    : a.created_at.localeCompare(b.created_at);
+  const byTime = compareChatTimestamps(a.created_at, b.created_at);
+  return byTime || a.id.localeCompare(b.id);
 }
 
 /** Turns a newest-first database page back into the list's oldest-first order. */
