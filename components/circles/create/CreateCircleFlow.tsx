@@ -1,6 +1,7 @@
 /** The existing people -> identity -> invite-policy Circle creation journey. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, ScrollView } from 'react-native';
+import { View, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, ScrollView } from 'react-native';
+import { ScaledText as Text } from '../../ScaledText';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
@@ -173,10 +174,10 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   const primaryLabel = step < TOTAL_STEPS ? COPY.circleCreateNext : appearance ? 'Create circle' : COPY.circleCreateMake;
   const headerTitle = appearance ? 'New circle' : selectedPeople.length > 0 ? COPY.circleCreateBuildTitleN(selectedPeople.length + 1) : COPY.circleCreateBuildTitle;
   const button = (label: string, action: () => void, secondary = false, disabled = false) => <Pressable onPress={action} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={[secondary ? styled.secondary : styled.primary, disabled && styled.primaryDisabled]}><Text numberOfLines={1} style={secondary ? styled.secondaryLabel : styled.primaryLabel}>{label}</Text></Pressable>;
-  const loading = (label: string) => <View style={styled.status}><ActivityIndicator color={accent}/><Text style={styled.body}>{label}</Text></View>;
+  const loading = (label: string) => <ScrollView style={styled.flex} contentContainerStyle={styled.status}><ActivityIndicator color={accent}/><Text style={styled.body}>{label}</Text></ScrollView>;
   const renderBody = () => {
     if (viewer.isLoading) return loading('Checking your account…');
-    if (!ready) return <View style={styled.status}><Text style={styled.body}>Couldn’t check your account.</Text>{button('Try again', () => { if (live.current) void viewer.retry(); }, true)}</View>;
+    if (!ready) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text style={styled.body}>Couldn’t check your account.</Text>{button('Try again', () => { if (live.current) void viewer.retry(); }, true)}</ScrollView>;
     if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Check your circles</Text><Text style={styled.body}>We couldn’t confirm whether your circle was created. Check your circles before starting again.</Text>{button('View circles', exit)}</ScrollView>;
     if (receipt) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Circle created</Text><Text style={styled.body}>{receipt.policyApplied && receipt.coverApplied ? 'Your circle is ready.' : 'Your circle is there. We couldn’t finish saving these details:'}</Text>
       {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}{!receipt.coverApplied && <Text style={styled.detail}>Cover photo</Text>}
@@ -186,7 +187,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
       {button('View circle', () => openCircle(receipt), true)}
     </ScrollView>;
     if (grid.isLoading) return loading('Loading your people…');
-    if (grid.isError) return <View style={styled.status}><Text accessibilityRole="alert" style={styled.body}>Your people didn’t load.</Text>{button(retryingPeople ? 'Trying again…' : 'Try again', () => { void retryPeople(); }, true, retryingPeople)}</View>;
+    if (grid.isError) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text accessibilityRole="alert" style={styled.body}>Your people didn’t load.</Text>{button(retryingPeople ? 'Trying again…' : 'Try again', () => { void retryPeople(); }, true, retryingPeople)}</ScrollView>;
     if (step === 1) return <PeopleStep people={people} selected={selectedIds} onToggle={toggleSelected} onAddPeople={exit} appearance={appearance}/>;
     if (step === 2) return <IdentityStep name={name} description={description} coverPreviewUri={coverPreviewUri} onName={value => { if (draftEditable()) setName(value); }} onDescription={value => { if (draftEditable()) setDescription(value); }} onPickCover={() => { void onPickCover(); }} picking={working === 'photos'} pickError={pickError} appearance={appearance}/>;
     return <PermissionsStep circleName={name.trim()} policy={policy} onPolicy={value => { if (draftEditable()) setPolicy(value); }} selectedPeople={selectedPeople} adminIds={adminIds} onToggleAdmin={toggleAdmin} appearance={appearance}/>;
@@ -194,7 +195,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   return <SafeAreaView style={styled.container} edges={['top']}>
     <View style={styled.header}>
       <Pressable onPress={back} style={styled.back} accessibilityRole="button" accessibilityLabel={closeAction ? 'Close circle creation' : 'Back'}>{closeAction ? <X size={24} color={ink}/> : <ChevronLeft size={24} color={ink}/>}</Pressable>
-      <Text style={styled.headerTitle}>{headerTitle}</Text>
+      <Text style={styled.headerTitle} numberOfLines={1}>{headerTitle}</Text>
       {!receipt && !unconfirmed && (appearance ? <Text accessibilityLabel={`Step ${step} of ${TOTAL_STEPS}`} style={styled.progress}>{step} of {TOTAL_STEPS}</Text> : <View style={styled.dots}>{Array.from({ length: TOTAL_STEPS }).map((_, i) => <View key={i} style={[styled.dot, i + 1 === step && styled.dotOn]}/>)}</View>)}
     </View>
     <KeyboardAvoidingView style={styled.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -210,7 +211,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   </SafeAreaView>;
 }
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.parchment }, flex: { flex: 1 },
+  container: { flex: 1, backgroundColor: Colors.parchment }, flex: { flex: 1, minHeight: 0 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
   back: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { flex: 1, minWidth: 0, fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt },
@@ -221,7 +222,7 @@ const styles = StyleSheet.create({
   primary: { minHeight: CIRCLE_CREATE.footerBtnHeight, borderRadius: 999, backgroundColor: Colors.terracotta, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 16 }, primaryDisabled: { opacity: 0.4 },
   primaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   secondary: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderRadius: 4, borderColor: Colors.terracotta, alignItems: 'center', justifyContent: 'center' }, secondaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
-  status: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 }, body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary },
+  status: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 }, body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary },
   completed: { flexGrow: 1, padding: 24, gap: 16 }, completedTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt }, detail: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt }, error: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
 });
 function afterglow(fonts: AfterglowFontFamilies) { return StyleSheet.create({
