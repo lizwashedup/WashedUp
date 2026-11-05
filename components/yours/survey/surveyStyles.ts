@@ -109,6 +109,7 @@ export const styles = StyleSheet.create({
 
   // ── Body + footer ──
   body: { flex: 1 },
+  scrollingSections: { flexGrow: 1 },
   bodyContent: { paddingHorizontal: 24, paddingTop: 18, paddingBottom: 8, flexGrow: 1 },
   footer: {
     paddingHorizontal: 24,
