@@ -1,3 +1,5 @@
+import { usePlanEditDraft } from '../../hooks/usePlanEditDraft';
+import { AGE_RANGES, ageRangesToMinMax, type AgeRange } from '../../lib/planEditDraft';
 import { fetchPlanDetail, fetchMembers, type PlanDetail, type Member } from '../../lib/planDetailData';
 import { legacyStyles, legacyJoinStyles, ticketStyles } from '../../components/plans/planDetailStyles';
 import { legacyManagePlacesStyles, legacyManageStyles, legacyDuplicateSheetStyles } from '../../components/plans/managePlanStyles';
@@ -99,7 +101,7 @@ import {
 } from '../../lib/waitlistExceptions';
 import { WAITLIST_MANAGER_KEY } from '../../constants/QueryKeys';
 import { isPlanPast } from '../../lib/planTime';
-import { getLAWallParts, isValidLAWallTime, laWallTimeToUTC } from '../../lib/laDate';
+import { isValidLAWallTime, laWallTimeToUTC } from '../../lib/laDate';
 import { showAddToCalendar } from '../../lib/addToCalendar';
 // Lazy-load react-native-map-link so older production binaries (built before
 // this dep was added) don't crash when this screen's module is imported.
@@ -121,50 +123,6 @@ const MANAGE_CATEGORIES = [
 // editing never silently truncates a description created at the higher cap.
 const EDIT_DESC_LIMIT = 2000;
 const EDIT_DESC_WARN_MARGIN = 200; // counter turns warn-colored within this many chars of the cap
-
-const AGE_RANGES = ['All Ages', '21+', '20s', '30s', '40s', '50s', '60s', '70+'] as const;
-type AgeRange = typeof AGE_RANGES[number];
-
-const AGE_BUCKETS: Record<Exclude<AgeRange, 'All Ages'>, [number, number]> = {
-  '21+': [21, 99],
-  '20s': [20, 29],
-  '30s': [30, 39],
-  '40s': [40, 49],
-  '50s': [50, 59],
-  '60s': [60, 69],
-  '70+': [70, 99],
-};
-
-function ageRangesToMinMax(ranges: AgeRange[]): { min: number | null; max: number | null } {
-  if (ranges.length === 0 || ranges.includes('All Ages')) return { min: null, max: null };
-  let min = 99, max = 0;
-  for (const r of ranges) {
-    const b = AGE_BUCKETS[r as Exclude<AgeRange, 'All Ages'>];
-    if (b) {
-      if (b[0] < min) min = b[0];
-      if (b[1] > max) max = b[1];
-    }
-  }
-  return { min, max };
-}
-
-function minMaxToAgeRanges(min: number | null, max: number | null): AgeRange[] {
-  if (min === null && max === null) return ['All Ages'];
-  const entries = Object.entries(AGE_BUCKETS) as [Exclude<AgeRange, 'All Ages'>, [number, number]][];
-  for (const [range, [bMin, bMax]] of entries) {
-    if (bMin === min && bMax === max) return [range];
-  }
-  for (let i = 0; i < entries.length; i++) {
-    for (let j = i + 1; j < entries.length; j++) {
-      const [a, [aMin, aMax]] = entries[i];
-      const [b, [bMin, bMax]] = entries[j];
-      if (Math.min(aMin, bMin) === min && Math.max(aMax, bMax) === max) {
-        return [a, b];
-      }
-    }
-  }
-  return []; // Saved bounds do not fit a preset; keep them until explicitly changed.
-}
 
 // ─── Date/time picker constants ───────────────────────────────────────────────
 // Keep display values aligned with the shared creation controls.
@@ -407,33 +365,14 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [departureError, setDepartureError] = useState<string | null>(null);
   const [departureResult, setDepartureResult] = useState<PlanDepartureResult | null>(null);
 
-  const [editTitle, setEditTitle] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editCreatorMessage, setEditCreatorMessage] = useState('');
-  const [editLocation, setEditLocation] = useState('');
-  const [editLocationLat, setEditLocationLat] = useState<number | null>(null);
-  const [editLocationLng, setEditLocationLng] = useState<number | null>(null);
-  const [editTicketUrl, setEditTicketUrl] = useState('');
-  // Plan photo — mirrors PlanComposerV2's imageUrl/imageLoading pair
-  const [editImageUrl, setEditImageUrl] = useState<string | null>(null);
-  // Date / time editing keeps the shared calendar and direct-entry time sheet.
-  const [editDateMonth, setEditDateMonth] = useState(0);
-  const [editDateDay, setEditDateDay] = useState(1);
-  const [editDateYear, setEditDateYear] = useState(new Date().getFullYear());
-  const [editTimeHour, setEditTimeHour] = useState(7);
-  const [editTimeMinute, setEditTimeMinute] = useState<string>('00');
-  const [editTimePeriod, setEditTimePeriod] = useState<'AM' | 'PM'>('PM');
-  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
-  const [showEditTimePicker, setShowEditTimePicker] = useState(false);
+  const draft = usePlanEditDraft();
+
   const managePlacesRef = React.useRef<GooglePlacesAutocompleteRef>(null);
-  const [editCategory, setEditCategory] = useState<string | null>(null);
-  const [editGenderRule, setEditGenderRule] = useState('mixed');
-  const [editAgeRanges, setEditAgeRanges] = useState<AgeRange[]>([]);
-  const [editGroupSize, setEditGroupSize] = useState(6);
+
   const edit = usePlanEdit({
     eventId: id, viewerId: currentUserId, isCurrent: identity.isCurrent,
     canEdit: () => !!plan && isCreator && contextReady && !isClosedPlan,
-    onPhoto: setEditImageUrl,
+    onPhoto: draft.setImageUrl,
     onCommitted: () => {
       void Promise.resolve(queryClient.invalidateQueries({ queryKey: ['events', 'detail', id, currentUserId, identity.epoch] })).catch(error => logError(error, 'plan.edit.refresh'));
     },
@@ -453,17 +392,13 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   }, [manageModalVisible, edit.error, edit.unknown]);
   const closeManageModal = () => {
     if (!edit.close()) return false;
-    Keyboard.dismiss(); setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
+    Keyboard.dismiss(); setManageModalVisible(false); draft.setDatePickerVisible(false); draft.setTimePickerVisible(false);
     return true;
   };
   useFocusEffect(useCallback(() => () => {
-    setManageModalVisible(false); setShowEditDatePicker(false); setShowEditTimePicker(false);
+    setManageModalVisible(false); draft.setDatePickerVisible(false); draft.setTimePickerVisible(false);
   }, []));
-  const [editOriginal, setEditOriginal] = useState<PlanDetail | null>(null);
-  const [editAgeChanged, setEditAgeChanged] = useState(false);
-  const [editTimeChanged, setEditTimeChanged] = useState(false);
-  const [editGroupChanged, setEditGroupChanged] = useState(false);
-  const [editFeaturedChanged, setEditFeaturedChanged] = useState(false);
+
   const [showReport, setShowReport] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [shareAfterJoinVisible, setShareAfterJoinVisible] = useState(false);
@@ -483,9 +418,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     setBrandedAlert((alert) => ({ ...alert, visible: false }));
   };
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
-  const [featuredToggle, setFeaturedToggle] = useState(false);
-  const [featuredType, setFeaturedType] = useState<'washedup_event' | 'birthday_party' | 'special_event' | 'plan_in_making'>('washedup_event');
-  const [featuredCapacity, setFeaturedCapacity] = useState(FEATURED_DEFAULT_CAPACITY);
+
   const [featuredSaving, setFeaturedSaving] = useState(false);
   // A missing or invalid upload uses the existing branded Plan artwork.
   const [failedHeroUrl, setFailedHeroUrl] = useState<string | null>(null);
@@ -845,7 +778,6 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       // Clear local waitlist state since the trigger deleted the row
       waitlist.clearAfterJoining();
 
-
       if (result.greetingUnconfirmed) {
         setShareAfterJoinPending(false);
         setShareAfterJoinVisible(false);
@@ -997,40 +929,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     if (!edit.begin()) return;
     if (edit.unknown) { setManageModalVisible(true); return; }
     const isCurrentEdit = edit.capture();
-    setEditOriginal({ ...plan });
-    setEditAgeChanged(false); setEditTimeChanged(false); setEditGroupChanged(false); setEditFeaturedChanged(false);
-    setFeaturedToggle(plan.is_featured);
-    setFeaturedType(plan.featured_type ?? 'washedup_event');
-    setFeaturedCapacity(plan.is_featured ? (plan.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
-    setEditTitle(plan.title);
-    setEditDescription(plan.description ?? '');
-    setEditCreatorMessage(plan.host_message ?? '');
-    setEditLocation(plan.location_text ?? '');
-    setEditLocationLat(plan.location_lat ?? null);
-    setEditLocationLng(plan.location_lng ?? null);
-    setEditTicketUrl(plan.tickets_url ?? '');
-    setEditImageUrl(plan.image_url ?? null);
+    const initialized = draft.initialize(plan);
     setTimeout(() => {
       if (isCurrentEdit()) managePlacesRef.current?.setAddressText(plan.location_text ?? '');
     }, 100);
-    setEditCategory(plan.primary_vibe ? plan.primary_vibe.charAt(0).toUpperCase() + plan.primary_vibe.slice(1) : null);
-    setEditGenderRule(plan.gender_rule ?? 'mixed');
-    setEditAgeRanges(minMaxToAgeRanges(plan.target_age_min, plan.target_age_max));
-    setEditGroupSize(plan.max_invites ?? 6);
-    // Seed the date / time pickers from the existing plan.start_time
-    const start = getLAWallParts(plan.start_time);
-    if (!start) return;
-    setEditDateMonth(start.m);
-    setEditDateDay(start.d);
-    setEditDateYear(start.y);
-    const h24 = start.hour24;
-    const period: 'AM' | 'PM' = h24 >= 12 ? 'PM' : 'AM';
-    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-    setEditTimeHour(h12);
-    // Preserve the exact published minute when opening Manage. A no-op edit
-    // must never silently move a Plan to a quarter-hour boundary.
-    setEditTimeMinute(String(start.minute).padStart(2, '0'));
-    setEditTimePeriod(period);
+    if (!initialized) return;
     setManageModalVisible(true);
   };
 
@@ -1038,41 +941,41 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const openEditDatePicker = () => {
     if (!edit.canChange()) return;
     Keyboard.dismiss();
-    setShowEditDatePicker(true);
+    draft.setDatePickerVisible(true);
   };
   const confirmEditDate = (day: CalendarDay) => {
     if (!edit.canChange()) return;
-    setEditTimeChanged(true);
-    setEditDateYear(day.year);
-    setEditDateMonth(day.month);
-    setEditDateDay(day.day);
-    setShowEditDatePicker(false);
+    draft.setTimeChanged(true);
+    draft.setDateYear(day.year);
+    draft.setDateMonth(day.month);
+    draft.setDateDay(day.day);
+    draft.setDatePickerVisible(false);
   };
   // Time picker open / confirm
   const openEditTimePicker = () => {
     if (!edit.canChange()) return;
     Keyboard.dismiss();
-    setShowEditTimePicker(true);
+    draft.setTimePickerVisible(true);
   };
   const confirmEditTime = (time: PickerTime) => {
     if (!edit.canChange()) return;
     Keyboard.dismiss();
-    setEditTimeChanged(true);
-    setEditTimeHour(time.hour);
-    setEditTimeMinute(time.minute);
-    setEditTimePeriod(time.period);
-    setShowEditTimePicker(false);
+    draft.setTimeChanged(true);
+    draft.setTimeHour(time.hour);
+    draft.setTimeMinute(time.minute);
+    draft.setTimePeriod(time.period);
+    draft.setTimePickerVisible(false);
     hapticLight();
   };
 
   const toggleEditAgeRange = (range: AgeRange) => {
     if (!edit.canChange()) return;
-    hapticLight(); setEditAgeChanged(true);
+    hapticLight(); draft.setAgeChanged(true);
     if (range === 'All Ages') {
-      setEditAgeRanges(['All Ages']);
+      draft.setAgeRanges(['All Ages']);
       return;
     }
-    setEditAgeRanges((prev) => {
+    draft.setAgeRanges((prev) => {
       const filtered = prev.filter((r) => r !== 'All Ages');
       if (filtered.includes(range)) {
         return filtered.filter((r) => r !== range);
@@ -1086,15 +989,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
   const handleSaveEdit = async () => {
     if (isClosedPlan || departure.isPending || departure.isChecking || departure.unknownAction || departureVisitRef.current) return;
-    if (!plan || !editOriginal || !currentUserId || !edit.canChange() || !editTitle.trim()) return;
+    if (!plan || !draft.original || !currentUserId || !edit.canChange() || !draft.title.trim()) return;
 
-    const editHour24 = editTimeHour % 12 + (editTimePeriod === 'PM' ? 12 : 0);
-    if (!isValidLAWallTime(editDateYear, editDateMonth, editDateDay, editHour24, Number(editTimeMinute))) {
+    const editHour24 = draft.timeHour % 12 + (draft.timePeriod === 'PM' ? 12 : 0);
+    if (!isValidLAWallTime(draft.dateYear, draft.dateMonth, draft.dateDay, editHour24, Number(draft.timeMinute))) {
       setBrandedAlert({ visible: true, title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
       return;
     }
 
-    const fieldsToCheck = [editTitle, editDescription, editCreatorMessage, editLocation].filter(Boolean).join(' ');
+    const fieldsToCheck = [draft.title, draft.description, draft.creatorMessage, draft.location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
     if (!filter.ok) {
       setBrandedAlert({ visible: true, title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
@@ -1103,29 +1006,29 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
     try {
       const newStartTime = buildDatetime(
-        editDateMonth, editDateDay, editDateYear,
-        editTimeHour, editTimeMinute, editTimePeriod,
+        draft.dateMonth, draft.dateDay, draft.dateYear,
+        draft.timeHour, draft.timeMinute, draft.timePeriod,
       );
 
-      const editAgeBounds = ageRangesToMinMax(editAgeRanges);
+      const editAgeBounds = ageRangesToMinMax(draft.ageRanges);
 
       const updatePayload: Record<string, any> = {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        host_message: editCreatorMessage.trim() || null,
-        location_text: editLocation.trim() || null,
-        location_lat: editLocationLat,
-        location_lng: editLocationLng,
-        tickets_url: editTicketUrl.trim() || null,
-        image_url: resolveManagePlanImageUrl(editImageUrl),
-        primary_vibe: editCategory?.toLowerCase() ?? null,
-        gender_rule: editGenderRule,
-        ...buildPlanEditRulePatch(editOriginal, {
-          timeChanged: editTimeChanged, proposedStart: newStartTime,
-          ageChanged: editAgeChanged, ages: editAgeBounds,
-          circlePlan: isCirclePlan, groupChanged: editGroupChanged, maxInvites: editGroupSize,
-          officialCreator: isOfficialCreator, featuredChanged: editFeaturedChanged, featured: featuredToggle,
-          featuredType, featuredCapacity,
+        title: draft.title.trim(),
+        description: draft.description.trim() || null,
+        host_message: draft.creatorMessage.trim() || null,
+        location_text: draft.location.trim() || null,
+        location_lat: draft.locationLat,
+        location_lng: draft.locationLng,
+        tickets_url: draft.ticketUrl.trim() || null,
+        image_url: resolveManagePlanImageUrl(draft.imageUrl),
+        primary_vibe: draft.category?.toLowerCase() ?? null,
+        gender_rule: draft.genderRule,
+        ...buildPlanEditRulePatch(draft.original, {
+          timeChanged: draft.timeChanged, proposedStart: newStartTime,
+          ageChanged: draft.ageChanged, ages: editAgeBounds,
+          circlePlan: isCirclePlan, groupChanged: draft.groupChanged, maxInvites: draft.groupSize,
+          officialCreator: isOfficialCreator, featuredChanged: draft.featuredChanged, featured: draft.featured,
+          featuredType: draft.featuredType, featuredCapacity: draft.featuredCapacity,
         }),
       };
 
@@ -2054,7 +1957,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       {/* Manage Plan Modal */}
       <Modal visible={manageModalVisible} onDismiss={() => finishPlanModalDismiss('manage', modalTransition)} transparent animationType="slide" onRequestClose={closeManageModal} statusBarTranslucent>
         <KeyboardAvoidingView style={[manageStyles.overlay, { paddingTop: insets.top + 8 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={manageStyles.sheet} accessibilityElementsHidden={showEditTimePicker || showEditDatePicker} importantForAccessibility={showEditTimePicker || showEditDatePicker ? "no-hide-descendants" : "auto"}>
+          <View style={manageStyles.sheet} accessibilityElementsHidden={draft.timePickerVisible || draft.datePickerVisible} importantForAccessibility={draft.timePickerVisible || draft.datePickerVisible ? "no-hide-descendants" : "auto"}>
             <View style={manageStyles.headerRow}>
               <Text style={manageStyles.title} accessibilityRole="header" numberOfLines={1} adjustsFontSizeToFit>Manage Plan</Text>
               <TouchableOpacity style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }} accessibilityRole="button" accessibilityLabel="Close editor" disabled={edit.isBusy} onPress={closeManageModal} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -2090,8 +1993,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 editable={!edit.isBusy && !edit.unknown}
                 style={manageStyles.input}
                 accessibilityLabel="Plan title"
-                value={editTitle}
-                onChangeText={setEditTitle}
+                value={draft.title}
+                onChangeText={draft.setTitle}
                 maxLength={80}
                 placeholder="Plan title"
                 placeholderTextColor={Colors.textLight}
@@ -2103,13 +2006,13 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               {/* Plan photo */}
               <Text style={manageStyles.label}>Plan photo</Text>
               <View style={manageStyles.photoRow}>
-                {editImageUrl ? (
+                {draft.imageUrl ? (
                   <View style={manageStyles.photoThumbWrap}>
-                    <Image source={{ uri: editImageUrl }} style={manageStyles.photoThumb} contentFit="cover" />
+                    <Image source={{ uri: draft.imageUrl }} style={manageStyles.photoThumb} contentFit="cover" />
                     {editImageLoading ? (
                       <View style={manageStyles.photoThumbOverlay}><ActivityIndicator color={Colors.white} /></View>
                     ) : (
-                      <TouchableOpacity accessibilityRole="button" style={manageStyles.photoRemove} accessibilityLabel="Remove photo" disabled={edit.isBusy || edit.unknown} onPress={() => { if (edit.canChange()) { hapticLight(); setEditImageUrl(null); } }} hitSlop={8}>
+                      <TouchableOpacity accessibilityRole="button" style={manageStyles.photoRemove} accessibilityLabel="Remove photo" disabled={edit.isBusy || edit.unknown} onPress={() => { if (edit.canChange()) { hapticLight(); draft.setImageUrl(null); } }} hitSlop={8}>
                         <X size={13} color={Colors.white} strokeWidth={2.5} />
                       </TouchableOpacity>
                     )}
@@ -2120,7 +2023,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                     <Text style={manageStyles.photoAddText} numberOfLines={1}>Add photo</Text>
                   </TouchableOpacity>
                 )}
-                {editImageUrl && <TouchableOpacity accessibilityRole="button" disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} style={manageStyles.photoAdd}>
+                {draft.imageUrl && <TouchableOpacity accessibilityRole="button" disabled={edit.isBusy || edit.unknown} onPress={pickEditImage} style={manageStyles.photoAdd}>
                   <Text style={manageStyles.photoAddText} numberOfLines={1}>Change photo</Text>
                 </TouchableOpacity>}
                 {editImageLoading && <Text accessibilityLiveRegion="polite" style={manageStyles.hint}>Adding photo…</Text>}
@@ -2137,7 +2040,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                   activeOpacity={0.85}
                 >
                   <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
-                    {new Date(editDateYear, editDateMonth, editDateDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {new Date(draft.dateYear, draft.dateMonth, draft.dateDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button"
@@ -2148,7 +2051,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                   activeOpacity={0.85}
                 >
                   <Text numberOfLines={1} adjustsFontSizeToFit style={manageStyles.dateTimeBtnText}>
-                    {displayPickerTime(editTimeHour, editTimeMinute, editTimePeriod)}
+                    {displayPickerTime(draft.timeHour, draft.timeMinute, draft.timePeriod)}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2159,18 +2062,18 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 <Text
                   style={[
                     manageStyles.charCounter,
-                    editDescription.length >= EDIT_DESC_LIMIT - EDIT_DESC_WARN_MARGIN && manageStyles.charCounterWarn,
+                    draft.description.length >= EDIT_DESC_LIMIT - EDIT_DESC_WARN_MARGIN && manageStyles.charCounterWarn,
                   ]}
                 >
-                  {editDescription.length}/{EDIT_DESC_LIMIT}
+                  {draft.description.length}/{EDIT_DESC_LIMIT}
                 </Text>
               </View>
               <TextInput
                 editable={!edit.isBusy && !edit.unknown}
                 style={[manageStyles.input, manageStyles.textArea]}
                 accessibilityLabel="Plan description"
-                value={editDescription}
-                onChangeText={setEditDescription}
+                value={draft.description}
+                onChangeText={draft.setDescription}
                 multiline
                 maxLength={EDIT_DESC_LIMIT}
                 placeholder="What's the plan? Dress code, what to expect..."
@@ -2184,8 +2087,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 editable={!edit.isBusy && !edit.unknown}
                 style={[manageStyles.input, manageStyles.creatorMessageInput]}
                 accessibilityLabel="Your message"
-                value={editCreatorMessage}
-                onChangeText={setEditCreatorMessage}
+                value={draft.creatorMessage}
+                onChangeText={draft.setCreatorMessage}
                 multiline
                 maxLength={150}
                 placeholder="A personal note to people joining"
@@ -2207,9 +2110,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                     const lat = details?.geometry?.location?.lat ?? null;
                     const lng = details?.geometry?.location?.lng ?? null;
                     const name = data.structured_formatting?.main_text ?? data.description;
-                    setEditLocation(name || data.description);
-                    setEditLocationLat(lat);
-                    setEditLocationLng(lng);
+                    draft.setLocation(name || data.description);
+                    draft.setLocationLat(lat);
+                    draft.setLocationLng(lng);
                     hapticLight();
                   }}
                   query={{
@@ -2225,7 +2128,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                     editable: !edit.isBusy && !edit.unknown,
                     onChangeText: (text: string) => {
                       if (!edit.canChange()) return;
-                      setEditLocation(text); setEditLocationLat(null); setEditLocationLng(null);
+                      draft.setLocation(text); draft.setLocationLat(null); draft.setLocationLng(null);
                     },
                     placeholderTextColor: Colors.textLight,
                   }}
@@ -2242,8 +2145,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 editable={!edit.isBusy && !edit.unknown}
                 style={manageStyles.input}
                 accessibilityLabel="Ticket link"
-                value={editTicketUrl}
-                onChangeText={setEditTicketUrl}
+                value={draft.ticketUrl}
+                onChangeText={draft.setTicketUrl}
                 placeholder="https://..."
                 placeholderTextColor={Colors.textLight}
                 autoCapitalize="none"
@@ -2257,7 +2160,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               <Text style={manageStyles.label}>Category</Text>
               <View style={manageStyles.pillWrap}>
                 {MANAGE_CATEGORIES.map((cat) => {
-                  const isSelected = editCategory === cat;
+                  const isSelected = draft.category === cat;
                   return (
                     <TouchableOpacity accessibilityRole="button"
                       key={cat}
@@ -2266,7 +2169,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                       style={[manageStyles.pill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
                         hapticLight();
-                        setEditCategory(cat);
+                        draft.setCategory(cat);
                       }}
                       activeOpacity={0.8}
                     >
@@ -2280,7 +2183,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               <Text style={manageStyles.label}>Who can join</Text>
               <View style={manageStyles.genderRow}>
                 {manageGenderOptions.map((opt) => {
-                  const isSelected = editGenderRule === opt.value;
+                  const isSelected = draft.genderRule === opt.value;
                   return (
                     <TouchableOpacity accessibilityRole="button"
                       key={opt.value}
@@ -2289,7 +2192,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                       style={[manageStyles.genderPill, isSelected && manageStyles.pillSelected]}
                       onPress={() => {
                         hapticLight();
-                        setEditGenderRule(opt.value);
+                        draft.setGenderRule(opt.value);
                       }}
                       activeOpacity={0.8}
                     >
@@ -2303,7 +2206,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               <Text style={manageStyles.label}>Age range</Text>
               <View style={manageStyles.pillWrap}>
                 {AGE_RANGES.map((range) => {
-                  const isSelected = editAgeRanges.includes(range);
+                  const isSelected = draft.ageRanges.includes(range);
                   return (
                     <TouchableOpacity accessibilityRole="button"
                       key={range}
@@ -2318,39 +2221,39 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                   );
                 })}
               </View>
-              <Text style={manageStyles.hint}>{!editAgeChanged && editAgeRanges.length === 0 && editOriginal ? `${savedAgeLabel(editOriginal.target_age_min, editOriginal.target_age_max)}. Kept unless you choose a range.` : 'Select up to 2 ranges, or All Ages'}</Text>
+              <Text style={manageStyles.hint}>{!draft.ageChanged && draft.ageRanges.length === 0 && draft.original ? `${savedAgeLabel(draft.original.target_age_min, draft.original.target_age_max)}. Kept unless you choose a range.` : 'Select up to 2 ranges, or All Ages'}</Text>
 
               {/* Ordinary capacity does not describe a Circle’s outsider allowance. */}
-              {isCirclePlan ? <><Text style={manageStyles.label}>Circle plan</Text><Text style={manageStyles.hint}>Circle members aren’t included in the public spot limit. Your Circle’s existing joining settings stay the same.</Text></> : !featuredToggle ? <>
+              {isCirclePlan ? <><Text style={manageStyles.label}>Circle plan</Text><Text style={manageStyles.hint}>Circle members aren’t included in the public spot limit. Your Circle’s existing joining settings stay the same.</Text></> : !draft.featured ? <>
               <Text style={manageStyles.label}>How many to invite</Text>
               <View style={manageStyles.stepperRow}>
                 <TouchableOpacity accessibilityRole="button"
-                  style={[manageStyles.stepperBtn, editGroupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
+                  style={[manageStyles.stepperBtn, draft.groupSize <= (MIN_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
-                    if (editGroupSize > (MIN_GROUP - 1)) {
+                    if (draft.groupSize > (MIN_GROUP - 1)) {
                       hapticLight();
-                      setEditGroupChanged(true); setEditGroupSize((g) => g - 1);
+                      draft.setGroupChanged(true); draft.setGroupSize((g) => g - 1);
                     }
                   }}
                   accessibilityLabel="Fewer people"
-                  disabled={edit.isBusy || edit.unknown || editGroupSize <= (MIN_GROUP - 1)}
+                  disabled={edit.isBusy || edit.unknown || draft.groupSize <= (MIN_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>−</Text>
                 </TouchableOpacity>
                 <View style={manageStyles.stepperValue}>
-                  <Text style={manageStyles.stepperValueText}>{editGroupSize + 1}</Text>
+                  <Text style={manageStyles.stepperValueText}>{draft.groupSize + 1}</Text>
                   <Text style={manageStyles.stepperValueSub}>people total</Text>
                 </View>
                 <TouchableOpacity accessibilityRole="button"
-                  style={[manageStyles.stepperBtn, editGroupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
+                  style={[manageStyles.stepperBtn, draft.groupSize >= (MAX_GROUP - 1) && manageStyles.stepperBtnDisabled]}
                   onPress={() => {
-                    if (editGroupSize < (MAX_GROUP - 1)) {
+                    if (draft.groupSize < (MAX_GROUP - 1)) {
                       hapticLight();
-                      setEditGroupChanged(true); setEditGroupSize((g) => g + 1);
+                      draft.setGroupChanged(true); draft.setGroupSize((g) => g + 1);
                     }
                   }}
                   accessibilityLabel="More people"
-                  disabled={edit.isBusy || edit.unknown || editGroupSize >= (MAX_GROUP - 1)}
+                  disabled={edit.isBusy || edit.unknown || draft.groupSize >= (MAX_GROUP - 1)}
                 >
                   <Text style={manageStyles.stepperBtnText}>+</Text>
                 </TouchableOpacity>
@@ -2367,35 +2270,35 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                     </View>
                     <Switch
                       accessibilityLabel="Feature this plan"
-                      disabled={edit.isBusy || edit.unknown}                      value={featuredToggle}
+                      disabled={edit.isBusy || edit.unknown}                      value={draft.featured}
                       onValueChange={(val) => {
                         if (!edit.canChange()) return;
                         hapticLight();
-                        setEditFeaturedChanged(true); setFeaturedToggle(val);
+                        draft.setFeaturedChanged(true); draft.setFeatured(val);
                         if (val) {
-                          setFeaturedCapacity(editOriginal?.is_featured ? (editOriginal.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
+                          draft.setFeaturedCapacity(draft.original?.is_featured ? (draft.original.max_invites ?? 99) + 1 : FEATURED_DEFAULT_CAPACITY);
                         }
                       }}
-                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.clay : featuredType === 'birthday_party' ? Colors.birthdayPink : featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
+                      trackColor={{ false: appearance ? AfterglowColors.line : Colors.border, true: draft.featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.clay : draft.featuredType === 'birthday_party' ? Colors.birthdayPink : draft.featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.goldenAmber }}
                       thumbColor={Colors.white}
                     />
                   </View>
-                  {featuredToggle && (
+                  {draft.featured && (
                     <View style={manageStyles.featuredTypeRow}>
                       <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (featuredType === 'washedup_event' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg) },
+                          { backgroundColor: appearance ? (draft.featuredType === 'washedup_event' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'washedup_event' ? Colors.goldenAmberTint15 : Colors.inputBg) },
                         ]}
                         disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: featuredType === "washedup_event"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('washedup_event'); }}
+                        accessibilityState={{selected: draft.featuredType === "washedup_event"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); draft.setFeaturedChanged(true); draft.setFeaturedType('washedup_event'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: appearance ? (featuredType === 'washedup_event' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary) },
+                            { color: appearance ? (draft.featuredType === 'washedup_event' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'washedup_event' ? Colors.goldenAmber : Colors.tertiary) },
                           ]}
                         >
                           washedup event
@@ -2404,17 +2307,17 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                       <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (featuredType === 'birthday_party' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg) },
+                          { backgroundColor: appearance ? (draft.featuredType === 'birthday_party' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'birthday_party' ? Colors.birthdayPinkTint15 : Colors.inputBg) },
                         ]}
                         disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: featuredType === "birthday_party"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('birthday_party'); }}
+                        accessibilityState={{selected: draft.featuredType === "birthday_party"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); draft.setFeaturedChanged(true); draft.setFeaturedType('birthday_party'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: appearance ? (featuredType === 'birthday_party' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary) },
+                            { color: appearance ? (draft.featuredType === 'birthday_party' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'birthday_party' ? Colors.birthdayPink : Colors.tertiary) },
                           ]}
                         >
                           birthday party
@@ -2423,62 +2326,62 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                       <TouchableOpacity accessibilityRole="button"
                         style={[
                           manageStyles.featuredTypePill,
-                          { backgroundColor: appearance ? (featuredType === 'special_event' ? AfterglowColors.clay : AfterglowColors.white) : (featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg) },
+                          { backgroundColor: appearance ? (draft.featuredType === 'special_event' ? AfterglowColors.clay : AfterglowColors.white) : (draft.featuredType === 'special_event' ? Colors.specialEventMaroon : Colors.inputBg) },
                         ]}
                         disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{selected: featuredType === "special_event"}}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('special_event'); }}
+                        accessibilityState={{selected: draft.featuredType === "special_event"}}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); draft.setFeaturedChanged(true); draft.setFeaturedType('special_event'); }}
                         activeOpacity={0.85}
                       >
                         <Text
                           style={[
                             manageStyles.featuredTypePillText,
-                            { color: appearance ? (featuredType === 'special_event' ? AfterglowColors.white : AfterglowColors.ink) : (featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary) },
+                            { color: appearance ? (draft.featuredType === 'special_event' ? AfterglowColors.white : AfterglowColors.ink) : (draft.featuredType === 'special_event' ? Colors.specialEventCream : Colors.tertiary) },
                           ]}
                         >
                           special event
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity accessibilityRole="button"
-                        style={[manageStyles.featuredTypePill, { backgroundColor: featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.white : Colors.inputBg }]}
+                        style={[manageStyles.featuredTypePill, { backgroundColor: draft.featuredType === 'plan_in_making' ? Colors.planInMakingPurple : appearance ? AfterglowColors.white : Colors.inputBg }]}
                         disabled={edit.isBusy || edit.unknown}
-                        accessibilityState={{ selected: featuredType === 'plan_in_making' }}
-                        onPress={() => { if (!edit.canChange()) return; hapticLight(); setEditFeaturedChanged(true); setFeaturedType('plan_in_making'); }}
+                        accessibilityState={{ selected: draft.featuredType === 'plan_in_making' }}
+                        onPress={() => { if (!edit.canChange()) return; hapticLight(); draft.setFeaturedChanged(true); draft.setFeaturedType('plan_in_making'); }}
                         activeOpacity={0.85}
                       >
-                        <Text style={[manageStyles.featuredTypePillText, { color: featuredType === 'plan_in_making' ? Colors.white : appearance ? AfterglowColors.ink : Colors.tertiary }]}>Plan in the making</Text>
+                        <Text style={[manageStyles.featuredTypePillText, { color: draft.featuredType === 'plan_in_making' ? Colors.white : appearance ? AfterglowColors.ink : Colors.tertiary }]}>Plan in the making</Text>
                       </TouchableOpacity>
                     </View>
                   )}
-                  {featuredToggle && (
+                  {draft.featured && (
                     <View style={manageStyles.capacitySection}>
-                      <Text style={manageStyles.capacityValue}>{featuredCapacity} people</Text>
+                      <Text style={manageStyles.capacityValue}>{draft.featuredCapacity} people</Text>
                       <View style={manageStyles.stepperRow}>
                         <TouchableOpacity accessibilityRole="button"
-                          style={[manageStyles.stepperBtn, featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
+                          style={[manageStyles.stepperBtn, draft.featuredCapacity <= FEATURED_MIN_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
-                            if (featuredCapacity > FEATURED_MIN_CAPACITY) {
+                            if (draft.featuredCapacity > FEATURED_MIN_CAPACITY) {
                               hapticLight();
-                              setEditFeaturedChanged(true); setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
+                              draft.setFeaturedChanged(true); draft.setFeaturedCapacity((c) => Math.max(FEATURED_MIN_CAPACITY, c - 50));
                             }
                           }}
-                          accessibilityLabel="Lower capacity" disabled={edit.isBusy || edit.unknown || featuredCapacity <= FEATURED_MIN_CAPACITY}
+                          accessibilityLabel="Lower capacity" disabled={edit.isBusy || edit.unknown || draft.featuredCapacity <= FEATURED_MIN_CAPACITY}
                         >
                           <Text style={manageStyles.stepperBtnText}>−</Text>
                         </TouchableOpacity>
                         <View style={manageStyles.stepperValue}>
-                          <Text style={manageStyles.stepperValueText}>{featuredCapacity}</Text>
+                          <Text style={manageStyles.stepperValueText}>{draft.featuredCapacity}</Text>
                           <Text style={manageStyles.stepperValueSub}>capacity</Text>
                         </View>
                         <TouchableOpacity accessibilityRole="button"
-                          style={[manageStyles.stepperBtn, featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
+                          style={[manageStyles.stepperBtn, draft.featuredCapacity >= FEATURED_MAX_CAPACITY && manageStyles.stepperBtnDisabled]}
                           onPress={() => {
-                            if (featuredCapacity < FEATURED_MAX_CAPACITY) {
+                            if (draft.featuredCapacity < FEATURED_MAX_CAPACITY) {
                               hapticLight();
-                              setEditFeaturedChanged(true); setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
+                              draft.setFeaturedChanged(true); draft.setFeaturedCapacity((c) => Math.min(FEATURED_MAX_CAPACITY, c + 50));
                             }
                           }}
-                          accessibilityLabel="Higher capacity" disabled={edit.isBusy || edit.unknown || featuredCapacity >= FEATURED_MAX_CAPACITY}
+                          accessibilityLabel="Higher capacity" disabled={edit.isBusy || edit.unknown || draft.featuredCapacity >= FEATURED_MAX_CAPACITY}
                         >
                           <Text style={manageStyles.stepperBtnText}>+</Text>
                         </TouchableOpacity>
@@ -2521,9 +2424,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             <View style={[manageStyles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
               {/* Save button */}
               <TouchableOpacity accessibilityRole="button"
-                style={[manageStyles.saveBtn, (editSaving || editImageLoading || editTitle.trim().length === 0) && manageStyles.saveBtnDisabled]}
+                style={[manageStyles.saveBtn, (editSaving || editImageLoading || draft.title.trim().length === 0) && manageStyles.saveBtnDisabled]}
                 onPress={edit.unknown ? edit.check : handleSaveEdit}
-                disabled={editSaving || editImageLoading || editTitle.trim().length === 0}
+                disabled={editSaving || editImageLoading || draft.title.trim().length === 0}
                 activeOpacity={0.85}
               >
                 {editSaving ? (
@@ -2533,22 +2436,21 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 )}
               </TouchableOpacity>
 
-
             </View>
           </View>
           {/* Keep the date picker inside the existing editor's native Modal. */}
-          {showEditDatePicker && <DatePickerSheet
-            selected={{ year: editDateYear, month: editDateMonth, day: editDateDay }}
-            onCancel={() => setShowEditDatePicker(false)}
+          {draft.datePickerVisible && <DatePickerSheet
+            selected={{ year: draft.dateYear, month: draft.dateMonth, day: draft.dateDay }}
+            onCancel={() => draft.setDatePickerVisible(false)}
             onSelect={confirmEditDate}
           />}
 
           {/* Reuse the same time sheet without nesting native Modals. */}
-          {showEditTimePicker && <TimePickerSheet
+          {draft.timePickerVisible && <TimePickerSheet
             embedded
             appearance={appearance}
-            initial={{ hour: editTimeHour, minute: editTimeMinute, period: editTimePeriod }}
-            onCancel={() => setShowEditTimePicker(false)}
+            initial={{ hour: draft.timeHour, minute: draft.timeMinute, period: draft.timePeriod }}
+            onCancel={() => draft.setTimePickerVisible(false)}
             onConfirm={confirmEditTime}
           />}
 
