@@ -34,7 +34,6 @@ import {
   Pressable,
   Linking,
   ScrollView,
-  AppState,
   BackHandler,
   LayoutChangeEvent,
   useWindowDimensions,
@@ -103,9 +102,7 @@ import { logError } from '../../lib/logger';
 import { ReportModal } from '../modals/ReportModal';
 import { useBlock } from '../../hooks/useBlock';
 import { BrandedAlert, BrandedAlertButton } from '../BrandedAlert';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerPushNotificationsWithResult, getPushPermissionStatus } from '../../hooks/usePushNotifications';
-import { pushRegistrationFeedback } from '../notifications/pushRegistrationFeedback';
+import { useChatPushBanner } from '../../hooks/useChatPushBanner';
 
 // ─── Shared chat surface ────────────────────────────────────────────────────────
 // ChatThread is the ONE polished chat body shared by plan, circle, and DM chats.
@@ -444,144 +441,7 @@ function ChatThread(props: ChatThreadProps) {
 
   // Keep the existing invitation and seven-day explicit-dismissal/denial
   // policy. A slow or failed registration is not a permission decision.
-  const [showPushBanner, setShowPushBanner] = useState(false);
-  const [enablingPush, setEnablingPush] = useState(false);
-  const [pushFeedback, setPushFeedback] = useState<string | null>(null);
-  const [pushVisit, setPushVisit] = useState<object>({});
-  const activePushVisit = useRef<object | null>(null);
-  const pushAttempt = useRef<object | null>(null);
-  const pushCheckRevision = useRef(0);
-  const pushSettingsReturn = useRef<{ visit: object; returned: boolean } | null>(null);
-  const PUSH_BANNER_KEY = 'push_banner_dismissed_at';
-  const PUSH_BANNER_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-  const isCurrentPush = useCallback(() => isCurrentEntry() && activePushVisit.current === pushVisit,
-    [isCurrentEntry, pushVisit]);
-
-  useFocusEffect(useCallback(() => {
-    const visit = {};
-    activePushVisit.current = visit;
-    setPushVisit(visit);
-    pushAttempt.current = null;
-    pushSettingsReturn.current = null;
-    pushCheckRevision.current++;
-    setShowPushBanner(false);
-    setPushFeedback(null);
-    setEnablingPush(false);
-    return () => {
-      if (activePushVisit.current !== visit) return;
-      activePushVisit.current = null;
-      pushAttempt.current = null;
-      pushSettingsReturn.current = null;
-      pushCheckRevision.current++;
-    };
-  }, [entry]));
-
-  useEffect(() => {
-    if (!isCurrentPush() || !currentUserId || messages.length === 0) return;
-    if (!messages.some(message => message.user_id !== currentUserId)) return;
-    let cancelled = false;
-    const revision = pushCheckRevision.current;
-    const current = () => !cancelled && isCurrentPush() && revision === pushCheckRevision.current;
-    void (async () => {
-      try {
-        const permission = await getPushPermissionStatus();
-        if (!current() || permission === 'granted') return;
-        const dismissed = await AsyncStorage.getItem(PUSH_BANNER_KEY);
-        if (!current()) return;
-        if (dismissed && Date.now() - parseInt(dismissed, 10) < PUSH_BANNER_COOLDOWN_MS) return;
-        setShowPushBanner(true);
-      } catch { /* A passive check never opens an error or requests permission. */ }
-    })();
-    return () => { cancelled = true; };
-  }, [currentUserId, messages.length, isCurrentPush]);
-
-  const handleEnablePush = useCallback(async (fromSettings = false): Promise<void> => {
-    if (!isCurrentPush() || pushAttempt.current) return;
-    if (fromSettings && (pushSettingsReturn.current?.visit !== pushVisit || !pushSettingsReturn.current.returned)) return;
-    pushSettingsReturn.current = null;
-    const attempt = {};
-    pushAttempt.current = attempt;
-    pushCheckRevision.current++;
-    setEnablingPush(true);
-    setPushFeedback(null);
-    const current = () => isCurrentPush() && pushAttempt.current === attempt;
-    // showResult and the native foreground listener can assign this ref
-    // after the initial clear; read its declared type at completion time.
-    const getSettingsReturn = (): { visit: object; returned: boolean } | null => pushSettingsReturn.current;
-    const showResult = (result: Parameters<typeof pushRegistrationFeedback>[0], previouslyDenied = false) => {
-      if (!current()) return;
-      const feedback = pushRegistrationFeedback(result);
-      if (feedback.kind === 'silent') return;
-      if (feedback.kind === 'success') {
-        setShowPushBanner(false);
-      } else if (feedback.kind === 'settings') {
-        // Keep the established snooze after a declined native prompt. Open
-        // Settings only when denial was known before this enable attempt.
-        void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-        setShowPushBanner(false);
-        if (fromSettings || !previouslyDenied) return;
-        const settingsReturn = { visit: pushVisit, returned: false };
-        pushSettingsReturn.current = settingsReturn;
-        void Linking.openSettings().catch(() => {
-          if (!isCurrentPush() || pushSettingsReturn.current !== settingsReturn) return;
-          pushSettingsReturn.current = null;
-          setShowPushBanner(true);
-          setPushFeedback('Couldn’t open Settings. Open your device settings and choose WashedUp.');
-        });
-      } else {
-        setShowPushBanner(true);
-        setPushFeedback(feedback.message);
-      }
-    };
-    try {
-      // An explicit Enable action first asks for a truthful, non-prompting
-      // registration result; the coarse Android native enum is insufficient.
-      let result = await registerPushNotificationsWithResult({ prompt: false, userId: currentUserId });
-      if (!current()) return;
-      const previouslyDenied = result.status === 'permission-denied';
-      if (result.status === 'permission-required' && !fromSettings) {
-        result = await registerPushNotificationsWithResult({ prompt: true, userId: currentUserId, canPrompt: current });
-      }
-      showResult(result, previouslyDenied);
-    } catch {
-      showResult({ status: 'failed' });
-    } finally {
-      if (pushAttempt.current === attempt) {
-        pushAttempt.current = null;
-        if (isCurrentPush()) {
-          setEnablingPush(false);
-          // An early foreground event may arrive before this attempt releases
-          // its lock. Retain and consume that one return after the lock clears.
-          const settingsReturn = getSettingsReturn();
-          if (settingsReturn?.visit === pushVisit && settingsReturn.returned) {
-            void handleEnablePush(true);
-          }
-        }
-      }
-    }
-  }, [currentUserId, isCurrentPush, pushVisit]);
-
-  const handleDismissPushBanner = useCallback(() => {
-    if (!isCurrentPush()) return;
-    pushAttempt.current = null;
-    pushCheckRevision.current++;
-    pushSettingsReturn.current = null;
-    setEnablingPush(false);
-    setShowPushBanner(false);
-    setPushFeedback(null);
-    void AsyncStorage.setItem(PUSH_BANNER_KEY, String(Date.now())).catch(() => {});
-  }, [isCurrentPush]);
-
-  // Recheck only after this visit's explicit Settings action. Foregrounding
-  // elsewhere must not start another registration or display a new prompt.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', state => {
-      if (state !== 'active' || !isCurrentPush() || pushSettingsReturn.current?.visit !== pushVisit) return;
-      pushSettingsReturn.current.returned = true;
-      void handleEnablePush(true);
-    });
-    return () => sub.remove();
-  }, [handleEnablePush, isCurrentPush, pushVisit]);
+  const { showPushBanner, enablingPush, pushFeedback, handleEnablePush, handleDismissPushBanner } = useChatPushBanner({ entry, currentUserId, isCurrentEntry, messages });
 
   // Throttle the focus-driven message refetch. New messages already
   // arrive live via realtime; this is a safety-net resync, so once per
@@ -687,17 +547,37 @@ function ChatThread(props: ChatThreadProps) {
   // conditionally skipped (an early return before these hooks would throw
   // "rendered fewer hooks" if infoError flipped true after a successful render).
 
+  const reportMembersAttempt = useRef<object | null>(null);
+  const [loadingReportMembers, setLoadingReportMembers] = useState(false);
+  const reportMenuVisit = useRef<object | null>(null);
+  useFocusEffect(useCallback(() => {
+    const visit = {}; reportMenuVisit.current = visit;
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
+    return () => {
+      if (reportMenuVisit.current !== visit) return;
+      reportMenuVisit.current = null; reportMembersAttempt.current = null;
+    };
+  }, [entry]));
   const handleReportMenu = useCallback(async () => {
-    if (!isCurrentEntry()) return;
+    const visit = reportMenuVisit.current;
+    const current = () => isCurrentEntry() && !!visit && reportMenuVisit.current === visit;
+    if (!current() || reportMembersAttempt.current) return;
+    const menuScope = { userId: moderationScope.userId, isCurrent: () => current() && moderationScope.isCurrent() };
+    const attempt = {}; reportMembersAttempt.current = attempt; setLoadingReportMembers(true);
     // The full member list (avatar row is capped) comes from the per-kind wrapper:
     // plans query event_members, circles query circle_members.
     let reportMembers: { id: string; name: string }[];
     try { reportMembers = (await props.fetchReportMembers?.()) ?? []; }
     catch {
-      if (isCurrentEntry()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
+      if (current()) setAlertInfo({ title: 'Could not load members', message: 'Try opening the member menu again.' });
       return;
+    } finally {
+      if (reportMembersAttempt.current === attempt) {
+        reportMembersAttempt.current = null;
+        if (current()) setLoadingReportMembers(false);
+      }
     }
-    if (!isCurrentEntry()) return;
+    if (!current()) return;
 
     if (reportMembers.length === 0) {
       setAlertInfo({ title: 'No other members', message: 'There are no other members in this chat to report.' });
@@ -710,16 +590,16 @@ function ChatThread(props: ChatThreadProps) {
       ActionSheetIOS.showActionSheetWithOptions(
         { options: [...memberNames, 'Cancel'], cancelButtonIndex: memberNames.length, title: 'Members' },
         (idx) => {
-          if (!isCurrentEntry() || idx < 0 || idx >= reportMembers.length) return;
+          if (!current() || idx < 0 || idx >= reportMembers.length) return;
           const member = reportMembers[idx];
           setTimeout(() => {
-            if (!isCurrentEntry()) return;
+            if (!current()) return;
             ActionSheetIOS.showActionSheetWithOptions(
               { options: ['Report User', 'Block User', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2, title: member.name },
               (actionIdx) => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 if (actionIdx === 0) { setReportTarget(member); setShowReport(true); }
-                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope);
+                if (actionIdx === 1) blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope);
               },
             );
           }, 300);
@@ -733,15 +613,15 @@ function ChatThread(props: ChatThreadProps) {
           ...reportMembers.map((member) => ({
             text: member.name,
             onPress: () => {
-              if (!isCurrentEntry()) return;
+              if (!current()) return;
               setTimeout(() => {
-                if (!isCurrentEntry()) return;
+                if (!current()) return;
                 setAlertInfo({
                   title: member.name,
                   message: '',
                   buttons: [
-                    { text: 'Report User', onPress: () => { if (isCurrentEntry()) { setReportTarget(member); setShowReport(true); } } },
-                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (isCurrentEntry()) router.back(); }, moderationScope) },
+                    { text: 'Report User', onPress: () => { if (current()) { setReportTarget(member); setShowReport(true); } } },
+                    { text: 'Block User', style: 'destructive', onPress: () => blockUser(member.id, member.name, () => { if (current()) router.back(); }, menuScope) },
                     { text: 'Cancel', style: 'cancel' },
                   ],
                 });
@@ -1346,6 +1226,7 @@ function ChatThread(props: ChatThreadProps) {
     setLocationPickerOpen(false); setActivePanel(null);
     setOverlayMessage(null); setReactionDetails(null); setReactionPickerMsgId(null); setPhotoViewUrl(null);
     setAlertInfo(null); setMiniProfileUserId(null); setShowReport(false); setReportTarget(null);
+    reportMembersAttempt.current = null; setLoadingReportMembers(false);
     setRecordingMode('idle'); setDraft(null); setAudioSending(false); setAudioError(null); setVoiceDockHeight(0);
     voiceCapture.current = null; voiceStopAttempt.current = null; audioSendAttempt.current = null; audioSession.current = null;
   }, [entry]);
@@ -1576,8 +1457,8 @@ function ChatThread(props: ChatThreadProps) {
             </TouchableOpacity>}
             {props.headerMenu.type === 'plus' ? <TouchableOpacity ref={plusBtnRef} onPress={openPlusFromButton} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="Add people or make a plan">
               <Ionicons name="add" size={24} color={AfterglowColors.clay} />
-            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
-              <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />
+            </TouchableOpacity> : <TouchableOpacity onPress={handleReportMenu} disabled={loadingReportMembers} accessibilityState={{ disabled: loadingReportMembers, busy: loadingReportMembers }} style={chatHeaderActionStyle} accessibilityRole="button" accessibilityLabel="More options">
+              {loadingReportMembers ? <ActivityIndicator size="small" color={AfterglowColors.ink} /> : <Ionicons name="ellipsis-horizontal" size={21} color={AfterglowColors.ink} />}
             </TouchableOpacity>}
           </>}
         /> : <View style={chatStyles.header}>
@@ -1623,12 +1504,14 @@ function ChatThread(props: ChatThreadProps) {
           ) : (
             <TouchableOpacity
               onPress={handleReportMenu}
+              disabled={loadingReportMembers}
+              accessibilityState={{ disabled: loadingReportMembers, busy: loadingReportMembers }}
               style={chatStyles.ellipsisBtn}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               accessibilityRole="button"
               accessibilityLabel="More options"
             >
-              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />
+              {loadingReportMembers ? <ActivityIndicator size="small" color={Colors.warmGray} /> : <Ionicons name="ellipsis-horizontal" size={20} color={Colors.warmGray} />}
             </TouchableOpacity>
           )}
           <ProfileButton compact/>

@@ -32,7 +32,8 @@ const mockSend = jest.fn().mockResolvedValue(undefined), mockTyping = jest.fn();
 const mockRead = jest.fn(), mockBlock = jest.fn();
 const mockReportMembers = jest.fn(), mockBack = jest.fn();
 const mockCameraPermission = jest.fn(), mockCamera = jest.fn(), mockLibrary = jest.fn(), mockManipulate = jest.fn(), mockUpload = jest.fn(), mockUploadAudio = jest.fn();
-let mockViewerId = 'account-a', mockEpoch = 1, mockRoomId = 'plan-one';
+let mockViewerId = 'account-a', mockEpoch = 1, mockRoomId = 'plan-one', mockFocused = true;
+const mockFocusContext = React.createContext(true);
 const mockViewerListeners = new Set<() => void>();
 const mockChat = { messages: [], loading: false, currentUserId: 'account-a', sendMessage: mockSend, sendLocation: jest.fn(), sendAudio: jest.fn(), deleteMessage: jest.fn(), editMessage: jest.fn(), toggleReaction: jest.fn(), loadOlder: jest.fn(), refetch: mockRead };
 const mockRecorder = { status: 'idle', durationMillis: 0, meterings: [], start: jest.fn(), stop: jest.fn(), cancel: jest.fn() };
@@ -60,7 +61,7 @@ jest.mock('../../../lib/uploadAudio', () => ({ uploadAudioToStorage: (...args: a
 jest.mock('../../../lib/logger', () => ({ logError: jest.fn() }));
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn(), hapticMedium: jest.fn(), hapticHeavy: jest.fn(), hapticSelection: jest.fn(), hapticSuccess: jest.fn(), hapticWarning: jest.fn(), hapticError: jest.fn() }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn().mockResolvedValue(undefined) }));
-jest.mock('expo-router', () => ({ useRouter: () => ({ replace: jest.fn(), back: mockBack }), useFocusEffect: () => {} }));
+jest.mock('expo-router', () => ({ useRouter: () => ({ replace: jest.fn(), back: mockBack }), useFocusEffect: (callback: () => (() => void) | void) => { const React = require('react'); const focused = React.useContext(mockFocusContext); React.useEffect(() => { if (focused) return callback(); }, [callback, focused]); } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 34, left: 0, right: 0 }) }));
 jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native'), { useRef } = require('react');
@@ -96,7 +97,7 @@ let tree: ReactTestRenderer | undefined;
 let readOnly: { text: string } | null;
 let nativeMenus: { options: any; choose: (index: number) => void }[];
 const baseProps = { kind: 'event' as const, title: 'A walk', subtitle: null, members: [], viewContextLabel: 'View Plan', onViewContext: jest.fn(), headerMenu: { type: 'report' as const }, fetchReportMembers: mockReportMembers };
-function screen() { return <ChatThread {...baseProps} id={mockRoomId} readOnly={readOnly} />; }
+function screen() { return <mockFocusContext.Provider value={mockFocused}><ChatThread {...baseProps} id={mockRoomId} readOnly={readOnly} /></mockFocusContext.Provider>; }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 const action = (label: string) => tree!.root.findAllByType(TouchableOpacity).find(button => button.props.accessibilityLabel === label)!;
 const input = () => tree!.root.findAllByType(TextInput).find(field => field.props.placeholder === 'Message...')!;
@@ -114,7 +115,7 @@ beforeEach(async () => {
   mockVerifyDraftTarget.mockReset().mockResolvedValue(undefined); mockCheckOriginal.mockReset().mockResolvedValue(true);
   mockRead.mockReset().mockResolvedValue(undefined);
   jest.useFakeTimers(); jest.clearAllMocks();
-  nativeMenus = []; mockReportMembers.mockReset(); mockBlock.mockReset();
+  nativeMenus = []; mockFocused = true; mockReportMembers.mockReset(); mockBlock.mockReset();
   mockReportMembers.mockResolvedValue([{ id: 'member-one', name: 'Jamie' }]);
   jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((options, choose) => { nativeMenus.push({ options, choose }); });
   [mockSend, mockChat.editMessage, mockCameraPermission, mockCamera, mockLibrary, mockManipulate, mockUpload, mockUploadAudio, mockChat.sendAudio, mockChat.sendLocation, mockRecorder.start, mockRecorder.stop, mockRecorder.cancel].forEach(mock => mock.mockReset());
@@ -970,4 +971,62 @@ it('keeps one recording upload identity after response loss and starts another a
   expect(mockChat.sendAudio.mock.calls[0][3]).toBe(uploadId);
   await makeVoiceDraft(); await act(async () => voiceControls().onSend());
   expect(mockUploadAudio.mock.calls[2][4]).not.toBe(uploadId);
+});
+
+
+it('coalesces repeated member-menu taps while the original member read is pending', async () => {
+  const pending = deferred<{ id: string; name: string }[]>();
+  mockReportMembers.mockReturnValue(pending.promise);
+  await mount(); await openModeration(); await openModeration();
+  expect(mockReportMembers).toHaveBeenCalledTimes(1);
+  expect(action('More options').props.accessibilityState).toEqual({ disabled: true, busy: true });
+  await act(async () => pending.resolve([{ id: 'member-one', name: 'Jamie' }])); await flush();
+  expect(nativeMenus).toHaveLength(1);
+  expect(nativeMenus[0].options.title).toBe('Members');
+  expect(action('More options').props.accessibilityState).toEqual({ disabled: false, busy: false });
+});
+
+it('does not let an old member read unlock a pending read in the next room', async () => {
+  const old = deferred<{ id: string; name: string }[]>();
+  const current = deferred<{ id: string; name: string }[]>();
+  mockReportMembers.mockReturnValueOnce(old.promise).mockReturnValue(current.promise);
+  await mount(); await openModeration(); await moveModerationEntry('room'); await openModeration();
+  await act(async () => old.resolve([{ id: 'old', name: 'Old member' }])); await flush();
+  await openModeration();
+  expect(mockReportMembers).toHaveBeenCalledTimes(2);
+  expect(nativeMenus).toHaveLength(0);
+  await act(async () => current.resolve([{ id: 'current', name: 'Current member' }])); await flush();
+  expect(nativeMenus).toHaveLength(1);
+  expect(nativeMenus[0].options.options).toContain('Current member');
+});
+
+it('allows another member-menu read after a failure', async () => {
+  mockReportMembers.mockRejectedValueOnce(new Error('offline'));
+  await mount(); await openModeration();
+  expect(alert().title).toBe('Could not load members');
+  await openModeration();
+  expect(mockReportMembers).toHaveBeenCalledTimes(2);
+  expect(nativeMenus).toHaveLength(1);
+});
+
+
+it('retires a pending member menu when the chat loses focus, even after returning', async () => {
+  const old = deferred<{ id: string; name: string }[]>();
+  mockReportMembers.mockReturnValueOnce(old.promise);
+  await mount(); await openModeration();
+  mockFocused = false; await update();
+  mockFocused = true; await update();
+  await act(async () => old.resolve([{ id: 'old', name: 'Old member' }])); await flush();
+  expect(nativeMenus).toHaveLength(0);
+  await openModeration();
+  expect(nativeMenus).toHaveLength(1);
+  expect(nativeMenus[0].options.options).toContain('Jamie');
+});
+
+it('retires the selected member action when leaving and returning to the same chat', async () => {
+  await mount(); const choose = await openNativeMemberActions();
+  mockFocused = false; await update();
+  mockFocused = true; await update();
+  act(() => choose(1)); await flush();
+  expect(mockBlock).not.toHaveBeenCalled();
 });
