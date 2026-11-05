@@ -31,6 +31,7 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
   const inputType = Platform.OS === 'ios' ? {
     fontSize: (appearance ? AfterglowType.body.fontSize : FontSizes.bodyMD) * fontScale,
     lineHeight: (appearance ? AfterglowType.body.lineHeight : LineHeights.bodyMD) * fontScale,
+    minHeight: (appearance ? AfterglowType.body.lineHeight : LineHeights.bodyMD) * fontScale + 12,
   } : undefined;
   const accent = appearance ? AfterglowColors.clay : Colors.terracotta;
   return (
@@ -43,7 +44,7 @@ export default function PlanHistoryBacklog({ userId, onPressPerson, appearance, 
           if (next !== queryRef.current) { queryRef.current = next; visit.retireQuery(); }
           setInput({ userId, value });
         }} placeholder={Platform.OS === 'ios' ? undefined : "Search people from your plans"} placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
-          autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={[s.input, inputType]} />
+          autoCorrect={false} accessibilityLabel="Search people from your completed plans" style={[s.input, styles.inputField, inputType]} />
         {Platform.OS === 'ios' && !q && <View pointerEvents="none" style={styles.hintWrap} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <ScaledText accessible={false} allowFontScaling={false} numberOfLines={1} style={[s.input, inputType, styles.hintText, { color: appearance ? AfterglowColors.muted : Colors.tertiary }]}>Search people</ScaledText>
         </View>}
@@ -102,6 +103,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   inputWrap: { flex: 1, minWidth: 0 },
+  inputField: { flex: 0 },
   hintWrap: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
   hintText: { flex: 0, minHeight: undefined },
   input: {
