@@ -7,7 +7,7 @@ import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../
 import RequestRow from './RequestRow';
 import BlockPrompt from './BlockPrompt';
 import { COPY } from '../state/constants';
-import { usePeopleConnectionMutations, friendlyConnectionError } from '../../../hooks/usePeopleConnectionMutations';
+import { usePeopleConnectionMutations, friendlyConnectionError, isObsoletePeopleConnection } from '../../../hooks/usePeopleConnectionMutations';
 import { supabase } from '../../../lib/supabase';
 import type { IncomingRequest } from '../../../lib/yours/types';
 
@@ -100,13 +100,9 @@ export default function RequestStack({ visible, onClose, userId, requests, highl
     locks.current.set(lockKey, attempt);
     change(captured, value => ({ ...value, operations: { ...value.operations, [id]: { req, kind, phase: 'pending' } } }));
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (!current(captured)) return;
-      if (error) throw error;
-      if (!user || user.id !== captured.userId) throw new Error('account_changed');
-      if (kind !== 'block' && !latest.current.requests.some(row => requestKey(row) === id)) {
-        throw new Error('no_pending_request');
-      }
+      // The scoped mutation owns the bounded account preflight and rechecks
+      // this visit/request immediately before dispatch. A second preflight
+      // here could hang indefinitely before reaching that recovery boundary.
       // The existing mutations reject RPC errors and fulfill void on success.
       // No optimistic removal or block escalation precedes this confirmation.
       const scope = { userId: captured.userId, isCurrent: () => current(captured),
@@ -122,7 +118,7 @@ export default function RequestStack({ visible, onClose, userId, requests, highl
       });
     } catch (error) {
       if (!current(captured)) return;
-      const message = (error as Error)?.message === 'account_changed' ? 'Your account changed. Close and reopen requests before trying again.' : friendlyConnectionError(error);
+      const message = isObsoletePeopleConnection(error) ? 'Your account changed. Close and reopen requests before trying again.' : friendlyConnectionError(error);
       change(captured, value => ({ ...value, operations: { ...value.operations, [id]: { req, kind, phase: 'error', error: message } } }));
     } finally {
       if (locks.current.get(lockKey) === attempt) locks.current.delete(lockKey);
