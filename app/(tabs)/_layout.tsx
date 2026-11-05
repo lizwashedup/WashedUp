@@ -87,15 +87,13 @@ export default function TabLayout() {
   const tabBarPaddingBottom = isAndroid ? androidBottomInset : 28;
 
   useEffect(() => {
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }) => {
-        setUserId(session?.user?.id ?? null);
-      })
-      // A residual ProcessLockAcquireTimeoutError must not become an unhandled
-      // rejection; onAuthStateChange below re-sets userId regardless.
-      .catch(() => {});
+    let active = true;
+    let observedAuthEvent = false;
+    // Subscribe before reading. An initial session snapshot must never replace
+    // a newer sign-in/sign-out event or reset that account's open Create menu.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      observedAuthEvent = true;
       setUserId(session?.user?.id ?? null);
       const visit = getVerificationDestination();
       if (session?.user && visit && !visit.entryApproved) {
@@ -104,7 +102,15 @@ export default function TabLayout() {
         setVerificationGateRevision((revision) => revision + 1);
       }
     });
-    return () => subscription.unsubscribe();
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (active && !observedAuthEvent) setUserId(session?.user?.id ?? null);
+      })
+      // A residual ProcessLockAcquireTimeoutError must not become an unhandled
+      // rejection; the listener can still supply a later session.
+      .catch(() => {});
+    return () => { active = false; subscription.unsubscribe(); };
   }, []);
 
   // Onboarding guard: bounces incomplete users out of tabs. The auth-state
