@@ -7,6 +7,7 @@ import { isPlanPast } from '../lib/planTime';
 import { getPlanTerminalStatus } from '../lib/planLifecycle';
 import { friendlyError } from '../lib/friendlyError';
 import { logError } from '../lib/logger';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { classifyPlanJoinReceipt, type PlanJoinRpc } from '../lib/planJoinSafety';
 import type { CirclePlanContext } from './useCirclePlanContext';
 
@@ -73,14 +74,16 @@ export function usePlanJoin(options: Options) {
     mutationFn: async (call: Call): Promise<PlanJoinResult | false> => {
       if (!call.isCurrent() || !latest.current.ready) return false;
       requireNonterminal(call);
-      const auth = await supabase.auth.getUser();
+      // Only pre-dispatch reads may time out and unlock an explicit retry.
+      // A submitted membership write retains its separate receipt/unknown lock.
+      const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!call.isCurrent() || !latest.current.ready) return false;
       requireNonterminal(call);
       if (auth.error || auth.data.user?.id !== call.viewerId) throw new Error('Couldn’t check your account. Try again.');
       if (isPlanPast(call.startTime, call.endTime)) throw new Error('This plan ended. Nobody new can join.');
       if (call.greeting) { const check = checkContent(call.greeting); if (!check.ok) throw new Error(check.reason); }
       if (call.rpc === 'join_event_atomic') {
-        const gate = await supabase.rpc('can_join_event_gender', { p_event_id: call.eventId, p_user_id: call.viewerId });
+        const gate = await requestWithDeadline(supabase.rpc('can_join_event_gender', { p_event_id: call.eventId, p_user_id: call.viewerId }), 12000);
         if (!call.isCurrent() || !latest.current.ready) return false;
         if (gate.error) throw new Error('Couldn’t check this plan. Try again.');
         if (gate.data !== true) throw new Error(gate.data === false ? denialCopy.not_eligible : 'Couldn’t check this plan. Try again.');
