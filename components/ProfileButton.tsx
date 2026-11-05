@@ -3,7 +3,6 @@ import { CreatorActionFill } from './creator/CreatorActionFill';
 import { useAfterglowFonts } from '../hooks/useAfterglowFonts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { Bell, User } from 'lucide-react-native';
@@ -11,53 +10,10 @@ import React, { useRef, useState } from 'react';
 import { AppState, AppStateStatus, Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Colors, { SceneDetailColors } from '../constants/Colors';
 import { Fonts, FontSizes } from '../constants/Typography';
-import { INBOX_COUNT_KEY, PROFILE_PHOTO_KEY } from '../constants/QueryKeys';
 import InboxModal from './InboxModal';
-import { supabase } from '../lib/supabase';
+import { useProfileHeaderData } from '../hooks/useProfileHeaderData';
 
 const PROFILE_PROMPT_KEY = 'has_seen_profile_prompt';
-
-async function fetchProfilePhoto(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase
-    .from('profiles')
-    .select('profile_photo_url')
-    .eq('id', user.id)
-    .single();
-  return data?.profile_photo_url ?? null;
-}
-
-async function fetchInboxCount(): Promise<number> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
-
-  const [invites, notifs] = await Promise.all([
-    supabase
-      .from('plan_invites')
-      .select('id, events!inner(status)')
-      .eq('recipient_id', user.id)
-      .eq('status', 'pending')
-      .in('events.status', ['forming', 'active', 'full']),
-    // Exclude notifications whose expires_at has passed but whose status is
-    // still 'unread' — the modal expires them on open via expire_stale_
-    // notifications RPC, so without this filter the bell count shows N but
-    // the modal opens to nothing (and the badge briefly stays high until
-    // the post-open invalidation refetches). Filtering here makes the
-    // count agree with what the modal will actually display.
-    supabase
-      .from('app_notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .eq('status', 'unread')
-      .neq('type', 'plan_invite')
-      .neq('type', 'new_message')
-      .or('expires_at.is.null,expires_at.gt.now()'),
-  ]);
-
-  const activeInviteCount = (invites.data ?? []).length;
-  return activeInviteCount + (notifs.count ?? 0);
-}
 
 export default function ProfileButton({ surface = 'light', compact = false, stacked = false }: { surface?: 'light' | 'scene'; compact?: boolean; stacked?: boolean }) {
   const { fonts: promptFonts } = useAfterglowFonts(true, 'creator');
@@ -65,32 +21,7 @@ export default function ProfileButton({ surface = 'light', compact = false, stac
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
   const hasCheckedPrompt = useRef(false);
 
-  const { data: photoUrl, refetch } = useQuery({
-    queryKey: PROFILE_PHOTO_KEY,
-    queryFn: fetchProfilePhoto,
-    staleTime: 30_000,
-  });
-
-  const { data: inboxCount = 0 } = useQuery({
-    queryKey: INBOX_COUNT_KEY,
-    enabled: !compact,
-    queryFn: fetchInboxCount,
-    // ProfileButton is mounted on nearly every screen, so this poll runs
-    // continuously for the whole session. Slowed 30s -> 60s to cut steady
-    // background load (incident 2026-05-18).
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  const { data: userId } = useQuery({
-    queryKey: ['auth-user-id'],
-    enabled: !compact,
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      return user?.id ?? null;
-    },
-    staleTime: 60_000,
-  });
+  const { photoUrl, inboxCount, userId, epoch, isCurrent: identityCurrent, refetchPhoto: refetch } = useProfileHeaderData(compact);
 
   const focused = useIsFocused();
   const visit = useRef(0);
@@ -106,15 +37,15 @@ export default function ProfileButton({ surface = 'light', compact = false, stac
     afterDismiss.current = null;
     hasCheckedPrompt.current = false;
     setShowProfilePrompt(false);
-    if (!focused) setShowInbox(false);
+    setShowInbox(false);
     return () => { active.current = false; visit.current++; afterDismiss.current = null; };
-  }, [focused, userId]);
+  }, [focused, userId, epoch]);
 
   const handleProfilePress = async () => {
     if (!active.current || profileBusy.current) return;
     profileBusy.current = true;
     const started = visit.current;
-    const isCurrent = () => active.current && visit.current === started;
+    const isCurrent = () => active.current && visit.current === started && identityCurrent();
     // A form outside the tab navigator needs a stack entry so Back returns to it.
     if (compact) { router.push(stacked ? '/account' : '/(tabs)/profile'); return; }
     if (!hasCheckedPrompt.current) {

@@ -11,6 +11,7 @@ jest.mock('@tanstack/react-query', () => ({ useQuery: ({ queryKey }: any) => ({
   data: queryKey[0] === 'profile-photo' ? 'https://example.test/photo.jpg' : queryKey[0] === 'inbox-count' ? 0 : 'viewer', refetch: jest.fn(),
 }) }));
 jest.mock('expo-router', () => ({ router: { push: (...args: any[]) => mockPush(...args) } }));
+jest.mock('../../hooks/useObservedUser',()=>({useObservedUser:()=>({viewerId:'viewer',epoch:1,isLoading:false,error:null,isCurrent:()=>true})}));
 jest.mock('../../lib/supabase', () => ({ supabase: {} }));
 jest.mock('../InboxModal', () => () => null);
 jest.mock('../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: jest.requireActual('../../constants/Typography').AfterglowFonts }) }));
