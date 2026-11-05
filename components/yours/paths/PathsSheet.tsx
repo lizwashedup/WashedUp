@@ -1,5 +1,6 @@
+import { ScaledText } from '../../ScaledText';
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Pressable, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, ChevronLeft, ChevronRight, AtSign, QrCode, Users, Send } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
@@ -63,8 +64,8 @@ function PathsVisit({ onClose, userId, backlogCount, onPressPerson, appearance, 
       if (inviteAttempt.current === attempt) { inviteAttempt.current = null; if (operationScope.isCurrent()) setInviting(false); }
     }
   };
-  const status = viewer.isLoading ? <View style={styles.feedback}><ActivityIndicator color={colors.clay}/><Text style={styles.sub}>Checking your account…</Text></View> : !ready ?
-    <View style={styles.feedback}><Text style={styles.sub}>Couldn’t check your account.</Text><Pressable accessibilityRole="button" accessibilityLabel="Try again to check account" onPress={() => { if (mounted.current && !retired.current) void viewer.retry(); }} style={styles.retry}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null;
+  const status = viewer.isLoading ? <View style={styles.feedback}><ActivityIndicator color={colors.clay}/><ScaledText style={styles.sub}>Checking your account…</ScaledText></View> : !ready ?
+    <View style={styles.feedback}><ScaledText style={styles.sub}>Couldn’t check your account.</ScaledText><Pressable accessibilityRole="button" accessibilityLabel="Try again to check account" onPress={() => { if (mounted.current && !retired.current) void viewer.retry(); }} style={styles.retry}><ScaledText style={styles.retryText}>Try again</ScaledText></Pressable></View> : null;
 
   // An account change closes this presentation; it never replaces a native
   // Modal in place. The parent must close and explicitly open a new visit.
@@ -74,7 +75,7 @@ function PathsVisit({ onClose, userId, backlogCount, onPressPerson, appearance, 
     <SafeAreaView style={[styles.full, { backgroundColor: colors.paper }]}>
       <View style={styles.bar}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to add people" onPress={() => move('menu')} style={styles.icon}><ChevronLeft size={24} color={colors.ink}/></Pressable>
-        <Text accessibilityRole="header" style={styles.barTitle}>{page.mode === 'plans' ? 'Past plans' : page.mode === 'handle' ? 'Find by handle' : 'Your invite code'}</Text>
+        <ScaledText accessibilityRole="header" style={styles.barTitle}>{page.mode === 'plans' ? 'Past plans' : page.mode === 'handle' ? 'Find by handle' : 'Your invite code'}</ScaledText>
         <Pressable accessibilityRole="button" accessibilityLabel="Close add people" onPress={close} style={styles.icon}><X size={24} color={colors.ink}/></Pressable>
       </View>
       <View style={styles.fullBody}>{status || (page.mode === 'plans' ?
@@ -86,16 +87,16 @@ function PathsVisit({ onClose, userId, backlogCount, onPressPerson, appearance, 
 
   const row = (key: string, title: string, detail: string, Icon: typeof Users, action: () => void, busy = false) => <Pressable key={key}
     style={styles.row} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !ready || busy, busy }} disabled={!ready || busy} onPress={action}>
-      <Icon size={22} color={colors.clay}/><View style={styles.rowBody}><Text style={styles.title} numberOfLines={1}>{title}</Text><Text style={styles.sub}>{detail}</Text></View>
+      <Icon size={22} color={colors.clay}/><View style={styles.rowBody}><ScaledText style={styles.title}>{title}</ScaledText><ScaledText style={styles.sub}>{detail}</ScaledText></View>
       {busy ? <ActivityIndicator color={colors.clay}/> : <ChevronRight size={18} color={colors.muted}/>}</Pressable>;
   return <BottomSheet visible onClose={close} appearance={appearance}>
     <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={styles.menu}>
-      <Text accessibilityRole="header" style={styles.heading}>Add people</Text>
-      <Text style={styles.intro}>Keep in touch with people you meet.</Text>
+      <ScaledText accessibilityRole="header" style={styles.heading}>Add people</ScaledText>
+      <ScaledText style={styles.intro}>Keep in touch with people you meet.</ScaledText>
       {status}
       {row('plans', 'Past plans', COPY.pathPlansCount(backlogCount), Users, () => move('plans'))}
       {row('invite', failure ? 'Try again' : 'Invite someone', inviting ? 'Opening your invite…' : 'Send an invite they can accept in the app.', Send, () => { void invite(); }, inviting)}
-      {failure && <Text accessibilityRole="alert" style={styles.error}>{failure}</Text>}
+      {failure && <ScaledText accessibilityRole="alert" style={styles.error}>{failure}</ScaledText>}
       {row('handle', 'Find by handle', 'Enter someone’s exact WashedUp handle.', AtSign, () => move('handle'))}
       {row('qr', 'Show my code', 'Let someone scan your WashedUp invite.', QrCode, () => move('qr'))}
     </ScrollView>
