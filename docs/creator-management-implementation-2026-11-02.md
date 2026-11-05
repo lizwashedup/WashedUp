@@ -578,3 +578,13 @@ Read-only live policy/ACL/constraint/trigger inspection confirmed the cause. A g
 Final app validation for this pass: **54 tests across five targeted suites**, TypeScript and diff checks. Evidence under `/Users/liz/Desktop/WashedUp/Design/Creator management review 2026-11-02`: `native-creator-help-normal-2026-11-04.png`, `native-creator-help-large-text-2026-11-04.png`, `native-community-identity-permission-denied-2026-11-04.png`, and `community-identity-live-contracts-2026-11-04.csv`. Device Hub was released to the other task, with iPhone 17 Pro Max at the archived QA community's settings, Text Size 3 and keyboard capture off. Other devices and Metro servers were untouched.
 
 This does not certify the entire block editor, every creator journey, physical devices, Android, push delivery or all audience restrictions. Pending request withdrawal and the earlier full age/gender coverage gap remain separate. No production write, OTA or native build occurred in this pass. Local-only preview package/entry wiring remains excluded from product commits.
+
+### November 4 approved identity-save repair — live and verified
+
+Liz approved **Apply the repair and run isolated QA**. The exact one-column permission repair from `932b3ce` is deployed, superseding the preceding pending-approval status. All 12 deployment checks passed; existing records and access policies were unchanged by deployment. The authenticated App Review non-member account and anonymous client passed three denial checks.
+
+The real creator simulator saved a changed name and short description in the existing isolated archived QA community, left the full editor and reopened it with both values persisted. The same native flow restored the original values, which were checked again after reopening and independently in Supabase. All nine final checks passed: the 12 other communities, all 95 membership records, checked authority routines/policies and QA lifecycle/settings remain unchanged. The QA record's expected modification timestamp is the only remaining row difference from its baseline.
+
+Native QA also exposed misleading Basics copy claiming **not started** despite saved identity details. The local prompt now says **Add a cover photo and an introduction.** The editor's 13 tests and diff check passed, and the native overview showed the corrected prompt. The simulator returned to archived Discovery QA settings with Text Size 3/Capture Keyboard off and was released to other work.
+
+Complete scope, evidence and limits: [identity permission rollout](database/direct-apply-evidence-20261104-community-identity.md). The backend is live. **No OTA or native build was published.** The earlier unrelated verification gaps remain open.

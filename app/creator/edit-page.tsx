@@ -244,7 +244,7 @@ function CommunityPageEditor({ community, scope }: { community: LedCommunity; sc
       if (coverDone && wordsDone) return 'looks good — a cover photo and your words are both in';
       if (coverDone) return 'cover photo is in — add a few words next';
       if (wordsDone) return 'your words are in — add a cover photo next';
-      return 'not started — a photo and a few words go a long way';
+      return 'Add a cover photo and an introduction.';
     }
     if (key === 'sections') {
       const count = group.filter((b) => b.visible).length;

@@ -1,6 +1,6 @@
 # Community name and description saving — November 4
 
-**Prepared and tested locally; not deployed. Separate production approval is required. No OTA or native build is included.**
+**Update: Liz approved this repair; it is deployed and isolated native/SDK QA passed. See [the live rollout record](direct-apply-evidence-20261104-community-identity.md). No OTA or native build was published. The original proposal below is retained for provenance.**
 
 ## Confirmed problem
 
