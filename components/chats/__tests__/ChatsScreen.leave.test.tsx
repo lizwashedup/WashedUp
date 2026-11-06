@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { useFocusEffect } from '@react-navigation/native';
 import ChatsScreen from '../../../app/(tabs)/chats/index';
 import { BrandedAlert } from '../../BrandedAlert';
 import { COPY } from '../../yours/state/constants';
@@ -56,6 +57,12 @@ function deferred() {
   const promise = new Promise<string>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+function focusInbox() {
+  let blur: void | (() => void);
+  act(() => { blur = jest.mocked(useFocusEffect).mock.calls[0][0](); });
+  return () => act(() => { if (blur) blur(); });
+}
+
 async function mount(chats = [circle, dm, plan]) {
   jest.mocked(useChatList).mockImplementation(viewer => {
     const [rows, setRows] = React.useState(chats);
@@ -63,6 +70,7 @@ async function mount(chats = [circle, dm, plan]) {
     return { chats: viewer === 'alice' ? rows : [], loading: false, loadError: false, refetch: mockRefetch, removeChat: mockRemoveChat };
   });
   await act(async () => { tree = create(<ChatsScreen />); });
+  return focusInbox();
 }
 const confirmAlert = () => tree!.root.findAllByType(BrandedAlert).find(node => !!node.props.buttons)!;
 const errorAlert = () => tree!.root.findAllByType(BrandedAlert).find(node => !node.props.buttons)!;
@@ -253,4 +261,29 @@ it.each(['success', 'failure'])('ignores a pending %s after unmount', async outc
   });
   expect(mockRemoveChat).not.toHaveBeenCalled();
   expect(mockRefetch).not.toHaveBeenCalled();
+});
+
+it.each([circle, dm])('requires a fresh confirmation for $title after leaving Chats', async chat => {
+  const blur = await mount();
+  open(chat);
+  const oldConfirm = confirmAlert().props.buttons[1].onPress;
+  blur();
+  focusInbox();
+  await act(async () => { await oldConfirm(); });
+  expect(mockMutateAsync).not.toHaveBeenCalled();
+  expect(confirmAlert().props.visible).toBe(false);
+  open(chat);
+  await act(async () => { await confirm(); });
+  expect(mockMutateAsync).toHaveBeenCalledWith(chat.conversationId);
+});
+
+it('keeps an already confirmed removal when its receipt arrives after leaving Chats', async () => {
+  const pending = deferred();
+  mockMutateAsync.mockReturnValueOnce(pending.promise);
+  const blur = await mount();
+  open();
+  const operation = confirm();
+  blur();
+  await act(async () => { pending.resolve('left'); await operation; });
+  expect(mockRemoveChat).toHaveBeenCalledWith(circle.conversationId);
 });
