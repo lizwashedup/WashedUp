@@ -1,3 +1,5 @@
+let mockDraftProtocol:any;const mockProtocolSave=jest.fn(),mockProtocolCheck=jest.fn(),mockProtocolRetry=jest.fn(),mockProtocolResume=jest.fn();
+jest.mock('../../../hooks/useOperatorEventDraft',()=>({useOperatorEventDraft:()=>mockDraftProtocol}));
 import React from 'react';import {act,create,type ReactTestRenderer} from 'react-test-renderer';import {TextInput,TouchableOpacity,Text} from 'react-native';
 let mockEntryProps:any, mockRouteParams:Record<string,string>|undefined,mockPagesEnabled=true;
 const mockPageId='f5d7644a-2ff5-4def-b0ab-d04b8250892b',mockEventId='0f860000-0000-4000-8000-000000000001',mockUser='0e6e1827-0f87-4e03-b42b-7ade8219725b';
@@ -49,7 +51,7 @@ async function settle(){for(let i=0;i<5;i++)await act(async()=>{await Promise.re
 async function mount(){await act(async()=>{tree=create(<EventForm/>);});await settle();}
 async function advance(){await act(async()=>{jest.advanceTimersByTime(1600);});await settle();}
 const button=(label:string)=>tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>(Array.isArray(t.props.children)?t.props.children.join(''):t.props.children)===label));
-beforeEach(()=>{jest.clearAllMocks();mockSettingsOpen=true;mockSavedCapacity=null;mockSetOffer.mockReset();mockSetOffer.mockResolvedValue(undefined);mockSetCapacity.mockReset();mockSetCapacity.mockImplementation(async(_id:string,capacity:number|null)=>{mockSavedCapacity=capacity;});mockStateRead.mockReset();mockLegacyRead.mockReset();mockLegacyRead.mockImplementation(async()=>({...saved,id:mockEventId,ticket_capacity:mockSavedCapacity}));mockStorageRemove.mockImplementation(async(k:string)=>{mockStorage.delete(k);});mockRouteParams={};mockCreate.mockResolvedValue(mockEventId);mockAccess=null;mockSource=null;mockSourceTemplate=null;mockEntryProps=undefined;mockPagesEnabled=true;mockTemplate=null;mockTemplateRead.mockImplementation(async()=>mockTemplate);mockTemplateSave.mockImplementation(async a=>{mockTemplate={id:a.templateId,userId:mockUser,sourcePageId:a.pageId,sourceEventId:a.eventId,sourceUpdatedAt:a.expectedUpdatedAt,name:a.name,fields:{...saved.fields,event_date:'',start_time:null,end_time:null}};return mockTemplate;});mockTeamEntry=false;mockCanGoBack.mockReturnValue(true);mockEventStatus='Draft';mockStatusReceipt=null;mockStatusRead.mockImplementation(async()=>mockStatusReceipt);mockStatusWrite.mockImplementation(async(p,e,r,input)=>{mockStatusReceipt={pageId:p,eventId:e,requestId:r,userId:mockUser,...input,updatedAt:'2026-09-15T03:00:00Z'};saved={...saved,status:input.status,updatedAt:mockStatusReceipt.updatedAt};return mockStatusReceipt;});mockRefundAccess.mockResolvedValue({isOwner:true,isDelegate:false,canRefund:true});mockRefund.mockImplementation(async(_id,options)=>{await options?.beforeEach?.();return {refundedCount:0,failedCount:0};});mockReadiness.mockReset();mockCurrent=true;mockTiers.mockResolvedValue([]);mockPayout.mockResolvedValue(null);mockReadiness.mockResolvedValue({publishReady:true,publishReason:null,canManageTickets:true});jest.useFakeTimers();mockStorage.clear();mockCounter=0;receipt=null;saved={pageId:mockPageId,eventId:mockEventId,fields,updatedAt:'2026-09-15T01:00:00Z',status:'Draft',offerType:'free_event',ticketCapacity:null,latitude:null,longitude:null,canManageTickets:true};mockStateRead.mockImplementation(async()=>saved);mockAttemptRead.mockImplementation(async()=>receipt);mockSave.mockImplementation(async(_p,_e,id,input)=>{receipt={...saved,...input,updatedAt:`2026-09-15T01:01:${String(mockCounter).padStart(2,'0')}Z`,requestId:id,userId:mockUser};saved=receipt;return receipt;});});
+beforeEach(()=>{jest.clearAllMocks();mockDraftProtocol={enabled:false,ready:true,supported:false,canStart:()=>true};mockSettingsOpen=true;mockSavedCapacity=null;mockSetOffer.mockReset();mockSetOffer.mockResolvedValue(undefined);mockSetCapacity.mockReset();mockSetCapacity.mockImplementation(async(_id:string,capacity:number|null)=>{mockSavedCapacity=capacity;});mockStateRead.mockReset();mockLegacyRead.mockReset();mockLegacyRead.mockImplementation(async()=>({...saved,id:mockEventId,ticket_capacity:mockSavedCapacity}));mockStorageRemove.mockImplementation(async(k:string)=>{mockStorage.delete(k);});mockRouteParams={};mockCreate.mockResolvedValue(mockEventId);mockAccess=null;mockSource=null;mockSourceTemplate=null;mockEntryProps=undefined;mockPagesEnabled=true;mockTemplate=null;mockTemplateRead.mockImplementation(async()=>mockTemplate);mockTemplateSave.mockImplementation(async a=>{mockTemplate={id:a.templateId,userId:mockUser,sourcePageId:a.pageId,sourceEventId:a.eventId,sourceUpdatedAt:a.expectedUpdatedAt,name:a.name,fields:{...saved.fields,event_date:'',start_time:null,end_time:null}};return mockTemplate;});mockTeamEntry=false;mockCanGoBack.mockReturnValue(true);mockEventStatus='Draft';mockStatusReceipt=null;mockStatusRead.mockImplementation(async()=>mockStatusReceipt);mockStatusWrite.mockImplementation(async(p,e,r,input)=>{mockStatusReceipt={pageId:p,eventId:e,requestId:r,userId:mockUser,...input,updatedAt:'2026-09-15T03:00:00Z'};saved={...saved,status:input.status,updatedAt:mockStatusReceipt.updatedAt};return mockStatusReceipt;});mockRefundAccess.mockResolvedValue({isOwner:true,isDelegate:false,canRefund:true});mockRefund.mockImplementation(async(_id,options)=>{await options?.beforeEach?.();return {refundedCount:0,failedCount:0};});mockReadiness.mockReset();mockCurrent=true;mockTiers.mockResolvedValue([]);mockPayout.mockResolvedValue(null);mockReadiness.mockResolvedValue({publishReady:true,publishReason:null,canManageTickets:true});jest.useFakeTimers();mockStorage.clear();mockCounter=0;receipt=null;saved={pageId:mockPageId,eventId:mockEventId,fields,updatedAt:'2026-09-15T01:00:00Z',status:'Draft',offerType:'free_event',ticketCapacity:null,latitude:null,longitude:null,canManageTickets:true};mockStateRead.mockImplementation(async()=>saved);mockAttemptRead.mockImplementation(async()=>receipt);mockSave.mockImplementation(async(_p,_e,id,input)=>{receipt={...saved,...input,updatedAt:`2026-09-15T01:01:${String(mockCounter).padStart(2,'0')}Z`,requestId:id,userId:mockUser};saved=receipt;return receipt;});});
 afterEach(()=>{act(()=>tree?.unmount());jest.useRealTimers();});
 
 import { setWorkspace } from '../../../lib/workspaceContext';
@@ -223,4 +225,40 @@ it('opens the confirmed preview when replacement retires the creation screen syn
  await act(async()=>{await previewAction()();});
  expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}`);
  expect(mockPush).toHaveBeenCalledWith(`/event/${mockEventId}?preview=guest`);
+});
+
+async function prepareProtocolDraft(){
+ mockDraftProtocol={enabled:true,ready:true,supported:true,pending:null,saved:null,error:null,busy:false,canStart:()=>true,save:mockProtocolSave,check:mockProtocolCheck,retry:mockProtocolRetry,resumeEditing:mockProtocolResume};
+ mockProtocolSave.mockResolvedValue({eventId:mockEventId,status:'Draft'});
+ await prepareLegacyDraft();
+}
+it.each(['save','preview','photos','video'])('uses one atomic draft call with the chosen settings for %s',async entry=>{
+ await prepareProtocolDraft();await act(async()=>{await (entry==='save'?button('save it as a draft')!.props.onPress():runDraftEntry(entry));});
+ expect(mockProtocolSave).toHaveBeenCalledTimes(1);expect(mockProtocolSave).toHaveBeenCalledWith(expect.objectContaining({communityId:null,offerType:'free_event',ticketCapacity:24,fields:expect.objectContaining({title:'Draft format test'})}));
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockSetOffer).not.toHaveBeenCalled();expect(mockSetCapacity).not.toHaveBeenCalled();
+ if(entry==='save')expect(mockDismissTo).toHaveBeenCalledWith('/(tabs)/friends/manage/(tools)/events?section=drafts');
+ else expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}${entry==='photos'?'&openPhotos=1':''}`);
+});
+it('does not fall back or navigate after an atomic draft response is lost',async()=>{
+ await prepareProtocolDraft();mockProtocolSave.mockRejectedValueOnce(Error('unconfirmed'));await act(async()=>{await previewAction()();});
+ expect(mockCreate).not.toHaveBeenCalled();expect(mockSetOffer).not.toHaveBeenCalled();expect(mockReplace).not.toHaveBeenCalled();expect(mockPush).not.toHaveBeenCalled();
+});
+it('shows recovery instead of an editable form and invokes only the selected action',async()=>{
+ await prepareProtocolDraft();mockDraftProtocol={...mockDraftProtocol,pending:{input:{fields:{title:'Original picnic'}}},retryReady:true,canStart:()=>false};
+ await act(async()=>{tree.update(<EventForm/>);});
+ expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+ const action=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label&&typeof n.props.onPress==='function')[0];
+ await act(async()=>{action('Check save').props.onPress();});expect(mockProtocolCheck).toHaveBeenCalledTimes(1);expect(mockProtocolRetry).not.toHaveBeenCalled();
+ await act(async()=>{action('Return to editing').props.onPress();});expect(mockProtocolResume).toHaveBeenCalledTimes(1);expect(mockCreate).not.toHaveBeenCalled();
+});
+it('opens only the confirmed saved draft from recovery',async()=>{
+ await prepareProtocolDraft();mockDraftProtocol={...mockDraftProtocol,saved:{eventId:mockEventId},canStart:()=>false};await act(async()=>{tree.update(<EventForm/>);});
+ const open=tree.root.findAll(n=>n.props.accessibilityLabel==='Open draft'&&typeof n.props.onPress==='function')[0];act(()=>open.props.onPress());
+ expect(mockReplace).toHaveBeenCalledWith(`/creator/event-form?id=${mockEventId}`);expect(mockCreate).not.toHaveBeenCalled();
+});
+it('restores the original fields and settings after the server sealed an unconfirmed save',async()=>{
+ await prepareProtocolDraft();mockDraftProtocol={...mockDraftProtocol,restored:{fields:{...fields,title:'Recovered picnic',categories:['music']},offerType:'free_event',ticketCapacity:27,latitude:34,longitude:-118}};
+ await act(async()=>{tree.update(<EventForm/>);});await settle();
+ expect(tree.root.findAllByType(TextInput).find(n=>n.props.placeholder==='sunset rooftop social')!.props.value).toBe('Recovered picnic');
+ expect(tree.root.findAllByType(TextInput).find(n=>n.props.accessibilityLabel==='Event capacity')!.props.value).toBe('27');expect(mockProtocolSave).not.toHaveBeenCalled();
 });

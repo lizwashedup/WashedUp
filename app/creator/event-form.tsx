@@ -1,3 +1,4 @@
+import { ScaledText } from '../../components/ScaledText';
 import { LegacyEventCreateGate } from '../../components/creator/LegacyEventCreateGate';
 import { prepareLegacyEventCreate, type LegacyEventCreateContext } from '../../lib/legacyEventCreate';
 import {getPageEventSaveState} from '../../lib/creatorPageEventSave';
@@ -93,6 +94,9 @@ import { useCreatorPageEventSave } from '../../hooks/useCreatorPageEventSave';
 import { loadCreatorPageEventReadiness, pageEventPublishGuidance } from '../../lib/creatorPageEventReadiness';
 import CreatorPageEventGate from '../../components/creator/pages/CreatorPageEventGate';
 import { publishCreatorPageEvent, CreatorPageScopeExpired, type CreatorPageScope } from '../../lib/creatorPageReview';
+import { useOperatorEventDraft } from '../../hooks/useOperatorEventDraft';
+import { validOperatorDraftInput } from '../../lib/operatorEventDraft';
+import { PageAction, PageFrame, pageStyles } from '../../components/creator/pages/PageFrame';
 import type { CreatorPageEventContext } from '../../lib/creatorPageEventContext';
 
 // doc 78 law 2 / doc 80 section D: a real drop-zone, not a pill over
@@ -145,6 +149,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   // A page context comes only from the authorized saved-page/event gate, never route text.
   const operationScope = pageScope ?? creationScope;
   const confirmedCreatedEvent = React.useRef<string | null>(null);
+  const draftCreation = useOperatorEventDraft(creationContext?.community?.id ?? null, creationScope);
   const assertPageVisit = () => { if (operationScope && !operationScope.isCurrent()) throw new CreatorPageScopeExpired(); };
   const withPageScope = async <T,>(action: () => Promise<T>, readOnly = false): Promise<T> => {
     assertPageVisit();
@@ -161,6 +166,7 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
     return result;
   };
   const createOperatorEvent: typeof existingCreateOperatorEvent = (...args) => withPageScope(async () => {
+    if (!draftCreation.canStart()) throw new Error('Check the original draft save before continuing.');
     if (confirmedCreatedEvent.current) throw new Error('This draft already exists. Open it from Events before continuing.');
     if (creationContext && creationScope) {
       const selected = await prepareLegacyEventCreate(creationContext, creationScope);
@@ -384,6 +390,26 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
       setSeeded(true);
     }
   }, [editing, duplicateFrom, templateId, template, seeded]);
+
+  // A server-sealed request can safely return to its original fields, including
+  // after an app restart. A confirmed event opens by ID instead of being recreated.
+  useEffect(() => {
+    const restored = draftCreation.restored;
+    if (!restored || editing) return;
+    const f = restored.fields;
+    setTitle(f.title); setDescription(f.description); setImageUrl(f.image_url);
+    setBlocks(f.description_blocks ?? undefined); setDate(f.event_date);
+    const start = f.start_time ? getLAWallParts(f.start_time) : null;
+    const end = f.end_time ? getLAWallParts(f.end_time) : null;
+    setTime(start ? `${pad2(start.hour24)}:${pad2(start.minute)}` : '');
+    setEndDate(end ? `${end.y}-${pad2(end.m + 1)}-${pad2(end.d)}` : '');
+    setEndTime(end ? `${pad2(end.hour24)}:${pad2(end.minute)}` : '');
+    setVenue(f.venue); setVenueAddress(f.venue_address); setCategories(eventCategories(f));
+    setExternalUrl(f.external_url); setTicketPrice(f.ticket_price); setPublicName(f.public_name);
+    setPinToChat(f.pin_to_chat); setAfterPurchaseMsg(f.confirmation_message ?? '');
+    setOfferType(restored.offerType); setTicketCapacity(restored.ticketCapacity === null ? '' : String(restored.ticketCapacity));
+    setCoords(restored.latitude === null ? null : { lat: restored.latitude, lng: restored.longitude! });
+  }, [draftCreation.restored, editing]);
 
   // duplicate = same clothes, fresh date: seed everything but date and time,
   // then run the normal create path (publish, chat born, tell-your-members)
@@ -884,6 +910,21 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   // legacy API writes fields and settings separately; keep a confirmed ID on
   // partial success and never continue to preview/media with unchecked settings.
   const persistDraft = async (fields: OperatorEventFields): Promise<string | null> => {
+    if (!editing && creationContext && creationScope && draftCreation.supported) {
+      await prepareLegacyEventCreate(creationContext, creationScope);
+      const input = { fields, communityId: creationContext.community?.id ?? null, offerType,
+        ticketCapacity: ticketCapacity.trim() ? Number(ticketCapacity) : null, latitude: coords?.lat ?? null, longitude: coords?.lng ?? null };
+      if (!validOperatorDraftInput(input)) throw Error('Check the draft and RSVP settings.');
+      const saved = await draftCreation.save(input);
+      assertPageVisit();
+      if (saved.status !== 'Draft') return null;
+      confirmedCreatedEvent.current = saved.eventId;
+      setDraftSettingsNeedReview(false);
+      lastSavedRef.current = autosaveSignature;
+      afterSave();
+      return saved.eventId;
+    }
+
     if (!pageContext && (!offerTypeColumnOpen || !ticketCapacityRpcOpen)) {
       // Retry capability without reseeding over the creator's current choices.
       const [offer, capacity] = await withPageScope(() => requestWithDeadline(
@@ -1445,6 +1486,24 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
       {pageTemplate.saved && !templateNeedsCheck && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Return to the page after saving template" disabled={saving || pageTemplate.busy || coverInProgress()} style={styles.recoveryAction} onPress={() => { afterSave(); leaveEditor(); }}><CreatorActionFill /><Text numberOfLines={1} style={styles.recoveryActionText}>Back to page</Text></TouchableOpacity>}
     </View>
   );
+
+  if (draftCreation.enabled && (!draftCreation.ready || draftCreation.error || draftCreation.pending || draftCreation.saved)) {
+    return <PageFrame scrollingTitle title={draftCreation.saved ? 'Draft saved' : draftCreation.pending ? 'Check your draft' : 'Create an event'}>
+      <ScaledText accessibilityRole="alert" style={[pageStyles.body, { fontFamily: fonts.regular }]}>{draftCreation.saved
+        ? 'Your event is saved as a draft. Open it to keep editing.'
+        : draftCreation.error ?? (draftCreation.busy ? (draftCreation.pending ? 'Checking your draft…' : 'Getting event creation ready…') : 'We haven’t confirmed this save yet. Check its status or retry the original save.')}</ScaledText>
+      {draftCreation.pending && <ScaledText style={[pageStyles.small, { fontFamily: fonts.regular, marginBottom: 16 }]}>{draftCreation.pending.input.fields.title}</ScaledText>}
+      {draftCreation.busy && <ActivityIndicator accessibilityLabel="Checking the original draft save" color={Colors.terracotta} />}
+      <View style={{ gap: 12 }}>
+      {draftCreation.saved && <PageAction primary title="Open draft" onPress={() => { if (creationScope?.isCurrent()) router.replace(`/creator/event-form?id=${draftCreation.saved!.eventId}` as never); }} />}
+      {!draftCreation.busy && (!draftCreation.saved || draftCreation.error) && <PageAction primary={!draftCreation.saved} title="Check save" quiet={!!draftCreation.saved} onPress={() => void draftCreation.check()} />}
+      {!draftCreation.busy && draftCreation.retryReady && <PageAction title="Retry save" onPress={() => void draftCreation.retry()} />}
+      {!draftCreation.busy && draftCreation.pending && !draftCreation.saved && <PageAction title="Return to editing" quiet onPress={() => void draftCreation.resumeEditing()} />}
+      {!draftCreation.busy && draftCreation.pending && !draftCreation.saved && <ScaledText style={[pageStyles.small, { fontFamily: fonts.regular }]}>We’ll check this save first. If it already saved, you can open that draft.</ScaledText>}
+      <PageAction title="You manage" quiet onPress={() => router.dismissTo('/(tabs)/friends/manage')} />
+      </View>
+    </PageFrame>;
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
