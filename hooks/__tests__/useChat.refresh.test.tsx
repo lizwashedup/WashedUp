@@ -39,11 +39,11 @@ function message(n: number, extra: Partial<ChatMessage> = {}): ChatMessage {
 }
 const result = (...rows: ChatMessage[]): ReadResult => ({ data: rows, error: null });
 
-function mount(key: ConversationKey = { kind: 'event', id: 'plan-a' }, canAcknowledge = () => true) {
+function mount(key: ConversationKey = { kind: 'event', id: 'plan-a' }, canAcknowledge = () => true, rowVisible?: (id: string) => boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   let chat!: ReturnType<typeof useChat>;
   let renderer!: ReturnType<typeof create>;
-  function Harness({ room }: { room: ConversationKey }) { chat = useChat(room, null, canAcknowledge); return null; }
+  function Harness({ room }: { room: ConversationKey }) { chat = useChat(room, null, canAcknowledge, rowVisible); return null; }
   const tree = (room: ConversationKey) => <QueryClientProvider client={client}><Harness room={room} /></QueryClientProvider>;
   act(() => { renderer = create(tree(key)); });
   cleanup.push(() => { act(() => renderer.unmount()); client.clear(); });
@@ -698,4 +698,31 @@ it.each([null, {}, {blocked_users:'invalid'}, {blocked_users:[null]}])('does not
 it.each([null,[]])('accepts a confirmed profile with an empty or legacy null block list: %j',async list=>{
   readBlocked.mockResolvedValueOnce({data:{blocked_users:list},error:null});readMessages.mockResolvedValue(result(message(1)));
   const fixture=mount();await flush();expect(fixture.chat.loadError).toBe(false);expect(fixture.chat.messages).toHaveLength(1);
+});
+
+it.each(['event','circle'] as const)('waits for the actual newest row of the %s page to enter the viewport', async kind => {
+  const latest = message(2), older = message(1);
+  readMessages.mockResolvedValue(result(latest, older));
+  let seenId = older.id;
+  const fixture = mount({kind,id:'room'}, () => true, id => id === seenId);
+  await flush();
+  fixture.chat.checkVisiblePage(); await flush();
+  expect(readReceipts).not.toHaveBeenCalled();
+  expect(clearNotifications).not.toHaveBeenCalled();
+  seenId = latest.id;
+  fixture.chat.checkVisiblePage(); fixture.chat.checkVisiblePage(); await flush();
+  expect(readReceipts).toHaveBeenCalledTimes(1);
+  expect(readReceipts.mock.calls[0][0]).toMatchObject({last_read_at: latest.created_at});
+  expect(clearNotifications).toHaveBeenCalledTimes(kind === 'event' ? 1 : 0);
+  expect(readMessages).toHaveBeenCalledTimes(1);
+});
+it('cannot acknowledge an old room page when the viewport changes after leaving', async () => {
+  const old = message(2);
+  readMessages.mockResolvedValueOnce(result(old)).mockResolvedValue(result());
+  let visible = false;
+  const fixture = mount({kind:'event',id:'room-a'}, () => true, () => visible);
+  await flush(); const retained = fixture.chat.checkVisiblePage;
+  fixture.navigate({kind:'event',id:'room-b'}); await flush();
+  visible = true; retained(); await flush();
+  expect(readReceipts).not.toHaveBeenCalled(); expect(clearNotifications).not.toHaveBeenCalled();
 });
