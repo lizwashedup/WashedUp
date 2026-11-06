@@ -1,3 +1,4 @@
+import { classifyInboxInsert, withInboxDelivery } from '../lib/inboxMessageEvidence';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
@@ -290,6 +291,13 @@ export function useChatList(knownUserId: string | null | undefined) {
   useEffect(() => {
     let active = true;
     let arrival = 0;
+    const hydrating = new Set<string>();
+    let recheck: ReturnType<typeof setTimeout> | null = null;
+    // A cards response may contain only a total. Coalesce ambiguous older
+    // deliveries into one read; never treat identical times as identical IDs.
+    const recheckSnapshot = () => {
+      if (!recheck) recheck = setTimeout(() => { recheck = null; if (isCurrent()) void fetchChats(true); }, 200);
+    };
     const latestArrival = new Map<string, number>();
     const isCurrent = () => active && mounted.current && currentViewer.current === knownUserId;
     const channel = supabase
@@ -306,11 +314,22 @@ export function useChatList(knownUserId: string | null | undefined) {
           const convId = msg?.event_id ?? (GROUPS_ENABLED ? msg?.circle_id : null);
           if (!isCurrentPreview() || !convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
 
-          const group = !rowsRef.current.find(row => row.conversationId === convId)?.is_dm;
+          const kind = msg.event_id ? 'event' : 'circle';
+          const match = (row: ChatPreview) => row.kind === kind && row.conversationId === convId;
+          const target = rowsRef.current.find(match);
+          if (!target) return;
+          const group = !target.is_dm;
           if (group && pendingGroupPrivacy.current && !await pendingGroupPrivacy.current) return;
           if (!isCurrentPreview()) return;
           const mayShow = () => !group || (!!msg.user_id && groupBlocks.current !== null && !groupBlocks.current.has(msg.user_id));
           if (!mayShow()) return;
+          const classify = (row?: ChatPreview) => classifyInboxInsert(row?.inbox_evidence, msg.id, msg.created_at);
+          const status = classify(rowsRef.current.find(match));
+          if (status === 'known') return;
+          if (status === 'check') { recheckSnapshot(); return; }
+          const delivery = msg.id ? JSON.stringify([version, kind, convId, msg.id]) : null;
+          if (delivery && hydrating.has(delivery)) return;
+          if (delivery) hydrating.add(delivery);
           const sequence = ++arrival;
           latestArrival.set(convId, sequence);
 
@@ -338,23 +357,29 @@ export function useChatList(knownUserId: string | null | undefined) {
             showChats(prev => {
               if (!isCurrentPreview() || !mayShow()) return prev;
               const updated = prev.map(c => {
-                if (c.conversationId !== convId) return c;
+                if (!match(c)) return c;
+                // Sender hydration may finish after a snapshot or another
+                // delivery of this very same database row.
+                const afterHydration = classify(c);
+                if (afterHydration === 'known') return c;
+                if (afterHydration === 'check') { recheckSnapshot(); return c; }
+                const countUnread = !isOwn && afterHydration !== 'read';
                 const order = comparePreviewTimes(msg.created_at, c.last_message_at);
                 // Sender hydration can finish out of order. Keep the newest
                 // text/time, but still count each incoming message as unread.
                 const replacePreview = order > 0 || (order === 0 && latestArrival.get(convId) === sequence);
                 if (replacePreview) livePreviews.current.at.set(`${c.kind}:${convId}`, ++livePreviews.current.sequence);
                 return {
-                  ...c,
+                  ...c, inbox_evidence: withInboxDelivery(c.inbox_evidence, msg.id, msg.created_at, c.last_message_at),
                   ...(!c.is_dm && {
                     last_message_user_id: replacePreview ? msg.user_id : c.last_message_user_id,
-                    unread_by_author: isOwn ? c.unread_by_author : {
+                    unread_by_author: !countUnread ? c.unread_by_author : {
                       ...c.unread_by_author, [msg.user_id]: (c.unread_by_author?.[msg.user_id] ?? 0) + 1,
                     },
                   }),
                   last_message: replacePreview ? preview : c.last_message,
                   last_message_at: replacePreview ? msg.created_at : c.last_message_at,
-                  unread_count: isOwn ? c.unread_count : c.unread_count + 1,
+                  unread_count: countUnread ? c.unread_count + 1 : c.unread_count,
                 };
               });
               // Re-sort: active chats by last_message_at desc
@@ -366,12 +391,13 @@ export function useChatList(knownUserId: string | null | undefined) {
           } catch {
             // Fallback: full refetch only for this active account.
             if (isCurrentPreview()) void fetchChats(true);
-          }
+          } finally { if (delivery) hydrating.delete(delivery); }
         },
       )
       .subscribe();
     return () => {
       active = false;
+      if (recheck) clearTimeout(recheck);
       supabase.removeChannel(channel);
     };
   }, [fetchChats, knownUserId]);

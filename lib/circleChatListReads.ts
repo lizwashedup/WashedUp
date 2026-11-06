@@ -1,3 +1,4 @@
+import { messageEvidence } from './inboxMessageEvidence';
 import { checkInboxActivityResponses, checkLatestMessageParents, peerActivityRows, PEER_ACTIVITY_LIMIT } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { circleDisplay, type DisplayMember } from './circles/display';
@@ -46,7 +47,7 @@ export async function fetchCircleChats(
     supabase.from('circle_members').select('circle_id').in('circle_id', circleIds).eq('status', 'joined'),
     // Limit inside each parent so busy chats cannot crowd out older history.
     supabase.from('circles')
-      .select('id, latest_message:messages!messages_circle_id_fkey(circle_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_circle_id_fkey(circle_id, created_at, user_id)')
+      .select('id, latest_message:messages!messages_circle_id_fkey(id, circle_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_circle_id_fkey(id, circle_id, created_at, user_id)')
       .in('id', circleIds)
       .order('created_at', { referencedTable: 'latest_message', ascending: false })
       .order('id', { referencedTable: 'latest_message', ascending: false })
@@ -105,7 +106,9 @@ export async function fetchCircleChats(
 
   const unreadMap: Record<string, number> = {};
   const unreadByAuthor: Record<string, Record<string, number>> = {};
+  const sampled: Record<string, {id?:string;created_at:string}[]> = {};
   peerActivityRows(messageParents).forEach((msg: any) => {
+    (sampled[msg.circle_id] ??= []).push(msg);
     const lastRead = readMap[msg.circle_id];
     if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
       if (msg.user_id) {
@@ -148,6 +151,7 @@ export async function fetchCircleChats(
             })()
           : null,
         last_message_user_id: lastMsg?.user_id ?? null,
+        inbox_evidence: messageEvidence(sampled[circle.id] ?? [], lastMsg, readMap[circle.id], PEER_ACTIVITY_LIMIT),
         unread_by_author: unreadByAuthor[circle.id] ?? {},
         last_message_at: lastMsg?.created_at ?? null,
         unread_count: unreadMap[circle.id] ?? 0,
@@ -218,6 +222,7 @@ export async function fetchCircleChatsViaCards(
       last_message_user_id: lastMsg?.user_id ?? null,
       last_message_at: lastMsg?.created_at ?? null,
       unread_count: card.unread_count ?? 0,
+      inbox_evidence: { ids: lastMsg?.id ? [lastMsg.id] : [], uncertainThrough: lastMsg?.created_at },
       is_past: false,
       member_avatars: members
         .map((m) => m.avatar_url)
