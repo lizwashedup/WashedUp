@@ -12,6 +12,7 @@ type Options = {
   onNotice: (isCurrent: () => boolean, context: ParticipationAssentContext) => void;
   onNoticeComplete: (isCurrent: () => boolean) => void | Promise<void>;
   onAccepted: () => void; onDeclined: () => void;
+  refreshInbox: (viewerId: string) => Promise<void>;
   onError: (error: unknown, kind: 'accept' | 'decline') => void;
 };
 type Stage = 'status' | 'notice' | 'assent' | 'dispatch' | 'notification';
@@ -73,15 +74,21 @@ export function usePlanExceptionActions(options: Options) {
     call.entry.completed = true;
     requirePlanParticipationCurrent(call);
     call.stage = 'notification';
-    // Original notification cleanup remains best-effort, but cannot run as a
-    // replacement account or turn confirmed membership into a failed accept.
-    let accountChanged = false;
+    // Account preflight still protects cleanup when the decision finishes after an account switch.
     try {
       await requirePlanParticipationAccount(call);
-      await supabase.from('app_notifications').update({ status: call.kind === 'accept' ? 'acted' : 'read' })
+      const refreshInbox = latest.current.refreshInbox;
+      const cleanup = supabase.from('app_notifications').update({ status: call.kind === 'accept' ? 'acted' : 'read' })
         .eq('type', 'exception_invite').eq('event_id', call.eventId).eq('user_id', call.viewerId);
-    } catch (error) { accountChanged = error instanceof ChangedPlanParticipationAccount; }
-    if (!accountChanged && call.isCurrent()) {
+      // The decision has committed. Only refresh its owner's inbox when the secondary write settles.
+      // A late response must never navigate, show a new alert or retry the decision.
+      void Promise.resolve(cleanup)
+        .finally(() => refreshInbox(call.viewerId))
+        .catch(() => {});
+    } catch (error) {
+      if (error instanceof ChangedPlanParticipationAccount) return;
+    }
+    if (call.isCurrent()) {
       if (call.kind === 'accept') latest.current.onAccepted(); else latest.current.onDeclined();
     }
   };
