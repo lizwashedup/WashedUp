@@ -9,7 +9,7 @@ jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush}),useFocusEffect:(ca
 }}));
 jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({setQueryData:mockCache,invalidateQueries:mockInvalidate})}));
 jest.mock('../../lib/supabase',()=>({supabase:{auth:{getUser:()=>mockAuth()}}}));
-jest.mock('../../lib/interestedPlanActions',()=>({canMakeSimilarPlan:(plan:any)=>plan.allow_duplicate===true,removeInterestedPlan:(...args:any[])=>mockRemove(...args),fetchSimilarPlanParams:(...args:any[])=>mockSimilar(...args)}));
+jest.mock('../../lib/interestedPlanActions',()=>({...jest.requireActual('../../lib/interestedPlanActions'),canMakeSimilarPlan:(plan:any)=>plan.allow_duplicate===true,removeInterestedPlan:(...args:any[])=>mockRemove(...args),fetchSimilarPlanParams:(...args:any[])=>mockSimilar(...args)}));
 const plan:any={id:'plan',title:'Walk',allow_duplicate:true};
 let value:ReturnType<typeof useInterestedPlanActions>, tree:ReturnType<typeof create>, user='alice';
 function Harness(){value=useInterestedPlanActions(user);return null;}
@@ -33,7 +33,9 @@ it('keeps a failed removal visible, with a retry that can succeed',async()=>{
  await act(async()=>{await value.run(plan,'remove');});expect(mockRemove).toHaveBeenCalledTimes(2);expect(mockCache).toHaveBeenCalledTimes(1);expect(value.feedback.plan.error).toBeNull();
 });
 it('opens a read-only prefill without removing interest',async()=>{
- mount();await act(async()=>{await value.run(plan,'similar');});expect(mockPush).toHaveBeenCalledWith({pathname:'/(tabs)/post',params:{prefillTitle:'Walk',similarPlanRequest:'new'}});expect(mockRemove).not.toHaveBeenCalled();expect(mockCache).not.toHaveBeenCalled();
+ mount();await act(async()=>{await value.run(plan,'similar');});const reviewId = mockSimilar.mock.calls[0][1];
+ expect(mockCache).toHaveBeenCalledWith(['similar-plan-review','alice',reviewId],{prefillTitle:'Walk',similarPlanRequest:'new'});
+ expect(mockPush).toHaveBeenCalledWith({pathname:'/similar-plan',params:{reviewId}});expect(mockRemove).not.toHaveBeenCalled();
 });
 it('prevents another action on the same card while a source read is pending',async()=>{
  const read=deferred();mockSimilar.mockReturnValue(read.promise);mount();act(()=>{void value.run(plan,'similar');void value.run(plan,'remove');});await flush();expect(mockSimilar).toHaveBeenCalledTimes(1);expect(mockRemove).not.toHaveBeenCalled();read.resolve({prefillTitle:'Walk'});await flush();

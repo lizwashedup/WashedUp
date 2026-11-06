@@ -3,7 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
-import { canMakeSimilarPlan, fetchSimilarPlanParams, removeInterestedPlan } from '../lib/interestedPlanActions';
+import { canMakeSimilarPlan, fetchSimilarPlanParams, removeInterestedPlan, similarPlanReviewKey } from '../lib/interestedPlanActions';
 import type { Plan } from '../lib/fetchPlans';
 
 type Action = 'remove' | 'similar';
@@ -51,9 +51,11 @@ export function useInterestedPlanActions(userId: string) {
         queryClient.setQueryData<Plan[]>(queryKey, old => old?.filter(item => item.id !== plan.id));
         void queryClient.invalidateQueries({ queryKey });
       } else {
-        const params = await fetchSimilarPlanParams(plan.id, `${Date.now()}-${++nextPrefill}`);
+        const reviewId = `${Date.now()}-${++nextPrefill}`;
+        const params = await fetchSimilarPlanParams(plan.id, reviewId);
         if (!isCurrent()) return;
-        router.push({ pathname: '/(tabs)/post', params } as never);
+        queryClient.setQueryData(similarPlanReviewKey(userId, reviewId), params);
+        router.push({ pathname: '/similar-plan', params: { reviewId } } as never);
       }
     } catch {
       if (isCurrent()) setFeedback(current => ({ ...current, [plan.id]: {
