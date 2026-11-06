@@ -1,3 +1,4 @@
+import { interestSignalList, isInterestId } from './interestSignalList';
 import { supabase } from './supabase';
 import { buildDuplicatePostParams, type DuplicateSourceEvent } from './duplicatePlan';
 import { requestWithDeadline } from './requestWithDeadline';
@@ -57,11 +58,12 @@ export async function removeInterestedPlan(eventId: string, isCurrent: () => boo
   // or using an event id where the existing RPC requires a signal id.
   const { data, error } = await requestWithDeadline(supabase.rpc('get_user_interest_signals'), TIMEOUT_MS);
   if (error) throw error;
-  if (!Array.isArray(data)) throw new Error('Could not check your interest. Please try again.');
+  const list = interestSignalList(data);
+  if (error !== null || !list) throw new Error('Could not check your interest. Please try again.');
   if (!isCurrent()) return false;
-  const signal = data.find((row: any) => row.event_id === eventId);
+  const signal = list.find(row => row.event_id === eventId);
   if (!signal) return true; // A fresh read confirms it is already inactive.
-  if (typeof signal.signal_id !== 'string' || !signal.signal_id) throw new Error('Could not check your interest. Please try again.');
+  if (!isInterestId(signal.signal_id)) throw new Error('Could not check your interest. Please try again.');
   const result = await requestWithDeadline(
     supabase.rpc('remove_interest_signal', { p_signal_id: signal.signal_id }),
     TIMEOUT_MS,

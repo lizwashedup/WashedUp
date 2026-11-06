@@ -1,3 +1,4 @@
+import { interestSignalList } from './interestSignalList';
 import { supabase } from './supabase';
 import { GROUPS_ENABLED } from '../constants/FeatureFlags';
 
@@ -236,12 +237,14 @@ export async function fetchPlans(
  */
 export async function fetchInterestedPlans(options: { throwOnError?: boolean } = {}): Promise<Plan[]> {
   const { data: signals, error: sErr } = await supabase.rpc('get_user_interest_signals');
-  if (sErr) {
-    if (options.throwOnError) throw sErr;
-    console.warn('[fetchInterestedPlans] RPC failed:', sErr.message);
+  const list = interestSignalList(signals);
+  if (sErr !== null || !list) {
+    const error = sErr ?? new Error('Interested plans unavailable');
+    if (options.throwOnError) throw error;
+    console.warn('[fetchInterestedPlans] RPC failed:', error.message);
     return [];
   }
-  const eventIds = (signals ?? []).map((r: any) => r.event_id).filter(Boolean) as string[];
+  const eventIds = list.map(row => row.event_id);
   if (eventIds.length === 0) return [];
 
   // cluster_root_id is computed by get_filtered_feed, not stored on events.
