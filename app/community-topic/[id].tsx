@@ -10,6 +10,7 @@ import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
 import ProfileButton from '../../components/ProfileButton';
+import { MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../../lib/removeOwnChatMessage';
 import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
@@ -589,9 +590,13 @@ export default function CommunityTopicScreen() {
       if (entryIsCurrent()) hapticLight();
     } catch (e) {
       if (!entryIsCurrent() || isObsoleteTopicOperation(e)) return;
-      setAlertInfo(e instanceof RequestDeadlineError
-        ? { title: 'Removal not confirmed', message: 'The connection took too long. Reopen this chat to check whether the message was removed.' }
-        : { title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
+      if (e instanceof RequestDeadlineError || e instanceof UnconfirmedMessageRemovalError) {
+        setAlertInfo({ title: 'Removal not confirmed', message: 'Reopen this chat to check whether the message was removed.' });
+      } else if (e instanceof MessageStillVisibleError) {
+        setAlertInfo({ title: 'Message still here', message: e.message });
+      } else {
+        setAlertInfo({ title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
+      }
     }
   };
 

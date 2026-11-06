@@ -27,15 +27,15 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe: jest.fn() } } }),
   },
   from: (table: string) => {
-    let inserting = false;
+    let inserting = false, deleting = false;
     const chain: any = {};
     for (const method of ['select', 'eq']) chain[method] = () => chain;
     chain.insert = () => { inserting = true; return chain; };
     chain.update = () => chain;
-    chain.delete = () => chain;
+    chain.delete = () => {deleting=true;return chain;};
     chain.then = (yes: any, no: any) => Promise.resolve(mockUpdate()).then(yes, no);
     chain.single = () => inserting ? mockInsert() : Promise.resolve({ data: null, error: null });
-    chain.maybeSingle = async () => ({ data: table === 'profiles_public' ? { first_name_display: 'Alice', profile_photo_url: null } : null, error: null });
+    chain.maybeSingle = async () => deleting ? mockUpdate() : ({ data: table === 'profiles_public' ? { first_name_display: 'Alice', profile_photo_url: null } : null, error: null });
     return chain;
   },
   channel: (name: string) => {
@@ -649,7 +649,7 @@ it('an unsuccessful delete superseding an edit does not leave older edit refresh
   act(() => { edit = fixture.chat.editMessage('message-1', 'Unconfirmed edit'); });
   const editResult = edit.catch(error => error);
   await flush();
-  mockUpdate.mockResolvedValueOnce({error:Error('Delete failed')});
+  mockUpdate.mockResolvedValueOnce({error:Object.assign(Error('Delete failed'), {code:'42501'})});
   await act(async () => { await expect(fixture.chat.deleteMessage('message-1')).rejects.toThrow('Delete failed'); });
   await act(async () => { editing.resolve({error:null}); await editResult; });
   mockLoadedEdits.mockResolvedValueOnce([{id:'message-1',body:'Authoritative revision',edited_at:null}]);

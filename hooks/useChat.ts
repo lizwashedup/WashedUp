@@ -5,7 +5,8 @@ import { Alert, AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
-import { requestWithDeadline, RequestDeadlineError } from '../lib/requestWithDeadline';
+import { removeOwnChatMessage, MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../lib/removeOwnChatMessage';
+import { RequestDeadlineError, requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 import { editOwnChatMessage, isChatEditRefused } from '../lib/chatMessageEdit';
 import { readLoadedChatReactions } from '../lib/chatReactionReader';
@@ -691,43 +692,20 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     if (!scope || pendingDeletes.has(messageId) || !messagesRef.current.some(m => m.id === messageId && m.user_id === scope.userId)) return;
     pendingDeletes.add(messageId);
     try {
-      let confirmed = false;
-      try {
-        const write = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').delete()
-          .eq('id', messageId).eq('user_id', scope.userId).eq(parentCol, conversationId).select('id').maybeSingle(), 12_000));
-        assertChatScope(scope);
-        if (write.error?.code === '42501') {
-          logError(write.error, 'useChat.deleteMessage');
-          Alert.alert('Could not delete', 'Something went wrong. Please try again.');
-          return;
-        }
-        confirmed = !write.error && write.data?.id === messageId;
-      } catch (error) {
-        assertChatScope(scope);
-        if (error instanceof RequestDeadlineError) throw error;
-        // A transport failure may follow a committed deletion.
-      }
-      if (!confirmed) {
-        // A zero-row delete is not a receipt. An already-absent message can
-        // leave this thread, but a still-readable one must remain retryable.
-        const read = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').select('id')
-          .eq('id', messageId).eq('user_id', scope.userId).eq(parentCol, conversationId).maybeSingle(), 8_000));
-        assertChatScope(scope);
-        if (read.error) throw read.error;
-        if (read.data) {
-          Alert.alert('Message still here', 'It wasn’t removed. You can try deleting it again.');
-          return;
-        }
-      }
+      await removeOwnChatMessage({ kind, id: conversationId }, messageId, scope.userId, () => assertChatScope(scope));
+      assertChatScope(scope);
       setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
     } catch (error) {
       assertChatScope(scope);
       logError(error, 'useChat.deleteMessage');
-      Alert.alert('Removal not confirmed', 'Reopen this chat to check whether the message was removed.');
+      if (error instanceof MessageStillVisibleError) Alert.alert('Message still here', error.message);
+      else if (error instanceof RequestDeadlineError || error instanceof UnconfirmedMessageRemovalError)
+        Alert.alert('Removal not confirmed', 'Reopen this chat to check whether the message was removed.');
+      else Alert.alert('Could not delete', 'Something went wrong. Please try again.');
     } finally {
       pendingDeletes.delete(messageId);
     }
-  }, [captureOperation, pendingDeletes, parentCol, conversationId]);
+  }, [captureOperation, pendingDeletes, kind, conversationId]);
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string, sendIdOverride?: string, entryScope?: ChatOperationScope, mentions?: ChatMentionDocument | null) => {
     const scope = captureOperation(entryScope);

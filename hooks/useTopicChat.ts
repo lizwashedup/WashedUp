@@ -16,6 +16,7 @@ import {
 import { getCommunityMessageAnchorWindow, CommunityMessageUnavailableError, type CommunityMessageAnchor } from '../lib/communityMessageAnchor';
 import { getCommunityRoomHistory, type CommunityRoomCursor } from '../lib/communityRoomHistory';
 import { chronologicalCommunityRoomItems, replaceCommunitySourceWindow } from '../lib/communityRoomWindow';
+import { removeOwnChatMessage } from '../lib/removeOwnChatMessage';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 import { mergeTopicMessagesWithPending } from '../lib/topicPendingMessages';
@@ -730,32 +731,23 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     }
   }, [viewerId, isCurrentRoom, topicId]);
 
+  const pendingDeletes = useMemo(() => new Set<string>(), [roomGeneration]);
   const deleteMessage = useCallback(async (messageId: string) => {
-    if (!isCurrentRoom()) throw new ObsoleteTopicOperationError();
-    const userId = viewerId;
-    if (!userId) return;
-    const snapshot = messagesRef.current.find(message => message.id === messageId);
-    const attempt = {};
-    const changes = messageChangesRef.current;
-    changes.set(messageId, attempt);
-    const isCurrent = () => isCurrentRoom() && changes.get(messageId) === attempt;
-    setMessages((current) => isCurrent() ? current.filter((message) => message.id !== messageId) : current);
+    const checkVisit = () => { if (!isCurrentRoom()) throw new ObsoleteTopicOperationError(); };
+    checkVisit();
+    if (!topicId || !viewerId || pendingDeletes.has(messageId)) return;
+    const message = messagesRef.current.find(row => row.id === messageId);
+    if (!message || message.sender_id !== viewerId || message.delivery_state === 'sending') return;
+    pendingDeletes.add(messageId);
     try {
-      const { error } = await requestWithDeadline(supabase
-        .from('community_topic_messages')
-        .delete()
-        .eq('id', messageId)
-        .eq('sender_id', userId), 12_000);
-      if (!isCurrent()) throw new ObsoleteTopicOperationError();
-      if (error) throw error;
+      await removeOwnChatMessage({ kind: 'topic', id: topicId }, messageId, viewerId, checkVisit);
+      checkVisit();
+      setMessages(current => isCurrentRoom() ? current.filter(row => row.id !== messageId) : current);
       invalidateLists();
-    } catch (error) {
-      if (!isCurrent()) throw new ObsoleteTopicOperationError();
-      if (snapshot) setMessages(current => isCurrent() && !current.some(message => message.id === messageId)
-        ? mergeTopicMessagesWithPending([...current, snapshot], []) : current);
-      throw error;
+    } finally {
+      pendingDeletes.delete(messageId);
     }
-  }, [invalidateLists, viewerId, isCurrentRoom]);
+  }, [invalidateLists, viewerId, topicId, isCurrentRoom, pendingDeletes]);
 
   const toggleReaction = useCallback(async function changeReaction(messageId: string, reaction: string, expectedIntent?: ReactionIntent): Promise<void> {
     if (!isCurrentRoom()) throw new ObsoleteTopicOperationError();
