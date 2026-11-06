@@ -1,3 +1,4 @@
+import { requireMemberHistoryPage } from './chatMessageModel';
 import { supabase } from './supabase';
 import { requestWithDeadline } from './requestWithDeadline';
 import { getBlockedWith } from './blocking';
@@ -35,11 +36,11 @@ export async function getMemberChatAnchorWindow(key: ConversationKey, messageId:
   ]);
   current(scope);
   if (before.error || after.error) throw before.error ?? after.error;
-  const candidates = [target, ...(before.data ?? []), ...(after.data ?? [])];
+  const older = requireMemberHistoryPage(before.data), newer = requireMemberHistoryPage(after.data);
+  const candidates = [target, ...older, ...newer];
   const [checked, blocked] = await Promise.all([exact(), requestWithDeadline(getBlockedWith(scope.userId, candidates.map(message => message.user_id)), 12_000)]);
   current(scope);
   if (checked.created_at !== target.created_at || checked.user_id !== target.user_id || blocked.has(checked.user_id)) throw new MemberChatMessageUnavailableError();
-  const older = (before.data ?? []) as ChatMessage[], newer = (after.data ?? []) as ChatMessage[];
   return {
     messages: toChronologicalChatPage([...older, checked, ...newer]).filter(message => !blocked.has(message.user_id)),
     hasMore: older.length === CHAT_NEWEST_PAGE_SIZE,

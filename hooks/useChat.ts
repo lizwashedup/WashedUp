@@ -34,7 +34,7 @@ export { ObsoleteChatOperationError, isObsoleteChatOperation, UnconfirmedChatRea
 import {
   ObsoleteChatOperationError, isObsoleteChatOperation,
   UnconfirmedChatReactionError, isUnconfirmedChatReaction,
-  type MessageReaction, type ReplyTo, type ChatMessage,
+  requireMemberHistoryPage, type MessageReaction, type ReplyTo, type ChatMessage,
   type ConversationKey, type ChatOperationScope, type ChatReactionIntent,
 } from '../lib/chatMessageModel';
 import { acknowledgeMemberChatPage } from '../lib/memberChatReadPosition';
@@ -382,7 +382,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       if (!user || user.id !== operationScope.userId) throw new Error('Could not verify this chat account.');
       setLoadError(false);
       setAnchorUnavailable(false);
-      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
+      const page = toChronologicalChatPage(requireMemberHistoryPage(data));
       const more = anchor ? anchor.hasMore : page.length === CHAT_NEWEST_PAGE_SIZE;
       const pageCursor = anchor?.olderCursor ?? oldestChatCursor(page);
       const retainedOlderPages = !!window.older && !!pageCursor && compareChatSequence(window.older, pageCursor) < 0;
@@ -547,7 +547,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       if (!isCurrent()) return;
       if (error) throw error;
 
-      const page = toChronologicalChatPage((data ?? []) as unknown as ChatMessage[]);
+      const page = toChronologicalChatPage(requireMemberHistoryPage(data));
       const more = page.length === CHAT_NEWEST_PAGE_SIZE;
 
       const filtered = page.filter(message => !blockedIdsRef.current[message.user_id]);

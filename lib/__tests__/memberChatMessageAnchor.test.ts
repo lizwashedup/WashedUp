@@ -13,11 +13,12 @@ const message = (n: number, kind: 'event' | 'circle' = 'event'): ChatMessage => 
 });
 let rows: ChatMessage[], current: boolean, exactReads: number;
 let exact: (n: number) => Promise<any>, rangeError: Error | null;
+let missingRange: boolean | null;
 let predicates: string[], limits: number[], parents: string[];
 const scope = { userId: 'viewer', isCurrent: () => current };
 beforeEach(() => {
   jest.clearAllMocks(); rows = Array.from({ length: 240 }, (_, i) => message(i + 1)); current = true;
-  exactReads = 0; rangeError = null; predicates = []; limits = []; parents = [];
+  missingRange=null; exactReads = 0; rangeError = null; predicates = []; limits = []; parents = [];
   exact = async () => ({ data: rows[99], error: null });
   jest.mocked(getBlockedWith).mockResolvedValue(new Set());
   jest.mocked(supabase.from).mockImplementation((table: string) => {
@@ -33,7 +34,7 @@ beforeEach(() => {
         const boundary = filter.match(/id\.(?:lt|gt)\.([^)]*)/)![1];
         const data = rows.filter(row => ascending ? row.id > boundary : row.id < boundary)
           .sort((a, b) => ascending ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)).slice(0, count);
-        return { data, error: rangeError };
+        return { data: missingRange===ascending ? null : data, error: rangeError };
       }),
     };
     return chain;
@@ -91,4 +92,11 @@ it.each([[id(100), 'topic'], [id(100), 'broadcast'], [[id(100)], 'chat'], ['bad'
 });
 it('accepts only the member-chat source and normalizes its exact message UUID', () => {
   expect(parseMemberReactionAnchor('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', 'chat')).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+});
+
+it.each([true,false])('a missing neighbor page (newer: %s) is retryable, not the end of the thread',async newer=>{
+  missingRange=newer;
+  await expect(getMemberChatAnchorWindow({kind:'event',id:room},id(100),scope)).rejects.toThrow('history');
+  missingRange=null;
+  await expect(getMemberChatAnchorWindow({kind:'event',id:room},id(100),scope)).resolves.toMatchObject({hasMore:true});
 });
