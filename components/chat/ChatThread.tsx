@@ -189,6 +189,10 @@ const VOICE_LOCK_THRESHOLD = 80;
 
 let nextChatEntry = 0;
 
+// Short bubbles must be fully visible; a tall photo or message can qualify
+// by occupying part of the viewport. Ignore bubbles flashed past in a fling.
+const memberChatViewability = { viewAreaCoveragePercentThreshold: 20, minimumViewTime: 300 };
+
 function ChatThread(props: ChatThreadProps) {
   const { id } = props;
   const { width: windowWidth } = useWindowDimensions();
@@ -221,12 +225,15 @@ function ChatThread(props: ChatThreadProps) {
   const chatFocusedRef = useRef(false);
   const deferredReceipt = useRef(false);
   const photoCover = useRef<{ entry: object | null; visible: boolean }>({ entry: null, visible: false });
+  const visibleRows = useRef(new Set<string>());
+  const viewportReady = useRef(false);
+  const isRowVisible = useCallback((messageId: string) => viewportReady.current && visibleRows.current.has(messageId), []);
   const mayMarkHistoryRead = useCallback(() => {
     const visible = chatFocusedRef.current && !photoCover.current.visible;
     deferredReceipt.current = !visible;
     return visible;
   }, []);
-  const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id }, anchorId, mayMarkHistoryRead);
+  const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch, checkVisiblePage } = useChat({ kind: props.kind, id }, anchorId, mayMarkHistoryRead, isRowVisible);
   // A room/account return is a new entry, even when its IDs repeat. The
   // transport also owns its own account epoch; this tighter scope includes
   // the read-only transition and every asynchronous composer continuation.
@@ -1238,6 +1245,23 @@ function ChatThread(props: ChatThreadProps) {
   }, [isPast]);
 
   type EnrichedItem = ChatMessage | { type: 'date'; label: string; id: string } | { type: 'time'; label: string; id: string };
+  // Key the native list and its visibility callbacks to the same chat visit.
+  // Recycled cells from an old account or an anchored page are not read evidence.
+  const listVisit = useMemo(() => ({}), [entry, anchorId]);
+  const liveListVisit = useRef(listVisit);
+  useLayoutEffect(() => {
+    liveListVisit.current = listVisit;
+    visibleRows.current = new Set();
+  }, [listVisit]);
+  useLayoutEffect(() => {
+    viewportReady.current = bottomDockHeight !== null;
+    if (viewportReady.current) checkVisiblePage?.();
+  }, [bottomDockHeight, checkVisiblePage]);
+  const viewableRowsChanged = useCallback(({ viewableItems }: {viewableItems: Array<{isViewable: boolean; item: EnrichedItem}>}) => {
+    if (liveListVisit.current !== listVisit || !isCurrentEntry()) return;
+    visibleRows.current = new Set(viewableItems.filter(token => token.isViewable && !('type' in token.item)).map(token => token.item.id));
+    checkVisiblePage?.();
+  }, [listVisit, isCurrentEntry, checkVisiblePage]);
   const enrichedItems = useMemo<EnrichedItem[]>(() => {
     const items: EnrichedItem[] = [];
     messages.forEach((msg, i) => {
@@ -1507,7 +1531,9 @@ function ChatThread(props: ChatThreadProps) {
           </View>
         ) : (
           <FlatList
-            key={anchorId ?? 'latest'}
+            key={entry.serial + ':' + (anchorId ?? 'latest')}
+            onViewableItemsChanged={viewableRowsChanged}
+            viewabilityConfig={memberChatViewability}
             decelerationRate="normal"
             ref={listRef}
             data={enrichedItems}

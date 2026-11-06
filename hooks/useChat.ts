@@ -51,7 +51,7 @@ async function scopedChatRequest<T>(scope: ChatOperationScope, request: () => Pr
 }
 
 const alwaysVisible = () => true;
-export function useChat(key: ConversationKey, anchorId: string | null = null, mayMarkHistoryRead = alwaysVisible) {
+export function useChat(key: ConversationKey, anchorId: string | null = null, mayMarkHistoryRead = alwaysVisible, isRowVisible: (id: string) => boolean = alwaysVisible) {
   const { viewerId, epoch, isCurrent: isCurrentViewer, error: identityError, isLoading: identityLoading, retry: retryIdentity } = useObservedUser();
   // Primitive fields drive all effect/callback deps so a fresh key object on
   // each render does not re-subscribe the realtime channel.
@@ -319,10 +319,15 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     };
   }, [kind, conversationId, roomGeneration, isCurrentRoom, viewerId]);
 
+  // A page can arrive while the member is reading older messages. Keep only the
+  // latest verified page's receipt; scrolling to it requires no second fetch.
+  const pendingPageRead = useRef<(() => void) | null>(null);
+  const checkVisiblePage = useCallback(() => pendingPageRead.current?.(), []);
   const fetchMessages = useCallback(async (silent = false) => {
     if (!isCurrentRoom() || AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
     if (!operationScope) { if (!silent && viewerId === undefined) await retryIdentity(); return; }
     const request = ++newestRequestRef.current;
+    pendingPageRead.current = null;
     const window = readWindowRef.current;
     const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && newestRequestRef.current === request
       && AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
@@ -450,11 +455,20 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
             const seen = firstPaint.slice().reverse().find(row =>
               !row.id.startsWith('optimistic-') && Number.isFinite(Date.parse(row.created_at)) &&
               (!startedWith.has(row.id) || existingById.has(row.id)));
-            if (!window.anchorId && seen && mayMarkHistoryRead()) void acknowledgeMemberChatPage(
-              { kind, id: conversationId }, seen.created_at, readScope, mayMarkHistoryRead,
-            ).then(() => {
-              if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
-            }).catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
+            if (!window.anchorId && seen) {
+              const visible = () => mayMarkHistoryRead() && isRowVisible(seen.id);
+              const attempt = () => {
+                if (!isCurrent() || !visible()) return;
+                pendingPageRead.current = null;
+                // Once seen, scrolling within this room does not undo that read.
+                // Navigation, overlays, app state and account still guard the write.
+                void acknowledgeMemberChatPage({ kind, id: conversationId }, seen.created_at, readScope, mayMarkHistoryRead)
+                  .then(() => { if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY }); })
+                  .catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
+              };
+              pendingPageRead.current = attempt;
+              attempt();
+            }
             const [{ data: reactionsData, error: reactionsError }, enriched] = await Promise.all([
               msgIds.length > 0
                 ? requestWithDeadline(supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds), 12_000)
@@ -514,7 +528,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity, mayMarkHistoryRead]);
+  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity, mayMarkHistoryRead, isRowVisible]);
   refreshWindowRef.current = fetchMessages;
 
   useEffect(() => {
@@ -977,5 +991,6 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     toggleReaction,
     loadOlder,
     refetch: fetchMessages,
+    checkVisiblePage,
   };
 }
