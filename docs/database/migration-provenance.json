@@ -162,6 +162,11 @@
       "file": "docs/database/review-only/20261106021000_exact_member_terms_acceptance.sql",
       "reason": "Private member reacceptance receipt prerequisite. Verify overloads, permissions, version source and evidence on a production-schema copy before separately approved rollout.",
       "source": "docs/database/review-only/20261106021000_exact_member_terms_acceptance.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261106022000_one_interest_activation_notification.sql",
+      "reason": "Private Next time concurrency fix. Compare the live function, grants and notification triggers on an approved schema copy before any promotion.",
+      "source": "docs/database/review-only/20261106022000_one_interest_activation_notification.sql"
     }
   ],
   "unresolved_versions": [

@@ -4,7 +4,8 @@ import { usePlanInterest } from '../usePlanInterest';
 const mockAuth = jest.fn(), mockRead = jest.fn(), mockPlan = jest.fn(), mockMember = jest.fn(), mockSend = jest.fn(), mockCircle = jest.fn(), mockInvalidate = jest.fn(), mockFilters = jest.fn();
 let mockFocus: any, mockBlur: any;
 jest.mock('expo-router', () => ({ useFocusEffect: (cb: any) => require('react').useEffect(() => { mockFocus = cb; mockBlur = cb(); return () => mockBlur?.(); }, [cb]) }));
-jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate }) }));
+let mockClient: { invalidateQueries: typeof mockInvalidate };
+jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient }));
 jest.mock('../../lib/logger', () => ({ logError: jest.fn() }));
 jest.mock('../../lib/supabase', () => ({ supabase: { auth: { getUser: () => mockAuth() }, rpc: (name: string, args: any) => name === 'send_interest_signal' ? mockSend(args) : mockCircle(args), from: (table: string) => { const q: any = { select: () => q, eq: (...args: any[]) => { mockFilters(table, ...args); return q; }, maybeSingle: () => table === 'events' ? mockPlan() : table === 'event_members' ? mockMember() : mockRead() }; return q; } } }));
 const id = 'a1111111-1111-4111-8111-111111111111', circleId = 'b2222222-2222-4222-8222-222222222222';
@@ -16,7 +17,7 @@ const auth = () => ({ data: { user: { id: 'viewer' } }, error: null });
 const deferred = () => { let resolve!: (x: any) => void; const promise = new Promise<any>(r => resolve = r); return { promise, resolve }; };
 let tree: ReturnType<typeof create>;
 async function mount() { let current!: ReturnType<typeof usePlanInterest>, epoch = 1, allowed = true; function Harness() { const captured = epoch; current = usePlanInterest({ eventId: 'plan', viewerId: 'viewer', epoch, isCurrent: () => captured === epoch, canSend: () => allowed }); return null; } await act(async () => { tree = create(<Harness />); }); return { get current() { return current; }, deny: () => allowed = false, retire: () => epoch++, replace: async () => { epoch++; await act(async () => tree.update(<Harness />)); }, blur: () => act(() => mockBlur()), focus: async () => { await act(async () => { mockBlur = mockFocus(); }); } }; }
-beforeEach(() => { mockAuth.mockReset().mockResolvedValue(auth()); mockRead.mockReset().mockResolvedValue(ok(null)); mockPlan.mockReset().mockResolvedValue(ok(plan)); mockMember.mockReset().mockResolvedValue(ok(null)); mockSend.mockReset().mockResolvedValue(ok(id)); mockCircle.mockReset().mockResolvedValue(ok(circle)); mockInvalidate.mockReset().mockResolvedValue(undefined); mockFilters.mockClear(); });
+beforeEach(() => { mockClient = { invalidateQueries: mockInvalidate }; mockAuth.mockReset().mockResolvedValue(auth()); mockRead.mockReset().mockResolvedValue(ok(null)); mockPlan.mockReset().mockResolvedValue(ok(plan)); mockMember.mockReset().mockResolvedValue(ok(null)); mockSend.mockReset().mockResolvedValue(ok(id)); mockCircle.mockReset().mockResolvedValue(ok(circle)); mockInvalidate.mockReset().mockResolvedValue(undefined); mockFilters.mockClear(); });
 afterEach(() => { if (tree)
     act(() => tree.unmount()); });
 it('reads only the current person’s active signal', async () => { const h = await mount(); expect(h.current.ready).toBe(true); expect(mockFilters.mock.calls).toEqual([['event_interest_signals', 'event_id', 'plan'], ['event_interest_signals', 'interested_user_id', 'viewer'], ['event_interest_signals', 'status', 'active']]); });
@@ -71,7 +72,8 @@ it('does not turn a dispatched interest signal into a retryable failure on a clo
     const h = await mount(), wait = deferred(); mockSend.mockReturnValueOnce(wait.promise); jest.useFakeTimers();
     try {
         act(() => { void h.current.send(); }); await act(async () => { await jest.advanceTimersByTimeAsync(45000); });
-        expect(h.current.busy).toBe(true); expect(h.current.phase).toBe('pending'); expect(mockSend).toHaveBeenCalledTimes(1);
+        expect(h.current.busy).toBe(false); expect(h.current.phase).toBe('unknown');
+        await act(async () => h.current.retry()); expect(mockSend).toHaveBeenCalledTimes(1); mockRead.mockResolvedValue(ok(entry));
         await act(async () => { wait.resolve(ok(id)); await jest.advanceTimersByTimeAsync(1); }); expect(h.current.entry).toEqual(entry);
     } finally { jest.clearAllTimers(); jest.useRealTimers(); }
 });
@@ -83,4 +85,29 @@ it('preserves an uncertain interest signal when its recovery read stalls', async
         expect(h.current.loading).toBe(false); expect(h.current.ready).toBe(false); expect(h.current.phase).toBe('unknown');
         await act(async () => h.current.send()); expect(mockSend).toHaveBeenCalledTimes(1);
     } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+
+it('keeps a pending send attached to the account and plan across a new detail mount', async () => {
+    const original = await mount(), held = deferred();
+    mockSend.mockReturnValueOnce(held.promise);
+    await act(async () => { void original.current.send(); });
+    act(() => tree.unmount());
+    const reopened = await mount();
+    expect(reopened.current.phase).toBe('unknown');
+    await act(async () => { await reopened.current.retry(); await reopened.current.send(); });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    mockRead.mockResolvedValue(ok(entry));
+    await act(async () => held.resolve(ok(id)));
+    expect(reopened.current.entry).toEqual(entry);
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['plans.myInterested', 'viewer'], exact: true, refetchType: 'active' });
+});
+
+it('marks only the old collection stale after logout without refetching as the replacement member', async () => {
+    const h = await mount(), held = deferred();
+    mockSend.mockReturnValueOnce(held.promise);
+    await act(async () => { void h.current.send(); });
+    h.retire();
+    mockAuth.mockResolvedValue({ data: {user: {id: 'other'}}, error: null });
+    await act(async () => held.resolve(ok(id)));
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['plans.myInterested', 'viewer'], exact: true, refetchType: 'none' });
 });
