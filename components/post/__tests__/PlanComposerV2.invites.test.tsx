@@ -198,6 +198,8 @@ it.each<[Record<string, string>, string]>([
 it('points to a missing title without posting or clearing the entered message', async () => {
   const form = await mount();
   form.setTitle('   ');
+  expect(JSON.stringify(form.tree.toJSON())).toContain('Add a title to save or post.');
+  expect(form.tree.root.findByProps({ accessibilityLabel: 'post the plan' }).props.disabled).toBe(false);
   const focus = jest.fn();
   form.tree.root.findByType(EditorialTitleField).props.inputRef.current = { focus };
   await act(async () => { await form.post(); });
@@ -906,4 +908,25 @@ it('uses the images-only system picker when broad photo-library permission is de
   expect(mockUpload).toHaveBeenCalledTimes(1);
   expect(photoUris(fixture.tree)).toContain('https://test.invalid/creator-photo.jpg');
   expect(mockInsert).not.toHaveBeenCalled();
+});
+
+it.each(['post', 'draft'] as const)('recovers a stalled %s account check before any write and permits explicit retry', async mode => {
+  const fixture = await mount(); jest.useFakeTimers();
+  const stalled = pendingResult();
+  jest.mocked(supabase.auth.getUser).mockReturnValueOnce(stalled.promise as any);
+  let settled = false;
+  act(() => { void (mode === 'post' ? fixture.post() : fixture.saveDraft()).then(() => { settled = true; }); });
+  await flush();
+  expect(mockInsert).not.toHaveBeenCalled(); expect(mockMember).not.toHaveBeenCalled();
+  await act(async () => { jest.advanceTimersByTime(12_000); }); await flush();
+  expect(settled).toBe(true);
+  expect(fixture.title()).toBe('Local test walk');
+  expect(byLabel(fixture.tree, 'Post').props.disabled).toBe(false);
+  if (mode === 'post') { expect(fixture.confirmation().visible).toBe(false); expect(mockRollback).toHaveBeenCalledTimes(1); }
+  else expect(fixture.tree.root.findByType(BrandedAlert).props.title).toBe('That did not save');
+  await act(async () => { await (mode === 'post' ? fixture.post() : fixture.saveDraft()); });
+  expect(mockInsert).toHaveBeenCalledTimes(1);
+  const membershipWrites = mockMember.mock.calls.length;
+  await act(async () => { stalled.resolve({ data: { user: { id: 'creator' } }, error: null }); }); await flush();
+  expect(mockInsert).toHaveBeenCalledTimes(1); expect(mockMember).toHaveBeenCalledTimes(membershipWrites);
 });
