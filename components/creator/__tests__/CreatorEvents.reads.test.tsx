@@ -9,7 +9,7 @@ jest.mock('expo-router',()=>({useLocalSearchParams:()=>({}),useFocusEffect:(fn:a
 jest.mock('../../../lib/creatorMode',()=>({isAdminTierRole:(role:string)=>['leader','co_leader','admin'].includes(role)}));
 jest.mock('../../../lib/creatorEvents',()=>({}));
 jest.mock('../../../lib/creatorPageEventTemplateLibrary',()=>({}));
-jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:null,account:{isLoading:false}})}));
+jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({focused:true,scope:{userId:'viewer',isCurrent:()=>true},account:{viewerId:'viewer',epoch:1,isLoading:false,isCurrent:()=>true}})}));
 jest.mock('../../../hooks/useCreatorPageRead',()=>({useCreatorPageRead:()=>({loading:false,data:[],refresh:jest.fn()})}));
 jest.mock('../../../constants/FeatureFlags',()=>({CREATOR_PAGES_ENABLED:false,EVENT_SUMMARY_ENABLED:true}));
 jest.mock('../../../lib/selectedCommunity',()=>({useLedCommunity:()=>({id:'community',role:mockRole,status:mockCommunityStatus})}));
