@@ -333,3 +333,28 @@ it('keeps loading when a private preview needs a fresh privacy check on return',
   expect(value.chats.map(chat => chat.title)).toEqual([event.title]);
   await act(async () => { circles.resolve({ data: [], error: null }); });
 });
+
+it('retires a departed plan after a confirmed membership read even if the remaining previews fail', async () => {
+  const viewer = 'confirmed-departure-during-refresh';
+  const coffee = { ...event, id: 'coffee', title: 'Coffee chat' };
+  const joined = (...events: typeof event[]) => ({ data: events.map(e => ({ events: e })), error: null });
+  mockMembership = async () => joined(event, coffee);
+  const counts = async (table: string, columns: string) => table === 'event_members' && columns === 'event_id'
+    ? { data: [event, event, coffee, coffee].map(e => ({ event_id: e.id })), error: null } : undefined;
+  mockEnrichment = counts;
+  await mount(viewer);
+  const ids = () => value.chats.map(chat => chat.conversationId);
+  expect(ids()).toEqual(expect.arrayContaining([event.id, coffee.id]));
+  mockMembership = async () => joined(coffee);
+  const preview = deferred();
+  mockEnrichment = (table, cols) => table === 'events' ? preview.promise : counts(table, cols);
+  let refresh!: Promise<void>;
+  await act(async () => { refresh = value.refetch(true); });
+  expect(ids()).toEqual([coffee.id]);
+  await act(async () => { preview.resolve({ data: null, error: new Error('Preview unavailable') }); await refresh; });
+  expect(ids()).toEqual([coffee.id]); expect(value.loadError).toBe(true);
+  expect(chatListMemoryCache.get(viewer)?.map(chat => chat.conversationId)).toEqual([coffee.id]);
+  mockEnrichment = counts;
+  await act(async () => { await value.refetch(true); });
+  expect(value.loadError).toBe(false); expect(ids()).toEqual([coffee.id]);
+});

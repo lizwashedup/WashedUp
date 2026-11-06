@@ -305,3 +305,13 @@ it('can refresh a confirmed empty inbox without leaving, and a second gesture sh
   await act(async () => { result.resolve(undefined); await result.promise; });
   expect(button()!.props.disabled).toBe(false);
 });
+
+it('does not open a row removed by a newer inbox snapshot for the same viewer', async () => {
+  await mount(); focusInbox();
+  const retired = tree.root.findByType(ChatInboxRow).props.onPress;
+  jest.mocked(useChatList).mockReturnValue({ chats: [], loading: false, loadError: false, refetch: mockRefetch, removeChat: jest.fn() });
+  act(() => tree.update(<ChatsScreen />));
+  expect(texts()).not.toContain('Plan for alice');
+  act(retired);
+  expect(mockPush).not.toHaveBeenCalled();
+});
