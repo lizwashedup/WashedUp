@@ -21,9 +21,11 @@ export async function saveNewPlanDraft(id: string, viewerId: string, fields: Rec
     .upsert({ ...fields, id, creator_user_id: viewerId }, { onConflict: 'id', ignoreDuplicates: true })
     .select('id').maybeSingle();
   if (error) throw error;
-  if (data?.id === id) return;
+  if (data?.id === id) return true;
   if (data !== null) throw new Error('Could not confirm the new draft.');
-  if (isCurrent()) await updateOwnedDraft(id, viewerId, fields);
+  if (!isCurrent()) return false;
+  await updateOwnedDraft(id, viewerId, fields);
+  return true;
 }
 
 // The database commits the marked plan write and creator membership
