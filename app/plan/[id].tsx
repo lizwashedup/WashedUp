@@ -62,7 +62,7 @@ import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT
 import { usePlanInvitation } from '../../hooks/usePlanInvitation';
 import { usePlanWaitlist } from '../../hooks/usePlanWaitlist';
 import { usePlanEdit } from '../../hooks/usePlanEdit';
-import { useStartCirclePlanChat } from '../../hooks/useStartCirclePlanChat';
+import { useCirclePlanCoordination } from '../../hooks/useCirclePlanCoordination';
 import { useCirclePlanContext } from '../../hooks/useCirclePlanContext';
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
@@ -545,8 +545,10 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       : circleCtx.circle_visibility === 'circle_only' ? 'A plan for this circle’s members.' : undefined
     : undefined;
   const circleViewerIsMember = contextReady && circleCtx?.viewer_is_member === true;
-  const startPlanChat = useStartCirclePlanChat({ eventId: id, viewerId: currentUserId, epoch: identity.epoch,
-    isCurrent: identity.isCurrent, refetch: circleQuery.refetch, eligible: circleViewerIsMember &&
+  const coordination = useCirclePlanCoordination({ eventId: id, viewerId: currentUserId, epoch: identity.epoch,
+    isCurrent: identity.isCurrent, refetch: circleQuery.refetch,
+    canOpen: circleViewerIsMember && isCreator && circleCtx?.circle_visibility === 'circle_only',
+    canStart: circleViewerIsMember &&
       circleCtx?.circle_visibility === 'circle_only' && circleCtx.has_own_chat === false });
   const circleName = circleCtx?.circle_name?.trim() || 'this circle';
   const confirmedCircleContext = useRef(circleCtx);
@@ -1465,8 +1467,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         {GROUPS_ENABLED && contextReady && isCirclePlan && id && (
           <React.Suspense fallback={null}>
             <CirclePlanCoordination
-              onStartChat={startPlanChat.start} startingChat={startPlanChat.busy}
-              eventId={id}
+              onStartChat={coordination.start} onConfirmOpen={coordination.open} busy={coordination.busy}
               circleName={circleName}
               visibility={circleCtx?.circle_visibility}
               hasOwnChat={circleCtx?.has_own_chat}
@@ -1480,8 +1481,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       {/* ─── Sticky Bottom Bar ─────────────────────────────────────────────────── */}
 
       <View style={[styles.stickyBar, { paddingBottom: insets.bottom + 12 }]}>
-        {!!startPlanChat.error && contextReady && circleCtx?.has_own_chat === false &&
-          <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">{startPlanChat.error}</Text>}
+        {!!coordination.error && contextReady &&
+          <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">{coordination.error}</Text>}
         {(invitation.error||invitation.attempt||invitation.loading&&!invitation.ready) && <View style={{gap:8,marginBottom:12}}>
           <Text style={styles.exceptionBannerBody} accessibilityLiveRegion="polite">
             {isMember&&invitation.attempt?.reply==='accepted'?'You’re in this plan. ':''}{invitation.busy?'Saving your invitation reply…':invitation.loading?'Checking your invitation…':invitation.error}
@@ -1500,7 +1501,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           <Text style={styles.exceptionBannerTitle}>Check your place</Text>
           <Text style={styles.exceptionBannerBody}>We haven’t received confirmation yet. Check who’s going before trying again.</Text>
           <TouchableOpacity style={styles.joinButton} onPress={() => { setJoinModalVisible(false); void membersQuery.refetch(); void planQuery.refetch(); }}><Text style={styles.joinButtonText}>Check plan</Text></TouchableOpacity>
-        </View> : startPlanChat.busy ? <ActivityIndicator accessibilityLabel="Checking plan chat" color={accent} /> : (!contextReady || (currentUserId && !viewerQuery.isSuccess) || !membersQuery.isSuccess) ? <View>
+        </View> : coordination.busy ? <ActivityIndicator accessibilityLabel="Checking plan details" color={accent} /> : (!contextReady || (currentUserId && !viewerQuery.isSuccess) || !membersQuery.isSuccess) ? <View>
           <Text style={styles.exceptionBannerBody}>{circleQuery.isError || viewerQuery.isError || membersQuery.isError ? 'Couldn’t check the joining details.' : 'Checking the joining details…'}</Text>
           {circleQuery.isError || viewerQuery.isError || membersQuery.isError ? <TouchableOpacity style={styles.joinButton} onPress={() => { void circleQuery.refetch().catch(() => {}); void viewerQuery.refetch(); void membersQuery.refetch(); }}><Text style={styles.joinButtonText}>Try again</Text></TouchableOpacity> : <ActivityIndicator color={accent}/>}
         </View> : isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember ? <Text style={styles.ineligibleText}>This plan is for circle members.</Text> : isClosedPlan && (isMember || isCreator) && currentUserId ? (

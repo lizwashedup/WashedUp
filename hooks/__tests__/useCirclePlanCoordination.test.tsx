@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
-import { useStartCirclePlanChat } from '../useStartCirclePlanChat';
+import { useCirclePlanCoordination } from '../useCirclePlanCoordination';
 
 const mockRpc = jest.fn(), mockSession = jest.fn(), mockInvalidate = jest.fn(), mockHeader = jest.fn();
 let mockBlur: () => void;
@@ -8,15 +8,15 @@ jest.mock('expo-router', () => ({ useFocusEffect: (cb: any) => require('react').
 jest.mock('@tanstack/react-query', () => ({useQueryClient: () => ({ invalidateQueries: mockInvalidate })}));
 jest.mock('../../lib/supabase', () => ({supabase: { auth: {getSession: () => mockSession()}, rpc: (...args: any[]) => mockRpc(...args) }}));
 
-let current: ReturnType<typeof useStartCirclePlanChat>, tree: ReactTestRenderer;
+let current: ReturnType<typeof useCirclePlanCoordination>, tree: ReactTestRenderer;
 const refetch = jest.fn();
-let active = true;
+let active = true, canOpen = true;
 function View() {
-  current = useStartCirclePlanChat({eventId:'plan',viewerId:'member',epoch:1,eligible:true,isCurrent:()=>active,refetch});
+  current = useCirclePlanCoordination({eventId:'plan',viewerId:'member',epoch:1,canStart:true,canOpen,isCurrent:()=>active,refetch});
   return null;
 }
 beforeEach(() => {
-  jest.resetAllMocks(); active = true;
+  jest.resetAllMocks(); active = true; canOpen = true;
   mockSession.mockResolvedValue({data:{session:{user:{id:'member'},access_token:'fictional'}}});
   mockRpc.mockReturnValue({setHeader:mockHeader});
   refetch.mockResolvedValue({isSuccess:true,data:{has_own_chat:true}});
@@ -51,4 +51,22 @@ it('refreshes only original context if the write settles after the account chang
   await act(async()=>{await current.start();});
   expect(mockInvalidate.mock.calls).toEqual([[{queryKey:['circle-plan-context','plan','member',1]}]]);
   expect(refetch).not.toHaveBeenCalled();
+});
+
+it('only confirms opening from plan visibility, even if it already has a separate chat',async()=>{
+  refetch.mockResolvedValue({isSuccess:true,data:{has_own_chat:true,circle_visibility:'circle_only'}});
+  await act(async()=>{await current.open();});
+  expect(mockRpc.mock.calls).toEqual([['release_circle_plan',{p_event_id:'plan',p_stranger_cap:4}]]);
+  expect(current.error).toMatch(/still just for your circle/);
+});
+it('accepts open visibility after a lost response without sending anything again',async()=>{
+  mockHeader.mockRejectedValue(Error('lost'));
+  refetch.mockResolvedValue({isSuccess:true,data:{has_own_chat:true,circle_visibility:'open'}});
+  await act(async()=>{await Promise.all([current.open(),current.start(),current.open()]);});
+  expect(mockRpc).toHaveBeenCalledTimes(1);expect(current.error).toBe('');
+});
+it('never opens the plan for an ineligible viewer',async()=>{
+  canOpen=false;act(()=>tree.update(<View/>));
+  await act(async()=>{await current.open();});
+  expect(mockRpc).not.toHaveBeenCalled();expect(refetch).not.toHaveBeenCalled();
 });

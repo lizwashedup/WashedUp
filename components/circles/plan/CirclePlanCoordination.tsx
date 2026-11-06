@@ -19,12 +19,11 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE_PLAN } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { BrandedAlert } from '../../BrandedAlert';
-import { useReleaseCirclePlan } from '../../../hooks/useCirclePlanActions';
 
 interface CirclePlanCoordinationProps {
-  eventId: string;
+  onConfirmOpen: () => void;
   onStartChat: () => void;
-  startingChat: boolean;
+  busy: boolean;
   circleName: string;
   visibility: 'circle_only' | 'open' | null | undefined;
   hasOwnChat: boolean | undefined;
@@ -42,17 +41,15 @@ interface CirclePlanCoordinationProps {
 }
 
 export default function CirclePlanCoordination({
-  eventId,
-  onStartChat, startingChat,
+  onConfirmOpen,
+  onStartChat, busy,
   circleName,
   visibility,
   hasOwnChat,
   viewerIsMember,
   viewerIsCreator,
 }: CirclePlanCoordinationProps) {
-  const release = useReleaseCirclePlan(eventId);
   const [confirmRelease, setConfirmRelease] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Open plans (and non-circle plans) show nothing; only circle members coordinate.
   if (!viewerIsMember || visibility !== 'circle_only') return null;
@@ -72,7 +69,7 @@ export default function CirclePlanCoordination({
           style={styles.row}
           accessibilityRole="button"
           onPress={onStartChat}
-          disabled={startingChat}
+          disabled={busy}
         >
           <MessageCircle size={CIRCLE_PLAN.memberCheck} color={Colors.terracotta} strokeWidth={2} />
           <View style={styles.rowBody}>
@@ -85,8 +82,9 @@ export default function CirclePlanCoordination({
       {showRelease && (
         <Pressable
           style={styles.row}
+          accessibilityRole="button"
           onPress={() => setConfirmRelease(true)}
-          disabled={release.isPending}
+          disabled={busy}
         >
           <DoorOpen size={CIRCLE_PLAN.memberCheck} color={Colors.terracotta} strokeWidth={2} />
           <View style={styles.rowBody}>
@@ -99,28 +97,21 @@ export default function CirclePlanCoordination({
       {confirmRelease && (
         <BrandedAlert
           visible
+          scrollMessage
           title={COPY.circlePlanRelease}
           message={COPY.circlePlanReleaseExplain(circleName)}
           buttons={[
             { text: COPY.circlePlanReleaseCancel, style: 'cancel' },
             {
               text: COPY.circlePlanReleaseConfirm,
-              onPress: () =>
-                release.mutate(4, { onError: () => setErrorMsg(COPY.circlePlanReleaseError) }),
+              onPress: onConfirmOpen,
             },
           ]}
           onClose={() => setConfirmRelease(false)}
         />
       )}
 
-      {errorMsg && (
-        <BrandedAlert
-          visible
-          title="Oops"
-          message={errorMsg}
-          onClose={() => setErrorMsg(null)}
-        />
-      )}
+
     </View>
   );
 }

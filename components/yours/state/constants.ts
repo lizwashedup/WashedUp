@@ -562,7 +562,7 @@ export const COPY = {
   // Release a just-us plan to others (lives on the plan detail card).
   circlePlanRelease: 'Open it up',
   circlePlanReleaseExplain: (circle: string) =>
-    `Opening this up starts a separate chat, so ${circle} stays just yours.`,
+    `People outside ${circle} will be able to see this plan, and up to 4 can join. The plan gets its own chat; your circle chat stays private.`,
   circlePlanReleaseConfirm: 'Open it up',
   circlePlanReleaseCancel: 'Keep it just us',
   circlePlanReleaseError: "Couldn't open it up just now. Try again.",
