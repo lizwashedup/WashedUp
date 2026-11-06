@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { chatListMemoryCache } from '../../lib/chatListCache';
+import { chatListMemoryCache, removeDepartedPlanPreview } from '../../lib/chatListCache';
 import { useChatList } from '../useChatList';
 
 let mockIncoming: (payload: any) => Promise<void>;
@@ -357,4 +357,22 @@ it('retires a departed plan after a confirmed membership read even if the remain
   mockEnrichment = counts;
   await act(async () => { await value.refetch(true); });
   expect(value.loadError).toBe(false); expect(ids()).toEqual([coffee.id]);
+});
+
+it('does not restore a departed plan from an earlier inbox request, but allows a new membership', async () => {
+  const viewer = 'leave-with-an-inbox-request';
+  await mount(viewer);
+  expect(value.chats[0].conversationId).toBe(event.id);
+  const old = deferred();
+  mockMembership = () => old.promise;
+  let refresh!: Promise<void>;
+  await act(async () => { refresh = value.refetch(true); });
+  mockMembership = async () => ({ data: null, error: new Error('Offline') });
+  await act(async () => { removeDepartedPlanPreview(viewer, event.id); });
+  await act(async () => { old.resolve(membership()); await refresh; });
+  expect(value.chats).toEqual([]);
+  expect(value.loadError).toBe(true);
+  mockMembership = async () => membership();
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats[0].conversationId).toBe(event.id);
 });

@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { chatListMemoryCache } from '../../lib/chatListCache';
+import type { ChatPreview } from '../../lib/chatPreview';
 import { usePlanDeparture } from '../usePlanDeparture';
 const mockAuth=jest.fn(), mockRead=jest.fn(), mockWrite=jest.fn(), mockMessage=jest.fn();
 let mockEpoch=1, mockAccount='alice';
@@ -74,4 +76,25 @@ it.each(['auth','receipt'] as const)('recovers a stalled %s reconciliation read 
 it('does not expire a submitted departure write or permit another write',async()=>{
  const receipt=deferred();mockWrite.mockReturnValueOnce(receipt.promise);const f=await mount();jest.useFakeTimers();
  try {f.start('leave');await act(async()=>jest.advanceTimersByTimeAsync(30000));expect(f.current.isPending).toBe(true);expect(f.onError).not.toHaveBeenCalled();f.start('leave');expect(mockWrite).toHaveBeenCalledTimes(1);await act(async()=>receipt.resolve(left));await act(async()=>jest.advanceTimersByTimeAsync(1));expect(f.onSuccess).toHaveBeenCalledWith({action:'leave'});}finally{jest.useRealTimers();}
+});
+
+it.each(['receipt', 'reconciled'] as const)('retires only the confirmed member’s plan preview after %s',async mode=>{
+  const preview = (kind: ChatPreview['kind'], conversationId: string): ChatPreview => ({
+    kind, conversationId, title:'Fictional conversation', category:null, image_url:null, start_time:'2026-11-07',
+    member_count:2, last_message:'Previous preview', last_message_at:null, unread_count:0, is_past:false,
+    ticket_url:null, member_avatars:[],
+  });
+  const plan=preview('event','plan'), other=preview('event','other'), circle=preview('circle','plan');
+  chatListMemoryCache.set('alice',[plan,other,circle]); chatListMemoryCache.set('bob',[plan]);
+  try {
+    if(mode==='reconciled') mockWrite.mockRejectedValueOnce(Error('lost response'));
+    const f=await mount(); f.start('leave'); await flush();
+    if(mode==='reconciled'){
+      expect(chatListMemoryCache.get('alice')).toContain(plan);
+      await act(async()=>f.current.checkResult());
+    }
+    expect(chatListMemoryCache.get('alice')).toEqual([other,circle]);
+    expect(chatListMemoryCache.get('bob')).toEqual([plan]);
+    expect(mockWrite).toHaveBeenCalledTimes(1);
+  } finally { chatListMemoryCache.clear(); }
 });

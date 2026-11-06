@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../constants/FeatureFlags';
-import { chatListMemoryCache, subscribeChatListPrivacy } from '../lib/chatListCache';
+import { chatListMemoryCache, subscribeChatListChanges } from '../lib/chatListCache';
 import { comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot, type ChatPreview } from '../lib/chatPreview';
 import { fetchCircleChats, fetchCircleChatsViaCards } from '../lib/circleChatListReads';
 import { fetchEventChatPreviews } from '../lib/eventChatListReads';
@@ -178,10 +178,9 @@ export function useChatList(knownUserId: string | null | undefined) {
     void fetchChats(!!cached);
   }, [fetchChats]);
 
-  useEffect(() => subscribeChatListPrivacy(viewerId => {
+  useEffect(() => subscribeChatListChanges(viewerId => {
     if (!mounted.current || currentViewer.current !== viewerId || knownUserId !== viewerId) return;
-    // Retire reads and realtime hydration started before the confirmed block.
-    // A network failure must never restore the removed cached private row.
+    // Retire reads that started before a confirmed block or plan departure.
     requestVersion.current++;
     showChats(chatListMemoryCache.get(viewerId) ?? []);
     void fetchChats(true);
