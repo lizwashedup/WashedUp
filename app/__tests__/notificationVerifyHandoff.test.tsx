@@ -649,6 +649,23 @@ describe('root link-delivery lifetime', () => {
     expect(await AsyncStorage.getItem('pendingLinkDestination')).toBeNull();
   });
 
+  it('lets the mounted auth handoff own a foreground shared URL once', async () => {
+    const {redirectSystemPath} = require('../+native-intent');
+    const url = 'https://washedup.app/plans/weekend?invitation=kept';
+    let deliver!: (event: {url:string}) => void;
+    jest.spyOn(Linking, 'addEventListener').mockImplementation((_event, listener) => {
+      deliver = listener; return {remove:jest.fn()} as unknown as ReturnType<typeof Linking.addEventListener>;
+    });
+    await mount();
+    expect(redirectSystemPath({path:url,initial:false})).toBeNull();
+    act(()=>deliver({url}));await flush();
+    expect(await AsyncStorage.getItem('pendingLinkDestination')).toBe('/plans/weekend?invitation=kept');
+    expect(redirectSystemPath({path:url,initial:true})).toBe('/plans/weekend?invitation=kept');
+    expect(redirectSystemPath({path:'https://washedup.app/r/friend',initial:false})).toBe('/r/friend');
+    await act(async()=>tree!.unmount());tree=undefined;
+    expect(redirectSystemPath({path:url,initial:false})).toBe('/plans/weekend?invitation=kept');
+  });
+
   it('keeps a newer foreground link when the cold-start link resolves late', async () => {
     const initial = deferred<string | null>();
     jest.mocked(Linking.getInitialURL).mockReturnValue(initial.promise);
