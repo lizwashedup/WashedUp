@@ -167,6 +167,11 @@
       "file": "docs/database/review-only/20261106022000_one_interest_activation_notification.sql",
       "reason": "Private Next time concurrency fix. Compare the live function, grants and notification triggers on an approved schema copy before any promotion.",
       "source": "docs/database/review-only/20261106022000_one_interest_activation_notification.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261106023000_interest_expiry_after_reactivation.sql",
+      "reason": "Private interest expiration correction. Verify the actual expiration job, reactivation timestamp and scheduler privileges on a separately approved production-schema copy before rollout.",
+      "source": "docs/database/review-only/20261106023000_interest_expiry_after_reactivation.sql"
     }
   ],
   "unresolved_versions": [
