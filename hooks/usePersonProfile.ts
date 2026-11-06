@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { yoursKeys } from '../lib/yours/keys';
 import type { PersonProfile } from '../lib/yours/types';
+import { withDeadline } from '../lib/withTimeout';
 
 export interface PersonProfileScope {
   userId: string;
@@ -35,7 +36,7 @@ export function usePersonProfile(
       };
       check();
       if (scope) {
-        const verified = await supabase.auth.getUser();
+        const verified = await withDeadline(supabase.auth.getUser(), 8000, 'Profile account check');
         check();
         if (verified.error) throw verified.error;
         if (verified.data.user?.id !== scope.userId) throw new Error('This account changed. Please try again.');
@@ -44,7 +45,7 @@ export function usePersonProfile(
       const request = supabase.rpc('get_person_profile', {
         p_target: targetId,
       });
-      const { data, error } = await (scope ? request.abortSignal(signal) : request);
+      const { data, error } = await withDeadline(scope ? request.abortSignal(signal) : request, 12000, 'Profile');
       check();
       if (error) throw error;
       // Null is the same private unavailable result for denied and nonexistent.

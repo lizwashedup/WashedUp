@@ -43,3 +43,32 @@ it('does not cache a late response after account switch and isolates a return to
 it('aborts an unobserved request and cannot cache its later response', async () => { const pending = deferred<ReturnType<typeof answer>>(); mockRead.mockReturnValueOnce(pending.promise); await mount(); const signal = mockAbort.mock.calls[0][0]; act(() => tree!.unmount()); tree = undefined; expect(signal.aborted).toBe(true); pending.resolve(answer()); await flush(); expect(client.getQueryData([...yoursKeys.personProfile('alice', 'amelia'), 0])).toBeUndefined(); });
 it('keeps the legacy key and avoids new auth preflight for callers without scope', async () => { scope = undefined; await mount(); expect(mockAuth).not.toHaveBeenCalled(); expect(mockAbort).not.toHaveBeenCalled(); expect(client.getQueryData(yoursKeys.personProfile('alice', 'amelia'))).toEqual(answer().data); });
 it.each(['viewer', 'target'])('does not dispatch without a %s', async missing => { if (missing === 'viewer') userId = null; else targetId = null; await mount(); expect(mockAuth).not.toHaveBeenCalled(); expect(mockRpc).not.toHaveBeenCalled(); });
+
+
+describe('bounded profile reads', () => {
+  const tick = async (ms = 0) => { await act(async () => { await jest.advanceTimersByTimeAsync(ms); }); };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+  it('ends a stalled account preflight and does not dispatch its late result', async () => {
+    const gate = deferred<ReturnType<typeof auth>>(); mockAuth.mockReturnValueOnce(gate.promise);
+    act(() => { tree = create(render()); }); await tick();
+    await tick(8000); await tick(1);
+    expect(current.isFetching).toBe(false); expect(current.isError).toBe(true); expect(current.data).toBeUndefined();
+    expect(mockRpc).not.toHaveBeenCalled();
+    await act(async () => gate.resolve(auth())); await tick(1); expect(mockRpc).not.toHaveBeenCalled();
+    await act(async () => { await current.refetch(); }); await tick(1);
+    expect(current.data).toEqual(answer().data); expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+  it.each([true, false])('ends a stalled profile read and retains explicit retry (scoped=%s)', async scoped => {
+    if (!scoped) scope = undefined;
+    const gate = deferred<ReturnType<typeof answer>>(); mockRead.mockReturnValueOnce(gate.promise);
+    act(() => { tree = create(render()); }); await tick();
+    await tick(12000); await tick(1);
+    expect(current.isFetching).toBe(false); expect(current.isError).toBe(true); expect(current.data).toBeUndefined();
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    await act(async () => gate.resolve(answer({ user_id: 'amelia', bio: 'Late biography' }))); await tick(1);
+    expect(current.data).toBeUndefined();
+    await act(async () => { await current.refetch(); }); await tick(1);
+    expect(current.data).toEqual(answer().data); expect(mockRpc).toHaveBeenCalledTimes(2);
+  });
+});
