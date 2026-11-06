@@ -3,7 +3,9 @@ import { Text, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PlanChatScreen from '../../../app/(tabs)/chats/[id]';
+let mockFocused = true;
 let mockViewer = 'alice', mockEpoch = 1;
+let mockMembership: () => Promise<any>;
 let mockThreadProps: any;
 let mockEvent: () => Promise<any>, mockMembers: () => Promise<any>, mockProfiles: () => Promise<any>;
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
@@ -15,11 +17,12 @@ jest.mock('../ChatThread', () => ({ __esModule: true, default: (props: any) => {
   mockThreadProps = props;
   return require('react').createElement(require('react-native').View, { testID: 'thread-open' }, props.renderHeaderBanner?.());
 } }));
-jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: 'plan-a' }), useRouter: () => ({ push: jest.fn(), back: jest.fn() }) }));
 jest.mock('../../../lib/supabase', () => ({ supabase: { from: (table: string) => {
-  const result = () => table === 'events' ? mockEvent() : table === 'event_members' ? mockMembers() : mockProfiles();
-  const read: any = { select: () => read, eq: () => read, limit: () => read, in: () => read, maybeSingle: () => read,
+  let single = false;
+  const result = () => table === 'events' ? mockEvent() : table === 'event_members' ? (single ? mockMembership() : mockMembers()) : mockProfiles();
+  const read: any = { select: () => read, eq: () => read, limit: () => read, in: () => read, maybeSingle: () => { single = true; return read; },
     then: (yes: any, no: any) => result().then(yes, no) };
   return read;
 } } }));
@@ -37,8 +40,9 @@ const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { 
 const mount = async () => { await act(async () => { tree = create(screen()); }); await flush(); };
 const open = () => tree.root.findAllByProps({ testID: 'thread-open' }).length > 0;
 beforeEach(() => {
-  jest.useFakeTimers(); mockViewer = 'alice'; mockEpoch = 1; mockThreadProps = undefined;
+  jest.useFakeTimers(); mockFocused = true; mockViewer = 'alice'; mockEpoch = 1; mockThreadProps = undefined;
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  mockMembership = async () => ok({user_id: mockViewer, event_id: event.id, status: 'joined'});
   mockEvent = async () => ok(event); mockMembers = async () => ok([{ user_id: 'peer' }]);
   mockProfiles = async () => ok([{ id: 'peer', first_name_display: 'Peer', profile_photo_url: null }]);
 });
@@ -71,4 +75,44 @@ it('does not display retired owner member results in the next account', async ()
   await act(async () => tree.update(screen())); await flush();
   expect(open()).toBe(true); expect(mockThreadProps.members).toEqual([]);
   await act(async () => pending.resolve(ok([{ id: 'old-private-peer', first_name_display: 'Old peer' }]))); await flush(); expect(mockThreadProps.members).toEqual([]);
+});
+
+
+it('closes a departed chat, then admits the same member after a confirmed rejoin', async () => {
+  await mount(); expect(open()).toBe(true);
+  mockMembership = async () => ok(null);
+  await act(async () => { await client.invalidateQueries({queryKey: ['events', 'members', event.id]}); });
+  await flush(); expect(open()).toBe(false);
+  expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('Chat unavailable');
+  mockMembership = async () => ok({event_id: event.id, user_id: mockViewer, status: 'joined'});
+  await act(async () => { await client.invalidateQueries({queryKey: ['events', 'members', event.id]}); });
+  await flush(); expect(open()).toBe(true);
+});
+
+it('requires the next account’s own admission, and offers Retry on a failed read', async () => {
+  await mount(); expect(open()).toBe(true);
+  mockViewer = 'bob'; mockEpoch++;
+  mockMembership = async () => ({data: null, error: new Error('Offline')});
+  await act(async () => tree.update(screen())); await flush();
+  expect(open()).toBe(false);
+  const retry = tree.root.findByProps({accessibilityLabel: 'Retry opening chat'});
+  mockMembership = async () => ok(null);
+  await act(async () => retry.props.onPress()); await flush();
+  expect(open()).toBe(false);
+  expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain('Chat unavailable');
+});
+
+it.each(['creator','member'])('preserves read-only history for a cancelled plan’s %s', async role => {
+  mockEvent = async () => ok({...event, status: 'cancelled', creator_user_id: role === 'creator' ? mockViewer : 'peer'});
+  if (role === 'creator') mockMembership = async () => ok(null);
+  await mount(); expect(open()).toBe(true); expect(mockThreadProps.readOnly.text).toContain('read-only');
+});
+
+it('rechecks a still-mounted notification destination on return after a rejoin elsewhere', async () => {
+  mockMembership = async () => ok(null);
+  await mount(); expect(open()).toBe(false);
+  mockFocused = false; await act(async () => tree.update(screen())); await flush();
+  mockMembership = async () => ok({event_id: event.id, user_id: mockViewer, status: 'joined'});
+  mockFocused = true; await act(async () => tree.update(screen())); await flush();
+  expect(open()).toBe(true);
 });

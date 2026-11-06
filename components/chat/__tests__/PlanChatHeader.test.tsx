@@ -21,6 +21,7 @@ jest.mock('../ChatThread', () => ({ __esModule: true, default: (props: any) => {
   mockThreadProps = props;
   return require('react').createElement(require('react-native').View, null, props.renderHeaderBanner?.());
 } }));
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: 'plan-a', reactionMessageId: mockAnchor, reactionMessageSource: mockAnchor ? 'chat' : undefined }), useRouter: () => ({ push: mockPush, back: mockBack, navigate: mockNavigate }) }));
 jest.mock('@tanstack/react-query', () => ({ useQuery: jest.fn() }));
 jest.mock('../../../lib/supabase', () => ({ supabase: {} }));
@@ -34,7 +35,7 @@ const event = { id: 'plan-a', title: 'Volleyball', start_time: '2026-09-19T21:00
 let tree: ReactTestRenderer;
 beforeEach(() => {
   mockAnchor = undefined; mockThreadProps = undefined; mockViewerId = 'account-a'; mockEpoch = 1; mockIdentityLoading = false; mockIdentityError = null;
-  (useQuery as jest.Mock).mockImplementation(({ queryKey }) => ({ data: queryKey[0] === 'event-info' ? event : queryKey[0] === 'event-header-members' ? event.members : { id: 'event-a', title: 'Summer tournament' }, isError: false }));
+  (useQuery as jest.Mock).mockImplementation(({ queryKey }) => ({ data: queryKey[3] === 'chat-access' ? true : queryKey[0] === 'event-info' ? event : queryKey[0] === 'event-header-members' ? event.members : { id: 'event-a', title: 'Summer tournament' }, isError: false }));
 });
 afterEach(() => { act(() => tree?.unmount()); jest.clearAllMocks(); });
 
@@ -129,7 +130,7 @@ it('keeps the same conversation mounted when its cached Plan details fail to ref
   const retry = jest.fn();
   act(() => { tree = create(<PlanChatScreen/>); });
   const thread = tree.root.findByType(jest.requireMock('../ChatThread').default);
-  (useQuery as jest.Mock).mockImplementation(({queryKey}) => ({data:queryKey[0] === 'event-info' ? event : queryKey[0] === 'event-header-members' ? event.members : null, isError:queryKey[0] === 'event-info', refetch:retry}));
+  (useQuery as jest.Mock).mockImplementation(({queryKey}) => ({data:queryKey[3] === 'chat-access' ? true : queryKey[0] === 'event-info' ? event : queryKey[0] === 'event-header-members' ? event.members : null, isError:queryKey[0] === 'event-info', refetch:retry}));
   act(() => tree.update(<PlanChatScreen/>));
   expect(tree.root.findByType(jest.requireMock('../ChatThread').default)).toBe(thread);
   expect(mockThreadProps.title).toBe(event.title);
@@ -172,7 +173,7 @@ it('rejects a Plan read that finishes after the account changes', async () => {
 it('bounds parent-event reads and offers retry without hiding the conversation', async () => {
   jest.useFakeTimers(); const db = jest.requireMock('../../../lib/supabase').supabase; const retry = jest.fn();
   const stalled = new Promise(() => {});const read:any={select:()=>read,eq:()=>read,maybeSingle:()=>stalled};db.from=jest.fn(()=>read);
-  (useQuery as jest.Mock).mockImplementation(({queryKey})=>({data:queryKey[0]==='event-info'?event:queryKey[0]==='event-header-members'?event.members:undefined,isError:queryKey[0]==='chat-parent-event',refetch:retry}));
+  (useQuery as jest.Mock).mockImplementation(({queryKey})=>({data:queryKey[3]==='chat-access'?true:queryKey[0]==='event-info'?event:queryKey[0]==='event-header-members'?event.members:undefined,isError:queryKey[0]==='chat-parent-event',refetch:retry}));
   try {
     act(() => { tree = create(<PlanChatScreen/>); });
     expect(mockThreadProps.title).toBe(event.title);
