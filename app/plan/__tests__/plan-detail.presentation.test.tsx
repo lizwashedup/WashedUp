@@ -235,7 +235,7 @@ it('retains an unconfirmed introduction after membership succeeds and waits for 
   act(()=>tree.root.findByType(Sheet).props.onDismiss());
   const recovery=tree.root.findAllByType(Alert).find(n=>n.props.title==='You’re in')!;
   expect(recovery.props.scrollMessage).toBe(true);expect(recovery.props.message).toContain('My original introduction');expect(recovery.props.message).toContain('Check the conversation before sending it again');
-  act(()=>recovery.props.buttons[0].onPress());expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');expect(mockJoin).not.toHaveBeenCalled();
+  act(()=>recovery.props.buttons[0].onPress());expect(mockPush).not.toHaveBeenCalled();act(()=>introAlert().onDismiss());expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');expect(mockJoin).not.toHaveBeenCalled();
 });
 it('retires an open introduction when age or gender eligibility changes',async()=>{
   await mount();act(()=>button("Let's Go →").props.onPress());mockPlan={...mockPlan,gender_rule:'men_only'};
@@ -258,6 +258,7 @@ it.each(['retired visit', 'dismissed alert', 'repeated tap'])('prevents recovery
   if(mode==='dismissed alert') act(()=>recovery.onClose());
   if(mode==='repeated tap') act(()=>recovery.buttons[0].onPress());
   act(()=>recovery.buttons[0].onPress());
+  act(() => introAlert().onDismiss());
   expect(mockPush).toHaveBeenCalledTimes(mode==='repeated tap'?1:0);
   expect(mockJoin).not.toHaveBeenCalled();
 });
@@ -531,7 +532,7 @@ it('keeps introduction delivery recovery ahead of notifications after confirmed 
   expect(mockNotificationRequest).not.toHaveBeenCalled();
   const Alert = require('../../../components/BrandedAlert').BrandedAlert;
   const recovery = tree.root.findAllByType(Alert).find(n => n.props.title === 'You’re in')!;
-  act(() => recovery.props.buttons[0].onPress()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
+  act(() => recovery.props.buttons[0].onPress()); act(() => introAlert().onDismiss()); expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
 
 it.each([false, true])('keeps Circle creator management and Circle chat without ordinary waitlist tools (appearance %s)', async appearance => {
@@ -961,7 +962,30 @@ it('distinguishes an introduction never sent from one awaiting a receipt, and on
   const alert = tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert).find(n => n.props.title === 'You’re in')!;
   expect(alert.props.message).toContain('Your introduction wasn’t sent');
   expect(alert.props.message).toContain('See you at salsa!');
-  act(() => alert.props.buttons[0].onPress());
+  act(() => alert.props.buttons[0].onPress()); act(() => introAlert().onDismiss());
   expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');
   expect(mockJoin).not.toHaveBeenCalled();
+});
+
+const introAlert = () => tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert)
+  .filter(n => n.props.title === 'You’re in').slice(-1)[0].props;
+
+it.each(['open', 'backdrop', 'retired'])('waits for iOS introduction alert dismissal before handling %s', async mode => {
+  await mount(); act(() => mockJoinOptions.onJoined({greetingNotSent:'See you there'}));
+  const alert = introAlert();
+  act(() => { if (mode !== 'backdrop') alert.buttons[0].onPress(); alert.onClose(); });
+  expect(mockPush).not.toHaveBeenCalled(); expect(mockNotificationRequest).not.toHaveBeenCalled();
+  if (mode === 'retired') mockCurrent.mockReturnValue(false);
+  const dismiss = introAlert().onDismiss;
+  act(() => { dismiss(); dismiss(); });
+  expect(mockPush).toHaveBeenCalledTimes(mode === 'open' ? 1 : 0);
+  expect(mockNotificationRequest).toHaveBeenCalledTimes(mode === 'retired' ? 0 : 1);
+});
+it('opens chat once on Android without waiting for an iOS dismissal callback', async () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
+  await mount(); act(() => mockJoinOptions.onJoined({greetingUnconfirmed:'Hello!'}));
+  const alert = introAlert();
+  act(() => { alert.buttons[0].onPress(); alert.onClose(); alert.buttons[0].onPress(); });
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
