@@ -10,6 +10,8 @@ const mockInterestAction = jest.fn();
 let mockInterestFeedback: Record<string, any> = {};
 jest.mock('../../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({viewerId:'alice', epoch:1, isCurrent:()=>true}) }));
 jest.mock('../../../../hooks/useInterestedPlanActions', () => ({ useInterestedPlanActions: () => ({ feedback: mockInterestFeedback, run: mockInterestAction }) }));
+jest.mock('expo-crypto', () => ({...jest.requireActual('expo-crypto'),randomUUID: () => 'draft-review'}));
+const mockStoreDraft = jest.fn();
 const mockPush = jest.fn(), mockWishlistRead = jest.fn();
 let mockWishlistOptions: any, mockMutationOptions: any;
 const mockMutate = jest.fn();
@@ -21,7 +23,7 @@ jest.mock('../../../../hooks/useMyPlansData', () => ({
  useMyPlans: () => mockQueries.plans, useMyPlanDrafts: () => mockQueries.drafts,
  useWaitlistedPlans: () => mockQueries.waitlist, useInterestedPlans: () => mockQueries.interested, useSavedPlans: () => mockQueries.saved,
 }));
-jest.mock('@tanstack/react-query', () => ({ useQuery: (options:any) => {mockWishlistOptions=options;return mockQueries.wishlist;}, useMutation: (options:any) => {mockMutationOptions=options;return {mutate:mockMutate};}, useQueryClient: () => ({getQueryData:()=>[],invalidateQueries:jest.fn()}) }));
+jest.mock('@tanstack/react-query', () => ({ useQuery: (options:any) => {mockWishlistOptions=options;return mockQueries.wishlist;}, useMutation: (options:any) => {mockMutationOptions=options;return {mutate:mockMutate};}, useQueryClient: () => ({getQueryData:()=>[],invalidateQueries:jest.fn(),setQueryData:mockStoreDraft}) }));
 jest.mock('../../../creator/pages/PageFrame', () => ({ PageAction: () => null }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }), useFocusEffect: (cb: () => void) => require('react').useEffect(cb, [cb]) }));
 jest.mock('../../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: {} }) }));
@@ -148,4 +150,16 @@ it('shows a retry on the affected Yours card and offers sharing only after confi
  act(()=>retry.props.onPress());const second=mockMutate.mock.calls[1][0];
  act(()=>mockMutationOptions.onSuccess(undefined,second));
  expect(snackbar().visible).toBe(true);expect(snackbar().planTitle).toBe(plan.title);
+});
+
+it('opens the selected saved draft in its own account-owned form', () => {
+ mockQueries.drafts.data=[{id:'draft-one',title:'Saved walk',host_message:'Come along'}];
+ mount();
+ const row=tree.root.findAll(n=>n.props.accessibilityLabel==='Open draft: Saved walk' && typeof n.props.onPress==='function')[0];
+ act(()=>row.props.onPress());
+ const route=mockPush.mock.calls[0][0];
+ expect(route).toEqual({pathname:'/similar-plan',params:{reviewId:'draft-review'}});
+ expect(mockStoreDraft).toHaveBeenCalledWith(['similar-plan-review','alice','draft-review'],expect.objectContaining({
+   draftId:'draft-one',draftOwnerId:'alice',prefillTitle:'Saved walk',prefillCreatorMessage:'Come along',prefillInvitePersonId:'',
+ }));
 });
