@@ -474,6 +474,13 @@ export interface CommunityMessageReadOptions {
   broadcastKind?: 'intro' | 'main';
 }
 
+// A successful collection read returns an array, including [] for a new room.
+// A missing response must take the screen's recoverable error path.
+function requireHistoryPage<T>(rows: T[] | null): T[] {
+  if (!Array.isArray(rows)) throw Error('Chat history could not be loaded.');
+  return rows;
+}
+
 export async function getCommunityBroadcasts(
   communityId: string,
   olderThan?: { created_at: string; id: string },
@@ -509,7 +516,7 @@ export async function getCommunityBroadcasts(
   const { data: rows, error } = await measureChatPhase('community-main', 'history', () => scopedCommunityRequest(scope, () => query));
   assertCommunityScope(scope);
   if (error) throw error;
-  const fetched = rows ?? [];
+  const fetched = requireHistoryPage(rows);
   const oldestRaw = fetched[fetched.length - 1];
   const pageMeta = {
     hasMore: fetched.length === CHAT_NEWEST_PAGE_SIZE,
@@ -725,7 +732,7 @@ export async function getBroadcastReplies(
   if (olderThan) query = query.or(olderChatFilter(olderThan));
   const { data, error } = await scopedCommunityRequest(scope, () => query);
   if (error) throw error;
-  const raw = data ?? [];
+  const raw = requireHistoryPage(data);
   const oldest = raw[raw.length - 1];
   const replies = await attachSenderProfiles([...raw].reverse(), scope);
   assertCommunityScope(scope);
@@ -959,7 +966,7 @@ export async function getTopicMessages(
   }
   const { data, error } = await scopedCommunityRequest(scope, () => query);
   if (error) throw error;
-  const raw = data ?? [];
+  const raw = requireHistoryPage(data);
   const oldestRaw = raw[raw.length - 1];
   const pageMeta = {
     hasMore: raw.length === TOPIC_MESSAGE_PAGE_SIZE,
