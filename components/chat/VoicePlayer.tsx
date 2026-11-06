@@ -30,6 +30,15 @@ interface VoicePlayerProps {
   appearance?: { fonts: AfterglowFontFamilies };
 }
 
+// A message and a recording draft use the same player. Only the latest
+// explicit play request may start audio, including after a delayed replay seek.
+type VoicePlayback = { visit: object; pause: () => void };
+let currentVoice: VoicePlayback | null = null;
+
+function releaseVoice(visit: object) {
+  if (currentVoice?.visit === visit) currentVoice = null;
+}
+
 type PlaybackIssue = { kind: 'slow' | 'error'; message: string };
 
 function seededBars(seed: string, count: number): number[] {
@@ -70,7 +79,10 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn, appearance }:
     attemptRef.current = null; retryPendingRef.current = false; retryStatusRef.current = null;
     speedRef.current = 0;
     setSpeedIndex(0); setWaveWidth(0); setBusy(false); setIssue(null);
-    return () => { if (activeVisit.current === visit) activeVisit.current = null; };
+    return () => {
+      if (activeVisit.current === visit) activeVisit.current = null;
+      releaseVoice(visit);
+    };
   }, [visit]);
 
   // replace() is void. Wait for a fresh status event instead of treating the
@@ -145,6 +157,7 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn, appearance }:
     setIssue(null); setReloadVersion(version => version + 1);
     const reloaded = await run(() => {
       player.pause(); // replace() can resume an already-playing source.
+      releaseVoice(visit);
       player.replace(uri);
       player.setPlaybackRate(SPEEDS[speedRef.current]);
     }, 'Couldn’t reload this recording.');
@@ -152,21 +165,32 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn, appearance }:
       retryPendingRef.current = false; retryStatusRef.current = null;
       setReloadVersion(version => version + 1);
     }
-  }, [isCurrent, playerStatus, run, player, uri]);
+  }, [isCurrent, playerStatus, run, player, uri, visit]);
 
   const togglePlay = useCallback(async () => {
     if (!isCurrent() || attemptRef.current || retryPendingRef.current) return;
     if (failed) { await retry(); return; }
     if (loading && !isPlaying) return;
     await run(async canContinue => {
-      if (isPlaying) { player.pause(); return; }
-      if (atEnd) {
-        await player.seekTo(0);
-        if (!canContinue()) return;
+      if (isPlaying) {
+        player.pause();
+        releaseVoice(visit);
+        return;
       }
-      player.play();
+      if (currentVoice && currentVoice.visit !== visit) currentVoice.pause();
+      const request: VoicePlayback = { visit, pause: () => player.pause() };
+      currentVoice = request;
+      let started = false;
+      try {
+        if (atEnd) await player.seekTo(0);
+        if (!canContinue() || currentVoice !== request) return;
+        player.play();
+        started = true;
+      } finally {
+        if (!started && currentVoice === request) currentVoice = null;
+      }
     }, 'Couldn’t play this recording.');
-  }, [isCurrent, failed, retry, loading, isPlaying, atEnd, player, run]);
+  }, [isCurrent, failed, retry, loading, isPlaying, atEnd, player, run, visit]);
 
   const cycleSpeed = useCallback(async () => {
     if (!isCurrent() || loading || failed || retryPendingRef.current) return;

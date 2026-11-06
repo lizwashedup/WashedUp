@@ -6,7 +6,12 @@ import { AfterglowFallbackFonts, AfterglowType } from '../../../constants/Typogr
 
 let mockPlayer: ReturnType<typeof makePlayer>, mockStatus: any;
 function makePlayer(id = 1) { return { id, isLoaded: true, play: jest.fn(), pause: jest.fn(), replace: jest.fn(), seekTo: jest.fn().mockResolvedValue(undefined), setPlaybackRate: jest.fn() }; }
-jest.mock('expo-audio', () => ({ useAudioPlayer: () => mockPlayer, useAudioPlayerStatus: () => mockStatus }));
+const mockVoiceRows = new Map<string, {player: ReturnType<typeof makePlayer>; status: any}>();
+jest.mock('expo-audio', () => ({
+  useAudioPlayer: (source: string) => mockVoiceRows.get(source)?.player ?? mockPlayer,
+  useAudioPlayerStatus: (player: ReturnType<typeof makePlayer>) =>
+    [...mockVoiceRows.values()].find(row => row.player === player)?.status ?? mockStatus,
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 let tree: ReactTestRenderer, uri: string;
 let staged = false;
@@ -19,7 +24,7 @@ const text = (value: string) => tree.root.findAllByType(Text).find(node => node.
 function screen() { return <VoicePlayer uri={uri} durationSeconds={8} isOwn={false} {...(staged ? { appearance: { fonts: AfterglowFallbackFonts } } : {})} />; }
 async function mount() { await act(async () => { tree = create(screen()); }); }
 async function update() { await act(async () => tree.update(screen())); }
-beforeEach(() => { jest.useFakeTimers(); mockPlayer = makePlayer(); mockStatus = { ...ready }; uri = 'file:///voice-one.m4a'; staged = false; mockFontScale = 1; });
+beforeEach(() => { mockVoiceRows.clear(); jest.useFakeTimers(); mockPlayer = makePlayer(); mockStatus = { ...ready }; uri = 'file:///voice-one.m4a'; staged = false; mockFontScale = 1; });
 afterEach(() => { act(() => tree?.unmount()); jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
 it('retains ordinary play/pause and the existing three playback speeds', async () => {
@@ -226,4 +231,36 @@ it.each([false, true])('remeasures only native playback labels on mounted font r
   const enlargedCaption = caption(); mockFontScale = 1; await update();
   expect(caption()).not.toBe(enlargedCaption);
   expect(text('1.5x')).toBeDefined();
+});
+
+async function twoMessages(firstAtEnd = false) {
+  const first = makePlayer(11), second = makePlayer(22);
+  mockVoiceRows.set('first', {player:first,status:{...ready,id:first.id,currentTime:firstAtEnd ? 8 : 2}});
+  mockVoiceRows.set('second', {player:second,status:{...ready,id:second.id}});
+  await act(async () => {
+    tree = create(<><VoicePlayer uri="first" durationSeconds={8} isOwn={false}/>
+      <VoicePlayer uri="second" durationSeconds={8} isOwn/></>);
+  });
+  const start = (index: number) => tree.root.findAllByType(VoicePlayer)[index]
+    .findAll(node => node.props.accessibilityLabel === 'Play voice message' && typeof node.props.onPress === 'function')[0].props.onPress();
+  return {first,second,start};
+}
+it('pauses the previous voice message before playing the next and preserves its position', async () => {
+  const {first,second,start} = await twoMessages();
+  await act(async () => start(0));
+  await act(async () => start(1));
+  expect(first.pause).toHaveBeenCalledTimes(1);
+  expect(first.pause.mock.invocationCallOrder[0]).toBeLessThan(second.play.mock.invocationCallOrder[0]);
+  expect(first.seekTo).not.toHaveBeenCalled();
+});
+it('prevents an old pending replay from interrupting the next voice message', async () => {
+  const {first,second,start} = await twoMessages(true);
+  const seek = deferred();
+  first.seekTo.mockReturnValueOnce(seek.promise);
+  let replay!: Promise<unknown>;
+  act(() => { replay = start(0); });
+  await act(async () => start(1));
+  await act(async () => { seek.resolve(); await replay; });
+  expect(second.play).toHaveBeenCalledTimes(1);
+  expect(first.play).not.toHaveBeenCalled();
 });
