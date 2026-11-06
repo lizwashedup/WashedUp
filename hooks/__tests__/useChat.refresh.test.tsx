@@ -72,11 +72,11 @@ beforeEach(() => {
   jest.mocked(supabase.from).mockImplementation((table: string) => {
     let insert = false;
     const chain: any = {};
-    for (const method of ['select', 'eq', 'order', 'in', 'or', 'range']) chain[method] = jest.fn(() => chain);
+    for (const method of ['select', 'eq', 'lte', 'lt', 'gt', 'order', 'in', 'or', 'range']) chain[method] = jest.fn(() => chain);
     chain.insert = jest.fn(() => { insert = true; return chain; });
     chain.upsert = jest.fn((...args) => { readReceipts(...args); return chain; });
-    chain.update = jest.fn((...args) => { clearNotifications(...args); return chain; });
-    chain.limit = jest.fn(() => readMessages());
+    chain.update = jest.fn((...args) => { if (table === 'app_notifications') clearNotifications(...args); return chain; });
+    chain.limit = jest.fn(() => table === 'app_notifications' ? Promise.resolve({ data: [], error: null }) : readMessages());
     chain.single = jest.fn(() => insert ? writeMessage() : Promise.resolve({ data: null, error: null }));
     chain.maybeSingle = jest.fn(() => table === 'profiles' ? readBlocked() : Promise.resolve({ data: null, error: null }));
     chain.then = (yes: any, no: any) => (table === 'profiles_public' ? readProfiles() : table === 'message_reactions' ? readReactions() : Promise.resolve({ data: [], error: null })).then(yes, no);
@@ -623,4 +623,22 @@ it.each(['event', 'circle'] as const)('leaves %s unread when its history arrives
   await act(async () => fixture.chat.refetch(true));
   expect(readReceipts).toHaveBeenCalledTimes(1);
   expect(clearNotifications).toHaveBeenCalledTimes(kind === 'event' ? 1 : 0);
+});
+
+it('acknowledges only eligible persisted history, preserving the server microseconds',async()=>{
+  const confirmed = message(1,{created_at:'2026-11-06T09:00:00.123456Z'});
+  const hidden = message(2,{created_at:'2026-11-06T09:01:00Z',user_id:'blocked-user'});
+  blocked=['blocked-user'];readMessages.mockResolvedValueOnce(result(hidden,confirmed)).mockResolvedValueOnce(result());
+  const fixture=mount();await flush();
+  expect(readReceipts).toHaveBeenCalledWith(expect.objectContaining({last_read_at:confirmed.created_at}),expect.objectContaining({ignoreDuplicates:true}));
+  await act(async()=>fixture.chat.refetch(true));expect(readReceipts).toHaveBeenCalledTimes(1);
+});
+
+it('does not manufacture a receipt from an optimistic-only list',async()=>{
+  readMessages.mockResolvedValue(result());const delivery=deferred<any>();writeMessage.mockReturnValueOnce(delivery.promise);
+  const fixture=mount();await flush();
+  let sending!: Promise<unknown>;act(()=>{sending=fixture.chat.sendMessage('not confirmed');});await flush();
+  expect(fixture.chat.messages.some(row=>row.id.startsWith('optimistic-'))).toBe(true);
+  await act(async()=>fixture.chat.refetch(true));expect(readReceipts).not.toHaveBeenCalled();expect(clearNotifications).not.toHaveBeenCalled();
+  await act(async()=>{delivery.resolve({data:message(1),error:null});await sending;});
 });

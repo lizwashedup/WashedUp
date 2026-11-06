@@ -72,11 +72,11 @@ beforeEach(() => {
   jest.mocked(supabase.from).mockImplementation((table: string) => {
     let insert = false;
     const chain: any = {};
-    for (const method of ['select', 'eq', 'order', 'in', 'or']) chain[method] = jest.fn(() => chain);
+    for (const method of ['select', 'eq', 'lte', 'lt', 'gt', 'order', 'in', 'or']) chain[method] = jest.fn(() => chain);
     chain.insert = jest.fn(() => { insert = true; return chain; });
     chain.upsert = jest.fn((...args) => { readReceipts(...args); return chain; });
-    chain.update = jest.fn((...args) => { clearNotifications(...args); return chain; });
-    chain.limit = jest.fn(() => readMessages());
+    chain.update = jest.fn((...args) => { if (table === 'app_notifications') clearNotifications(...args); return chain; });
+    chain.limit = jest.fn(() => table === 'app_notifications' ? Promise.resolve({ data: [], error: null }) : readMessages());
     chain.single = jest.fn(() => insert ? writeMessage() : Promise.resolve({ data: null, error: null }));
     chain.maybeSingle = jest.fn(async () => ({ data: table === 'profiles' ? { blocked_users: blocked } : null, error: null }));
     chain.then = (yes: any, no: any) => (table === 'profiles_public' ? readProfiles() : table === 'message_reactions' ? readReactions() : Promise.resolve({ data: [], error: null })).then(yes, no);

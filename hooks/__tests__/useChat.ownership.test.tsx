@@ -34,13 +34,14 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
       if (table === 'message_reactions' && operation === 'select') return ending === 'limit' ? mockReactionRead(filters) : Promise.resolve({ data: [], error: null });
       if (table === 'profiles') return mockBlocks(filters);
       if (table === 'profiles_public') return mockProfiles(filters);
-      if (table === 'chat_reads') return mockReadMarker(payload);
-      if (table === 'app_notifications') return mockNotificationRead(filters);
+      if (table === 'chat_reads') return operation === 'upsert' ? mockReadMarker(payload) : Promise.resolve({ error: null });
+      if (table === 'app_notifications') return operation === 'update' ? mockNotificationRead(filters) : Promise.resolve({ data: [], error: null });
       return mockMutation(table, operation, payload, filters);
     };
     const chain: any = {
       select: () => chain, order: () => chain,
       eq: (key: string, value: unknown) => { filters[key] = value; return chain; },
+      gt: () => chain, lt: () => chain, lte: (key: string,value: unknown) => { filters[key] = value; return chain; },
       in: (key: string, value: unknown) => { filters[key] = value; return chain; },
       or: (value: unknown) => { filters.older = value; return chain; },
       insert: (value: unknown) => { operation = 'insert'; payload = value; return chain; },

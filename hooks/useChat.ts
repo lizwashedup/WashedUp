@@ -37,6 +37,7 @@ import {
   type MessageReaction, type ReplyTo, type ChatMessage,
   type ConversationKey, type ChatOperationScope, type ChatReactionIntent,
 } from '../lib/chatMessageModel';
+import { acknowledgeMemberChatPage } from '../lib/memberChatReadPosition';
 import { attachSenders, reconcileNewestMessages } from '../lib/chatMessageReads';
 
 function assertChatScope(scope: ChatOperationScope): void {
@@ -387,30 +388,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       const retainedOlderPages = !!window.older && !!pageCursor && compareChatSequence(window.older, pageCursor) < 0;
       if (!retainedOlderPages) hasOlderRef.current = more;
       if (user) {
-        const userId = operationScope.userId;
         const msgIds = page.map((m: any) => m.id);
-        // Mark this conversation read. Plans and circles use different unique
-        // keys on chat_reads, so the onConflict target differs.
-        const readUpsert = () => scopedChatRequest(readScope, () => kind === 'event'
-          ? supabase.from('chat_reads').upsert(
-              { event_id: conversationId, user_id: userId, last_read_at: new Date().toISOString() },
-              { onConflict: 'event_id,user_id' },
-            )
-          : supabase.from('chat_reads').upsert(
-              { circle_id: conversationId, user_id: userId, last_read_at: new Date().toISOString() },
-              { onConflict: 'user_id,circle_id' },
-            ));
-        // new_message notifications are event-only today; circles have no
-        // notification type yet, so the circle branch skips the clear + badge.
-        const notifClear = () => scopedChatRequest(readScope, () => kind === 'event'
-          ? supabase.from('app_notifications')
-              .update({ status: 'read' })
-              .eq('user_id', userId)
-              .eq('event_id', conversationId)
-              .eq('type', 'new_message')
-              .eq('status', 'unread')
-          : Promise.resolve({ data: null }));
-
         const blockedLookup = { ...initialBlockedLookup, ...anchor?.blockedIds };
         blockedIdsRef.current = blockedLookup;
         blockedReadyRef.current = true;
@@ -447,7 +425,12 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
             // These idempotent background writes keep their original scope.
             // Viewing an old notification must not mark unseen newer messages
             // read or dismiss their notifications.
-            if (!window.anchorId && mayMarkHistoryRead()) void Promise.all([readUpsert(), notifClear()]).then(() => {
+            const seen = firstPaint.slice().reverse().find(row =>
+              !row.id.startsWith('optimistic-') && Number.isFinite(Date.parse(row.created_at)) &&
+              (!startedWith.has(row.id) || existingById.has(row.id)));
+            if (!window.anchorId && seen && mayMarkHistoryRead()) void acknowledgeMemberChatPage(
+              { kind, id: conversationId }, seen.created_at, readScope, mayMarkHistoryRead,
+            ).then(() => {
               if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
             }).catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
             const [{ data: reactionsData, error: reactionsError }, enriched] = await Promise.all([
