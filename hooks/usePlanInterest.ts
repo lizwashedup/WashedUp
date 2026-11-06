@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { getPlanLifecycle } from '../lib/planLifecycle';
 import { parseCirclePlanContextReceipt } from './useCirclePlanContext';
+import { withDeadline } from '../lib/withTimeout';
+import { planInterestReceipts } from '../lib/planInterestReceipts';
 import { logError } from '../lib/logger';
 type Entry = {
     id: string;
@@ -38,6 +40,8 @@ const fields = 'id,event_id,interested_user_id,status';
 export function usePlanInterest(options: Options) {
     const client = useQueryClient(), latest = useRef(options);
     latest.current = options;
+    const receipts = planInterestReceipts(client);
+    const receiptKey = JSON.stringify([options.viewerId, options.eventId]);
     const state = useMemo<State>(() => ({ entry: null, ready: false, loading: true, busy: false, phase: null, error: null, visit: null, revision: 0 }), [options.eventId, options.viewerId, options.epoch]);
     const owner = useRef(state);
     owner.current = state;
@@ -47,6 +51,21 @@ export function usePlanInterest(options: Options) {
     const capture = () => { const visit = state.visit; return () => !!visit && state.visit === visit && owner.current === state && options.isCurrent(); };
     const invalidate = () => { for (const queryKey of [['events', 'my-interest', options.eventId, options.viewerId], ['events', 'creator-interest', options.eventId]])
         void Promise.resolve(client.invalidateQueries({ queryKey })).catch(e => logError(e, 'plan.interest.refresh')); };
+    const invalidateYours = async () => {
+        // The result can arrive after unmount, with Yours already open, or after
+        // logout. Never refetch an old account’s collection as its replacement.
+        let sameAccount = options.isCurrent();
+        if (!sameAccount) {
+            try {
+                const auth = await requestWithDeadline(supabase.auth.getUser(), 8000);
+                sameAccount = !auth.error && auth.data.user?.id === options.viewerId;
+            } catch { /* Mark stale without reading when identity is unavailable. */ }
+        }
+        try {
+            await client.invalidateQueries({ queryKey: ['plans.myInterested', options.viewerId], exact: true,
+                refetchType: sameAccount ? 'active' : 'none' });
+        } catch (error) { logError(error, 'plan.interest.yours'); }
+    };
     const authenticate = async (valid: () => boolean) => { const r = await requestWithDeadline(supabase.auth.getUser(), 12_000); if (!valid())
         return false; if (r.error || !options.viewerId || r.data.user?.id !== options.viewerId)
         throw new Error('Account unavailable'); return true; };
@@ -66,6 +85,8 @@ export function usePlanInterest(options: Options) {
     const refresh = async () => {
         if (!options.viewerId || !state.visit || !options.isCurrent() || state.busy)
             return;
+        const held = receipts.get(receiptKey);
+        if (held) state.phase = 'unknown';
         const visit = capture(), revision = ++state.revision, valid = () => visit() && state.revision === revision;
         state.loading = true;
         state.error = null;
@@ -79,11 +100,16 @@ export function usePlanInterest(options: Options) {
             state.entry = row;
             state.ready = true;
             if (row) {
+                if (held) { receipts.observed(held); void invalidateYours(); }
                 state.phase = null;
                 invalidate();
             }
+            else if (state.phase === 'unknown' && !receipts.get(receiptKey))
+                state.phase = null; // The pending write settled while this visit was away.
             else if (state.phase === 'unknown')
                 state.error = 'We still can’t confirm your interest. Check again in a moment.';
+            else if (state.phase === 'failed')
+                state.error = 'Couldn’t save your interest. Try again.';
         }
         catch {
             if (valid()) {
@@ -100,13 +126,26 @@ export function usePlanInterest(options: Options) {
     };
     const readRef = useRef(refresh);
     readRef.current = refresh;
-    useFocusEffect(useCallback(() => { const visit = {}; state.visit = visit; void readRef.current(); return () => { if (state.visit === visit) {
-        state.visit = null;
-        state.revision++;
-    } }; }, [state]));
+    useFocusEffect(useCallback(() => {
+        const visit = {};
+        state.visit = visit;
+        const unsubscribe = receipts.subscribe(receiptKey, result => {
+            if (state.visit !== visit || owner.current !== state || !latest.current.isCurrent() || state.busy) return;
+            state.phase = result === 'refused' ? 'failed' : result === 'unknown' ? 'unknown' : null;
+            if (result === 'refused') state.error = 'Couldn’t save your interest. Try again.';
+            if (result === 'saved') invalidate();
+            void readRef.current();
+        });
+        void readRef.current();
+        return () => {
+            unsubscribe();
+            if (state.visit === visit) { state.visit = null; state.revision++; }
+        };
+    }, [state, receipts, receiptKey]));
     const send = async (retry = false) => {
         if (!options.viewerId || !state.visit || !options.isCurrent() || !latest.current.canSend() || !state.ready || state.loading || state.busy || state.entry)
             return;
+        if (receipts.get(receiptKey)) { await refresh(); return; }
         if (state.phase && (!retry || state.phase !== 'failed'))
             return;
         const valid = capture();
@@ -153,8 +192,18 @@ export function usePlanInterest(options: Options) {
             }
             if (!valid() || !latest.current.canSend())
                 return;
+            const ticket = receipts.begin(receiptKey);
+            if (!ticket) { state.phase = 'unknown'; state.error = 'Your interest may be saved. Check before trying again.'; return; }
             dispatched = true;
-            const result = await supabase.rpc('send_interest_signal', { p_event_id: options.eventId });
+            // Bound the UI wait, not the transaction. The real response remains
+            // observed even after Back, a timeout, or a different account visit.
+            const write = (async () => await supabase.rpc('send_interest_signal', { p_event_id: options.eventId }))().then(result => {
+                const saved = result?.error === null && uuid(result.data);
+                if (saved) void invalidateYours();
+                receipts.settle(ticket, saved ? 'saved' : rejected.has(String(result?.error?.code)) ? 'refused' : 'unknown');
+                return result;
+            }, error => { receipts.settle(ticket, 'unknown'); throw error; });
+            const result = await withDeadline(write, 12_000, 'Saving interest');
             if (result.error && rejected.has(String(result.error.code))) {
                 dispatched = false;
                 throw result.error;
