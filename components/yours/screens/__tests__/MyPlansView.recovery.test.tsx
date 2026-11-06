@@ -19,7 +19,7 @@ jest.mock('../../../../hooks/useMyPlansData', () => ({
 }));
 jest.mock('@tanstack/react-query', () => ({ useQuery: (options:any) => {mockWishlistOptions=options;return mockQueries.wishlist;}, useMutation: () => ({ mutate: jest.fn() }), useQueryClient: () => ({}) }));
 jest.mock('../../../creator/pages/PageFrame', () => ({ PageAction: () => null }));
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }), useFocusEffect: (cb: () => void) => require('react').useEffect(cb, [cb]) }));
 jest.mock('../../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: {} }) }));
 jest.mock('../../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
 jest.mock('../../../../lib/supabase', () => ({ supabase: {from: () => ({select: () => ({eq: () => mockWishlistRead()})})} }));
