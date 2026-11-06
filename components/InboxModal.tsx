@@ -27,6 +27,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,6 +63,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const queryClient = useQueryClient();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = width / fontScale < 300;
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
   const chatAcknowledgements = useRef(new Set<string>());
@@ -267,6 +270,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const clearLabel = { idle: 'Clear all', clearing: 'Clearing…', retry: 'Retry clear',
     unknown: 'Check notifications', checking: 'Checking…' }[clearAll.phase];
 
+  const stackHeader = stacked || clearAll.phase === 'unknown';
+
   const exception = useInboxWaitlistException(notificationScope, visit,
     () => !closingRef.current && activeVisit.current === visit, navigateAfterDismiss,
     message => setAlertInfo({ title: 'Invitation', message }));
@@ -292,6 +297,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           accessibilityViewIsModal
           style={[
             s.sheet,
+            stacked && s.tallSheet,
             // Android edge-to-edge: Modal renders behind the nav/gesture bar;
             // add the bottom inset on top of the base 40px so action buttons
             // stay clear of the system bar. iOS unchanged.
@@ -300,27 +306,29 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
           onPress={(e) => e.stopPropagation()}
         >
           <View style={s.handle} />
-          <View style={s.headerRow}>
+          <View style={[s.headerRow, stackHeader && s.stackedHeader]}>
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Close inbox"
               onPress={() => requestClose()}
-              style={s.closeBtn}
+              style={[s.closeBtn, stackHeader && s.flowClose]}
             >
               <X size={22} color={Colors.asphalt} />
             </TouchableOpacity>
-            <Text style={s.title}>Notifications</Text>
+            <Text accessibilityRole="header" style={[s.title, stackHeader && s.flowTitle]}>Notifications</Text>
             {(appNotifications.length > 0 || clearAll.phase !== 'idle') && (
-              <TouchableOpacity
-                disabled={clearBusy}
-                onPress={() => clearAll.press(appNotifications)}
-                accessibilityRole="button"
-                accessibilityLabel={clearAll.phase === 'idle' ? 'Clear all notifications' : clearLabel}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={s.clearAllBtn}
-              >
-                <Text style={s.clearAllText}>{clearLabel}</Text>
-              </TouchableOpacity>
+              <View pointerEvents="box-none" style={stackHeader ? s.flowClear : s.clearAllBtn}>
+                <TouchableOpacity
+                  disabled={clearBusy}
+                  onPress={() => clearAll.press(appNotifications)}
+                  accessibilityRole="button"
+                  accessibilityLabel={clearAll.phase === 'idle' ? 'Clear all notifications' : clearLabel}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={s.clearAction}
+                >
+                  <Text style={s.clearAllText}>{clearLabel}</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
           {(clearAll.phase === 'retry' || clearAll.phase === 'unknown') && (
@@ -450,9 +458,10 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 return (
                   <InboxNotificationRow key={`notif-${notif.id}`} notice={notif}
                     scope={notificationScope} visit={visit} isOpen={() => !closingRef.current && activeVisit.current === visit}
+                    stacked={stacked}
                     showDismiss={completed || (!isWaitlist && !isExceptionInvite)}
                     openSpotActions={isWaitlist ? ({ pass, label, busy }) => (
-                      <View style={[s.waitlistActions, { flexWrap: 'wrap' }]}>
+                      <View style={[s.waitlistActions, stacked && s.stackedActions]}>
                         <TouchableOpacity style={s.claimBtn} accessibilityRole="button" accessibilityLabel="Claim Spot"
                           disabled={busy} onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)}>
                           <Text style={s.claimText}>Claim Spot</Text>
@@ -478,8 +487,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       </View>
                     )}
                     <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={s.rowTitle} numberOfLines={1}>{notif.title}</Text>
-                      {notif.body && <Text style={s.notifBody} numberOfLines={2}>{notif.body}</Text>}
+                      <Text style={s.rowTitle} numberOfLines={stacked ? undefined : 1}>{notif.title}</Text>
+                      {notif.body && <Text style={s.notifBody} numberOfLines={stacked ? undefined : 2}>{notif.body}</Text>}
                       {timeLeft !== null && timeLeft > 0 && (
                         <Text style={s.expiry}>{timeLeft < 1 ? 'Expires soon' : `${timeLeft}h left to respond`}</Text>
                       )}
@@ -495,7 +504,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                         </TouchableOpacity>
                       </View>}
                       {isExceptionInvite && !decision && (
-                        <View style={s.waitlistActions}>
+                        <View style={[s.waitlistActions, stacked && s.stackedActions]}>
                           <TouchableOpacity style={s.claimBtn} accessibilityRole="button" accessibilityLabel="Join the plan" disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id)} activeOpacity={0.7}>
                             <Text style={s.claimText}>{exception.pendingId === notif.id ? 'Please wait…' : 'Join the plan'}</Text>
                           </TouchableOpacity>
@@ -534,6 +543,12 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 const s = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: Colors.overlayDark, justifyContent: 'flex-end' },
   sheet: { backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 40, height: '70%' },
+  tallSheet: { height: '90%' },
+  stackedHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 0, marginBottom: 6 },
+  flowClose: { position: 'relative' },
+  flowTitle: { flex: 1, textAlign: 'left' },
+  flowClear: { width: '100%', alignItems: 'flex-end' },
+  clearAction: { minHeight: 44, maxWidth: '100%', justifyContent: 'center' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#D5CCC2', alignSelf: 'center', marginTop: 10, marginBottom: 12 },
   headerRow: { position: 'relative', justifyContent: 'center', marginBottom: 16, minHeight: 44, paddingHorizontal: 64 },
   closeBtn: { position: 'absolute', left: 0, top: 0, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
@@ -551,7 +566,8 @@ const s = StyleSheet.create({
   viewBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14 },
   viewBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   expiry: { fontSize: FontSizes.caption, fontFamily: Fonts.sansMedium, color: Colors.errorRed, marginTop: 2 },
-  waitlistActions: { flexDirection: 'row' as const, gap: 10, marginTop: 10 },
+  stackedActions: { flexDirection: 'column', alignItems: 'stretch' },
+  waitlistActions: { flexDirection: 'row' as const, flexWrap: 'wrap', gap: 10, marginTop: 10 },
   claimBtn: { backgroundColor: Colors.terracotta, borderRadius: 14, paddingVertical: 8, paddingHorizontal: 16 },
   claimText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   cantGoBtn: { borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' as const },
