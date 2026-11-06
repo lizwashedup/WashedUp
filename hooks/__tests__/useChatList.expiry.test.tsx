@@ -1,3 +1,4 @@
+jest.mock('../../lib/memberChatBlockPreferences', () => ({ readMemberChatBlockPreferences: jest.fn(async () => new Set<string>()) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useChatList } from '../useChatList';

@@ -1,4 +1,4 @@
-import type { ChatPreview } from './chatPreview';
+import { restrictPlanPreview, type ChatPreview } from './chatPreview';
 import { markChatListDirty } from './chatListSignal';
 
 // Process-only previews, partitioned by account. Block confirmation must clear
@@ -6,14 +6,14 @@ import { markChatListDirty } from './chatListSignal';
 export const chatListMemoryCache = new Map<string, ChatPreview[]>();
 const listeners = new Set<(viewerId: string, blockedId: string) => void>();
 
-const inboxListeners = new Set<(viewerId: string) => void>();
+const inboxListeners = new Set<(viewerId: string, blockedId?: string) => void>();
 
-function notifyInbox(viewerId: string) {
+function notifyInbox(viewerId: string, blockedId?: string) {
   markChatListDirty();
-  for (const listener of inboxListeners) listener(viewerId);
+  for (const listener of inboxListeners) listener(viewerId, blockedId);
 }
 
-export function subscribeChatListChanges(listener: (viewerId: string) => void): () => void {
+export function subscribeChatListChanges(listener: (viewerId: string, blockedId?: string) => void): () => void {
   inboxListeners.add(listener);
   return () => { inboxListeners.delete(listener); };
 }
@@ -26,9 +26,12 @@ export function removeDepartedPlanPreview(viewerId: string, eventId: string): vo
 
 export function removeBlockedPrivateChatPreviews(viewerId: string, blockedId: string): void {
   const previous = chatListMemoryCache.get(viewerId);
-  if (previous) chatListMemoryCache.set(viewerId,
-    previous.filter(chat => !(chat.is_dm && chat.dm_user_id === blockedId)));
-  notifyInbox(viewerId);
+  if (previous) {
+    const blocked = new Set([blockedId]);
+    chatListMemoryCache.set(viewerId, previous.filter(row => !(row.is_dm && row.dm_user_id === blockedId))
+      .map(row => restrictPlanPreview(row, blocked)));
+  }
+  notifyInbox(viewerId, blockedId);
   for (const listener of listeners) listener(viewerId, blockedId);
 }
 

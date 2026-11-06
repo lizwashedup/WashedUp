@@ -1,4 +1,6 @@
+jest.mock('../../lib/memberChatBlockPreferences', () => ({ readMemberChatBlockPreferences: jest.fn(async () => new Set<string>()) }));
 import React from 'react';
+import {readMemberChatBlockPreferences} from '../../lib/memberChatBlockPreferences';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useChatList } from '../useChatList';
 
@@ -11,10 +13,14 @@ jest.mock('../../constants/FeatureFlags', () => ({ GROUPS_ENABLED: true, CHAT_EN
 jest.mock('../../lib/chatEngine/senderCache', () => ({ seedSender: jest.fn() }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   from: (table: string) => {
-    let columns = ''; let ids: string[] = []; let cap = Infinity; let embeddedCap = Infinity;
+    let excluded: string[] = []; let columns = ''; let ids: string[] = []; let cap = Infinity; let embeddedCap = Infinity;
     const query: any = {
       select: (value: string) => { columns = value; return query; },
       eq: () => query, neq: () => query,
+      not: (key:string,op:string,values:string) => {
+        expect(key).toBe('latest_message.user_id');expect(op).toBe('in');
+        excluded=JSON.parse('['+values.slice(1,-1)+']');return query;
+      },
       in: (_key: string, value: string[]) => { ids = value; return query; },
       order: () => query,
       limit: (value: number, options?: { referencedTable?: string }) => {
@@ -27,7 +33,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
         if (columns.includes('events (')) data = mockKind === 'event' ? mockParents.map(events => ({ events })) : [];
         else if (columns.includes('circles (')) data = mockKind === 'circle' ? mockParents.map(circles => ({ circles })) : [];
         else if (table === 'events' || table === 'circles') data = mockParents.filter(p => ids.includes(p.id)).map(parent => ({ id: parent.id,
-          latest_message: mockMessages.filter(m => m[`${mockKind}_id`] === parent.id).slice(0, embeddedCap) })).slice(0, cap);
+          latest_message: mockMessages.filter(m => m[`${mockKind}_id`] === parent.id && !excluded.includes(m.user_id)).slice(0, embeddedCap) })).slice(0, cap);
         else if (table === 'chat_reads') data = mockReads;
         else if (table === 'messages') data = mockMessages.filter(m => ids.includes(m[`${mockKind}_id`])).slice(0, cap);
         else if (table === `${mockKind}_members` && columns === `${mockKind}_id`) data = mockParents.flatMap(parent =>
@@ -96,4 +102,25 @@ describe.each(['event', 'circle'] as const)('%s unread timestamps', kind => {
     expect(value.chats).toHaveLength(1);
     expect(value.chats[0].unread_count).toBe(expected);
   });
+});
+
+it('keeps both joined plans while removing a newly blocked author’s preview, including after refresh',async()=>{
+  const {removeBlockedPrivateChatPreviews}=require('../../lib/chatListCache');
+  const viewer='local-preview-owner';mockKind='event';mockParents=[parent('sunset'),parent('coffee')];mockReads=[];
+  mockMessages=[message('sunset','Fictional lighthouse','2026-11-06T12:00:00Z'),{...message('coffee','Fictional umbrella','2026-11-06T11:00:00Z'),user_id:'other-allowed-author'}];
+  await act(async()=>{tree=create(<Probe viewer={viewer}/>);});
+  const snippets=()=>value.chats.map(row=>row.last_message).join(' | ');
+  expect(snippets()).toContain('Fictional lighthouse');expect(snippets()).toContain('Fictional umbrella');
+  await act(async()=>removeBlockedPrivateChatPreviews(viewer,'synthetic-peer'));
+  expect(value.chats).toHaveLength(2);expect(snippets()).not.toContain('Fictional lighthouse');expect(snippets()).toContain('Fictional umbrella');
+  await act(async()=>{await value.refetch(true);});
+  expect(snippets()).not.toContain('Fictional lighthouse');expect(snippets()).toContain('Fictional umbrella');
+});
+
+it('uses the preceding permitted message on cold entry and counts only permitted unread authors',async()=>{
+  jest.mocked(readMemberChatBlockPreferences).mockResolvedValueOnce(new Set(['synthetic-peer']));
+  mockKind='event';mockParents=[parent('sunset')];mockReads=[];
+  mockMessages=[message('sunset','blocked','2026-11-06T12:00:00Z'),{...message('sunset','Earlier allowed','2026-11-06T11:00:00Z'),user_id:'allowed'}];
+  await act(async()=>{tree=create(<Probe viewer="pre-existing-block"/>);});
+  expect(value.chats[0]).toMatchObject({title:'sunset',last_message:'Earlier allowed',unread_count:1});
 });

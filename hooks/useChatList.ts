@@ -3,9 +3,10 @@ import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { GROUPS_ENABLED, CHAT_ENGINE_ENABLED } from '../constants/FeatureFlags';
 import { chatListMemoryCache, subscribeChatListChanges } from '../lib/chatListCache';
-import { comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot, type ChatPreview } from '../lib/chatPreview';
+import { readMemberChatBlockPreferences } from '../lib/memberChatBlockPreferences';
+import { copyPreviewActivity, restrictPlanPreview, comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot, type ChatPreview } from '../lib/chatPreview';
 import { fetchCircleChats, fetchCircleChatsViaCards } from '../lib/circleChatListReads';
-import { fetchEventChatPreviews } from '../lib/eventChatListReads';
+import { fetchEventChatPreviews, replaceBlockedEventActivity } from '../lib/eventChatListReads';
 export type { ChatPreview } from '../lib/chatPreview';
 
 function sortChatPreviews(previews: ChatPreview[]): ChatPreview[] {
@@ -27,6 +28,10 @@ export function useChatList(knownUserId: string | null | undefined) {
   currentViewer.current = knownUserId;
   // Keep committed rows synchronous across independent reads and realtime
   // callbacks. React may batch renders; the cache must follow the same rows.
+  const unverifiedWarmPlans = useRef(new Map<string, ChatPreview>());
+  const pendingPlanPrivacy = useRef<Promise<boolean> | null>(null);
+  const planBlocks = useRef<ReadonlySet<string> | null>(null);
+  const visitBlocks = useRef(new Set<string>());
   const rowsRef = useRef<ChatPreview[]>([]);
   const showChats = useCallback((next: ChatPreview[] | ((rows: ChatPreview[]) => ChatPreview[]), cacheOwner?: string | null) => {
     if (cacheOwner && (currentViewer.current !== cacheOwner || userIdRef.current !== cacheOwner)) return;
@@ -84,7 +89,7 @@ export function useChatList(knownUserId: string | null | undefined) {
       }
       if (complete) pending[kind] = false;
       failed[kind] = error;
-      const sorted = sortChatPreviews(latest);
+      const sorted = sortChatPreviews(latest.map(row => restrictPlanPreview(row, planBlocks.current)));
       chatListMemoryCache.set(userId, sorted);
       senderNameCacheRef.current = names;
       showChats(sorted);
@@ -101,12 +106,55 @@ export function useChatList(knownUserId: string | null | undefined) {
     };
 
     const loadEvents = async () => {
+      let privacy: Promise<boolean> | undefined;
+      const checkPrivacy = () => {
+        if (privacy) return;
+        privacy = read(readMemberChatBlockPreferences(userId)).then(ids => {
+          if (!current()) return false;
+          planBlocks.current = new Set([...ids, ...visitBlocks.current]);
+
+          // Restore only preview activity for rows still in this account's
+          // list. A confirmed departure must never be restored by this read.
+          const warm = unverifiedWarmPlans.current;
+          const rows = (chatListMemoryCache.get(userId) ?? latest).map(row => {
+            const previous = row.kind === 'event' && warm.get(row.conversationId);
+            return restrictPlanPreview(previous ? copyPreviewActivity(row, previous) : row, planBlocks.current);
+          });
+          warm.clear();
+          latest = rows;
+          showChats(sortChatPreviews(rows), userId);
+          return true;
+        }).catch(() => false);
+        pendingPlanPrivacy.current = privacy;
+      };
+
+      if (latest.some(row => row.kind === 'event')) void checkPrivacy();
       try {
         const eventPreviews = await fetchEventChatPreviews(userId, names, read, silent ? undefined : {
           cachedRows: () => latest,
           publish: rows => publish('event', rows, false),
-        }, joined => retainJoined('event', joined));
-        publish('event', eventPreviews, true);
+        }, joined => {
+          retainJoined('event', joined);
+          if (joined.size) void checkPrivacy();
+        });
+        if (privacy && !await privacy) {
+          // An offline refresh can keep last verified activity. A previously
+          // unknown room gets its title only until its privacy check succeeds.
+          const kept = new Map(rowsRef.current.filter(row => row.kind === 'event').map(row => [row.conversationId, row]));
+          publish('event', eventPreviews.map(row => {
+            const previous = kept.get(row.conversationId);
+            return previous ? copyPreviewActivity(row, previous) : restrictPlanPreview(row, null);
+          }), true, true);
+        } else if (current()) {
+          const blocked = planBlocks.current;
+          try {
+            const visible = blocked?.size ? await replaceBlockedEventActivity(eventPreviews, userId, blocked, names, read) : eventPreviews;
+            publish('event', visible, true);
+          } catch {
+            // The ordinary result still supplies membership and other rooms.
+            publish('event', eventPreviews, true, true);
+          }
+        }
       } catch {
         publish('event', null, true, true);
       }
@@ -147,6 +195,9 @@ export function useChatList(knownUserId: string | null | undefined) {
   useEffect(() => {
     requestVersion.current++;
     userIdRef.current = knownUserId ?? null;
+    pendingPlanPrivacy.current = null;
+    planBlocks.current = null;
+    visitBlocks.current = new Set();
     removals.current = { sequence: 0, at: new Map() };
     livePreviews.current = { sequence: 0, at: new Map() };
     senderNameCacheRef.current = new Map();
@@ -156,8 +207,9 @@ export function useChatList(knownUserId: string | null | undefined) {
     // until the existing mutual-block check authorizes it again. Retire it in
     // the shared cache too: a faster Plan response must not republish the DM.
     const previous = knownUserId ? chatListMemoryCache.get(knownUserId) : undefined;
-    const safeWarmRows = previous?.filter(chat => !chat.is_dm);
-    if (knownUserId && previous?.some(chat => chat.is_dm)) {
+    unverifiedWarmPlans.current = new Map(previous?.filter(row => row.kind === 'event').map(row => [row.conversationId, row]));
+    const safeWarmRows = previous?.filter(chat => !chat.is_dm).map(row => restrictPlanPreview(row, null));
+    if (knownUserId && previous?.length) {
       if (safeWarmRows?.length) chatListMemoryCache.set(knownUserId, safeWarmRows);
       // With only unverified private rows we have no confirmed inbox snapshot.
       // Removing the entry also keeps an immediate second remount in loading.
@@ -178,8 +230,12 @@ export function useChatList(knownUserId: string | null | undefined) {
     void fetchChats(!!cached);
   }, [fetchChats]);
 
-  useEffect(() => subscribeChatListChanges(viewerId => {
+  useEffect(() => subscribeChatListChanges((viewerId, blockedId) => {
     if (!mounted.current || currentViewer.current !== viewerId || knownUserId !== viewerId) return;
+    if (blockedId) {
+      visitBlocks.current.add(blockedId);
+      if (planBlocks.current) planBlocks.current = new Set([...planBlocks.current, blockedId]);
+    }
     // Retire reads that started before a confirmed block or plan departure.
     requestVersion.current++;
     showChats(chatListMemoryCache.get(viewerId) ?? []);
@@ -224,6 +280,10 @@ export function useChatList(knownUserId: string | null | undefined) {
           const convId = msg?.event_id ?? (GROUPS_ENABLED ? msg?.circle_id : null);
           if (!isCurrentPreview() || !convId || !hasChatsRef.current || !convIdsRef.current.has(convId)) return;
 
+          if (msg.event_id && pendingPlanPrivacy.current && !await pendingPlanPrivacy.current) return;
+          if (!isCurrentPreview()) return;
+          const mayShow = () => !msg.event_id || (!!msg.user_id && planBlocks.current !== null && !planBlocks.current.has(msg.user_id));
+          if (!mayShow()) return;
           const sequence = ++arrival;
           latestArrival.set(convId, sequence);
 
@@ -249,7 +309,7 @@ export function useChatList(knownUserId: string | null | undefined) {
             const preview = formatChatPreview(msg, senderName);
 
             showChats(prev => {
-              if (!isCurrentPreview()) return prev;
+              if (!isCurrentPreview() || !mayShow()) return prev;
               const updated = prev.map(c => {
                 if (c.conversationId !== convId) return c;
                 const order = comparePreviewTimes(msg.created_at, c.last_message_at);
@@ -259,6 +319,12 @@ export function useChatList(knownUserId: string | null | undefined) {
                 if (replacePreview) livePreviews.current.at.set(`${c.kind}:${convId}`, ++livePreviews.current.sequence);
                 return {
                   ...c,
+                  ...(c.kind === 'event' && {
+                    last_message_user_id: replacePreview ? msg.user_id : c.last_message_user_id,
+                    unread_by_author: isOwn ? c.unread_by_author : {
+                      ...c.unread_by_author, [msg.user_id]: (c.unread_by_author?.[msg.user_id] ?? 0) + 1,
+                    },
+                  }),
                   last_message: replacePreview ? preview : c.last_message,
                   last_message_at: replacePreview ? msg.created_at : c.last_message_at,
                   unread_count: isOwn ? c.unread_count : c.unread_count + 1,
