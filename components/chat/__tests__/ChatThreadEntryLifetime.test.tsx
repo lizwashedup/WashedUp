@@ -35,6 +35,7 @@ const mockCameraPermission = jest.fn(), mockCamera = jest.fn(), mockLibrary = je
 let mockViewerId = 'account-a', mockEpoch = 1, mockRoomId = 'plan-one', mockFocused = true;
 const mockFocusContext = React.createContext(true);
 const mockViewerListeners = new Set<() => void>();
+let mockSelectedPhotoId: string | null = null;
 let mockCanAcknowledge: () => boolean;
 const mockChat = { messages: [], loading: false, currentUserId: 'account-a', sendMessage: mockSend, sendLocation: jest.fn(), sendAudio: jest.fn(), deleteMessage: jest.fn(), editMessage: jest.fn(), toggleReaction: jest.fn(), loadOlder: jest.fn(), refetch: mockRead };
 const mockRecorder = { status: 'idle', durationMillis: 0, meterings: [], start: jest.fn(), stop: jest.fn(), cancel: jest.fn() };
@@ -79,7 +80,7 @@ jest.mock('react-native-gesture-handler', () => {
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialIcons: () => null }));
 jest.mock('../MediaPanel', () => ({ __esModule: true, default: () => null, isChatGifPickerAvailable: () => mockGifAvailable }));
-jest.mock('../ChatPhotoViewer', () => ({ ChatPhotoViewer: () => null, useChatPhotoSelection: () => ({ selectedId: null, onSelect: jest.fn(), onClose: jest.fn(), onChange: jest.fn() }) }));
+jest.mock('../ChatPhotoViewer', () => ({ ChatPhotoViewer: () => null, useChatPhotoSelection: () => ({ selectedId: mockSelectedPhotoId, onSelect: jest.fn(), onClose: jest.fn(), onChange: jest.fn() }) }));
 jest.mock('../ChatPhotoAttachment', () => ({ ChatPhotoAttachment: () => null }));
 jest.mock('../ChatPlanCard', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../MiniProfileCard', () => ({ __esModule: true, default: () => null }));
@@ -117,7 +118,7 @@ beforeEach(async () => {
   mockVerifyDraftTarget.mockReset().mockResolvedValue(undefined); mockCheckOriginal.mockReset().mockResolvedValue(true);
   mockRead.mockReset().mockResolvedValue(undefined);
   jest.useFakeTimers(); jest.clearAllMocks();
-  nativeMenus = []; mockFocused = true; mockReportMembers.mockReset(); mockBlock.mockReset();
+  mockSelectedPhotoId = null; nativeMenus = []; mockFocused = true; mockReportMembers.mockReset(); mockBlock.mockReset();
   mockReportMembers.mockResolvedValue([{ id: 'member-one', name: 'Jamie' }]);
   jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((options, choose) => { nativeMenus.push({ options, choose }); });
   [mockSend, mockChat.editMessage, mockCameraPermission, mockCamera, mockLibrary, mockManipulate, mockUpload, mockUploadAudio, mockChat.sendAudio, mockChat.sendLocation, mockRecorder.start, mockRecorder.stop, mockRecorder.cancel].forEach(mock => mock.mockReset());
@@ -1085,4 +1086,26 @@ it('edits a sending bubble by its eventual database ID and offers deletion after
   expect(mockChat.editMessage.mock.calls[0].slice(0,2)).toEqual([target,'First note edited']);
   const confirmed=messageControls(target);act(()=>confirmed.onMessageLongPress(confirmed.message,true));
   expect(menu().buttons.map((b:any)=>b.text)).toContain('delete');
+});
+
+
+it('checks a deferred receipt once when the photo closes on the same visible chat', async () => {
+  await mount(); mockSelectedPhotoId = 'photo-one'; await update();
+  expect(mockCanAcknowledge()).toBe(false);
+  mockSelectedPhotoId = null; await update();
+  expect(mockRead).toHaveBeenCalledTimes(1);
+  expect(mockCanAcknowledge()).toBe(true);
+  mockSelectedPhotoId = 'photo-two'; await update();
+  mockSelectedPhotoId = null; await update();
+  expect(mockRead).toHaveBeenCalledTimes(1);
+});
+
+it('waits for the chat to return if the photo closes behind another screen', async () => {
+  await mount(); mockSelectedPhotoId = 'photo-one'; await update();
+  expect(mockCanAcknowledge()).toBe(false);
+  mockFocused = false; await update();
+  mockSelectedPhotoId = null; await update();
+  expect(mockRead).not.toHaveBeenCalled();
+  mockFocused = true; await update();
+  expect(mockRead).toHaveBeenCalledTimes(1);
 });
