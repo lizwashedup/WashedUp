@@ -121,14 +121,14 @@ export function useCircle(circleId: string | null | undefined) {
     [circleId, visit, store, viewerId, epoch]);
   const configuredRetry = client.getDefaultOptions().queries?.retry;
   const ready = !!circleId && !!viewerId && !identity.isLoading && !identity.error;
-  const query = useQuery({
+  const query = useQuery<CirclePayload | null>({
     // Existing mutation invalidations still match the detail prefix. Never read
     // a legacy unscoped cache or another account's membership/noticeboard.
     queryKey: [...circleKeys.detail(circleId ?? ''), viewerId ?? '', epoch],
     enabled: ready,
     // Warm sharing lasts while a Circle identity observer remains mounted.
     // After all observers leave, a new generation revalidates on reopening.
-    staleTime: 60_000,
+    staleTime: query => query.state.data === null ? 0 : 60_000,
     retry: (failures, error) => {
       if (error instanceof RequestDeadlineError) return false;
       if (typeof configuredRetry === 'function') return configuredRetry(failures, error);
@@ -150,6 +150,8 @@ export function useCircle(circleId: string | null | undefined) {
         p_circle_id: circleId,
       }).abortSignal(signal)), 12_000);
       requireCurrent();
+      // get_circle explicitly raises this exception for a nonmember.
+      if (error?.code === 'P0001' && error.message === 'not a member of this circle') return null;
       if (error) throw error;
       const payload = data as CirclePayload | null;
       if (!payload) return null;

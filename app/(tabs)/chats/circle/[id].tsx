@@ -43,7 +43,8 @@ function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSou
   const [menuVisit, setMenuVisit] = useState<MenuVisit | null>(null);
   const activeMenu = useRef<MenuVisit | null>(null);
   const menuSerial = useRef(0), entrySerial = useRef(0);
-  const entry = useMemo(() => ({ serial: ++entrySerial.current }), [circleId, myUserId, epoch, isError]);
+  const unavailable = data === null;
+  const entry = useMemo(() => ({ serial: ++entrySerial.current }), [circleId, myUserId, epoch, isError, unavailable]);
   const activeEntry = useRef<typeof entry | null>(null);
   const entryReadable = useRef(false);
   entryReadable.current = !!myUserId && !!data && !isError;

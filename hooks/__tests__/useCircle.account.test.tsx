@@ -275,3 +275,13 @@ it('leaves a named two-person circle available and ignores another account block
   expect(current.data?.circle.name).toBe('Named circle'); expect(current.viewerEpoch).toBe(epoch);
   expect(mockRpc).toHaveBeenCalledTimes(1);
 });
+
+it('shows an unavailable circle for the confirmed nonmember response and accepts a subsequent rejoin', async () => {
+  await mount();
+  mockRpc.mockResolvedValue({data: null, error: {code: 'P0001', message: 'not a member of this circle'}});
+  await act(async () => { await current.refetch(); }); await flush();
+  expect(current.isError).toBe(false); expect(current.data).toBeNull();
+  mockRpc.mockResolvedValue(answer('Rejoined circle'));
+  await act(async () => { await current.refetch(); }); await flush();
+  expect(current.data?.circle.name).toBe('Rejoined circle');
+});

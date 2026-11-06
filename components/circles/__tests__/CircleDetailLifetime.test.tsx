@@ -8,6 +8,7 @@ import NameCircleSheet from '../NameCircleSheet';
 import CirclePlanComposer from '../plan/CirclePlanComposer';
 import { BrandedAlert } from '../../BrandedAlert';
 import { COPY } from '../../yours/state/constants';
+let mockUnavailable=false;
 let mockCircle='circle-a',mockUser:string|null='alice',mockEpoch=1,mockError=false,mockLoading=false,mockEnabled=true,mockName='Friends',mockRole='admin',mockCount=3,mockPending=false,mockFocused=true;
 const mockDismissTo=jest.fn(),mockPush=jest.fn(),mockBack=jest.fn(),mockDismiss=jest.fn(),mockRefetch=jest.fn(),mockLeave=jest.fn();
 const mockMember=(id:string,name:string)=>({user_id:id,first_name_display:name,profile_photo_url:null,role:id===mockUser?mockRole:'member'});
@@ -18,7 +19,7 @@ jest.mock('../../yours/state/useAuthUserId',()=>({useAuthUserId:()=>({data:'alic
 jest.mock('../../../hooks/useCircle',()=>({useCircle:()=>{
  const React=require('react');const viewerId=mockUser,viewerEpoch=mockEpoch;
  const isCurrentViewer=React.useCallback(()=>viewerId===mockUser&&viewerEpoch===mockEpoch,[viewerId,viewerEpoch]);
- return {data:mockError||mockLoading?undefined:{circle:{id:mockCircle,name:mockName,room_enabled:false,cover_upload_id:null},members:[mockMember(mockUser??'alice','Me'),mockMember('jamie','Jamie'),...(mockCount===3?[mockMember('cara','Cara')]:[])]},isLoading:mockLoading,isError:mockError,refetch:mockRefetch,viewerId,viewerEpoch,isCurrentViewer};
+ return {data:mockError||mockLoading?undefined:mockUnavailable?null:{circle:{id:mockCircle,name:mockName,room_enabled:false,cover_upload_id:null},members:[mockMember(mockUser??'alice','Me'),mockMember('jamie','Jamie'),...(mockCount===3?[mockMember('cara','Cara')]:[])]},isLoading:mockLoading,isError:mockError,refetch:mockRefetch,viewerId,viewerEpoch,isCurrentViewer};
 }}));
 jest.mock('../../../hooks/useLeaveCircle',()=>({useLeaveCircle:()=>({mutateAsync:(id:string)=>new Promise((resolve,reject)=>mockLeave(id,{onSuccess:resolve,onError:reject})),isPending:mockPending}),isObsoleteCircleLeave:(error:any)=>error?.name==='ObsoleteCircleLeaveError'}));
 jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:jest.requireActual('../../../constants/Typography').AfterglowFonts})}));
@@ -41,7 +42,7 @@ const alert=()=>tree.root.findByType(BrandedAlert).props;
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label && typeof n.props.onPress==='function')[0].props;
 async function render(){await act(async()=>{if(tree)tree.update(<CircleDetailScreen/>);else tree=create(<CircleDetailScreen/>);});}
 async function move(kind:'room'|'account'|'access'){if(kind==='room')mockCircle='circle-b';else if(kind==='account'){mockUser='bob';mockEpoch++;}else mockError=true;await render();}
-beforeEach(()=>{jest.clearAllMocks();mockCircle='circle-a';mockUser='alice';mockEpoch=1;mockError=false;mockLoading=false;mockEnabled=true;mockName='Friends';mockRole='admin';mockCount=3;mockPending=false;mockFocused=true;jest.spyOn(Alert,'alert').mockImplementation(()=>{});});
+beforeEach(()=>{jest.clearAllMocks();mockCircle='circle-a';mockUser='alice';mockEpoch=1;mockError=false;mockUnavailable=false;mockLoading=false;mockEnabled=true;mockName='Friends';mockRole='admin';mockCount=3;mockPending=false;mockFocused=true;jest.spyOn(Alert,'alert').mockImplementation(()=>{});});
 afterEach(()=>{act(()=>tree?.unmount());tree=undefined as any;jest.restoreAllMocks();});
 it('supplies one stable readable scope to both sheets across ordinary metadata refresh',async()=>{
  await render();const scope=plan().scope;expect(scope).toMatchObject({userId:'alice'});expect(scope.isCurrent()).toBe(true);expect(add().scope).toBe(scope);
@@ -134,4 +135,14 @@ it('releases an obsolete leave preflight without removing the page or trapping r
  expect(Alert.alert).not.toHaveBeenCalled();expect(mockDismiss).not.toHaveBeenCalled();
  act(()=>button(COPY.circleHomeMore).onPress());act(()=>{void alert().buttons[1].onPress();});expect(mockLeave).toHaveBeenCalledTimes(2);
  await act(async()=>mockLeave.mock.calls[1][1].onSuccess('not_member'));expect(mockDismiss).toHaveBeenCalledTimes(1);
+});
+
+it('retires old controls across a confirmed membership loss and later rejoin', async () => {
+  await render(); const scope = plan().scope;
+  mockUnavailable = true; await render();
+  expect(scope.isCurrent()).toBe(false);
+  expect(tree.root.findAllByProps({accessibilityLabel: COPY.circlesRetry})).toHaveLength(0);
+  mockUnavailable = false; await render();
+  expect(scope.isCurrent()).toBe(false);
+  expect(plan().scope.isCurrent()).toBe(true);
 });
