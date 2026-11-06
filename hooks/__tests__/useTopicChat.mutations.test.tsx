@@ -87,9 +87,9 @@ it.each(['edit', 'delete'] as const)('failed %s restores only its message change
   const pending = deferred(); mockTransport.mockReturnValueOnce(pending.promise);
   const result = start(() => kind === 'edit' ? fixture.chat.editMessage('old', 'Edited') : fixture.chat.deleteMessage('old'));
   await flush();
-  mockRead.mockResolvedValueOnce(page(kind === 'edit' ? [message('old'), message('new')] : [message('new')]));
+  mockRead.mockResolvedValueOnce(page([message('old'), message('new')]));
   await act(async () => { await fixture.chat.refresh(true); });
-  await act(async () => { pending.resolve({ error: new Error('Rejected') }); await result; });
+  await act(async () => { pending.resolve({ error: { code: '42501', message: 'Rejected' } }); await result; });
   expect(fixture.chat.messages.map(row => row.id)).toEqual(['old', 'new']);
   expect(fixture.chat.messages[0].body).toBe('Body old');
 });
@@ -205,8 +205,9 @@ it.each(['edit', 'delete'] as const)('a rejected %s promise uses a message-level
   const fixture = mount(); await flush();
   const pending = deferred(); mockTransport.mockReturnValueOnce(pending.promise);
   const result = start(() => kind === 'edit' ? fixture.chat.editMessage('old', 'Edited') : fixture.chat.deleteMessage('old'));
-  await flush(); mockRead.mockResolvedValueOnce(page(kind === 'edit' ? [message('old'), message('new')] : [message('new')]));
+  await flush(); mockRead.mockResolvedValueOnce(page([message('old'), message('new')]));
   await act(async () => { await fixture.chat.refresh(true); });
+  if (kind === 'delete') mockTransport.mockResolvedValueOnce({data:{id:'old'},error:null});
   await act(async () => { pending.reject(new Error('Network rejection')); await result; });
   expect(fixture.chat.messages.map(row => row.id)).toEqual(['old', 'new']);
   expect(fixture.chat.messages[0].body).toBe('Body old');
@@ -708,4 +709,42 @@ it.each([false, true])('bounds a stalled topic delete and respects account retir
     deletion.resolve({error:null}); await flush(); await pending;
     jest.useRealTimers();
   }
+});
+
+it('rechecks a zero-row deletion in the same topic and only removes a confirmed message', async () => {
+  const fixture = mount(); await flush();
+  mockTransport.mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce({data:{id:'old'},error:null});
+  expect(await start(() => fixture.chat.deleteMessage('old'))).toMatchObject({message:expect.stringContaining('still here')});
+  expect(fixture.chat.messages.map(row=>row.id)).toEqual(['old']);
+  expect(mockTransport.mock.calls.map(([table,op,,filters]) => [table,op,filters])).toEqual(
+    ['delete','select'].map(op=>['community_topic_messages',op,{id:'old',sender_id:'alice',topic_id:'topic-a'}]));
+  mockTransport.mockResolvedValueOnce({data:{id:'old'},error:null});
+  await act(async()=>{await fixture.chat.deleteMessage('old');});
+  expect(fixture.chat.messages).toHaveLength(0);
+});
+
+it.each(['visible','absent','offline','malformed'])('recovers a lost delete result with a %s status read', async status=>{
+  const fixture = mount(); await flush();const write=deferred();
+  mockTransport.mockReturnValueOnce(write.promise).mockResolvedValueOnce(
+    status === 'offline' ? {data:null,error:{message:'offline'}} :
+    {data:status==='absent'?null:status==='visible'?{id:'old'}:undefined,error:null});
+  const attempt=start(()=>fixture.chat.deleteMessage('old')); await flush();
+  await start(()=>fixture.chat.deleteMessage('old'));
+  await act(async()=>{write.reject(Error('lost'));await attempt;});
+  expect(mockTransport.mock.calls.map(c=>c[1])).toEqual(['delete','select']);
+  expect(fixture.chat.messages.map(row=>row.id)).toEqual(status==='absent'?[]:['old']);
+  if (status!=='absent') expect(await attempt).toBeInstanceOf(Error);
+});
+
+it.each(['account','topic'])('retires the status check on %s change', async change=>{
+  const fixture=mount();await flush();const read=deferred();
+  mockTransport.mockResolvedValueOnce({data:null,error:null}).mockReturnValueOnce(read.promise);
+  const attempt=start(()=>fixture.chat.deleteMessage('old'));await flush();
+  mockRead.mockResolvedValue(page([message('new')]));
+  if(change==='account')emit('bob');else fixture.navigate('topic-b');
+  await flush();let outcome:unknown;
+  await act(async()=>{read.resolve({data:null,error:null});outcome=await attempt;});
+  expect(isObsoleteTopicOperation(outcome)).toBe(true);
+  expect(fixture.chat.messages.map(row=>row.id)).toEqual(['new']);
+  expect(mockInvalidate).not.toHaveBeenCalled();
 });
