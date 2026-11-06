@@ -43,6 +43,7 @@ export function useBlock() {
             if (!isCurrent() || (pending.current && (!pending.current.scope || pending.current.scope.isCurrent()))) return;
             const attempt = { scope }; pending.current = attempt; setOwner(attempt);
             setBlocking(true);
+            let checkingBlock = false;
             try {
               const { data: { user }, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
               if (!isCurrent() || (scope && user?.id !== scope.userId)) return;
@@ -69,13 +70,31 @@ export function useBlock() {
                 write = profile.blocked_users === null
                   ? write.is('blocked_users', null)
                   : write.eq('blocked_users', `{${current.join(',')}}`);
-                const { data: receipt, error: writeError } = await requestWithDeadline(
-                  write.select('id, blocked_users').maybeSingle(), 12_000);
+                const result = await requestWithDeadline(
+                  write.select('id, blocked_users').maybeSingle(), 12_000,
+                ).catch(() => null);
                 if (!isCurrent()) return;
-                if (writeError) throw writeError;
-                if (receipt?.id !== user.id || !Array.isArray(receipt.blocked_users) ||
-                    ![...current, blockedId].every(id => receipt.blocked_users.includes(id))) {
-                  throw new Error('The block could not be confirmed. Please try again.');
+                if (!result || result.error) {
+                  // A failed response can follow a committed write. Read the
+                  // initiating member's own block list before offering a retry.
+                  checkingBlock = true;
+                  const { data: saved, error } = await requestWithDeadline(supabase
+                    .from('profiles').select('id, blocked_users').eq('id', user.id).single(), 12_000);
+                  if (!isCurrent()) return;
+                  if (error || saved?.id !== user.id || !Array.isArray(saved.blocked_users) ||
+                      !saved.blocked_users.includes(blockedId)) {
+                    throw new Error('Could not confirm the block.');
+                  }
+                  const { data: auth, error: accountError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
+                  if (!isCurrent()) return;
+                  if (accountError) throw accountError;
+                  if (auth?.user?.id !== user.id) return;
+                } else {
+                  const receipt = result.data;
+                  if (receipt?.id !== user.id || !Array.isArray(receipt.blocked_users) ||
+                      ![...current, blockedId].every(id => receipt.blocked_users.includes(id))) {
+                    throw new Error('The block could not be confirmed. Please try again.');
+                  }
                 }
 
                 // Apple 1.2: Notify developer of inappropriate content when user blocks
@@ -131,7 +150,9 @@ export function useBlock() {
                 if (isCurrent()) Alert.alert('Blocked', `${blockedName} has been blocked.`);
               }, 300);
             } catch {
-              if (isCurrent()) Alert.alert('Error', 'Could not block user. Please try again.');
+              if (isCurrent()) Alert.alert('Error', checkingBlock
+                ? 'Could not confirm the block. Please try again.'
+                : 'Could not block user. Please try again.');
             } finally {
               if (!scope || pending.current === attempt) {
                 pending.current = null;
