@@ -39,14 +39,12 @@ export function subscribeCommunityMain(options: Refresh & {
   communityId: string;
   hasMessage: (id: string) => boolean;
   hasMessages: () => boolean;
-  onMessage: () => void;
 }) {
   const queue = refreshQueue(options);
   // A quick return must not reuse a channel whose asynchronous leave is pending.
   const channel = supabase.channel(`${options.channelName}-${++nextSubscription}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'community_broadcasts', filter: `community_id=eq.${options.communityId}` }, () => {
-      if (!queue.current()) return;
-      queue.refresh(); options.onMessage();
+      queue.refresh();
     })
     // Deleted records only carry their primary key. A community_id filter
     // cannot deliver these; only refresh for a message already in this room.

@@ -200,10 +200,11 @@ it('stops a two-stage reaction after its account is retired and serializes per-m
   expect(mockReact).toHaveBeenCalledTimes(1);
 });
 
-it('retires realtime/read-marker callbacks on account change and reopens the stream for the new account', async () => {
-  await mount(); const stale = mockRealtime[0]; expect(mockRead).toHaveBeenCalledTimes(1);
-  mockViewerId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'; mockEpoch++; await update(); expect(mockRead).toHaveBeenCalledTimes(2);
-  await act(async () => stale()); expect(mockRead).toHaveBeenCalledTimes(2);
+it('retires realtime work on account change without acknowledging either unviewed room', async () => {
+  await mount(); const stale = mockRealtime[0];
+  mockViewerId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'; mockEpoch++; await update();
+  expect(mockRealtime.length).toBeGreaterThan(1);
+  await act(async () => stale()); expect(mockRead).not.toHaveBeenCalled();
 });
 
 it('keeps unknown membership delegated to the existing server gate', async () => {

@@ -63,7 +63,7 @@ import { useCommunityConversationNotifications } from '../../hooks/useCommunityC
 import { useCommunityTopicMute } from '../../hooks/useCommunityTopicMute';
 import { compareCommunityRoomSequence } from '../../lib/communityRoomWindow';
 import { getCommunityIntroRoom, type CommunityRoomMessage, type CommunityReadTargets } from '../../lib/communityRoomHistory';
-import { useVisibleTopicRead } from '../../hooks/useVisibleTopicRead';
+import { useVisibleCommunityRead } from '../../hooks/useVisibleCommunityRead';
 import { useCommunityCoreReadAcknowledgement } from '../../hooks/useCommunityCoreReadAcknowledgement';
 import { BroadcastCard } from '../../components/communities/BroadcastCard';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
@@ -499,7 +499,7 @@ export default function CommunityTopicScreen() {
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(introLayout?.communityId, 'intros', coreReadScope, !!introLayout);
   const topicReadEnabled = !!id && usesLegacyHistory && !anchor && !!myId && myId === muteViewer.viewerId;
   const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId;
-  const ordinaryRead = useVisibleTopicRead(id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
+  const ordinaryRead = useVisibleCommunityRead('topic', id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
   visibleRead.current = items => {
     if (!introLayout) {

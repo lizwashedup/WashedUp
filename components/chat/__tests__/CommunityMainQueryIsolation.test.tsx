@@ -143,7 +143,9 @@ it('identity failure never falls back to legacy history or marks introductions r
 });
 it('confirmed unmapped communities retain the existing stream and marker', async () => {
   enableCore(); mockReadIdentity.mockResolvedValue(null); await mount(); await flush();
-  expect(rows().map((r: any) => r.id)).toEqual(['alice-1']); expect(mockReadCore).not.toHaveBeenCalled(); expect(mockReadMarker).toHaveBeenCalled();
+  expect(rows().map((r: any) => r.id)).toEqual(['alice-1']); expect(mockReadCore).not.toHaveBeenCalled(); expect(mockReadMarker).not.toHaveBeenCalled();
+    await act(async () => tree.root.findByType(FlatList).props.onViewableItemsChanged({viewableItems:[{isViewable:true,item:rows()[0]}]}));
+    expect(mockReadMarker).toHaveBeenCalledWith('community-a',rows()[0].created_at,expect.objectContaining({userId:'alice'}));
 });
 it('background visibility callbacks do not acknowledge main', async () => {
   enableCore(); await mount(); await flush(); Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
@@ -338,9 +340,30 @@ it('uses the same conversation UI without enabling grouped history or read marke
     expect(tree.root.findByType(ChatContextHeader).props.title).toBe('alice room');
     expect(rows().map((row: any) => row.id)).toEqual(['alice-1']);
     expect(mockReadMessages).toHaveBeenCalled();
-    expect(mockReadMarker).toHaveBeenCalled();
+    expect(mockReadMarker).not.toHaveBeenCalled();
+    await act(async () => tree.root.findByType(FlatList).props.onViewableItemsChanged({viewableItems:[{isViewable:true,item:rows()[0]}]}));
+    expect(mockReadMarker).toHaveBeenCalledWith('community-a',rows()[0].created_at,expect.objectContaining({userId:'alice'}));
     expect(mockReadIdentity).not.toHaveBeenCalled();
     expect(mockReadCore).not.toHaveBeenCalled();
     expect(mockMarkCore).not.toHaveBeenCalled();
   } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
+});
+
+it('refreshes ordinary history behind another screen, then reads only visible persisted messages and broadcast cards', async () => {
+  const old = page('older').messages[0], notice = {...old,id:'notice',kind:'broadcast',created_at:'2026-09-13T12:00:00.000001Z'};
+  const fresh = {...old,id:'unseen',created_at:'2026-09-13T12:00:00.000002Z'};
+  const initial = {...page('older'),messages:[notice,old]};
+  mockReadMessages.mockResolvedValue(initial);
+  await mount();
+  act(() => mockBlur?.());
+  mockReadMessages.mockResolvedValue({...initial,messages:[fresh,notice,old]});
+  await act(async () => mockRealtime?.()); await flush();
+  expect(rows().map((r:any)=>r.id)).toEqual(['unseen','notice','older']);
+  const show = (items:any[]) => tree.root.findByType(FlatList).props.onViewableItemsChanged({viewableItems:items.map(item=>({isViewable:true,item}))});
+  await act(async () => show([fresh])); expect(mockReadMarker).not.toHaveBeenCalled();
+  await act(async () => mockFocus?.()); await flush();
+  await act(async () => show([{...fresh,id:'local-only'}, old, notice]));
+  expect(mockReadMarker).toHaveBeenCalledTimes(1);
+  expect(mockReadMarker.mock.calls[0][1]).toBe(notice.created_at);
+  await act(async () => show([old])); expect(mockReadMarker).toHaveBeenCalledTimes(1);
 });

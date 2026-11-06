@@ -357,31 +357,27 @@ export async function getCommunityChatRows(): Promise<CommunityChatRowData[]> {
 
 // -- read markers ----------------------------------------------------------------
 
-export async function markBroadcastsRead(communityId: string, scope?: CommunityOperationScope): Promise<void> {
-  const user = await communityOperationUser(scope);
-  if (!user) return;
-  const { error } = await scopedCommunityRequest(scope, () => supabase
-    .from('community_broadcast_reads')
-    .upsert(
-      { community_id: communityId, user_id: user.id, last_read_at: new Date().toISOString() },
-      { onConflict: 'community_id,user_id' },
-    ));
-  assertCommunityScope(scope);
-  if (error) throw error;
+export function markBroadcastsRead(communityId: string, seenAt: string, scope: CommunityOperationScope) {
+  return advanceCommunityRead('community_broadcast_reads', 'community_id', communityId, seenAt, scope);
 }
 
-export async function markTopicRead(topicId: string, seenAt: string, scope: CommunityOperationScope): Promise<void> {
+export function markTopicRead(topicId: string, seenAt: string, scope: CommunityOperationScope) {
+  return advanceCommunityRead('community_topic_reads', 'topic_id', topicId, seenAt, scope);
+}
+
+async function advanceCommunityRead(table: 'community_broadcast_reads' | 'community_topic_reads',
+  key: 'community_id' | 'topic_id', roomId: string, seenAt: string, scope: CommunityOperationScope) {
   const user = await requestWithDeadline(communityOperationUser(scope), 8000);
   if (!user) return;
-  const row = { topic_id: topicId, user_id: user.id, last_read_at: seenAt };
+  const row = { [key]: roomId, user_id: user.id, last_read_at: seenAt };
   // Ignore a concurrent insert, then advance an existing position only if it
   // is older. Neither a delayed phone nor scrolling up can rewind the marker.
-  const inserted = await scopedCommunityRequest(scope, () => supabase.from('community_topic_reads')
-    .upsert(row, { onConflict: 'topic_id,user_id', ignoreDuplicates: true }).select('last_read_at'));
+  const inserted = await scopedCommunityRequest(scope, () => supabase.from(table)
+    .upsert(row, { onConflict: `${key},user_id`, ignoreDuplicates: true }).select('last_read_at'));
   if (inserted.error) throw inserted.error;
   if (inserted.data?.length) return;
-  const updated = await scopedCommunityRequest(scope, () => supabase.from('community_topic_reads')
-    .update({ last_read_at: seenAt }).eq('topic_id', topicId).eq('user_id', user.id).lt('last_read_at', seenAt));
+  const updated = await scopedCommunityRequest(scope, () => supabase.from(table)
+    .update({ last_read_at: seenAt }).eq(key, roomId).eq('user_id', user.id).lt('last_read_at', seenAt));
   if (updated.error) throw updated.error;
 }
 
