@@ -15,6 +15,7 @@ import { useChatMentionFocus } from '../../hooks/useChatMentionFocus';
 import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
+import { MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../../lib/chatMessageRemoval';
 import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
@@ -53,7 +54,7 @@ import { ChatKeyboardAvoidingView as KeyboardAvoidingView, IOSKeyboardDock, IOSK
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams, useFocusEffect, Stack } from 'expo-router';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { CalendarDays, CircleHelp, X } from 'lucide-react-native';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights, AfterglowType } from '../../constants/Typography';
@@ -554,23 +555,45 @@ export default function CommunityThreadScreen() {
       : 'The requested change wasn’t confirmed. Chat options shows the current saved setting.' });
   };
 
-  const handleDeleteMessage = async (messageId: string) => {
-    if (!admissionIsCurrent() || mutationAttemptsRef.current.has(messageId)) return;
+  const deleteVisit = useRef<object | null>(null);
+  useFocusEffect(useCallback(() => {
+    deleteVisit.current = {};
+    return () => { deleteVisit.current = null; };
+  }, [entryVisit]));
+  const handleDeleteMessage = async (messageId: string, visit: object | null) => {
+    const current = () => !!visit && deleteVisit.current === visit && admissionIsCurrent();
+    if (!current()) return;
+    if (!id || !selectedMessageCurrent(messageId) || mutationAttemptsRef.current.has(messageId)) return;
+    const selected = menuMessages.current.find(row => row.id === messageId);
+    if (selected?.kind !== 'message' || selected.sender_id !== myId) return;
     const attempt = {}, attempts = mutationAttemptsRef.current; attempts.set(messageId, attempt);
     try {
-      await deleteCommunityMessage(messageId, operationScope);
-      if (!admissionIsCurrent()) return;
+      await deleteCommunityMessage(id, messageId, {userId: operationScope.userId, isCurrent: current});
+      if (!current()) return;
+      const withoutRemoved = (page: CommunityBroadcastPage) => ({
+        ...page, messages: page.messages.filter(row => row.id !== messageId),
+      });
+      queryClient.setQueryData<InfiniteData<CommunityBroadcastPage>>(messageQueryKey, cache =>
+        cache && {...cache, pages:cache.pages.map(withoutRemoved)});
+      setBasicHistory(old => old?.key === messageQueryKey ? {...old,page:withoutRemoved(old.page)} : old);
       hapticLight();
       refreshMessages(true);
     } catch (e) {
-      if (!admissionIsCurrent() || isObsoleteCommunityOperation(e)) return;
-      showError('That did not remove', friendlyError(e, 'Try again in a moment.'));
+      if (!current() || isObsoleteCommunityOperation(e)) return;
+      if (e instanceof RequestDeadlineError || e instanceof UnconfirmedMessageRemovalError) {
+        showError('Removal not confirmed', 'Reopen this chat to check whether the message was removed.');
+      } else if (e instanceof MessageStillVisibleError) {
+        showError('Message still here', e.message);
+      } else {
+        showError('That did not remove', friendlyError(e, 'Try again in a moment.'));
+      }
     } finally {
       if (admissionIsCurrent() && attempts.get(messageId) === attempt) attempts.delete(messageId);
     }
   };
 
   const openOwnMessageMenu = (message: CommunityBroadcast) => {
+    const visit = deleteVisit.current;
     if (!admissionIsCurrent()) return;
     hapticLight();
     setMessageMenu({
@@ -588,7 +611,7 @@ export default function CommunityThreadScreen() {
         { text: 'react', onPress: currentAction(() => setReactionPickerMsgId(message.id)) },
         { text: 'reply', onPress: () => { if (selectedMessageCurrent(message.id)) setReplyRequest({ messageId: message.id }); } },
         ...(message.body && !parseCommunityLocation(message.body) ? [{ text: 'edit', onPress: currentAction(() => { if (draftBlocked || sending) return; entryRevisionRef.current++; composerDraft.change({ text: message.body, mentions: message.mention_data ?? null, reply: null, edit: { id: message.id, body: message.body, edited_at: message.edited_at ?? null, mentions: message.mention_data ?? null } }); draftRef.current = message.body; setComposerFocusRequest(request => request + 1); }) }] : []),
-        { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id) },
+        { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id, visit) },
         { text: 'cancel', style: 'cancel' },
       ],
     });

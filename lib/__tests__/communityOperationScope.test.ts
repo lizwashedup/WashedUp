@@ -48,7 +48,7 @@ const mutations: Array<[string, (owner: ReturnType<typeof scope>) => Promise<unk
   ['legacy topic join', owner => community.joinTopic('topic-a', owner)],
   ['send', owner => community.sendCommunityMessage('community-a', 'hello', undefined, 'client-uuid', owner)],
   ['edit', owner => community.editCommunityMessage('message-one', 'edited', owner)],
-  ['delete', owner => community.deleteCommunityMessage('message-one', owner)],
+  ['delete', owner => community.deleteCommunityMessage('community-a','message-one', owner)],
   ['reaction', owner => community.toggleBroadcastReaction('message-one', '❤️', true, owner)],
   ['reaction removal', owner => community.toggleBroadcastReaction('message-one', 'heart', false, owner)],
   ['read marker', owner => community.markBroadcastsRead('community-a', owner)],
@@ -159,12 +159,13 @@ it('keeps existing unscoped send and signed-out read-marker behavior', async () 
 
 it('preserves edit/delete ownership filters and legacy reaction storage keys and duplicate semantics', async () => {
   await community.editCommunityMessage('message-one', ' edited ', scope());
-  await community.deleteCommunityMessage('message-one', scope());
+  execute.mockResolvedValueOnce({data:{id:'message-one'},error:null});
+  await community.deleteCommunityMessage('community-a','message-one', scope());
   await community.toggleBroadcastReaction('message-one', 'heart', false, scope());
   execute.mockResolvedValueOnce({ data: null, error: { code: '23505' } });
   await expect(community.toggleBroadcastReaction('message-one', '❤️', true, scope())).resolves.toBeUndefined();
   expect(requests[0]).toMatchObject({ operation: 'update', payload: { body: 'edited' }, filters: [['id', 'message-one'], ['sender_id', 'account-a'], ['kind', 'message']] });
-  expect(requests[1]).toMatchObject({ operation: 'delete', filters: [['id', 'message-one'], ['sender_id', 'account-a'], ['kind', 'message']] });
+  expect(requests[1]).toMatchObject({ operation: 'delete', filters: [['id','message-one'],['sender_id','account-a'],['community_id','community-a'],['kind','message']] });
   expect(requests[2]).toMatchObject({ table: 'community_broadcast_reactions', operation: 'delete', filters: [['broadcast_id', 'message-one'], ['user_id', 'account-a'], ['emoji', 'heart']] });
   expect(requests[3].payload).toEqual({ broadcast_id: 'message-one', user_id: 'account-a', emoji: '❤️' });
 });
@@ -673,4 +674,11 @@ it('a moderator never repeats the write after losing its receipt, even if the st
   execute.mockRejectedValueOnce(Error('lost')).mockResolvedValueOnce({data:null,error:{message:'unavailable'}});
   await expect(community.deleteTopicMessage('topic-a','message-one','other-author',scope())).rejects.toThrow('Reopen');
   expect(requests.map(r=>r.operation)).toEqual(['delete','select']);
+});
+
+it('checks the same authored Main message after an empty receipt, preserving announcements and introductions',async()=>{
+  execute.mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce({data:{id:'message-one'},error:null});
+  await expect(community.deleteCommunityMessage('community-a','message-one',scope())).rejects.toThrow('still here');
+  expect(requests.map(r=>r.operation)).toEqual(['delete','select']);
+  for(const req of requests) expect(req.filters).toEqual([['id','message-one'],['sender_id','account-a'],['community_id','community-a'],['kind','message']]);
 });

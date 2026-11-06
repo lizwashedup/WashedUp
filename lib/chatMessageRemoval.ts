@@ -9,20 +9,28 @@ export class UnconfirmedMessageRemovalError extends Error {
   constructor() { super('Reopen this chat to check whether the message was removed.'); }
 }
 
-type Conversation = { kind: 'event' | 'circle' | 'topic'; id: string };
+const rowFields = {
+  event: {table:'messages', author:'user_id', parent:'event_id'},
+  circle: {table:'messages', author:'user_id', parent:'circle_id'},
+  topic: {table:'community_topic_messages', author:'sender_id', parent:'topic_id'},
+  main: {table:'community_broadcasts', author:'sender_id', parent:'community_id'},
+} as const;
+type Conversation = { kind: keyof typeof rowFields; id: string };
 
 /** Match the original row. Callers supply the author; database policies determine who may remove it. */
 export async function removeChatMessageFromSender(
   conversation: Conversation, messageId: string, senderId: string, assertCurrent: () => void,
 ): Promise<void> {
-  const topic = conversation.kind === 'topic';
-  const table = topic ? 'community_topic_messages' : 'messages';
-  const author = topic ? 'sender_id' : 'user_id';
-  const parent = topic ? 'topic_id' : conversation.kind === 'circle' ? 'circle_id' : 'event_id';
-
+  const {table, author, parent} = rowFields[conversation.kind];
+  const row = (operation: 'remove' | 'check') => {
+    const source = supabase.from(table);
+    const query = operation === 'remove' ? source.delete().select('id') : source.select('id');
+    const selected = query.eq('id',messageId).eq(author,senderId).eq(parent,conversation.id);
+    // Main chat also contains introductions and community announcements.
+    return (conversation.kind === 'main' ? selected.eq('kind','message') : selected).maybeSingle();
+  };
   assertCurrent();
-  const write = await requestWithDeadline(supabase.from(table).delete()
-    .eq('id', messageId).eq(author, senderId).eq(parent, conversation.id).select('id').maybeSingle(), 12_000)
+  const write = await requestWithDeadline(row('remove'), 12_000)
     .catch((error: unknown) => {
       assertCurrent();
       if (error instanceof RequestDeadlineError) throw error;
@@ -34,8 +42,7 @@ export async function removeChatMessageFromSender(
 
   // An empty DELETE response can also mean the write affected zero rows.
   // Only an authorized, successful read establishes absence from this chat.
-  const read = await requestWithDeadline(supabase.from(table).select('id')
-    .eq('id', messageId).eq(author, senderId).eq(parent, conversation.id).maybeSingle(), 8_000)
+  const read = await requestWithDeadline(row('check'), 8_000)
     .catch(() => null);
   assertCurrent();
   if (!read || read.error || read.data !== null && read.data?.id !== messageId) throw new UnconfirmedMessageRemovalError();

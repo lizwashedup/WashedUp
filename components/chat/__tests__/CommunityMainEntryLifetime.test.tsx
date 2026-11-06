@@ -30,7 +30,8 @@ const mockSend = jest.fn(), mockEdit = jest.fn(), mockDelete = jest.fn(), mockRe
 const mockCameraPermission = jest.fn(), mockCamera = jest.fn();
 const mockPermission = jest.fn(), mockPick = jest.fn(), mockManipulate = jest.fn(), mockUpload = jest.fn();
 const mockInvalidate = jest.fn().mockResolvedValue(undefined), mockCancel = jest.fn().mockResolvedValue(undefined);
-const mockQueryClient = { invalidateQueries: mockInvalidate, cancelQueries: mockCancel };
+const mockSetCache = jest.fn();
+const mockQueryClient = { setQueryData: mockSetCache, invalidateQueries: mockInvalidate, cancelQueries: mockCancel };
 const mockRealtime: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ push: jest.fn(), back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
@@ -547,4 +548,18 @@ it.each(['text', 'photo', 'location'] as const)('respects a newer reading positi
   await act(async () => { pending.resolve(); await work; }); await flush();
   expect(scroll).not.toHaveBeenCalled();
   expect(composer().sending).toBe(false);
+});
+
+it('prunes only the confirmed message from paginated Main chat history',async()=>{
+  await mount();
+  const target=mockMessages[0],remove=openMenuAction('delete this message');
+  const pending=deferred();mockDelete.mockReturnValueOnce(pending.promise);
+  let first!:Promise<void>;act(()=>{first=remove();void remove();});await flush();
+  expect(mockDelete).toHaveBeenCalledTimes(1);expect(mockSetCache).not.toHaveBeenCalled();
+  await act(async()=>{pending.resolve();await first;});
+  const [key,patch]=mockSetCache.mock.calls[0];
+  expect(key).toContain(mockViewerId);expect(key).toContain(mockRoomId);
+  const other={...target,id:'other'}, pages=[{messages:[other,target],hasMore:true},{messages:[other],hasMore:false}];
+  expect(patch({pages,pageParams:[undefined,'older']})).toEqual({
+    pages:[{messages:[other],hasMore:true},{messages:[other],hasMore:false}],pageParams:[undefined,'older']});
 });

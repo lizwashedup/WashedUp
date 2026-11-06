@@ -658,17 +658,10 @@ export async function editCommunityMessage(messageId: string, body: string, scop
   if (error) throw error;
 }
 
-export async function deleteCommunityMessage(messageId: string, scope?: CommunityOperationScope): Promise<void> {
-  const user = await communityOperationUser(scope);
-  if (!user) throw new Error('Not signed in');
-  const { error } = await scopedCommunityRequest(scope, () => supabase
-    .from('community_broadcasts')
-    .delete()
-    .eq('id', messageId)
-    .eq('sender_id', user.id)
-    .eq('kind', 'message'));
+export async function deleteCommunityMessage(communityId: string, messageId: string, scope: CommunityOperationScope): Promise<void> {
+  await requestWithDeadline(communityOperationUser(scope), 8000);
   assertCommunityScope(scope);
-  if (error) throw error;
+  await removeChatMessageFromSender({kind: 'main', id: communityId}, messageId, scope.userId, () => assertCommunityScope(scope));
 }
 
 export async function toggleBroadcastReaction(broadcastId: string, emoji: string, on: boolean, scope?: CommunityOperationScope): Promise<void> {
