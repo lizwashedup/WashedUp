@@ -4,12 +4,16 @@ import { act, create } from 'react-test-renderer';
 import MyPlansView from '../MyPlansView';
 import { PageAction } from '../../../creator/pages/PageFrame';
 import { SkeletonFeed } from '../../../SkeletonCard';
+import { SaveSnackbar } from '../../../SaveSnackbar';
 import { PlanCard } from '../../../plans/PlanCard';
 const mockInterestAction = jest.fn();
 let mockInterestFeedback: Record<string, any> = {};
+jest.mock('../../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({viewerId:'alice', epoch:1, isCurrent:()=>true}) }));
 jest.mock('../../../../hooks/useInterestedPlanActions', () => ({ useInterestedPlanActions: () => ({ feedback: mockInterestFeedback, run: mockInterestAction }) }));
 const mockPush = jest.fn(), mockWishlistRead = jest.fn();
-let mockWishlistOptions: any;
+let mockWishlistOptions: any, mockMutationOptions: any;
+const mockMutate = jest.fn();
+
 let mockCommunitiesEnabled = true;
 jest.mock('../../../../constants/FeatureFlags', () => ({get COMMUNITIES_ENABLED() {return mockCommunitiesEnabled;}, COMMUNITY_CHAT_GROUPING_ENABLED:false}));
 let mockQueries: Record<string, any> = {};
@@ -17,7 +21,7 @@ jest.mock('../../../../hooks/useMyPlansData', () => ({
  useMyPlans: () => mockQueries.plans, useMyPlanDrafts: () => mockQueries.drafts,
  useWaitlistedPlans: () => mockQueries.waitlist, useInterestedPlans: () => mockQueries.interested, useSavedPlans: () => mockQueries.saved,
 }));
-jest.mock('@tanstack/react-query', () => ({ useQuery: (options:any) => {mockWishlistOptions=options;return mockQueries.wishlist;}, useMutation: () => ({ mutate: jest.fn() }), useQueryClient: () => ({}) }));
+jest.mock('@tanstack/react-query', () => ({ useQuery: (options:any) => {mockWishlistOptions=options;return mockQueries.wishlist;}, useMutation: (options:any) => {mockMutationOptions=options;return {mutate:mockMutate};}, useQueryClient: () => ({getQueryData:()=>[],invalidateQueries:jest.fn()}) }));
 jest.mock('../../../creator/pages/PageFrame', () => ({ PageAction: () => null }));
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }), useFocusEffect: (cb: () => void) => require('react').useEffect(cb, [cb]) }));
 jest.mock('../../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: {} }) }));
@@ -129,4 +133,19 @@ it('keeps remove and similar actions separate and failed removal visible with re
 it('keeps removal available when the source cannot be duplicated', () => {
  mockQueries.interested.data=[{...plan,allow_duplicate:false}];mount();
  expect(words()).toContain('Remove from Interested');expect(words()).not.toContain('Make a similar plan');
+});
+
+it('shows a retry on the affected Yours card and offers sharing only after confirmation', () => {
+ mockQueries.plans.data=[plan]; mockQueries.wishlist.isSuccess=true; mount();
+ const card=()=>tree.root.findByType(PlanCard).props;
+ const snackbar=()=>tree.root.findByType(SaveSnackbar).props;
+ act(()=>card().onWishlist!(plan.id,false));
+ const call=mockMutate.mock.calls[0][0]; expect(snackbar().visible).toBe(false);
+ act(()=>{mockMutationOptions.onError(new Error('refused'),call,undefined);});
+ expect(words()).toContain('Couldn’t save this plan.'); expect(snackbar().visible).toBe(false);
+ act(()=>mockMutationOptions.onSettled(undefined,new Error('refused'),call));
+ const retry=tree.root.findAll(n=>n.props.accessibilityLabel==='Retry bookmark: Sunday walk')[0];
+ act(()=>retry.props.onPress());const second=mockMutate.mock.calls[1][0];
+ act(()=>mockMutationOptions.onSuccess(undefined,second));
+ expect(snackbar().visible).toBe(true);expect(snackbar().planTitle).toBe(plan.title);
 });

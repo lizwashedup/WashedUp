@@ -2,13 +2,12 @@ import { randomUUID } from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
 import { ScaledText as Text } from '../../ScaledText';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useFeedWishlist } from '../../../hooks/useFeedWishlist';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
-import { supabase } from '../../../lib/supabase';
 import { requestWithDeadline } from '../../../lib/requestWithDeadline';
 import { PageAction } from '../../creator/pages/PageFrame';
-import { hapticLight, hapticError } from '../../../lib/haptics';
+import { hapticLight } from '../../../lib/haptics';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
 import { PlanCard } from '../../plans/PlanCard';
@@ -38,8 +37,6 @@ import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
 import { useInterestedPlanActions } from '../../../hooks/useInterestedPlanActions';
 import { canMakeSimilarPlan } from '../../../lib/interestedPlanActions';
 
-const WISHLISTS_TIMEOUT_MS = 8000;
-
 /**
  * The personal "My Plans" surface: the Upcoming / Saved / Interested /
  * Waitlisted / Past sections that used to live as a tab on the public feed.
@@ -51,7 +48,6 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
   const cardAppearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { blockUser } = useBlock();
 
   const [waitlistExpanded, setWaitlistExpanded] = useState(false);
@@ -102,21 +98,11 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const { data: savedBase = [] } = savedQuery;
 
   // Wishlist cache drives the bookmark fill state + the optimistic un-save.
-  const wishlistQuery = useQuery<string[]>({
-    queryKey: ['wishlists', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      const { data, error } = await requestWithDeadline(
-        supabase.from('wishlists').select('event_id').eq('user_id', userId),
-        WISHLISTS_TIMEOUT_MS,
-      );
-      if (error) throw error;
-      return (data ?? []).map((r: any) => r.event_id as string);
-    },
-    enabled: !!userId,
-    staleTime: 30_000,
-    retry: false,
-  });
+  const wishlistQuery = useFeedWishlist(userId, (planId, planTitle) => setSnackbar({ planId, planTitle }), { retryReads: false });
+  useFocusEffect(useCallback(() => {
+    setSnackbar(null);
+    setShareSheet(null);
+  }, [userId]));
   const { data: wishlistIds = [] } = wishlistQuery;
   const retryLock = useRef<{ owner: object; attempt: object } | null>(null);
   const [recovery, setRecovery] = useState<{ owner: object; pending: boolean; failed: boolean } | null>(null);
@@ -142,37 +128,6 @@ export default function MyPlansView({ userId }: { userId: string }) {
         if (isCurrent() && retryLock.current?.attempt === attempt) setRecovery({ owner, pending: false, failed: true });
       }).finally(() => { if (retryLock.current?.attempt === attempt) retryLock.current = null; });
   };
-
-  const wishlistMutation = useMutation({
-    mutationFn: async ({ eventId, current }: { eventId: string; current: boolean }) => {
-      if (!userId) return;
-      if (current) {
-        await supabase.from('wishlists').delete().eq('user_id', userId).eq('event_id', eventId);
-      } else {
-        await supabase.from('wishlists').insert({ user_id: userId, event_id: eventId });
-      }
-    },
-    onMutate: async ({ eventId, current }: { eventId: string; current: boolean }) => {
-      if (!userId) return { prev: undefined as string[] | undefined };
-      const key = ['wishlists', userId];
-      await queryClient.cancelQueries({ queryKey: key });
-      const prev = queryClient.getQueryData<string[]>(key);
-      queryClient.setQueryData<string[]>(key, (old = []) =>
-        current ? old.filter((id) => id !== eventId) : [...old, eventId],
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      hapticError();
-      if (ctx?.prev !== undefined) {
-        queryClient.setQueryData(['wishlists', userId], ctx.prev);
-      }
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['wishlists', userId] });
-      queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
-    },
-  });
 
   const wishlistedSet = useMemo(() => {
     const lookup: Record<string, boolean> = {};
@@ -246,19 +201,24 @@ export default function MyPlansView({ userId }: { userId: string }) {
           plan={toPlanCardPlan(item)}
           isMember={!!memberIdSet[item.id]}
           isWishlisted={!!wishlistedSet[item.id]}
+          wishlistPending={wishlistQuery.pending(item.id)}
+          wishlistDisabled={!wishlistQuery.canWrite}
           onWishlist={(id, current) => {
-            wishlistMutation.mutate({ eventId: id, current });
-            if (!current) {
-              const plan = [...myPlans, ...savedBase, ...interestedPlans, ...waitlistedPlans].find((p) => p.id === id);
-              setSnackbar({ planId: id, planTitle: plan?.title ?? '' });
-            } else {
-              setSnackbar(null);
-            }
+            setSnackbar(null);
+            wishlistQuery.toggle(id, item.title, true, !current);
           }}
           onReport={handleReport}
           onBlock={handleBlock}
           onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
         />
+        {wishlistQuery.feedback?.kind === 'error' && wishlistQuery.feedback.call.eventId === item.id && <View style={styles.interestedRecovery}>
+          <Text accessibilityRole="alert" style={styles.recoveryText}>{wishlistQuery.feedback.call.wantSaved
+            ? 'Couldn’t save this plan.' : 'Couldn’t remove this plan from Saved.'}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={'Retry bookmark: ' + item.title}
+            style={styles.interestedAction} onPress={wishlistQuery.retry}>
+            <Text style={styles.interestedActionText}>Try again</Text>
+          </TouchableOpacity>
+        </View>}
         {section.title === 'Interested' && <View style={styles.interestedActions}>
           {canMakeSimilarPlan(item) && <TouchableOpacity
             accessibilityRole="button"
@@ -291,7 +251,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
         </View>}
       </View>
     ),
-    [cardAppearance, memberIdSet, wishlistedSet, wishlistMutation, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans, interestedActions],
+    [cardAppearance, memberIdSet, wishlistedSet, wishlistQuery, handleReport, handleBlock, myPlans, savedBase, interestedPlans, waitlistedPlans, interestedActions],
   );
 
   const renderSectionHeader = useCallback(
@@ -365,7 +325,10 @@ export default function MyPlansView({ userId }: { userId: string }) {
         </View>
       ) : (
         <SectionList
-          ListHeaderComponent={<>{recoveryNotice}{collectionsLoading && !collectionsFailed && <Text style={styles.loadingText}>Loading the rest of your plans…</Text>}{draftsHeader}</>}
+          ListHeaderComponent={<>{recoveryNotice}{!!wishlistQuery.identityError && <View style={styles.recoveryRow}>
+            <Text style={[styles.recoveryText, styles.recoveryCopy]}>Couldn’t check your account to save plans.</Text>
+            <PageAction compact title="Try again" onPress={() => void wishlistQuery.retryIdentity()}/>
+          </View>}{collectionsLoading && !collectionsFailed && <Text style={styles.loadingText}>Loading the rest of your plans…</Text>}{draftsHeader}</>}
           decelerationRate="normal"
           sections={sections}
           keyExtractor={(item) => item.id}
