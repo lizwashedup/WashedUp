@@ -1,4 +1,4 @@
-import { checkLatestMessageParents } from './inboxActivityResponse';
+import { checkLatestMessageParents, PEER_ACTIVITY_LIMIT } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { formatChatPreview, type ChatPreview } from './chatPreview';
 type ActivityMessage = {
@@ -53,27 +53,33 @@ export async function replaceBlockedGroupActivity(kind: 'event' | 'circle', rows
   return rows.map(row => replacements.get(row.conversationId) ?? row);
 }
 
-// The optional Circle cards RPC returns a total without author IDs. For a
-// viewer with blocks, check the individual unread senders before showing the
-// badge. Ten permitted rows suffice for the inbox's “9+” display.
-export async function attributeCircleCardUnreads(rows: ChatPreview[], viewer: string, blocked: ReadonlySet<string>,
+// Cards may not attribute unread counts. A limited peer page may also be
+// filled by blocked authors. Count permitted unread rows directly when the
+// bounded sample cannot establish the visible “9+” badge.
+export async function attributeGroupUnreads(kind: 'event' | 'circle', rows: ChatPreview[], viewer: string, blocked: ReadonlySet<string>,
   read: ScopedRead): Promise<ChatPreview[]> {
-  const needsCounts = rows.filter(row => !row.is_dm && row.unread_count > 0 && !row.unread_by_author);
+  const key = kind === 'event' ? 'event_id' : 'circle_id';
+  const needsCounts = rows.filter(row => {
+    if (row.is_dm || !row.unread_count) return false;
+    if (!row.unread_by_author) return true;
+    if (row.unread_count < PEER_ACTIVITY_LIMIT) return false;
+    return Object.entries(row.unread_by_author).reduce((n, [id,count]) => n + (blocked.has(id) ? 0 : count), 0) < 10;
+  });
   if (!blocked.size || !needsCounts.length || blocked.size > 100) return rows;
-  const {data: markers, error} = await read(supabase.from('chat_reads').select('circle_id,last_read_at')
-    .eq('user_id', viewer).in('circle_id', needsCounts.map(row => row.conversationId)));
-  if (error || !Array.isArray(markers)) throw error ?? new Error('Circle read positions unavailable');
-  const seen = new Map(markers.map(row => [row.circle_id, row.last_read_at]));
+  const {data: markers, error} = await read(supabase.from('chat_reads').select('event_id,circle_id,last_read_at')
+    .eq('user_id', viewer).in(key, needsCounts.map(row => row.conversationId)));
+  if (error || !Array.isArray(markers)) throw error ?? new Error('Chat read positions unavailable');
+  const seen = new Map(markers.map(row => [row[key], row.last_read_at]));
   const counts = new Map<string, Record<string, number>>();
   for (let offset = 0; offset < needsCounts.length; offset += 4) {
     await Promise.all(needsCounts.slice(offset, offset + 4).map(async row => {
       const id = row.conversationId;
-      let query = supabase.from('messages').select('user_id').eq('circle_id', id).neq('user_id', viewer)
+      let query = supabase.from('messages').select('user_id').eq(key, id).neq('user_id', viewer)
         .not('user_id', 'in', blockFilter(blocked));
       const lastRead = seen.get(id);
       if (lastRead) query = query.gt('created_at', lastRead);
       const {data, error: readError} = await read(query.order('created_at',{ascending:false}).limit(10));
-      if (readError || !Array.isArray(data)) throw readError ?? new Error('Circle unread messages unavailable');
+      if (readError || !Array.isArray(data)) throw readError ?? new Error('Chat unread messages unavailable');
       const byAuthor: Record<string,number> = {};
       for (const message of data) {
         const author = message.user_id;

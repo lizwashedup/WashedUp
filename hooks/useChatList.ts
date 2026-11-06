@@ -6,7 +6,7 @@ import { chatListMemoryCache, subscribeChatListChanges } from '../lib/chatListCa
 import { readMemberChatBlockPreferences } from '../lib/memberChatBlockPreferences';
 import { copyPreviewActivity, restrictGroupPreview, comparePreviewTimes, formatChatPreview, reconcilePreviewSnapshot, type ChatPreview } from '../lib/chatPreview';
 import { fetchCircleChats, fetchCircleChatsViaCards } from '../lib/circleChatListReads';
-import { attributeCircleCardUnreads, replaceBlockedGroupActivity } from '../lib/memberInboxActivity';
+import { attributeGroupUnreads, replaceBlockedGroupActivity } from '../lib/memberInboxActivity';
 import { fetchEventChatPreviews } from '../lib/eventChatListReads';
 export type { ChatPreview } from '../lib/chatPreview';
 
@@ -147,7 +147,7 @@ export function useChatList(knownUserId: string | null | undefined) {
       const blocked = groupBlocks.current;
       if (!blocked?.size) { publish(kind, rows, true, partial); return; }
       try {
-        const counted = kind === 'circle' ? await attributeCircleCardUnreads(rows, userId, blocked, read) : rows;
+        const counted = await attributeGroupUnreads(kind, rows, userId, blocked, read);
         const visible = await replaceBlockedGroupActivity(kind, counted, userId, blocked, names, read);
         publish(kind, visible, true, partial);
       } catch {

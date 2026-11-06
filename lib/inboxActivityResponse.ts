@@ -12,3 +12,14 @@ export function checkLatestMessageParents(data: unknown) {
     throw new Error('The latest conversation activity was not returned.');
   }
 }
+
+// Apply the limit inside each joined conversation. A single busy room must
+// not consume the activity budget for every other unread badge.
+export const PEER_ACTIVITY_LIMIT = 20;
+
+export function peerActivityRows<T>(parents: {peer_activity: T[]}[] | null): T[] {
+  if (!Array.isArray(parents) || parents.some(parent => !Array.isArray(parent?.peer_activity))) {
+    throw new Error('Conversation unread activity was not returned.');
+  }
+  return parents.flatMap(parent => parent.peer_activity);
+}

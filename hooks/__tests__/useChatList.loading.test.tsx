@@ -110,7 +110,7 @@ function useDetailedEnrichment(eventText = 'Plan preview', circleText = 'Circle 
       return { data: [{ [key]: id }, { [key]: id }], error: null };
     }
     if (table === 'events' || table === 'circles') {
-      return { data: [{ id, latest_message: [{ [key]: id, content: kind === 'circle' ? circleText : eventText,
+      return { data: [{ id, peer_activity: [], latest_message: [{ [key]: id, content: kind === 'circle' ? circleText : eventText,
         created_at: '2026-09-20T21:00:00Z', user_id: 'synthetic-peer',
         image_url: null, audio_url: null, message_type: 'text' }] }], error: null };
     }
@@ -297,7 +297,7 @@ it.each(['event', 'circle'] as const)('keeps a newer live %s preview when an old
   mockEnrichment = (table, columns, viewer) => table === `${kind}s` ? stale.promise : originalEnrichment(table, columns, viewer);
   let refresh!: Promise<void>; act(() => { refresh = value.refetch(true); });
   await act(async () => { await mockIncoming({ new: { [`${kind}_id`]: id, user_id: 'synthetic-peer', content: 'Newest arrival', created_at: '2026-09-20T22:00:00Z' } }); });
-  await act(async () => { stale.resolve({ data: [{ id, latest_message: [{ content: 'Older snapshot', user_id: 'synthetic-peer', created_at: '2026-09-20T21:00:00Z' }] }], error: null }); await refresh; });
+  await act(async () => { stale.resolve({ data: [{ id, peer_activity: [], latest_message: [{ content: 'Older snapshot', user_id: 'synthetic-peer', created_at: '2026-09-20T21:00:00Z' }] }], error: null }); await refresh; });
   expect(value.chats.find(chat => chat.conversationId === id)).toEqual(expect.objectContaining({ last_message: 'Aster: Newest arrival', last_message_at: '2026-09-20T22:00:00Z', unread_count: 1 }));
   expect(value.loadError).toBe(false);
   // A subsequent authoritative refresh may reflect a deletion/edit or a read
@@ -320,12 +320,10 @@ it('lets a successful read remove a conversation even when its preview changed d
 it('uses a caught-up read without double-counting the live arrival', async () => {
   useDetailedEnrichment(); await mount('live-preview-caught-up-read');
   const originalEnrichment = mockEnrichment, pending = deferred();
-  mockEnrichment = (table, columns, viewer) => table === 'events' ? pending.promise : table === 'messages'
-    ? Promise.resolve({ data: [{ event_id: event.id, created_at: '2026-09-20T22:00:00Z' }], error: null })
-    : originalEnrichment(table, columns, viewer);
+  mockEnrichment = (table, columns, viewer) => table === 'events' ? pending.promise : originalEnrichment(table, columns, viewer);
   let refresh!: Promise<void>; act(() => { refresh = value.refetch(true); });
   await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
-  await act(async () => { pending.resolve({ data: [{ id: event.id, latest_message: [{ content: 'New arrival', user_id: 'synthetic-peer', created_at: '2026-09-20T22:00:00Z' }] }], error: null }); await refresh; });
+  await act(async () => { pending.resolve({ data: [{ id: event.id, peer_activity: [{event_id:event.id,user_id:'synthetic-peer',created_at:'2026-09-20T22:00:00Z'}], latest_message: [{ content: 'New arrival', user_id: 'synthetic-peer', created_at: '2026-09-20T22:00:00Z' }] }], error: null }); await refresh; });
   expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
 });
 
@@ -416,8 +414,12 @@ it.each(['events','circles'])('retains verified %s snippets and badges on a miss
   await act(async()=>{await value.refetch(true);});
   expect(value.chats.map(row=>({title:row.title,text:row.last_message,count:row.unread_count}))).toEqual(eligible);
   expect(value.loadError).toBe(true);
+  mockEnrichment=async(t,cols,viewer)=>t===table?{data:[{id:table==='events'?event.id:'circle-independent',latest_message:[],peer_activity:null}],error:null}:normal(t,cols,viewer);
+  await act(async()=>{await value.refetch(true);});
+  expect(value.chats.map(row=>({title:row.title,text:row.last_message,count:row.unread_count}))).toEqual(eligible);
+  expect(value.loadError).toBe(true);
   // PostgREST represents a valid parent with no messages as an empty child array.
-  mockEnrichment=async(t,cols,viewer)=>t===table?{data:[{id:table==='events'?event.id:'circle-independent',latest_message:[]}],error:null}:normal(t,cols,viewer);
+  mockEnrichment=async(t,cols,viewer)=>t===table?{data:[{id:table==='events'?event.id:'circle-independent',peer_activity:[],latest_message:[]}],error:null}:normal(t,cols,viewer);
   await act(async()=>{await value.refetch(true);});
   expect(value.loadError).toBe(false);
   expect(value.chats.find(row=>row.kind===(table==='events'?'event':'circle'))?.last_message).toBeNull();
