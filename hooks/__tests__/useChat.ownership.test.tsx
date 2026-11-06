@@ -139,11 +139,11 @@ it('a reaction lookup cannot continue its write after the account changes', asyn
   expect(mockMutation).not.toHaveBeenCalled();
 });
 
-it('failed delete restores only that row and preserves later incoming messages', async () => {
+it('a rejected delete keeps that row and preserves later incoming messages', async () => {
   const fixture = mount(); await flush(); const deletion = deferred(); mockMutation.mockReturnValueOnce(deletion.promise);
   const pending = start(() => fixture.chat.deleteMessage('old')); await flush();
   await act(async () => { await mockChannels.at(-1).callbacks.INSERT({ new: message('new', { user_id: 'bob', created_at: '2026-09-13T11:00:00Z' }) }); });
-  await act(async () => { deletion.resolve({ error: new Error('Rejected') }); await pending; });
+  await act(async () => { deletion.resolve({ error: { code: '42501', message: 'Rejected' } }); await pending; });
   expect(fixture.chat.messages.map(row => row.id)).toEqual(['old', 'new']);
 });
 
@@ -946,4 +946,31 @@ describe('history reads across app suspension', () => {
     expect(fixture.chat.olderLoadError).toBe(false);
   });
 
+});
+
+it('keeps a still-visible message after a zero-row delete and removes it on confirmed retry', async () => {
+  const fixture=mount(); await flush();
+  mockMutation.mockResolvedValueOnce(success); mockReceipt.mockResolvedValueOnce({data:{id:'old'},error:null});
+  await act(async()=>{await fixture.chat.deleteMessage('old');});
+  expect(fixture.chat.messages.map(row=>row.id)).toContain('old');
+  expect(Alert.alert).toHaveBeenCalledWith('Message still here',expect.any(String));
+  expect(mockReceipt).toHaveBeenCalledWith({id:'old',user_id:'alice',event_id:'plan-a'});
+  mockMutation.mockResolvedValueOnce({data:{id:'old'},error:null});
+  await act(async()=>{await fixture.chat.deleteMessage('old');});
+  expect(fixture.chat.messages.map(row=>row.id)).not.toContain('old');
+});
+it('recovers a committed deletion with a lost response and blocks repeated taps',async()=>{
+  const f=mount(); await flush();const wait=deferred();mockMutation.mockReturnValueOnce(wait.promise);
+  const one=start(()=>f.chat.deleteMessage('old'));await flush();await start(()=>f.chat.deleteMessage('old'));
+  expect(mockMutation).toHaveBeenCalledTimes(1);expect(f.chat.messages.map(r=>r.id)).toContain('old');
+  mockReceipt.mockResolvedValueOnce(success);
+  await act(async()=>{wait.resolve({error:{message:'offline'}});await one;});
+  expect(mockReceipt).toHaveBeenCalledTimes(1);expect(f.chat.messages.map(r=>r.id)).not.toContain('old');
+});
+it('keeps the row when both deletion and status are unconfirmed',async()=>{
+  const f=mount();await flush();mockMutation.mockRejectedValueOnce(new Error('offline'));
+  mockReceipt.mockResolvedValueOnce({data:null,error:{message:'unavailable'}});
+  await act(async()=>{await f.chat.deleteMessage('old');});
+  expect(f.chat.messages.map(r=>r.id)).toContain('old');
+  expect(Alert.alert).toHaveBeenCalledWith('Removal not confirmed',expect.any(String));
 });
