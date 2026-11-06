@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { markPostPlanSurveyHandled } from '../../lib/postPlanSurveyHandled';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Linking, Platform } from 'react-native';
 import type { PushRegistrationResult } from '../../hooks/usePushNotifications';
@@ -97,7 +98,6 @@ jest.mock('../../components/keyboard/KeyboardDoneBar', () => ({ KeyboardDoneBar:
 jest.mock('../../components/keyboard/ChatKeyboard', () => ({ ChatKeyboardProvider: ({ children }: any) => children }));
 jest.mock('../../components/PostPlanSurvey', () => ({
   __esModule: true, default: (props: any) => require('react').createElement('SurveyFixture', props),
-  isPostPlanSurveyHandled: async () => false,
 }));
 jest.mock('../../components/marks/MarkEarnedModal', () => ({ __esModule: true, default: mockNothing }));
 // Presentation is replaced only to expose callbacks and pending/feedback state.
@@ -485,4 +485,18 @@ it.each(['Not now', 'review preemption', 'account change', 'unmount'])('revokes 
   expect(mockRegister).toHaveBeenCalledTimes(2);
   if (transition === 'account change') { expect(primer().pending).toBeFalsy(); expect(primer().feedback).toBeFalsy(); }
   else expect(primers()).toHaveLength(0);
+});
+
+it('keeps the same plan available to the next account after the first handles it', async () => {
+  mockSurveyRpc.mockResolvedValue(surveyPayload());
+  await mount();
+  const survey = tree!.root.findByType('SurveyFixture' as any).props;
+  expect(survey.userId).toBe(PERSON_A.id);
+  await markPostPlanSurveyHandled(survey.plan.id, survey.userId);
+  act(() => survey.onComplete(false));
+  await flush();
+  await emitAuth('SIGNED_IN', PERSON_B);
+  expect(tree!.root.findAllByType('SurveyFixture' as any).map(s => s.props.userId)).toEqual([PERSON_B.id]);
+  await unmount(); mockUser = PERSON_A; await mount();
+  expect(tree!.root.findAllByType('SurveyFixture' as any)).toHaveLength(0);
 });

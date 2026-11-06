@@ -115,7 +115,8 @@ jest.mock('../../lib/ticketing', () => ({ getOrder: (...args: any[]) => mockGetO
 jest.mock('../../components/auth/OtpInput', () => ({ __esModule: true, default: (props: any) => require('react').createElement('OtpFixture', props) }));
 jest.mock('../../components/albums/AlbumUploadPromptModal', () => ({ AlbumUploadPromptModal: mockNothing }));
 jest.mock('../../components/keyboard/KeyboardDoneBar', () => ({ KeyboardDoneBar: mockNothing }));
-jest.mock('../../components/PostPlanSurvey', () => ({ __esModule: true, default: mockNothing, isPostPlanSurveyHandled: async () => true }));
+jest.mock('../../lib/postPlanSurveyHandled', () => ({ isPostPlanSurveyHandled: async () => true }));
+jest.mock('../../components/PostPlanSurvey', () => ({ __esModule: true, default: mockNothing }));
 jest.mock('../../components/marks/MarkEarnedModal', () => ({ __esModule: true, default: mockNothing }));
 jest.mock('../../components/PushPrimerModal', () => ({ __esModule: true, default: mockNothing }));
 jest.mock('../../components/VideoSplash', () => ({ __esModule: true, default: mockNothing }));
