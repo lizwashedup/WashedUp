@@ -3,7 +3,6 @@ import { useFocusEffect } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useObservedUser } from './useObservedUser';
 import { supabase } from '../lib/supabase';
-import { withDeadline } from '../lib/withTimeout';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { hapticError } from '../lib/haptics';
 
@@ -15,7 +14,7 @@ type Feedback = { call: SaveCall; kind: 'saving' | 'error' };
 
 /** Existing wishlist collection and writes, with account-owned receipts.
  * Saving a plan is independent of membership or invitations. */
-export function useFeedWishlist(userId: string | null, onSaved: (eventId: string, title: string) => void) {
+export function useFeedWishlist(userId: string | null, onSaved: (eventId: string, title: string) => void, options?: { retryReads: false }) {
   const identity = useObservedUser();
   const queryClient = useQueryClient();
   const visit = useRef<object | null>(null);
@@ -36,14 +35,15 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
     queryKey: ['wishlists', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data, error } = await withDeadline(
-        supabase.from('wishlists').select('event_id').eq('user_id', userId), 8000, 'saved plans',
+      const { data, error } = await requestWithDeadline(
+        supabase.from('wishlists').select('event_id').eq('user_id', userId), 8000,
       );
       if (error) throw error;
       return (data ?? []).map((row: { event_id: string }) => row.event_id);
     },
     enabled: !!userId,
     staleTime: 30_000,
+    ...(options ? { retry: options.retryReads } : {}),
   });
 
   const mutation = useMutation({
@@ -90,7 +90,7 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
       if (![...pending.current.values()].some(other => other.account === call.account)) {
         void queryClient.invalidateQueries({ queryKey: ['wishlists', call.account] });
       }
-      void queryClient.invalidateQueries({ queryKey: ['saved-plans'] });
+      void queryClient.invalidateQueries({ queryKey: ['saved-plans', call.account] });
     },
   });
 
