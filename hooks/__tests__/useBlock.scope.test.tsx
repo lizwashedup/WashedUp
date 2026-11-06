@@ -91,7 +91,7 @@ it.each(['read', 'write'] as const)('does not report success when a scoped %s re
   (stage === 'read' ? mockRead : mockWrite).mockResolvedValueOnce({ data: null, error: new Error('request failed') });
   await mount(); await open(scope()); await act(async () => confirm()());
   expect(mockWrite).toHaveBeenCalledTimes(stage === 'read' ? 0 : 1); expect(mockReport).not.toHaveBeenCalled(); expect(after).not.toHaveBeenCalled();
-  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', stage === 'write' ? 'Could not confirm the block. Please try again.' : 'Could not block user. Please try again.');
 });
 
 it.each(['auth', 'read', 'write', 'missing-profile'] as const)('does not report unscoped success or remove previews after %s fails', async stage => {
@@ -101,7 +101,7 @@ it.each(['auth', 'read', 'write', 'missing-profile'] as const)('does not report 
   else (stage === 'write' ? mockWrite : mockRead).mockResolvedValueOnce({ data: null, error: stage === 'missing-profile' ? null : new Error('failed') });
   await mount(); await open(); await act(async () => confirm()()); act(() => jest.runOnlyPendingTimers());
   expect(after).not.toHaveBeenCalled(); expect(mockReport).not.toHaveBeenCalled();
-  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', stage === 'write' ? 'Could not confirm the block. Please try again.' : 'Could not block user. Please try again.');
   expect(chatListMemoryCache.get('alice')).toEqual([row]); expect(consumeChatListDirty()).toBe(false);
 });
 
@@ -179,7 +179,7 @@ it.each(['auth', 'read', 'write'] as const)('ends a stalled %s with an error and
   await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
   await act(async () => { jest.advanceTimersByTime(12_000); await work; });
   expect(after).not.toHaveBeenCalled(); expect(controller.blocking).toBe(false);
-  expect(Alert.alert).toHaveBeenLastCalledWith('Error', 'Could not block user. Please try again.');
+  expect(Alert.alert).toHaveBeenLastCalledWith('Error', stage === 'write' ? 'Could not confirm the block. Please try again.' : 'Could not block user. Please try again.');
 });
 
 it('invalidates the initiating account before the privacy signal retires its chat entry', async () => {
@@ -190,4 +190,38 @@ it('invalidates the initiating account before the privacy signal retires its cha
     expect(mockInvalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: expect.arrayContaining(['alice']) }));
     expect(consumeChatListDirty()).toBe(true); expect(after).not.toHaveBeenCalled();
   } finally { stop(); }
+});
+
+it.each(['returned', 'thrown'])('recovers a committed block after a %s error with one write', async kind => {
+  mockRead.mockResolvedValueOnce({ data: { blocked_users: ['existing'] } })
+    .mockResolvedValueOnce({ data: { id: 'alice', blocked_users: ['concurrent', 'target'] } });
+  if (kind === 'returned') mockWrite.mockResolvedValueOnce({ data: null, error: new Error('lost') });
+  else mockWrite.mockRejectedValueOnce(new Error('offline'));
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(mockRead.mock.calls).toEqual([['alice'], ['alice']]);
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockReport).toHaveBeenCalledTimes(1);
+  expect(after).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { data: { id: 'bob', blocked_users: ['target'] } },
+  { data: { id: 'alice', blocked_users: ['other'] } },
+  { data: null, error: new Error('unavailable') },
+])('requires confirmation on the initiating account after a lost result', async status => {
+  mockRead.mockResolvedValueOnce({ data: { blocked_users: [] } }).mockResolvedValueOnce(status);
+  mockWrite.mockRejectedValueOnce(new Error('lost'));
+  await mount(); await open(scope()); await act(async () => confirm()());
+  expect(mockReport).not.toHaveBeenCalled(); expect(after).not.toHaveBeenCalled();
+  expect(mockReset).not.toHaveBeenCalled(); expect(mockWrite).toHaveBeenCalledTimes(1);
+});
+
+it('retires an unscoped recovered block if the signed-in account changed', async () => {
+  mockRead.mockResolvedValueOnce({ data: { blocked_users: [] } })
+    .mockResolvedValueOnce({ data: { id: 'alice', blocked_users: ['target'] } });
+  mockGetUser.mockResolvedValueOnce(user('alice')).mockResolvedValueOnce(user('bob'));
+  mockWrite.mockRejectedValueOnce(new Error('lost'));
+  await mount(); await open(); await act(async () => confirm()());
+  expect(mockReport).not.toHaveBeenCalled(); expect(mockReset).not.toHaveBeenCalled();
+  expect(after).not.toHaveBeenCalled();
 });
