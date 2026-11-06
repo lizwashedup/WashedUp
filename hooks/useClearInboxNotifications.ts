@@ -12,9 +12,11 @@ type Scope = { userId: string | null; epoch: number; isCurrent: () => boolean };
 type Attempt = { cutoff: string; visibleIds: Set<string> };
 const rejected = new Set(['42501', '28000', '28P01', '23514', '40001', '40P01', 'P0001']);
 
-export function useInboxClearAll(scope: Scope, visit: object, isOpen: () => boolean) {
+export function useClearInboxNotifications(scope: Scope, visit: object, isOpen: () => boolean, selection: 'all' | { id: string }) {
+  const single = selection !== 'all';
+  const notificationId = single ? selection.id : undefined;
   const client = useQueryClient();
-  const state = useMemo(() => ({ phase: 'idle' as Phase, attempt: null as Attempt | null }), [visit, scope.epoch, scope.userId]);
+  const state = useMemo(() => ({ phase: 'idle' as Phase, attempt: null as Attempt | null }), [visit, scope.epoch, scope.userId, single, notificationId]);
   const owner = useRef<typeof state | null>(null);
   const [, render] = useState(0);
   useLayoutEffect(() => {
@@ -30,6 +32,7 @@ export function useInboxClearAll(scope: Scope, visit: object, isOpen: () => bool
   const press = async (notices: readonly Notice[]) => {
     const userId = scope.userId;
     if (!userId || !current() || state.phase === 'clearing' || state.phase === 'checking') return;
+    if (single && (!notificationId || notices.length !== 1 || notices[0].id !== notificationId)) return;
     if (!state.attempt) {
       // The list is newest-first. Keep the original cutoff through retries,
       // including older pages, while preserving notifications that arrive later.
@@ -46,9 +49,11 @@ export function useInboxClearAll(scope: Scope, visit: object, isOpen: () => bool
       const query = checking
         ? table.select('id', { count: 'exact', head: true })
         : table.update({ status: 'read' }, { count: 'exact' });
-      const response = await requestWithDeadline<CountResult>(query.eq('user_id', userId).eq('status', 'unread')
+      const eligible = query.eq('user_id', userId).eq('status', 'unread')
         .neq('type', 'plan_invite').neq('type', 'new_message')
-        .lte('created_at', attempt.cutoff).or('expires_at.is.null,expires_at.gt.now()'), 12_000);
+        .lte('created_at', attempt.cutoff).or('expires_at.is.null,expires_at.gt.now()');
+      const target = notificationId ? eligible.eq('id', notificationId) : eligible;
+      const response = await requestWithDeadline<CountResult>(target, 12_000);
       if (response.error) {
         change(!checking && rejected.has(response.error.code) ? 'retry' : 'unknown');
         return;

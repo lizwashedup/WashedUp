@@ -1,5 +1,6 @@
 import { InboxPlanInviteActions } from './InboxPlanInviteActions';
-import { useInboxClearAll } from '../hooks/useInboxClearAll';
+import { InboxNotificationRow } from './InboxNotificationRow';
+import { useClearInboxNotifications } from '../hooks/useClearInboxNotifications';
 import { useInboxNotificationScope } from '../hooks/useInboxNotificationScope';
 import { CommunityJoinInboxRow } from './notifications/CommunityJoinInboxRow';
 import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
@@ -258,7 +259,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [refetchNotifs, queryClient, userId, navigateAfterDismiss, notificationScope]);
 
-  const clearAll = useInboxClearAll(notificationScope, visit, () => !closingRef.current && activeVisit.current === visit);
+  const clearAll = useClearInboxNotifications(notificationScope, visit, () => !closingRef.current && activeVisit.current === visit, 'all');
   const clearBusy = clearAll.phase === 'clearing' || clearAll.phase === 'checking';
   const clearLabel = { idle: 'Clear all', clearing: 'Clearing…', retry: 'Retry clear',
     unknown: 'Check notifications', checking: 'Checking…' }[clearAll.phase];
@@ -534,20 +535,12 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   ? Math.max(0, Math.round((new Date(notif.expires_at).getTime() - Date.now()) / 3600000))
                   : null;
                 return (
-                  <TouchableOpacity
-                    key={`notif-${notif.id}`}
-                    style={s.notifRow}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      // exception_invite is decided only via its inline
-                      // Accept/Decline buttons; a stray row tap must not
-                      // consume it.
-                      if (isExceptionInvite) return;
-                      return hasAction
-                        ? handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
-                        : handleNotifAction(notif.id, 'read');
-                    }}
-                  >
+                  <InboxNotificationRow key={`notif-${notif.id}`} notice={notif}
+                    scope={notificationScope} visit={visit} isOpen={() => !closingRef.current && activeVisit.current === visit}
+                    showDismiss={!isWaitlist && !isExceptionInvite}
+                    onOpen={isExceptionInvite ? () => {} : hasAction
+                      ? () => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
+                      : isWaitlist ? () => handleNotifAction(notif.id, 'read') : undefined}>
                     {(notif.type === 'people_request' || notif.type === 'people_request_accepted') && (
                       <View style={s.peopleAccent} />
                     )}
@@ -585,15 +578,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                         </View>
                       )}
                     </View>
-                    {!isWaitlist && !isExceptionInvite && (
-                      <TouchableOpacity
-                        onPress={() => handleNotifAction(notif.id, 'read')}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Text style={s.dismissText}>Dismiss</Text>
-                      </TouchableOpacity>
-                    )}
-                  </TouchableOpacity>
+                  </InboxNotificationRow>
                 );
               })}
 
@@ -643,10 +628,8 @@ const s = StyleSheet.create({
   claimText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodySM, color: Colors.white },
   cantGoBtn: { borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'center' as const },
   cantGoText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.textLight },
-  notifRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5EDE0' },
   // Warm gold left-accent so people-request rows read as the "someone wants to
   // add you" loop (gold, never red), matching the requests banner.
   peopleAccent: { width: 3, alignSelf: 'stretch', backgroundColor: Colors.goldenAmber, borderRadius: 2, marginRight: 8 },
   notifBody: { fontSize: 13, color: '#78695C', marginTop: 1, lineHeight: 18 },
-  dismissText: { fontSize: 12, color: '#A09385', marginLeft: 8 },
 });
