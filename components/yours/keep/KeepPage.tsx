@@ -9,6 +9,7 @@ import { Fonts, FontSizes, AfterglowType, type AfterglowFontFamilies } from '../
 import { RADII } from '../../../constants/YoursDesign';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
+import { useQueryClient } from '@tanstack/react-query';
 import { buildComposerWithPerson } from '../../../lib/composerLink';
 import { formatPlanWhenLA } from '../../../lib/planTime';
 import { formatEventDateLA } from '../../../lib/laDate';
@@ -47,6 +48,7 @@ function ObservedKeepPage(props: KeepPageProps) {
   return <KeepVisit key={JSON.stringify([viewer.viewerId, viewer.epoch])} {...props} viewer={viewer} />;
 }
 function KeepVisit({ userId, targetId, appearance, viewer }: KeepPageProps & { viewer: ObservedUser }) {
+  const client = useQueryClient();
   const fonts = appearance?.fonts;
   const styles = useMemo(() => fonts ? { ...baseStyles, ...statusStyles, ...keepAppearance(fonts) } : { ...baseStyles, ...statusStyles }, [fonts]);
   const focused = useIsFocused();
@@ -106,7 +108,7 @@ function KeepVisit({ userId, targetId, appearance, viewer }: KeepPageProps & { v
   };
   const onInvite = () => {
     if (!fullCurrent() || pending.current?.visit === capturedVisit) return; const person = currentCard.current!; hapticSelection();
-    navigate(buildComposerWithPerson(person.user_id, person.first_name_display, person.profile_photo_url));
+    navigate(buildComposerWithPerson(client, userId, person.user_id, person.first_name_display, person.profile_photo_url));
   };
   const onAdd = async () => {
     if (!isCurrent() || currentCard.current?.kind !== 'minimal') return; const attempt = begin('add'); if (!attempt) return;

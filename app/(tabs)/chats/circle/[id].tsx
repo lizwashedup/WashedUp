@@ -23,6 +23,7 @@ const ThreadComponent = ChatThread;
 import AddPeopleSheet from '../../../../components/circles/AddPeopleSheet';
 import CirclePlanComposer from '../../../../components/circles/plan/CirclePlanComposer';
 import MenuCard, { type AnchorRect } from '../../../../components/menu/MenuCard';
+import { useQueryClient } from '@tanstack/react-query';
 import { buildComposerWithPerson } from '../../../../lib/composerLink';
 import { CalendarPlus, Users } from 'lucide-react-native';
 
@@ -34,6 +35,7 @@ interface MenuVisit {
 }
 
 function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSource }: { circleId: string; reactionMessageId?: string; reactionMessageSource?: string }) {
+  const client = useQueryClient();
   const router = useRouter();
   const { data, isError, isLoading, isFetching, refetch, viewerId: myUserId, viewerEpoch: epoch, isCurrentViewer: isCurrentUser } = useCircle(circleId);
   const [addOpen, setAddOpen] = useState(false);
@@ -231,9 +233,9 @@ function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSou
           if (action === 'circle') {
             setAddOpen(true);
           }
-          if (action === 'plan' && menuVisit.person) {
+          if (action === 'plan' && myUserId && menuVisit.person) {
             const { id, name, avatar } = menuVisit.person;
-            router.push(buildComposerWithPerson(id, name, avatar) as never);
+            router.push(buildComposerWithPerson(client, myUserId, id, name, avatar) as never);
           } else if (action === 'plan') {
             setPlanOpen(true);
           }

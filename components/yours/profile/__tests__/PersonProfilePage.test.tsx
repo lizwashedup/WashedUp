@@ -4,8 +4,11 @@ import { act, create } from 'react-test-renderer';
 import PersonProfilePage, { type PersonProfilePageProps } from '../PersonProfilePage';
 import { AfterglowFallbackFonts, Fonts } from '../../../../constants/Typography';
 import { AfterglowColors } from '../../../../constants/Colors';
-import { buildComposerWithPerson } from '../../../../lib/composerLink';
 import type { PersonProfile } from '../../../../lib/yours/types';
+const mockStoreReview = jest.fn();
+jest.mock('@tanstack/react-query', () => ({
+  ...jest.requireActual('@tanstack/react-query'), useQueryClient: () => ({setQueryData:mockStoreReview}),
+}));
 const mockProfile = jest.fn(), mockDm = jest.fn(), mockRemove = jest.fn(), mockBlock = jest.fn(), mockRefetch = jest.fn(), mockRetry = jest.fn(), mockPush = jest.fn(), mockBack = jest.fn();
 let mockFocused = true, mockViewerId: string | null = 'alice', mockEpoch = 0, mockLoading = false, mockIdentityError: Error | null = null, mockBlocking = false;
 jest.mock('react-native', () => {
@@ -73,7 +76,9 @@ it.each(['back', 'blur-return', 'target', 'account', 'unmount'])('retires delaye
   if (change === 'unmount') f.unmount();
   expect(mockDm.mock.calls[0][1].scope.isCurrent()).toBe(false); act(() => oldSend()); await act(async () => pending.resolve('old-room')); expect(mockPush).not.toHaveBeenCalled(); expect(mockDm).toHaveBeenCalledTimes(1);
 });
-it('makes a plan with the same removable invited person and prevents duplicate navigation', () => { const f = mount(); const make = f.button('Make a plan').props.onPress; act(() => { make(); make(); }); expect(mockPush.mock.calls).toEqual([[buildComposerWithPerson('amelia', 'Amelia', profile().profile_photo_url)]]); });
+it('makes a plan with the same removable invited person and prevents duplicate navigation', () => { const f = mount(); const make = f.button('Make a plan').props.onPress; act(() => { make(); make(); }); expect(mockPush).toHaveBeenCalledTimes(1);
+ const id = String(mockPush.mock.calls[0][0]).split('reviewId=')[1];expect(id).toBeTruthy();
+ expect(mockStoreReview).toHaveBeenCalledWith(['similar-plan-review',mockViewerId,id],{prefillInvitePersonId:'amelia',prefillInvitePersonName:'Amelia',prefillInvitePersonPhoto:profile().profile_photo_url}); });
 it('preserves the shared-history destination and plan destinations', () => { const f = mount(); expect(f.text()).toContain('Your shared plans'); act(() => f.button('View your shared plans with Amelia').props.onPress()); expect(mockPush).toHaveBeenCalledWith('/person/amelia'); const g = mount(); const plan = g.tree.root.findAll(n => n.props.accessibilityLabel?.startsWith('A sunset walk.') && n.props.onPress)[0]; act(() => plan.props.onPress()); expect(mockPush).toHaveBeenCalledWith('/plan/next-plan'); });
 it('does not open a plan from a retained row callback after that plan leaves the visible payload', () => { const f = mount(); const plan = f.tree.root.findAll(n => n.props.accessibilityLabel?.startsWith('A sunset walk.') && n.props.onPress)[0].props.onPress; result.data = profile({ upcoming: [] }); f.update(); act(() => plan()); expect(mockPush).not.toHaveBeenCalled(); });
 it('starts remove confirmation only after the menu has actually closed', () => { const f = mount(); act(() => f.button('More options').props.onPress()); const m = f.menu(); act(() => { m.onClose(); m.rows.find((r: any) => r.key === 'remove').onPress(); }); expect(f.alert().visible).toBe(false); act(() => f.menu().onClosed()); expect(f.alert().visible).toBe(true); expect(mockRemove).not.toHaveBeenCalled(); });
