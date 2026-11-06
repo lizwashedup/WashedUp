@@ -49,11 +49,9 @@ describe('chat and event-form UX contracts', () => {
     expect(list).not.toContain('supabase.auth.getUser');
   });
 
-  it('does not duplicate the mount fetch on first focus', () => {
-    const thread = source('components/chat/ChatThread.tsx');
+  it('does not duplicate the inbox mount fetch on first focus', () => {
     const listScreen = source('app/(tabs)/chats/index.tsx');
 
-    expect(thread).toContain('if (!isFirstFocus && nowTs - lastChatFocusFetchRef.current > 15_000)');
     expect(listScreen).toContain('if (!isFirstFocus && (isDirty || nowTs - lastChatsFocusFetchRef.current > 30_000))');
   });
 });

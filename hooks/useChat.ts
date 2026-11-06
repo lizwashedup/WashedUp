@@ -46,7 +46,8 @@ async function scopedChatRequest<T>(scope: ChatOperationScope, request: () => Pr
   try { return await request(); } finally { assertChatScope(scope); }
 }
 
-export function useChat(key: ConversationKey, anchorId: string | null = null) {
+const alwaysVisible = () => true;
+export function useChat(key: ConversationKey, anchorId: string | null = null, mayMarkHistoryRead = alwaysVisible) {
   const { viewerId, epoch, isCurrent: isCurrentViewer, error: identityError, isLoading: identityLoading, retry: retryIdentity } = useObservedUser();
   // Primitive fields drive all effect/callback deps so a fresh key object on
   // each render does not re-subscribe the realtime channel.
@@ -445,7 +446,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
             // These idempotent background writes keep their original scope.
             // Viewing an old notification must not mark unseen newer messages
             // read or dismiss their notifications.
-            if (!window.anchorId) void Promise.all([readUpsert(), notifClear()]).then(() => {
+            if (!window.anchorId && mayMarkHistoryRead()) void Promise.all([readUpsert(), notifClear()]).then(() => {
               if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY });
             }).catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
             const [{ data: reactionsData, error: reactionsError }, enriched] = await Promise.all([
@@ -507,7 +508,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null) {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity]);
+  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity, mayMarkHistoryRead]);
   refreshWindowRef.current = fetchMessages;
 
   useEffect(() => {

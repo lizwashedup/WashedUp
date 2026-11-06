@@ -218,7 +218,13 @@ function ChatThread(props: ChatThreadProps) {
   const [dismissedAnchor, setDismissedAnchor] = useState<string | null>(null);
   const anchorId = dismissedAnchor === anchorRequestKey ? null : requestedAnchor;
   const clearAnchor = useCallback(() => setDismissedAnchor(anchorRequestKey), [anchorRequestKey]);
-  const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id }, anchorId);
+  const chatFocusedRef = useRef(false);
+  const deferredReceipt = useRef(false);
+  const mayMarkHistoryRead = useCallback(() => {
+    deferredReceipt.current = !chatFocusedRef.current;
+    return chatFocusedRef.current;
+  }, []);
+  const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id }, anchorId, mayMarkHistoryRead);
   // A room/account return is a new entry, even when its IDs repeat. The
   // transport also owns its own account epoch; this tighter scope includes
   // the read-only transition and every asynchronous composer continuation.
@@ -447,7 +453,6 @@ function ChatThread(props: ChatThreadProps) {
   // 2026-05-18 "chat is slow" reports.
   const lastChatFocusFetchRef = useRef(0);
   const hasFocusedChatRef = useRef(false);
-  const chatFocusedRef = useRef(false);
   useChatResumeRefresh(refetch, isCurrentEntry, chatFocusedRef);
   useFocusEffect(
     useCallback(() => {
@@ -458,7 +463,10 @@ function ChatThread(props: ChatThreadProps) {
       if (isFirstFocus) lastChatFocusFetchRef.current = nowTs;
       // useChat already loads on mount. Starting the focus safety-net on that
       // same first frame doubled the initial message request.
-      if (!isFirstFocus && nowTs - lastChatFocusFetchRef.current > 15_000) {
+      // If history finished while covered, the ordinary throttle would leave
+      // the newly visible conversation unread. Recheck it once on return.
+      if (!isFirstFocus && (deferredReceipt.current || nowTs - lastChatFocusFetchRef.current > 15_000)) {
+        deferredReceipt.current = false;
         lastChatFocusFetchRef.current = nowTs;
         refetch(true);
       }
