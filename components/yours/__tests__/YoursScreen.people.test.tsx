@@ -23,6 +23,9 @@ import { AfterglowFonts } from '../../../constants/Typography';
 import { COPY } from '../state/constants';
 import type { YoursGridPerson } from '../../../lib/yours/types';
 
+import YoursIntroPopup from '../onboarding/YoursIntroPopup';
+import { resolveYoursIntroVariant, hasSeenYoursIntro, markYoursIntroSeen } from '../../../lib/yours/tabsIntroSeen';
+
 let mockSuspendCircles = false;
 const mockNever = new Promise(() => {});
 let mockUid = 'viewer', mockFocused = true, mockLoading = false, mockRequests: unknown[] = [], mockBacklog: unknown[] = [];
@@ -60,7 +63,7 @@ jest.mock('../../../hooks/useGetOrCreateDm', () => ({ isObsoleteDmOperation: (er
 jest.mock('../../../lib/yours/invite', () => ({ openInviteComposer: jest.fn() }));
 jest.mock('../../../lib/haptics', () => ({ hapticSelection: jest.fn() }));
 jest.mock('../../../lib/yours/requestsSeen', () => ({ markRequestsSeen: (...args: unknown[]) => mockMarkRequestsSeen(...args), REQUESTS_BADGE_KEY: ['requests'] }));
-jest.mock('../../../lib/yours/tabsIntroSeen', () => ({ resolveYoursIntroVariant: () => null, hasSeenYoursIntro: jest.fn(), markYoursIntroSeen: jest.fn() }));
+jest.mock('../../../lib/yours/tabsIntroSeen', () => ({ resolveYoursIntroVariant: jest.fn(() => null), hasSeenYoursIntro: jest.fn(), markYoursIntroSeen: jest.fn() }));
 jest.mock('../../creator/pages/CreatorSpaceEntry', () => ({ CreatorSpaceEntry: () => null }));
 jest.mock('../header/YoursHeader', () => () => null);
 jest.mock('../header/YoursTabs', () => () => null);
@@ -94,6 +97,7 @@ const flush = async () => { await act(async () => { for (let i = 0; i < 5; i++) 
 function deferred() { let resolve!: (value: unknown) => void, reject!: (error: Error) => void; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function mount(people = true) { act(() => { tree = create(<YoursScreen />); }); if (people) tab('people'); }
 beforeEach(() => {
+  jest.mocked(resolveYoursIntroVariant).mockReturnValue(null);
   jest.clearAllMocks(); mockMarkRequestsSeen.mockReset().mockResolvedValue(undefined); mockListeners.clear(); mockSuspendCircles = false; mockUid = 'viewer'; mockFocused = true; mockLoading = false;
   mockRequestsError = null; mockRequestsFetching = false; mockRefetchRequests.mockReset().mockResolvedValue({isSuccess:true});
   mockGridLoading = false; mockGridError = null; mockBacklogError = null;
@@ -581,4 +585,53 @@ it('a late seen-marker completion refreshes only its original account', async ()
   const badgeCalls=mockInvalidate.mock.calls.filter(call=>call[0].queryKey[0]==='requests');
   expect(badgeCalls.length).toBeGreaterThan(0);
   expect(badgeCalls.every(call=>call[0].queryKey[1]==='viewer')).toBe(true);
+});
+
+
+const intro = () => tree!.root.findByType(YoursIntroPopup).props;
+
+it('defers an unread Yours introduction until the member returns to Yours', async () => {
+  const lookup = deferred();
+  jest.mocked(resolveYoursIntroVariant).mockReturnValue('existingUser');
+  jest.mocked(hasSeenYoursIntro).mockResolvedValue(false).mockReturnValueOnce(lookup.promise as Promise<boolean>);
+  mount(false);
+  mockFocused = false; update();
+  lookup.resolve(false); await flush();
+  expect(intro().visible).toBe(false);
+  expect(markYoursIntroSeen).not.toHaveBeenCalled();
+  mockFocused = true; update(); await flush();
+  expect(intro().visible).toBe(true);
+  const shown = intro();
+  act(() => { shown.onDismiss(); shown.onAddPeople(); });
+  expect(markYoursIntroSeen).toHaveBeenCalledTimes(1);
+  expect(markYoursIntroSeen).toHaveBeenCalledWith('existingUser', 'viewer');
+  expect(tree!.root.findByType(PathsSheet).props.visible).toBe(false);
+});
+
+it.each(['blur', 'account', 'requests'])('retires visible Yours intro controls on %s', async change => {
+  jest.mocked(resolveYoursIntroVariant).mockReturnValue('newUser');
+  jest.mocked(hasSeenYoursIntro).mockResolvedValue(false);
+  mount(false); await flush();
+  const shown = intro();
+  expect(shown.visible).toBe(true);
+  if (change === 'blur') mockFocused = false;
+  if (change === 'account') mockUid = 'other';
+  if (change === 'requests') mockParams = {openRequests: '1'};
+  update();
+  expect(intro().visible).toBe(false);
+  act(() => { shown.onAddPeople(); shown.onDismiss(); });
+  expect(markYoursIntroSeen).not.toHaveBeenCalled();
+  expect(tree!.root.findByType(PathsSheet).props.visible).toBe(false);
+  await flush();
+});
+
+it('opens Add people once from the current returning member’s introduction', async () => {
+  jest.mocked(resolveYoursIntroVariant).mockReturnValue('existingUser');
+  jest.mocked(hasSeenYoursIntro).mockResolvedValue(false);
+  mount(false); await flush();
+  const shown = intro();
+  act(() => { shown.onAddPeople(); shown.onAddPeople(); });
+  expect(tree!.root.findByType(PathsSheet).props.visible).toBe(true);
+  expect(intro().visible).toBe(false);
+  expect(markYoursIntroSeen).toHaveBeenCalledTimes(1);
 });
