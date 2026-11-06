@@ -86,6 +86,7 @@ import PingAfterPlanModal from '../../components/yours/ping/PingAfterPlanModal';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { capDisplayCount, MAX_GROUP } from '../../constants/GroupLimits';
 import { Fonts, FontSizes } from '../../constants/Typography';
+import { useIsFocused } from '@react-navigation/native';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
 import { getParticipationNoticeStatus } from '../../lib/participationTerms';
@@ -407,6 +408,20 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [failedHeroUrl, setFailedHeroUrl] = useState<string | null>(null);
 
   const { blockUser } = useBlock();
+  const focused = useIsFocused();
+  const moderationVisit = useMemo(() => ({}), [focused]);
+  const currentModerationVisit = useRef(moderationVisit);
+  currentModerationVisit.current = moderationVisit;
+  const moderationScope = useMemo(() => ({
+    userId: currentUserId ?? '',
+    isCurrent: () => !!currentUserId && focused &&
+      moderationVisit === currentModerationVisit.current && identity.isCurrent(),
+  }), [currentUserId, focused, moderationVisit, identity.isCurrent]);
+  const blockFromPlan = (personId: string, name: string) => {
+    if (personId && moderationScope.isCurrent()) {
+      void blockUser(personId, name, () => router.back(), moderationScope);
+    }
+  };
 
   const viewerQuery = useQuery({
     queryKey: ['plan-viewer', currentUserId, identity.epoch], enabled: !!currentUserId,
@@ -1090,9 +1105,10 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     } catch {}
   }, [plan]);
 
-  const handleReportMenu = useCallback(() => {
+  const handleReportMenu = () => {
     if (isCreator || !plan?.creator) return;
-    const creatorName = plan.creator?.first_name_display ?? 'Creator';
+    const { id: creatorId } = plan.creator;
+    const creatorName = plan.creator.first_name_display ?? 'Creator';
     setBrandedAlert({
       visible: true,
       title: 'Options',
@@ -1107,12 +1123,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         {
           text: `Block ${creatorName}`,
           style: 'destructive',
-          onPress: () => blockUser(plan.creator?.id ?? '', creatorName, () => router.back()),
+          onPress: () => blockFromPlan(creatorId, creatorName),
         },
         { text: 'Cancel', style: 'cancel' },
       ],
     });
-  }, [isCreator, plan, blockUser]);
+  };
 
   // ─── Loading / Error ─────────────────────────────────────────────────────────
 
@@ -1981,7 +1997,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           setReportTarget({ id: uid, name: uname });
           setShowReport(true);
         }}
-        onBlock={(uid, uname) => blockUser(uid, uname, () => router.back())}
+        onBlock={blockFromPlan}
       />
 
       <ParticipationNotice

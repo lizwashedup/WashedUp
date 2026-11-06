@@ -15,6 +15,8 @@ jest.mock('../../../constants/MemberAppearance', () => ({ get MEMBER_REDESIGN_AP
 let mockPeople: any[] = [];
 let mockPeopleError = false;
 let mockAccount = 'viewer';
+let mockFocused = true;
+const mockBlock = jest.fn();
 let mockEpoch = 1;
 let mockPlan: any;
 let mockMembers: any[];
@@ -71,7 +73,7 @@ jest.mock('@tanstack/react-query', () => ({
   },
 }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({top:0,bottom:0,left:0,right:0}) }));
-jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 jest.mock('expo-router', () => ({
   Stack: { Screen: () => null }, useLocalSearchParams: () => ({ id: 'plan-1' }),
   useFocusEffect: (callback: any) => { require('react').useEffect(callback, [callback]); },
@@ -87,7 +89,7 @@ jest.mock('../../../hooks/usePlanInvitation',()=>({usePlanInvitation:(options:an
 jest.mock('../../../hooks/usePlanWaitlist',()=>({usePlanWaitlist:(options:any)=>{mockWaitlistOptions=options;return mockWaitlist;}}));
 jest.mock('../../../hooks/usePlanDeparture', () => ({ usePlanDeparture: (options: any) => { mockDepartureOptions = options; return mockDeparture; } }));
 jest.mock('../../../hooks/useFeedWishlist', () => ({ useFeedWishlist: () => mockWishlist }));
-jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
+jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: mockBlock }) }));
 jest.mock('../../../lib/supabase', () => ({ supabase: { auth: { onAuthStateChange: () => ({ data: { subscription: { unsubscribe: jest.fn() } } }), getUser: async () => ({ data: { user: { id: mockAccount } }, error: null }), refreshSession:async()=>({error:null}) }, from: () => mockTable, rpc: async () => ({ data: [], error: null }) } }));
 jest.mock('../../../lib/participationTerms', () => ({ getParticipationNoticeStatus: () => mockNotice(), recordParticipationAssent: () => mockAssent() }));
 jest.mock('../../../lib/logger',()=>({logError:jest.fn()}));
@@ -114,7 +116,7 @@ const allText = () => tree.root.findAllByType(Text).flatMap(n => [n.props.childr
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === label))!;
 async function mount() { await act(async () => { tree = create(<PlanDetailScreen />); }); }
 beforeEach(() => {
-  mockPlanPhotos = false;
+  mockPlanPhotos = false; mockFocused = true;
   mockMemberAppearance = true; mockCanGoBack = false;
   mockPeople=[];mockPeopleError=false;
   mockInterest={entry:null,ready:true,loading:false,busy:false,phase:null,error:null,send:mockInterestSend,retry:mockInterestRetry,refresh:jest.fn()};
@@ -1046,4 +1048,26 @@ it('uses fresh duplication permission from the waitlist chooser and opens an all
   expect(mockClient.setQueryData).toHaveBeenCalledWith(['similar-plan-review',expect.any(String),destination.params.reviewId],
     expect.objectContaining({prefillTitle:'Updated venue'}));
   expect(mockWaitlistChange).not.toHaveBeenCalled();
+});
+
+it('retires the original creator block after leaving the detail and returning', async () => {
+  await mount();
+  const selectBlock = () => {
+    act(() => tree.root.findByProps({ accessibilityLabel: 'Report or block' }).props.onPress());
+    const sheet = tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert)
+      .find(node => node.props.visible && node.props.title === 'Options')!;
+    return sheet.props.buttons.find((b: {text: string}) => b.text === 'Block Amelia').onPress;
+  };
+  const original = selectBlock();
+  act(original);
+  const scope = mockBlock.mock.calls[0][3];
+  expect(scope.userId).toBe('viewer'); expect(scope.isCurrent()).toBe(true);
+  mockFocused = false; act(() => tree.update(<PlanDetailScreen />));
+  expect(scope.isCurrent()).toBe(false);
+  mockFocused = true; act(() => tree.update(<PlanDetailScreen />));
+  act(original);
+  expect(mockBlock).toHaveBeenCalledTimes(1);
+  expect(scope.isCurrent()).toBe(false);
+  act(selectBlock());
+  expect(mockBlock.mock.calls[1][3].isCurrent()).toBe(true);
 });
