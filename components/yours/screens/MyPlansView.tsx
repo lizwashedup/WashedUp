@@ -4,7 +4,7 @@ import { View, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
 import { ScaledText as Text } from '../../ScaledText';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { ChevronDown, ChevronRight, X } from 'lucide-react-native';
+import { ChevronDown, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 import { requestWithDeadline } from '../../../lib/requestWithDeadline';
 import { PageAction } from '../../creator/pages/PageFrame';
@@ -32,8 +32,7 @@ import {
 } from '../../../hooks/useMyPlansData';
 import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
 import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
-import { formatEventDateLA } from '../../../lib/laDate';
-import { BrandedAlert, type BrandedAlertButton } from '../../BrandedAlert';
+import { MemberDraftRow } from './MemberDraftRow';
 import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
 import { useInterestedPlanActions } from '../../../hooks/useInterestedPlanActions';
@@ -68,7 +67,6 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const draftsQuery = useMyPlanDrafts(userId);
   const { data: myPlans = [] } = plansQuery;
   const { data: planDrafts = [] } = draftsQuery;
-  const [draftAlert, setDraftAlert] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
   const mounted = useRef(true);
   const ownerRef = useRef({ userId });
@@ -90,42 +88,10 @@ export default function MyPlansView({ userId }: { userId: string }) {
     } as never);
   }, [router, owner, userId]);
 
-  const confirmDeleteDraft = useCallback((draft: PlanDraft) => {
-    // LIZ COPY
-    setDraftAlert({
-      title: 'toss this draft?',
-      message: 'it goes for good.',
-      buttons: [
-        { text: 'keep it', style: 'cancel' },
-        {
-          // muted confirm, never red (C13)
-          text: 'toss it',
-          onPress: async () => {
-            await supabase.from('events').delete().eq('id', draft.id).eq('status', 'draft');
-            queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
-          },
-        },
-      ],
-    });
-  }, [queryClient]);
-
   const draftsHeader = COMMUNITIES_ENABLED && planDrafts.length > 0 ? (
     <View>
       <Text style={styles.sectionHeader}>Drafts</Text>
-      {planDrafts.map((d) => (
-        <TouchableOpacity key={d.id} style={styles.draftRow} onPress={() => openDraft(d)} activeOpacity={0.7}>
-          <View style={styles.draftBody}>
-            <Text style={styles.draftTitle} numberOfLines={1}>{d.title}</Text>
-            <Text style={styles.draftMeta} numberOfLines={1}>
-              {formatEventDateLA(d.start_time)}
-              {'  ·  finish it whenever'}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => confirmDeleteDraft(d)} hitSlop={10}>
-            <X size={16} color={Colors.tertiary} strokeWidth={2.5} />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      ))}
+      {planDrafts.map(d => <MemberDraftRow key={userId + ':' + d.id} draft={d} userId={userId} onOpen={openDraft}/>)}
     </View>
   ) : null;
   const waitlistedQuery = useWaitlistedPlans(userId);
@@ -458,34 +424,12 @@ export default function MyPlansView({ userId }: { userId: string }) {
         onClose={() => setShareSheet(null)}
       />
 
-      <BrandedAlert
-        visible={!!draftAlert}
-        title={draftAlert?.title ?? ''}
-        message={draftAlert?.message}
-        buttons={draftAlert?.buttons}
-        onClose={() => setDraftAlert(null)}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  draftRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.cardBg,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 10,
-  },
-  draftBody: { flex: 1 },
-  draftTitle: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.darkWarm },
-  draftMeta: { fontFamily: Fonts.sans, fontSize: FontSizes.bodySM, color: Colors.secondary, marginTop: 2 },
   listContent: { paddingHorizontal: 20, paddingBottom: 32 },
   cardWrap: { marginBottom: 14 },
   interestedActions: { paddingHorizontal: 8, paddingTop: 4, flexDirection: 'row', flexWrap: 'wrap', columnGap: 16 },
