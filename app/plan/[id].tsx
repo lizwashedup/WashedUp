@@ -1175,7 +1175,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           <Text style={styles.linkText}>Try again</Text>
         </TouchableOpacity>
       </View> : null}
-      {wishlist.isError || wishlist.feedback?.kind === 'error' ? <View style={styles.cancelledEventBanner}><Text style={styles.errorText}>{wishlist.isError ? 'Couldn’t load saved plans.' : 'Couldn’t update saved plans.'}</Text><TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => wishlist.isError ? void wishlist.refetch() : wishlist.retry()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity></View> : null}
+      {wishlist.isError || wishlist.feedback?.kind === 'error' ? <View style={styles.cancelledEventBanner}><Text style={styles.errorText}>{wishlist.isError ? 'Couldn’t load saved plans.' : wishlist.feedback?.uncertain ? 'Couldn’t confirm this bookmark change.' : 'Couldn’t update saved plans.'}</Text><TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => wishlist.isError ? void wishlist.refetch() : wishlist.retry()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity></View> : null}
       <ScrollView
         style={{ flex: 1 }}
         decelerationRate="normal"

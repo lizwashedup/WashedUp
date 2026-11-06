@@ -212,7 +212,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
           onCreatorPress={(creatorId) => setMiniProfileUserId(creatorId)}
         />
         {wishlistQuery.feedback?.kind === 'error' && wishlistQuery.feedback.call.eventId === item.id && <View style={styles.interestedRecovery}>
-          <Text accessibilityRole="alert" style={styles.recoveryText}>{wishlistQuery.feedback.call.wantSaved
+          <Text accessibilityRole="alert" style={styles.recoveryText}>{wishlistQuery.feedback.uncertain ? 'Couldn’t confirm this bookmark change.' : wishlistQuery.feedback.call.wantSaved
             ? 'Couldn’t save this plan.' : 'Couldn’t remove this plan from Saved.'}</Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel={'Retry bookmark: ' + item.title}
             style={styles.interestedAction} onPress={wishlistQuery.retry}>
