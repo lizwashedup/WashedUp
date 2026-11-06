@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { showAddToCalendar } from '../../../lib/addToCalendar';
 import { openUrl } from '../../../lib/url';
+import { planChatAccessKey, readPlanChatMembership } from '../../../lib/planChatAccess';
 import { getPlanChatExpiry } from '../../../lib/planChatExpiry';
 import { capDisplayCount } from '../../../constants/GroupLimits';
 import Colors from '../../../constants/Colors';
@@ -31,6 +33,7 @@ async function currentChatRead<T>(read: () => PromiseLike<T>, isCurrent: () => b
 // plan card, read-only/countdown copy) and hands the rest to the shared body.
 
 interface EventInfo {
+  creator_user_id: string | null;
   id: string;
   title: string;
   start_time: string;
@@ -45,7 +48,7 @@ interface EventInfo {
 async function fetchEventInfo(eventId: string): Promise<EventInfo> {
   const { data: event, error } = await supabase
     .from('events')
-    .select('id, title, start_time, end_time, location_text, status, tickets_url, member_count, explore_event_id')
+    .select('id, creator_user_id, title, start_time, end_time, location_text, status, tickets_url, member_count, explore_event_id')
     .eq('id', eventId)
     .maybeSingle();
   if (error) throw error;
@@ -53,6 +56,7 @@ async function fetchEventInfo(eventId: string): Promise<EventInfo> {
 
   return {
     id: event.id,
+    creator_user_id: event.creator_user_id,
     title: event.title,
     start_time: event.start_time,
     end_time: (event as any).end_time ?? null,
@@ -117,6 +121,7 @@ export default function PlanChatScreen() {
   const { id, reactionMessageId, reactionMessageSource } = useLocalSearchParams<{ id: string; reactionMessageId?: string; reactionMessageSource?: string }>();
   const router = useRouter();
   const viewer = useObservedUser();
+  const focused = useIsFocused();
   const readOwner = useMemo(() => ({ userId: viewer.viewerId, epoch: viewer.epoch, isCurrent: viewer.isCurrent }), [viewer.viewerId, viewer.epoch, viewer.isCurrent]);
   const [clockNow, setClockNow] = useState(Date.now());
 
@@ -134,6 +139,16 @@ export default function PlanChatScreen() {
     enabled: !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error,
     staleTime: 60_000,
     retry: (failures, error) => !(error instanceof RequestDeadlineError) && failures < 2,
+  });
+
+  const isCreator = !!event && event.creator_user_id === readOwner.userId;
+  const membership = useQuery({
+    queryKey: [...planChatAccessKey(id, readOwner.userId ?? null), readOwner.epoch],
+    queryFn: () => currentChatRead(() => readPlanChatMembership(id, readOwner.userId!), readOwner.isCurrent),
+    enabled: focused && !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error && !isCreator,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
   });
 
   const { data: members, isError: memberError, isFetching: membersFetching, refetch: refetchMembers } = useQuery({
@@ -171,6 +186,12 @@ export default function PlanChatScreen() {
     const failed = !!viewer.error || eventError;
     return <ChatEntryState state={!id ? 'unavailable' : viewer.isLoading ? 'loading' : failed ? 'error' : eventLoading ? 'loading' : 'unavailable'}
       retrying={viewer.isLoading || eventFetching} onRetry={id && failed ? () => { if (viewer.error) void viewer.retry(); else void refetchEvent(); } : undefined} onBack={() => router.navigate('/(tabs)/chats')} />;
+  }
+
+  if (!isCreator && (membership.isError || membership.data !== true)) {
+    return <ChatEntryState state={membership.isError ? 'error' : membership.isLoading ? 'loading' : 'unavailable'}
+      retrying={membership.isFetching} onRetry={membership.isError ? () => { void membership.refetch(); } : undefined}
+      onBack={() => router.navigate('/(tabs)/chats')} />;
   }
 
   return (

@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { planChatAccessKey } from '../../lib/planChatAccess';
 import { chatListMemoryCache } from '../../lib/chatListCache';
 import type { ChatPreview } from '../../lib/chatPreview';
 import { usePlanDeparture } from '../usePlanDeparture';
@@ -23,7 +24,7 @@ async function mount(extra:Partial<Options>={}){
  function Harness(){const epoch=mockEpoch;current=usePlanDeparture({eventId:'plan',viewerId:mockAccount,epoch,isCurrent:()=>epoch===mockEpoch,ready:true,canLeave:true,canCancel:true,hasOwnChat:true,onSuccess,onError,onUnconfirmed,...props});return null;}
  const render=()=> <QueryClientProvider client={client}><Harness/></QueryClientProvider>;
  let tree!:ReturnType<typeof create>;act(()=>{tree=create(render());});cleanups.push(()=>{act(()=>tree.unmount());client.clear();});await flush();
- return {get current(){return current;},onSuccess,onError,onUnconfirmed,update:(next:Partial<Options>)=>{props={...props,...next};act(()=>tree.update(render()));},start:(action:'leave'|'cancel')=>act(()=>current[action]())};
+ return {client,get current(){return current;},onSuccess,onError,onUnconfirmed,update:(next:Partial<Options>)=>{props={...props,...next};act(()=>tree.update(render()));},start:(action:'leave'|'cancel')=>act(()=>current[action]())};
 }
 const left={data:{event_id:'plan',user_id:'alice',status:'left'},error:null};
 const cancelled={data:{id:'plan',creator_user_id:'alice',status:'cancelled'},error:null};
@@ -97,4 +98,25 @@ it.each(['receipt', 'reconciled'] as const)('retires only the confirmed memberâ€
     expect(chatListMemoryCache.get('bob')).toEqual([plan]);
     expect(mockWrite).toHaveBeenCalledTimes(1);
   } finally { chatListMemoryCache.clear(); }
+});
+
+
+it.each(['receipt', 'status check'])('retires an older membership read only after the confirming %s', async mode => {
+  const f = await mount();
+  const access = [...planChatAccessKey('plan', 'alice'), mockEpoch];
+  const other = [...planChatAccessKey('plan', 'bob'), mockEpoch];
+  f.client.setQueryData(access, true);
+  f.client.setQueryData(other, true);
+  const pending = deferred();
+  const lookup = f.client.fetchQuery({queryKey: access, queryFn: () => pending.promise}).catch(() => undefined);
+  if (mode === 'status check') mockWrite.mockRejectedValueOnce(new Error('Lost receipt'));
+  f.start('leave'); await flush();
+  if (mode === 'status check') {
+    expect(f.client.getQueryData(access)).toBe(true);
+    await act(async () => f.current.checkResult());
+  }
+  pending.resolve(true);
+  await lookup;
+  expect(f.client.getQueryData(access)).toBe(false);
+  expect(f.client.getQueryData(other)).toBe(true);
 });

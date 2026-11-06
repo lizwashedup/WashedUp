@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { closeDepartedPlanChat } from '../lib/planChatAccess';
 import { removeDepartedPlanPreview } from '../lib/chatListCache';
 import { logError } from '../lib/logger';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
@@ -84,6 +85,13 @@ export function usePlanDeparture(options: Options) {
   };
   const mayDispatch = (call: Call) => call.isCurrent() && latest.current.ready &&
     (call.action === 'leave' ? latest.current.canLeave : latest.current.canCancel);
+  const confirmDeparture = (call: Call) => {
+    call.state.outcome = 'confirmed';
+    if (call.action === 'leave') {
+      closeDepartedPlanChat(client, call.eventId, call.viewerId);
+      removeDepartedPlanPreview(call.viewerId, call.eventId);
+    }
+  };
   const invalidate = (call: Call) => {
     for (const queryKey of [
       ['events', 'members', call.eventId], ['events', 'detail', call.eventId], ['circle-plan-context', call.eventId],
@@ -117,8 +125,7 @@ export function usePlanDeparture(options: Options) {
         throw new UnconfirmedDeparture();
       }
       if (response?.error !== null || !confirmsDeparture(response.data, call)) throw new UnconfirmedDeparture();
-      call.state.outcome = 'confirmed';
-      if (call.action === 'leave') removeDepartedPlanPreview(call.viewerId, call.eventId);
+      confirmDeparture(call);
       if (!call.isCurrent()) return false;
       const result: PlanDepartureResult = { action: call.action };
       // Leaving removes this member's permission to post in the event chat.
@@ -182,8 +189,7 @@ export function usePlanDeparture(options: Options) {
         ? await requestWithDeadline(supabase.from('event_members').select('event_id,user_id,status').eq('event_id', call.eventId).eq('user_id', call.viewerId).maybeSingle(), 12000)
         : await requestWithDeadline(supabase.from('events').select('id,creator_user_id,status').eq('id', call.eventId).eq('creator_user_id', call.viewerId).maybeSingle(), 12000);
       if (response?.error !== null || !confirmsDeparture(response.data, call)) throw new Error('Departure not confirmed');
-      state.outcome = 'confirmed';
-      if (call.action === 'leave') removeDepartedPlanPreview(call.viewerId, call.eventId);
+      confirmDeparture(call);
       invalidate(call);
       reportSuccess({ action: call.action, reconciled: true }, call);
     } catch (error) {
