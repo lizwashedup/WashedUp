@@ -272,3 +272,36 @@ it.each(['close/reopen','account change'])('retires a failed clear and retained 
   await act(async()=>{finish({error:{code:'42501'}});await pending;await press();});
   expect(mockWrite).toHaveBeenCalledTimes(1);expect(renderedText()).not.toContain('Retry clear');
 });
+
+const exactButton = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === label)!;
+it('keeps a rejected individual dismissal visible and only retries that notice', async()=>{
+  mockWrite.mockResolvedValueOnce({error:{code:'42501'}});
+  const dismiss=()=>tree.root.findAllByType(TouchableOpacity).find(n=>n.props.children?.props?.children==='Dismiss')!;
+  await act(async()=>dismiss().props.onPress());
+  expect(renderedText()).toContain('Retry dismiss');
+  expect(renderedText()).toContain('Fictional reminder');
+  mockWrite.mockResolvedValueOnce({error:null,count:1});
+  await act(async()=>exactButton('Retry dismiss: Fictional reminder').props.onPress());
+  expect(mockFilters.mock.calls.filter(([writing,key,value])=>writing && key==='id' && value==='fictional-notice')).toHaveLength(2);
+  expect(mockPush).not.toHaveBeenCalled();
+});
+it('checks a single uncertain dismissal without clearing other notices or opening a plan',async()=>{
+  const press=exactButton('Dismiss: Fictional reminder').props.onPress;
+  mockWrite.mockResolvedValueOnce({error:null,count:null});
+  await act(async()=>{await Promise.all([press(),press()]);});
+  expect(renderedText()).toContain('Check status');
+  mockReadInvite.mockResolvedValueOnce({error:null,count:0});
+  await act(async()=>exactButton('Check status: Fictional reminder').props.onPress());
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockFilters).toHaveBeenCalledWith(false,'id','fictional-notice');
+  const [key,remove]=mockClient.setQueryData.mock.calls[0];
+  expect(key).toEqual(['app-notifications','fictional-viewer',1]);
+  expect(remove([{id:'other'},{id:'fictional-notice'}])).toEqual([{id:'other'}]);
+  expect(mockPush).not.toHaveBeenCalled();
+});
+it('ignores an old individual dismiss callback on reopening',async()=>{
+  const press=exactButton('Dismiss: Fictional reminder').props.onPress;
+  act(()=>tree.update(renderInbox(false)));act(()=>tree.update(renderInbox(true)));
+  await act(async()=>press());
+  expect(mockWrite).not.toHaveBeenCalled();
+});
