@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { removeDepartedPlanPreview } from '../lib/chatListCache';
 import { logError } from '../lib/logger';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 
@@ -117,6 +118,7 @@ export function usePlanDeparture(options: Options) {
       }
       if (response?.error !== null || !confirmsDeparture(response.data, call)) throw new UnconfirmedDeparture();
       call.state.outcome = 'confirmed';
+      if (call.action === 'leave') removeDepartedPlanPreview(call.viewerId, call.eventId);
       if (!call.isCurrent()) return false;
       const result: PlanDepartureResult = { action: call.action };
       // Leaving removes this member's permission to post in the event chat.
@@ -181,6 +183,7 @@ export function usePlanDeparture(options: Options) {
         : await requestWithDeadline(supabase.from('events').select('id,creator_user_id,status').eq('id', call.eventId).eq('creator_user_id', call.viewerId).maybeSingle(), 12000);
       if (response?.error !== null || !confirmsDeparture(response.data, call)) throw new Error('Departure not confirmed');
       state.outcome = 'confirmed';
+      if (call.action === 'leave') removeDepartedPlanPreview(call.viewerId, call.eventId);
       invalidate(call);
       reportSuccess({ action: call.action, reconciled: true }, call);
     } catch (error) {
