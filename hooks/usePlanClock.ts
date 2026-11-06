@@ -7,14 +7,22 @@ type TimedPlan = { start_time: string; end_time?: string | null };
 /** Refresh at a visible plan's start/end, and when returning from background.
  * No polling or provider requests. Long waits respect the platform timer limit. */
 export function usePlanClock(plans: readonly TimedPlan[]): number {
+  return useBoundaryClock(now => {
+    let next = Infinity;
+    for (const plan of plans) {
+      for (const time of [Date.parse(plan.start_time), getPlanCutoff(plan.start_time, plan.end_time)]) {
+        if (time > now && time < next) next = time;
+      }
+    }
+    return next;
+  });
+}
+
+/** nextChange returns the next visible change in wall-clock milliseconds, or Infinity. */
+export function useBoundaryClock(nextChange: (now: number) => number): number {
   const [revision, refresh] = useState(0);
   const now = Date.now();
-  let next = Infinity;
-  for (const plan of plans) {
-    for (const time of [Date.parse(plan.start_time), getPlanCutoff(plan.start_time, plan.end_time)]) {
-      if (time > now && time < next) next = time;
-    }
-  }
+  const next = nextChange(now);
   useEffect(() => {
     // Use the boundary selected at render. If the JS thread was busy during
     // commit, schedule an immediate refresh for the already elapsed boundary.

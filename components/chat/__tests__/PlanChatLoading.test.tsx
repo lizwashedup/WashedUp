@@ -116,3 +116,17 @@ it('rechecks a still-mounted notification destination on return after a rejoin e
   mockFocused = true; await act(async () => tree.update(screen())); await flush();
   expect(open()).toBe(true);
 });
+
+it.each([true, false])('makes the mounted conversation read-only at its 48-hour cutoff (explicit end: %s)', async explicit => {
+  const expires = Date.now() + 1400;
+  const base = expires - 48 * 3600000;
+  mockEvent = async () => ok({ ...event, start_time: new Date(base - (explicit ? 3600000 : 0)).toISOString(),
+    end_time: explicit ? new Date(base).toISOString() : null, status: 'completed' });
+  await mount();
+  expect(mockThreadProps.readOnly).toBeNull();
+  act(() => jest.advanceTimersByTime(expires - Date.now() - 1));
+  expect(mockThreadProps.readOnly).toBeNull();
+  act(() => jest.advanceTimersByTime(1));
+  expect(mockThreadProps.readOnly?.text).toContain('read-only');
+  expect(open()).toBe(true);
+});
