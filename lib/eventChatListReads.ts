@@ -1,3 +1,4 @@
+import { messageEvidence } from './inboxMessageEvidence';
 import { checkInboxActivityResponses, checkLatestMessageParents, peerActivityRows, PEER_ACTIVITY_LIMIT } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { getPlanChatTiming } from './planChatExpiry';
@@ -58,7 +59,7 @@ export async function fetchEventChatPreviews(
       firstPaint.publish(initialRows.map(chat => {
         const cached = cachedEvents.get(chat.conversationId);
         return { ...chat, last_message: cached?.last_message ?? null, last_message_at: cached?.last_message_at ?? null,
-          preview_unavailable: cached ? cached.preview_unavailable : true, last_message_user_id: cached?.last_message_user_id, unread_by_author: cached?.unread_by_author,
+          inbox_evidence: cached?.inbox_evidence, preview_unavailable: cached ? cached.preview_unavailable : true, last_message_user_id: cached?.last_message_user_id, unread_by_author: cached?.unread_by_author,
           unread_count: cached?.unread_count ?? 0, member_avatars: cached?.member_avatars ?? [] };
       }));
     }
@@ -78,7 +79,7 @@ export async function fetchEventChatPreviews(
         .in('event_id', allEventIds)
         .eq('status', 'joined'),
       supabase.from('events')
-        .select('id, latest_message:messages!messages_event_id_fkey(event_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_event_id_fkey(event_id, created_at, user_id)')
+        .select('id, latest_message:messages!messages_event_id_fkey(id, event_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_event_id_fkey(id, event_id, created_at, user_id)')
         .in('id', allEventIds)
         .order('created_at', { referencedTable: 'latest_message', ascending: false })
         .order('id', { referencedTable: 'latest_message', ascending: false })
@@ -106,7 +107,7 @@ export async function fetchEventChatPreviews(
       realCounts[r.event_id] = (realCounts[r.event_id] ?? 0) + 1;
     });
 
-    const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
+    const lastMsgMap: Record<string, { id?: string; content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
     checkLatestMessageParents(messageParents);
     (messageParents ?? []).forEach((parent: any) => {
       const message = parent.latest_message?.[0];
@@ -145,7 +146,9 @@ export async function fetchEventChatPreviews(
 
     const unreadByAuthor: Record<string, Record<string, number>> = {};
     const unreadMap: Record<string, number> = {};
+    const sampled: Record<string, {id?:string;created_at:string}[]> = {};
     peerActivityRows(messageParents).forEach((msg: any) => {
+      (sampled[msg.event_id] ??= []).push(msg);
       const lastRead = readMap[msg.event_id];
       if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
         if (msg.user_id) {
@@ -180,6 +183,7 @@ export async function fetchEventChatPreviews(
             })()
           : null,
         last_message_user_id: lastMsg?.user_id ?? null,
+        inbox_evidence: messageEvidence(sampled[event.id] ?? [], lastMsg, readMap[event.id], PEER_ACTIVITY_LIMIT),
         unread_by_author: unreadByAuthor[event.id] ?? {},
         last_message_at: lastMsg?.created_at ?? null,
         unread_count: unreadMap[event.id] ?? 0,

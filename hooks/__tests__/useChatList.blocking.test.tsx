@@ -247,3 +247,41 @@ it.each([false,true])('withholds only the unverified unnamed row and retries its
   await act(async()=>{await value.refetch(true);});
   expect(value.chats.find(c=>c.conversationId==='dm')).toMatchObject({is_dm:true,dm_user_id:'peer'});
 });
+
+it('counts a persisted message once across redelivery and counts distinct IDs at the same instant',async()=>{
+  await mount();
+  const row={id:'first-id',circle_id:'dm',user_id:'peer',content:'The same words',created_at:'2026-10-07T22:00:00.123456Z'};
+  await act(async()=>{await mockIncoming({new:row}); await mockIncoming({new:row});});
+  expect(value.chats[0].unread_count).toBe(1);
+  await act(async()=>{await mockIncoming({new:{...row,id:'second-id'}}); await mockIncoming({new:row});});
+  expect(value.chats[0].unread_count).toBe(2);
+});
+
+it('does not start a second name lookup or count twice for the same pending delivery', async()=>{
+  await mount();
+  const held=deferred<any>(); mockProfile.mockReset().mockReturnValueOnce(held.promise);
+  const row={id:'slow',circle_id:'dm',user_id:'uncached',content:'Meet here',created_at:'2026-10-07T22:00:00Z'};
+  let first!:Promise<void>, duplicate!:Promise<void>;
+  act(()=>{first=mockIncoming({new:row}); duplicate=mockIncoming({new:row});});
+  await act(async()=>{held.resolve({data:{first_name_display:'Riley'},error:null});await Promise.all([first,duplicate]);});
+  expect(value.chats[0]).toMatchObject({unread_count:1,last_message:'Riley: Meet here'});
+  expect(mockProfile).toHaveBeenCalledTimes(1);
+});
+
+it('rechecks an ambiguous aggregate card once without treating a tied timestamp as proof of identity', async()=>{
+  jest.useFakeTimers();
+  try {
+    mockEngine=true;
+    const card={circle_id:'dm',name:'',member_count:2,created_at:'2026-10-01T20:00:00Z',
+      members:mockMembers.map(m=>({user_id:m.user_id,first_name:m.profiles_public.first_name_display})),
+      last_message:{user_id:'peer',content:'Old',created_at:'2026-10-07T20:00:00Z'},unread_count:1};
+    mockCardsRead.mockResolvedValue({data:[card],error:null});await mount();
+    mockCardsRead.mockClear();
+    const row={id:'unknown',circle_id:'dm',user_id:'peer',content:'Old',created_at:card.last_message.created_at};
+    await act(async()=>{await mockIncoming({new:row});await mockIncoming({new:{...row,id:'other-id'}});});
+    expect(value.chats[0].unread_count).toBe(1);expect(mockCardsRead).not.toHaveBeenCalled();
+    mockCardsRead.mockResolvedValue({data:[{...card,unread_count:2}],error:null});
+    await act(async()=>{await jest.advanceTimersByTimeAsync(250);});
+    expect(value.chats[0].unread_count).toBe(2);expect(mockCardsRead).toHaveBeenCalledTimes(1);
+  }finally{jest.useRealTimers();}
+});

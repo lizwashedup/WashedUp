@@ -35,3 +35,11 @@ it('keeps authoritative equal/newer snapshots and normal refreshes without a con
   expect(reconcilePreviewSnapshot(fetched, { ...fetched, last_message: 'Unedited', unread_count: 2 })).toBe(fetched);
   expect(reconcilePreviewSnapshot(fetched, { ...fetched, last_message_at: '2026-10-07T20:00:00Z', unread_count: 2 })).toBe(fetched);
 });
+
+it('keeps a live identity window across a legacy snapshot without fabricating evidence for an older row',()=>{
+  const row={last_message:'old',last_message_at:'2026-10-07T20:00:00Z',unread_count:1};
+  const live={...row,last_message:'new',last_message_at:'2026-10-07T21:00:00Z'};
+  expect(reconcilePreviewSnapshot(row,live)).not.toHaveProperty('inbox_evidence');
+  const evidence={ids:['first'],uncertainThrough:'2026-10-07T20:00:00Z'};
+  expect(reconcilePreviewSnapshot({...row,inbox_evidence:undefined as typeof evidence | undefined},{...live,inbox_evidence:evidence}).inbox_evidence).toEqual(evidence);
+});

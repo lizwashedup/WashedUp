@@ -1,3 +1,4 @@
+import type { InboxMessageEvidence } from './inboxMessageEvidence';
 import { compareChatTimestamps as comparePreviewTimes } from './chatTimestamp';
 export { comparePreviewTimes };
 
@@ -17,6 +18,7 @@ export interface ChatPreview {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  inbox_evidence?: InboxMessageEvidence;
   last_message_user_id?: string | null;
   unread_by_author?: Record<string, number>;
   preview_unavailable?: boolean;
@@ -46,7 +48,7 @@ export function formatChatPreview(message: {
 export function copyPreviewActivity(row: ChatPreview, activity: ChatPreview): ChatPreview {
   return { ...row, last_message: activity.last_message, last_message_at: activity.last_message_at,
     last_message_user_id: activity.last_message_user_id, unread_count: activity.unread_count,
-    unread_by_author: activity.unread_by_author, preview_unavailable: activity.preview_unavailable };
+    inbox_evidence: activity.inbox_evidence, unread_by_author: activity.unread_by_author, preview_unavailable: activity.preview_unavailable };
 }
 
 // Keep the joined group itself available while its message visibility is checked.
@@ -63,7 +65,7 @@ export function restrictGroupPreview(row: ChatPreview, blocked: ReadonlySet<stri
   };
 }
 
-type PreviewMessage = { last_message: string | null; last_message_at: string | null; unread_count: number; last_message_user_id?: string | null; unread_by_author?: Record<string, number> };
+type PreviewMessage = { inbox_evidence?: InboxMessageEvidence; last_message: string | null; last_message_at: string | null; unread_count: number; last_message_user_id?: string | null; unread_by_author?: Record<string, number> };
 
 /** Only pass live changes received during this read. The fetched row still
  * owns membership, title and other metadata. Never add a missing row here.
@@ -71,7 +73,17 @@ type PreviewMessage = { last_message: string | null; last_message_at: string | n
  * the next authoritative refresh can reconcile read receipts normally. */
 export function reconcilePreviewSnapshot<T extends PreviewMessage>(snapshot: T, live?: PreviewMessage): T {
   if (!live || comparePreviewTimes(live.last_message_at, snapshot.last_message_at) <= 0) return snapshot;
-  return { ...snapshot, last_message: live.last_message, last_message_at: live.last_message_at,
+  const fresh = snapshot.inbox_evidence;
+  const previous = live.inbox_evidence;
+  let evidence = fresh ?? previous;
+  if (fresh && previous) {
+    const ids = [...new Set([...fresh.ids, ...previous.ids])];
+    let uncertainThrough = comparePreviewTimes(fresh.uncertainThrough, previous.uncertainThrough) >= 0
+      ? fresh.uncertainThrough : previous.uncertainThrough;
+    if (ids.length > 64 && comparePreviewTimes(live.last_message_at, uncertainThrough) > 0) uncertainThrough = live.last_message_at!;
+    evidence = { ...fresh, uncertainThrough, ids: ids.slice(0,64) };
+  }
+  return { ...snapshot, ...(evidence && { inbox_evidence: evidence }), last_message: live.last_message, last_message_at: live.last_message_at,
     last_message_user_id: live.last_message_user_id,
     unread_by_author: live.unread_count >= snapshot.unread_count ? live.unread_by_author : snapshot.unread_by_author,
     unread_count: Math.max(snapshot.unread_count, live.unread_count) };
