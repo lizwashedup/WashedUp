@@ -35,6 +35,7 @@ beforeEach(() => {
     chain.select = (columns: string) => { request.columns = columns; return chain; };
     for (const operation of ['insert', 'update', 'delete', 'upsert']) chain[operation] = (payload: unknown, conflict: unknown) => { request.operation = operation; request.payload = payload; request.conflict = conflict; return chain; };
     for (const filter of ['eq', 'in', 'gte', 'is']) chain[filter] = (key: string, value: unknown) => { request.filters.push([key, value]); return chain; };
+    chain.lt = (key: string, value: unknown) => { request.filters.push(['lt:' + key, value]); return chain; };
     chain.order = (...args: unknown[]) => { request.order.push(args); return chain; };
     chain.limit = (value: number) => { request.limit = value; return chain; };
     chain.or = (value: string) => { request.or = value; return chain; };
@@ -51,6 +52,7 @@ const mutations: Array<[string, (owner: ReturnType<typeof scope>) => Promise<unk
   ['delete', owner => community.deleteCommunityMessage('community-a','message-one', owner)],
   ['reaction', owner => community.toggleBroadcastReaction('message-one', '❤️', true, owner)],
   ['reaction removal', owner => community.toggleBroadcastReaction('message-one', 'heart', false, owner)],
+  ['visible ordinary topic marker', owner => community.markTopicRead('topic-a', receipt.created_at, owner)],
   ['read marker', owner => community.markBroadcastsRead('community-a', owner)],
   ['message page', owner => community.getCommunityBroadcasts('community-a', undefined, owner)],
 ];
@@ -681,4 +683,23 @@ it('checks the same authored Main message after an empty receipt, preserving ann
   await expect(community.deleteCommunityMessage('community-a','message-one',scope())).rejects.toThrow('still here');
   expect(requests.map(r=>r.operation)).toEqual(['delete','select']);
   for(const req of requests) expect(req.filters).toEqual([['id','message-one'],['sender_id','account-a'],['community_id','community-a'],['kind','message']]);
+});
+
+
+it('advances only the member’s own position when it is older than the visible message', async () => {
+  const stamp = '2026-11-06T15:08:00.000001Z';
+  await community.markTopicRead('topic-a', stamp, scope());
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toMatchObject({ table: 'community_topic_reads', operation: 'upsert',
+    payload: { user_id: 'account-a', topic_id: 'topic-a', last_read_at: stamp },
+    conflict: { onConflict: 'topic_id,user_id', ignoreDuplicates: true } });
+  expect(requests[1]).toMatchObject({ table: 'community_topic_reads', operation: 'update',
+    payload: { last_read_at: stamp }, filters: [['topic_id', 'topic-a'], ['user_id', 'account-a'], ['lt:last_read_at', stamp]] });
+});
+it('never updates a read position after the member leaves during the insert response', async () => {
+  const write = pending(); execute.mockReturnValueOnce(write.promise);
+  const op = community.markTopicRead('topic-a', receipt.created_at, scope());
+  const done = expect(op).rejects.toMatchObject(obsolete);
+  await flush(); epoch++; write.resolve({data: [], error: null}); await done;
+  expect(requests).toHaveLength(1);
 });

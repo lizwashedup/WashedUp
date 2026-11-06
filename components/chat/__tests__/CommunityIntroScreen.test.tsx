@@ -116,8 +116,10 @@ it('blurred Intros does not acknowledge visibility callbacks', async () => {
 it('mapping failure remains a retryable error without legacy read writes', async () => {
   mockMappingError = true; mockMappingSuccess = false; mockItems = []; mount(); expect(copy()).toContain("Messages couldn't load"); expect(mockLegacyMark).not.toHaveBeenCalled(); await act(async () => button('Retry loading community messages').props.onPress()); expect(mockRetryIdentity).toHaveBeenCalledTimes(1);
 });
-it('confirmed unmapped topics preserve their original list data and read marker', () => {
-  mockMapping = null; mount(); expect(tree.root.findByType(FlatList).props.data).toEqual([mockItems[1].message]); expect(mockLegacyMark).toHaveBeenCalled(); expect(mockMark).not.toHaveBeenCalled();
+it('acknowledges a visible ordinary row with its timestamp after a confirmed unmapped identity', async () => {
+  mockMapping = null; mount(); expect(tree.root.findByType(FlatList).props.data).toEqual([mockItems[1].message]); expect(mockLegacyMark).not.toHaveBeenCalled();
+  await act(async () => tree.root.findByType(FlatList).props.onViewableItemsChanged({ viewableItems: [{ item: mockItems[1].message, isViewable: true }] }));
+  expect(mockLegacyMark).toHaveBeenCalledWith('topic-a', mockItems[1].message.created_at, expect.objectContaining({ userId: 'attendee-a' })); expect(mockMark).not.toHaveBeenCalled();
 });
 
 it('a same-day source transition does not repeat the day separator', () => {
