@@ -5,7 +5,7 @@ import type { ChatOperationScope, ConversationKey } from './chatMessageModel';
 // displayed. Keep the original database precision; device time is irrelevant.
 export async function acknowledgeMemberChatPage(room: ConversationKey, at: string, scope: ChatOperationScope, visible: () => boolean) {
   const active = () => scope.isCurrent() && visible();
-  if (!active()) return;
+  if (!active()) return false;
   const key = room.kind === 'event' ? 'event_id' : 'circle_id';
   const user = scope.userId;
   const inserted = await supabase.from('chat_reads')
@@ -13,19 +13,20 @@ export async function acknowledgeMemberChatPage(room: ConversationKey, at: strin
       onConflict: room.kind === 'event' ? 'event_id,user_id' : 'user_id,circle_id', ignoreDuplicates: true,
     }).select('last_read_at');
   if (inserted.error) throw inserted.error;
-  if (!active()) return;
+  if (!active()) return false;
   if (!inserted.data?.length) {
     // An older page from this phone cannot rewind another device's position.
     const advanced = await supabase.from('chat_reads').update({ last_read_at: at })
       .eq(key, room.id).eq('user_id', user).lt('last_read_at', at);
     if (advanced.error) throw advanced.error;
   }
-  if (room.kind !== 'event' || !active()) return;
+  if (!active()) return false;
+  if (room.kind !== 'event') return true;
   const clear = () => supabase.from('app_notifications').update({ status: 'read' })
     .eq('event_id', room.id).eq('user_id', user).eq('type', 'new_message').eq('status', 'unread');
   const cleared = await clear().lte('created_at', at);
   if (cleared.error) throw cleared.error;
-  if (!active()) return;
+  if (!active()) return false;
 
   // Reactions and delayed notices may be newer than the latest message.
   // Capture their exact IDs first. If newer history exists, we cannot tell
@@ -35,11 +36,14 @@ export async function acknowledgeMemberChatPage(room: ConversationKey, at: strin
     .eq('status', 'unread').gt('created_at', at).limit(100);
   if (later.error) throw later.error;
   const ids = later.data?.map(row => row.id).filter(Boolean);
-  if (!ids?.length || !active()) return;
+  if (!active()) return false;
+  if (!ids?.length) return true;
   const newer = await supabase.from('messages').select('id')
     .eq('event_id', room.id).gt('created_at', at).limit(1);
   if (newer.error) throw newer.error;
-  if (!Array.isArray(newer.data) || newer.data.length || !active()) return;
+  if (!active()) return false;
+  if (!Array.isArray(newer.data) || newer.data.length) return true;
   const confirmed = await clear().in('id', ids);
   if (confirmed.error) throw confirmed.error;
+  return active();
 }

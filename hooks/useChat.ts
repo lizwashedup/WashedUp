@@ -38,6 +38,7 @@ import {
   requireMemberHistoryPage, type MessageReaction, type ReplyTo, type ChatMessage,
   type ConversationKey, type ChatOperationScope, type ChatReactionIntent,
 } from '../lib/chatMessageModel';
+import { createMemberChatReadQueue } from '../lib/memberChatReadQueue';
 import { acknowledgeMemberChatPage } from '../lib/memberChatReadPosition';
 import { subscribeChatListPrivacy } from '../lib/chatListCache';
 import { attachSenders, reconcileNewestMessages, withoutBlockedChatAuthors } from '../lib/chatMessageReads';
@@ -94,7 +95,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
   // A notification changes the read window, not the room's draft, sends or
   // realtime subscription. Every asynchronous read owns its exact window.
   const readWindow = useMemo(() => ({ anchorId, ready: false, upper: null as ChatPageCursor | null,
-    older: null as ChatPageCursor | null }), [anchorId, roomGeneration]);
+    older: null as ChatPageCursor | null, receipts: createMemberChatReadQueue() }), [anchorId, roomGeneration]);
   const readWindowRef = useRef(readWindow); readWindowRef.current = readWindow;
   const appliedWindowRef = useRef<typeof readWindow | null>(null);
   const refreshWindowRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
@@ -125,6 +126,27 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
   }, [operationScope]);
   const newestRequestRef = useRef(0);
   const foregroundReadEpochRef = useRef(0);
+
+  const makeReadCandidate = useCallback(({id, created_at, user_id}: ChatMessage, scope: ChatOperationScope) => ({
+    id, at: created_at,
+    current: scope.isCurrent,
+    visible: () => !blockedIdsRef.current[user_id] && blockedReadyRef.current && mayMarkHistoryRead() && isRowVisible(id),
+    write: async () => {
+      let open = true;
+      const owned = {userId: scope.userId, isCurrent: () => open && scope.isCurrent() && !blockedIdsRef.current[user_id]};
+      try {
+        const confirmed = await requestWithDeadline(
+          acknowledgeMemberChatPage({kind, id:conversationId}, created_at, owned, mayMarkHistoryRead), 12_000);
+        if (confirmed && owned.isCurrent()) void queryClient.invalidateQueries({queryKey: UNREAD_CHATS_KEY});
+        return confirmed;
+      } catch (error) {
+        if (owned.isCurrent()) logError(error, 'useChat.readReceipts');
+        return false;
+      } finally { open = false; }
+    },
+  }), [kind, conversationId, isRowVisible, mayMarkHistoryRead, queryClient]);
+  useEffect(() => () => readWindow.receipts.clear(), [readWindow]);
+  const checkVisiblePage = useCallback(() => readWindow.receipts.check(), [readWindow]);
 
   useEffect(() => {
     activeRoomGenerationRef.current = roomGeneration;
@@ -235,6 +257,13 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
             return;
           }
           if (isCurrentRead()) {
+            const row = enriched[0];
+            if (!window.anchorId && row?.[parentCol] === conversationId && typeof row.user_id === 'string' && row.user_id.length > 0 && row.user_id !== viewerId &&
+                typeof row.id === 'string' && row.id.length > 0 && !row.id.startsWith('optimistic-') && Number.isFinite(Date.parse(row.created_at))) {
+              window.receipts.offerLive(makeReadCandidate(row, {
+                userId: viewerId, isCurrent: () => isCurrentRead() && readWindowRef.current === window,
+              }));
+            }
             setMessages(prev => {
               if (!isCurrentRead() || !inWindow() || blockedIdsRef.current[newMsg.user_id]) return prev;
               const incoming = enriched[0];
@@ -279,6 +308,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
         (payload) => {
           const deleted = payload.old as any;
           if (deleted?.id && isCurrentRoom()) {
+            readWindowRef.current.receipts.forget(deleted.id);
             if (deleted.id === readWindowRef.current.anchorId) {
               ++newestRequestRef.current;
               readWindowRef.current.ready = false;
@@ -317,18 +347,14 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       newestRequestRef.current += 1;
       supabase.removeChannel(channel);
     };
-  }, [kind, conversationId, roomGeneration, isCurrentRoom, viewerId]);
+  }, [kind, conversationId, roomGeneration, isCurrentRoom, viewerId, makeReadCandidate]);
 
-  // A page can arrive while the member is reading older messages. Keep only the
-  // latest verified page's receipt; scrolling to it requires no second fetch.
-  const pendingPageRead = useRef<(() => void) | null>(null);
-  const checkVisiblePage = useCallback(() => pendingPageRead.current?.(), []);
   const fetchMessages = useCallback(async (silent = false) => {
     if (!isCurrentRoom() || AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
     if (!operationScope) { if (!silent && viewerId === undefined) await retryIdentity(); return; }
     const request = ++newestRequestRef.current;
-    pendingPageRead.current = null;
     const window = readWindowRef.current;
+    const startedAfter = window.receipts.beginPage();
     const isCurrent = () => isCurrentRoom() && readWindowRef.current === window && newestRequestRef.current === request
       && AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
     // History work belongs to this foreground read, not just the room. A
@@ -455,20 +481,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
             const seen = firstPaint.slice().reverse().find(row =>
               !row.id.startsWith('optimistic-') && Number.isFinite(Date.parse(row.created_at)) &&
               (!startedWith.has(row.id) || existingById.has(row.id)));
-            if (!window.anchorId && seen) {
-              const visible = () => mayMarkHistoryRead() && isRowVisible(seen.id);
-              const attempt = () => {
-                if (!isCurrent() || !visible()) return;
-                pendingPageRead.current = null;
-                // Once seen, scrolling within this room does not undo that read.
-                // Navigation, overlays, app state and account still guard the write.
-                void acknowledgeMemberChatPage({ kind, id: conversationId }, seen.created_at, readScope, mayMarkHistoryRead)
-                  .then(() => { if (isCurrent()) void queryClient.invalidateQueries({ queryKey: UNREAD_CHATS_KEY }); })
-                  .catch(error => { if (isCurrent()) logError(error, 'useChat.readReceipts'); });
-              };
-              pendingPageRead.current = attempt;
-              attempt();
-            }
+            if (!window.anchorId && seen) window.receipts.offerPage(makeReadCandidate(seen, readScope), startedAfter);
             const [{ data: reactionsData, error: reactionsError }, enriched] = await Promise.all([
               msgIds.length > 0
                 ? requestWithDeadline(supabase.from('message_reactions').select('message_id, user_id, reaction').in('message_id', msgIds), 12_000)
@@ -528,7 +541,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity, mayMarkHistoryRead, isRowVisible]);
+  }, [kind, conversationId, isCurrentRoom, operationScope, viewerId, retryIdentity, makeReadCandidate]);
   refreshWindowRef.current = fetchMessages;
 
   useEffect(() => {
@@ -538,6 +551,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       // receipts retain their existing account/room ownership and drafts.
       ++newestRequestRef.current;
       ++foregroundReadEpochRef.current;
+      readWindowRef.current.receipts.clear();
       loadingOlderRef.current = false;
     });
     return () => subscription.remove();
