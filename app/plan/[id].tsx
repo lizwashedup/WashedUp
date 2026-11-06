@@ -449,10 +449,25 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     queryFn: () => fetchPlanDetail(id!), enabled: !!id, staleTime: 60_000,
   });
   const { data: plan, isLoading: planLoading, error: planError } = planQuery;
+  const latestPlan = useRef(plan);
+  latestPlan.current = plan;
+  const planOpenForParticipation = useCallback(() => {
+    const current = latestPlan.current;
+    return !!current && !getPlanLifecycle({
+      status: current.status, startTime: current.start_time, endTime: current.end_time,
+    }).isClosed;
+  }, []);
   const planNow = usePlanClock(plan ? [plan] : []);
   const lifecycle = plan ? getPlanLifecycle({ status: plan.status, startTime: plan.start_time, endTime: plan.end_time }, planNow) : null;
   const isClosedPlan = lifecycle?.isClosed ?? true;
   const terminalStatus = lifecycle?.terminalStatus ?? null;
+  useEffect(() => {
+    if (plan && isClosedPlan && noticePending?.action === 'join') {
+      noticePendingRef.current = null;
+      setNoticePending(null);
+    }
+  }, [plan, isClosedPlan, noticePending]);
+
   const membersQuery = useQuery({
     queryKey: ['events', 'members', id, currentUserId, identity.epoch],
     queryFn: () => fetchMembers(id!), enabled: !!id, staleTime: 60_000,
@@ -873,13 +888,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     joiningRef.current = true; setJoinPreparing(true);
     try {
       const { needsAssent, versions } = await getParticipationNoticeStatus();
-      if (!joinMutation.isCurrent()) return;
+      // The plan may have ended or been cancelled during the lookup or a native dismissal.
+      const participationCurrent = () => joinMutation.isCurrent() && planOpenForParticipation();
+      if (!participationCurrent()) return;
       if (needsAssent) {
         const context: ParticipationAssentContext = {
           listingType: 'plan', listingId: id, organizerUserId: plan.creator_user_id ?? null,
           organizerName: noticeOrganizerName, action: 'join', versions,
         };
-        const pending = { action: 'join' as const, context, message, isCurrent: joinMutation.isCurrent };
+        const pending = { action: 'join' as const, context, message, isCurrent: participationCurrent };
         if (Platform.OS === 'ios' && joinModalVisible) {
           void afterPlanModalDismiss('join', pending.isCurrent, () => setNoticePending(pending)).catch(() => {});
           setJoinModalVisible(false);
@@ -896,7 +913,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       joiningRef.current = false;
       if (identity.isCurrent() && !modalTransitionRef.current) setJoinPreparing(false);
     }
-  }, [joinMutation, plan, joinReady, identity, joinModalVisible, isClosedPlan, id, noticeOrganizerName]);
+  }, [joinMutation, plan, joinReady, identity, joinModalVisible, isClosedPlan, id, noticeOrganizerName, planOpenForParticipation]);
 
   const requestAcceptException = exceptionActions.requestAccept;
 

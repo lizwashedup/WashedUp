@@ -1100,3 +1100,74 @@ it('shows confirmed membership and a read-only exit if the joining sheet is stil
   expect(joinSheet().visible).toBe(false); expect(button('Open Chat')).toBeDefined();
   expect(mockJoin).not.toHaveBeenCalled();
 });
+
+describe('participation when an ordinary plan closes', () => {
+  it('retires an already open notice at the cutoff and ignores its old Agree button', async () => {
+    jest.useFakeTimers();
+    try {
+      mockPlan.end_time = new Date(Date.now() + 2000).toISOString();
+      await openTermsFromGreeting();
+      act(() => joinSheet().onDismiss());
+      const notice = participation();
+      expect(notice.visible).toBe(true);
+      act(() => jest.advanceTimersByTime(2000));
+      expect(participation().visible).toBe(false);
+      await act(async () => { expect(await notice.onAgree()).toBe(false); });
+      expect(mockAssent).not.toHaveBeenCalled();
+      expect(mockJoin).not.toHaveBeenCalled();
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not present a late notice after the host cancels during its lookup', async () => {
+    let finish!: (result: { needsAssent: boolean }) => void;
+    mockNotice.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    await mount();
+    act(() => button("Let's Go →").props.onPress());
+    let submission!: Promise<void>;
+    act(() => { submission = joinSheet().onJoin(); });
+    mockPlan = { ...mockPlan, status: 'cancelled' };
+    act(() => tree.update(<PlanDetailScreen />));
+    await act(async () => { finish({ needsAssent: true }); await submission; });
+    act(() => joinSheet().onDismiss());
+    expect(participation().visible).toBe(false);
+    expect(mockAssent).not.toHaveBeenCalled();
+    expect(mockJoin).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the plan after iOS dismisses the introduction and before presenting the notice', async () => {
+    await openTermsFromGreeting();
+    mockPlan = { ...mockPlan, status: 'completed' };
+    act(() => tree.update(<PlanDetailScreen />));
+    await act(async () => joinSheet().onDismiss());
+    expect(participation().visible).toBe(false);
+    expect(mockJoin).not.toHaveBeenCalled();
+  });
+});
+
+it('preserves a submitted assent but cannot dispatch a late join after the plan closes', async () => {
+  await openTermsFromGreeting();
+  act(() => joinSheet().onDismiss());
+  let confirm!: (value: boolean) => void;
+  mockAssent.mockImplementationOnce(() => new Promise(resolve => { confirm = resolve; }));
+  let agreement!: Promise<boolean>;
+  await act(async () => { agreement = participation().onAgree(); });
+  expect(mockAssent).toHaveBeenCalledTimes(1);
+  mockPlan = { ...mockPlan, status: 'cancelled' };
+  act(() => tree.update(<PlanDetailScreen />));
+  await act(async () => { confirm(true); expect(await agreement).toBe(false); });
+  expect(participation().visible).toBe(false);
+  expect(mockAssent).toHaveBeenCalledTimes(1);
+  expect(mockJoin).not.toHaveBeenCalled();
+});
+
+it('does not consume a queued iOS notice dismissal if the plan ended after agreement', async () => {
+  await openTermsFromGreeting();
+  act(() => joinSheet().onDismiss());
+  let agreement!: Promise<boolean>;
+  await act(async () => { agreement = participation().onAgree(); });
+  expect(mockAssent).toHaveBeenCalledTimes(1);
+  mockPlan = { ...mockPlan, status: 'completed' };
+  act(() => tree.update(<PlanDetailScreen />));
+  await act(async () => { participation().onDismiss(); expect(await agreement).toBe(false); });
+  expect(mockJoin).not.toHaveBeenCalled();
+});
