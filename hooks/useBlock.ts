@@ -93,7 +93,9 @@ export function useBlock() {
               }
               if (!isCurrent()) return;
               // Apple 1.2: Instant removal from feed — invalidate all relevant queries
-              queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
+              // Retire discovery snapshots before a refresh can fail offline.
+              void queryClient.resetQueries({ queryKey: ['events', 'feed', user.id] });
+              void queryClient.resetQueries({ queryKey: ['events', 'featured', user.id] });
               queryClient.invalidateQueries({ queryKey: ['events', 'detail'] });
               queryClient.invalidateQueries({ queryKey: ['events', 'members'] });
               queryClient.invalidateQueries({ queryKey: ['event-plans'] });
