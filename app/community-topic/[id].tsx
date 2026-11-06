@@ -232,12 +232,13 @@ export default function CommunityTopicScreen() {
   // a raw RLS error. Unknown (a read that fails) is treated as OPEN: the
   // server still holds the real gate, and guessing closed would silence a
   // room that works.
-  const { data: topicMeta } = useQuery({
+  const topicDetails = useQuery({
     queryKey: scopedKey(['topic-meta', id]),
     queryFn: ({ signal }) => readEntry(() => getTopicMeta(id!), signal),
     enabled: !!id,
     staleTime: 60_000,
   });
+  const topicMeta = topicDetails.data;
   const [clockNow, setClockNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setClockNow(Date.now()), 30_000);
@@ -300,11 +301,12 @@ export default function CommunityTopicScreen() {
     topicMeta?.explore_events?.status !== 'Cancelled';
 
 
-  const { data: payload } = useQuery({
+  const chatCards = useQuery({
     queryKey: scopedKey(['community-chat-cards']),
     queryFn: ({ signal }) => readEntry(() => getCommunityChatPayload(needsCoreIdentity ? identityScope : undefined), signal),
   });
   // members find the room inside their card; attendees find it in their list
+  const payload = chatCards.data;
   const topic =
     payload?.cards.flatMap((c) => c.topics).find((t) => t.id === id) ??
     payload?.attendee_topics.find((t) => t.id === id) ??
@@ -312,7 +314,15 @@ export default function CommunityTopicScreen() {
 
   // event chats open only after you say something (Liz 7-07): RSVP is untouched,
   // but the room stays veiled until your first message lands. back always works.
-  const eventTopic = !!topic?.explore_event_id;
+  // A direct room link can load before its Chats listing, or still work
+  // while that listing is offline. Both sources describe this same topic.
+  const detailEventId = topicMeta?.id === id ? topicMeta?.explore_event_id : undefined;
+  const eventId = detailEventId || topic?.explore_event_id;
+  const eventTopic = !!eventId;
+  const roomKindUnknown = usesLegacyHistory && !eventTopic
+    && detailEventId !== null && topic?.explore_event_id !== null;
+  const checkingRoomKind = topicDetails.isFetching || chatCards.isFetching;
+
   const { data: firstMessage, isSuccess: firstMessageLoaded } = useQuery({
     queryKey: scopedKey(['topic-first-message', id]),
     queryFn: ({ signal }) => readEntry(() => getTopicFirstMessage(id!), signal),
@@ -333,7 +343,7 @@ export default function CommunityTopicScreen() {
     retry: false,
   });
   const gated = eventTopic && !justSaidHi && saidHi === false;
-  const gateChecking = eventTopic && !justSaidHi && saidHi === undefined;
+  const gateChecking = roomKindUnknown || (eventTopic && !justSaidHi && saidHi === undefined);
   const introReadFailed = gateChecking && (introStatusError || introRetrying);
 
   const { data: members = [], isLoading: membersLoading, isError: membersError, refetch: retryMembers } = useQuery({
@@ -378,6 +388,13 @@ export default function CommunityTopicScreen() {
     return () => { coreFocused.current = false; moderatorVisit.current = null; };
   }, [!!introLayout, refreshMessages]));
   useChatResumeRefresh(refreshMessages, entryIsCurrent, coreFocused);
+  const retryRoomKind = () => {
+    if (!roomKindUnknown || !entryIsCurrent() || !coreFocused.current) return;
+    void Promise.allSettled([
+      topicDetails.refetch({ cancelRefetch: false }),
+      chatCards.refetch({ cancelRefetch: false }),
+    ]);
+  };
   const retryIntroStatus = () => {
     if (!entryIsCurrent() || !coreFocused.current || !gateChecking || introRetryAttempt.current || introStatusFetching) return;
     const attempt = {};
@@ -481,11 +498,7 @@ export default function CommunityTopicScreen() {
   const coreReadScope = useMemo(() => ({ userId: myId ?? '', isCurrent: entryIsCurrent }), [myId, entryIsCurrent]);
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(introLayout?.communityId, 'intros', coreReadScope, !!introLayout);
   const topicReadEnabled = !!id && usesLegacyHistory && !anchor && !!myId && myId === muteViewer.viewerId;
-  // Topic history may arrive before the event's introduction requirement.
-  // Only acknowledge when this room is known to be ordinary or its gate has opened.
-  const knownReadableRoom = topic ? (!topic.explore_event_id || justSaidHi || saidHi === true)
-    : !!topicMeta && topicMeta.id === id && topicMeta.explore_event_id === null;
-  const topicReadable = knownReadableRoom && !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId;
+  const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId;
   const ordinaryRead = useVisibleTopicRead(id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
   visibleRead.current = items => {
@@ -548,7 +561,7 @@ export default function CommunityTopicScreen() {
     finally { if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
   const handleSend = async () => {
-    if (!entryIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
+    if (roomKindUnknown || !entryIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
     const finishTiming = beginChatTiming('community-topic', 'send-to-confirmation');
     let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendAttemptRef.current = token; setSending(true);
@@ -1174,7 +1187,18 @@ export default function CommunityTopicScreen() {
 
         {!!anchor && <ChatMessageAnchorNotice fonts={conversationFonts} loading={messagesLoading} unavailable={anchorUnavailable} failed={messagesLoadError} onLatest={() => { setIsAtBottom(true); clearAnchor(); }} />}
         <MessageViewport {...(Platform.OS === 'ios' ? { style: styles.flex, inset: insets.bottom } : {})}>
-        {introReadFailed ? (
+        {roomKindUnknown ? (
+          checkingRoomKind ? <View style={styles.centered}>
+            <ActivityIndicator accessibilityLabel="Checking chat access" size="large" color={Colors.terracotta} />
+          </View> : <View style={styles.loadErrorWrap}>
+            <Text style={styles.loadErrorTitle}>Couldn’t open this chat</Text>
+            <Text style={styles.loadErrorBody}>We couldn’t load the room details.</Text>
+            <TouchableOpacity style={styles.loadRetry} onPress={retryRoomKind}
+              accessibilityRole="button" accessibilityLabel="Retry checking chat access">
+              <CreatorActionFill /><Text style={styles.loadRetryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : introReadFailed ? (
           <View style={styles.loadErrorWrap}>
             <Text style={styles.loadErrorTitle}>Couldn’t open this chat</Text>
             <Text style={styles.loadErrorBody}>We couldn’t check your introduction. Try again, or send a hello below.</Text>
@@ -1289,7 +1313,7 @@ export default function CommunityTopicScreen() {
 
         </MessageViewport>
         <ComposerDock {...(Platform.OS === 'ios' ? { inset: insets.bottom } : {})}>
-        {removedFromCommunity ? (
+        {roomKindUnknown ? null : removedFromCommunity ? (
           <View style={styles.closedNote}>
             {/* SC-07: a real reason, not a silently-broken composer.
                 copy to the taste gate */}
