@@ -157,6 +157,11 @@
       "file": "docs/database/review-only/20261106020000_exact_participation_assent.sql",
       "reason": "Private participation receipt prerequisite. Verify overload dispatch, immutable evidence, grants and server versions on a production-schema copy; separate approval required before promotion or client release.",
       "source": "docs/database/review-only/20261106020000_exact_participation_assent.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261106021000_exact_member_terms_acceptance.sql",
+      "reason": "Private member reacceptance receipt prerequisite. Verify overloads, permissions, version source and evidence on a production-schema copy before separately approved rollout.",
+      "source": "docs/database/review-only/20261106021000_exact_member_terms_acceptance.sql"
     }
   ],
   "unresolved_versions": [

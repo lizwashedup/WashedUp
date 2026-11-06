@@ -62,23 +62,28 @@ export async function recordParticipationAssent(ctx: ParticipationAssentContext,
     p_organizer_name: ctx.organizerName.slice(0, 200),
     p_action: ctx.action,
   }), 12_000, 'Participation receipt');
-  return error === null && typeof data === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(data);
+  return error === null && isReceiptId(data);
 }
 
-export async function getMemberTermsStatus(): Promise<{ needsAcceptance: boolean }> {
-  const { data, error } = await supabase.rpc('get_member_terms_status');
-  if (error) {
-    // Dormant until 49 applies; on any other failure the interstitial
-    // simply does not show this open (it re-asks next open; a blocking
-    // screen must never appear on a failed read, per the blocking-modal
-    // offline-escape rule).
+function isReceiptId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export async function getMemberTermsStatus(): Promise<{ needsAcceptance: boolean; termsVersion?: string }> {
+  const { data, error } = await requestWithDeadline(supabase.rpc('get_member_terms_status'), 12_000);
+  const row = Array.isArray(data) ? (data.length === 1 ? data[0] : null) : data;
+  // An unconfirmed startup read must not open a blocking interstitial.
+  if (error || typeof row?.needs_acceptance !== 'boolean' || typeof row.terms_version !== 'string' || !row.terms_version) {
     return { needsAcceptance: false };
   }
-  const row = Array.isArray(data) ? data[0] : data;
-  return { needsAcceptance: !!row?.needs_acceptance };
+  return { needsAcceptance: row.needs_acceptance, termsVersion: row.terms_version };
 }
 
-export async function recordMemberTermsAcceptance(): Promise<boolean> {
-  const { error } = await supabase.rpc('record_member_terms_acceptance');
-  return !error;
+export async function recordMemberTermsAcceptance(viewerId: string, termsVersion: string): Promise<boolean | 'outdated'> {
+  if (!viewerId || !termsVersion) return false;
+  const { data, error } = await withDeadline(supabase.rpc('record_member_terms_acceptance', {
+    p_expected_user_id: viewerId, p_terms_version: termsVersion,
+  }), 12_000, 'Member terms receipt');
+  if (error?.code === '22023') return 'outdated';
+  return error === null && isReceiptId(data);
 }
