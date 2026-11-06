@@ -26,6 +26,10 @@ try {
   // New database connection: confirms removal survives refresh/reconnection.
   const remaining = run(['exec','-i',container,'psql','-U','postgres','-tAq','-v','ON_ERROR_STOP=1'],{input:"SET ROLE authenticated; SET request.jwt.claim.sub='11111111-1111-4111-8111-111111111111'; SELECT signal_id FROM public.get_user_interest_signals();"}).trim();
   if (remaining !== 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee') throw new Error('Removal did not survive a new connection');
+  const publish = read('docs/database/review-only/20261106010000_atomic_member_draft_publish.sql');
+  const publishContract = read('supabase/tests/contracts/204_member_draft_publish_contract.sql');
+  process.stdout.write(run(['exec','-i',container,'psql','-U','postgres','-v','ON_ERROR_STOP=1'], { input: [publish, publish, publishContract].join('\n') }));
+  console.log('PASS: draft publication, creator membership, rollback, receipt and legacy-client boundaries');
   console.log('PASS: independent similar plans, ordinary/explicit associations, migration idempotency, and unchanged ownership boundaries');
   console.log('PASS: completed-plan interest persists; explicit removal survives reconnection; report permissions and deduplication remain intact');
 } finally {

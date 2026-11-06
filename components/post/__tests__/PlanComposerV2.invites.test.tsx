@@ -20,7 +20,7 @@ import InvitePeopleSection from '../InvitePeopleSection';
 import { BrandedAlert } from '../../BrandedAlert';
 import { buildSimilarPlanParams } from '../../../lib/interestedPlanActions';
 
-const mockUpdateDraft = jest.fn();
+const mockUpdateDraft = jest.fn(), mockPublishReceipt = jest.fn();
 const mockInvite = jest.fn(), mockInsert = jest.fn(), mockMember = jest.fn();
 const mockProfile = jest.fn();
 const mockRollback = jest.fn(), mockCommit = jest.fn();
@@ -58,7 +58,12 @@ jest.mock('../../../lib/supabase', () => ({ supabase: {
   auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null }), refreshSession: jest.fn().mockResolvedValue({ error: null }) },
   from: (table: string) => {
     if (table === 'profiles') return { select: () => ({ eq: (_field: string, id: string) => ({ single: () => mockProfile(id) }) }) };
-    if (table === 'events') return { update: (row: any) => {
+    if (table === 'events') return { select: () => {
+      const filters: Record<string, unknown> = {};
+      const read: any = { eq: (key: string, value: string) => { filters[key] = value; return read; },
+        in: (key: string, values: string[]) => { filters[key] = values; return read; }, maybeSingle: () => mockPublishReceipt(filters) };
+      return read;
+    }, update: (row: any) => {
       const filters: Record<string,string> = {};
       const run = () => mockUpdateDraft(row, filters);
       const query: any = { eq: (key: string, value: string) => { filters[key] = value; return query; },
@@ -278,7 +283,7 @@ async function mount(invite = false, params: Record<string, string> = {}) {
     },
   };
 }
-beforeEach(() => { jest.clearAllMocks(); mockAfterglow = false; mockFocused = true; mockCanGoBack = false;
+beforeEach(() => { jest.clearAllMocks(); mockPublishReceipt.mockReset().mockResolvedValue({data:null,error:null}); mockAfterglow = false; mockFocused = true; mockCanGoBack = false;
   mockPermission.mockReset().mockResolvedValue({ status: 'granted' });
   mockChoosePhoto.mockReset().mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///chosen.jpg' }] });
   mockPreparePhoto.mockReset().mockResolvedValue({ uri: 'file:///prepared.jpg', base64: 'prepared-base64' });
@@ -962,4 +967,33 @@ it('retries a lost draft save receipt against the same owned draft', async () =>
   await act(async () => { await form.saveDraft(); }); expect(form.title()).toBe('Local test walk');
   await act(async () => { await form.saveDraft(); }); expect(form.title()).toBe('');
   expect(mockUpdateDraft).toHaveBeenCalledTimes(2); expect(mockInsert).not.toHaveBeenCalled();
+});
+
+
+it('recovers a lost publication receipt without another creator membership or invitation batch', async () => {
+  let key: string;
+  mockUpdateDraft.mockImplementationOnce(async row => { key = row.member_draft_publish_key; throw new Error('Lost response'); });
+  mockPublishReceipt.mockImplementationOnce(async filters => {
+    expect(filters).toMatchObject({id:'existing', creator_user_id:'creator', member_draft_publish_key:key});
+    return {data:{id:'existing',member_draft_publish_key:key},error:null};
+  });
+  const form = await mount(true, {draftId:'existing'});
+  await act(async () => { await form.post(); });
+  expect(form.confirmation().visible).toBe(true); expect(mockCommit).toHaveBeenCalledWith('existing'); expect(mockUpdateDraft).toHaveBeenCalledTimes(1);
+  expect(mockMember).not.toHaveBeenCalled(); expect(mockInvite).toHaveBeenCalledTimes(1);
+});
+
+it.each([false,true])('only recovers the original request after an uncertain publish (changed=%s)', async changed => {
+  let committed: string;
+  mockUpdateDraft.mockImplementationOnce(async row => { committed=row.member_draft_publish_key; throw new Error('Lost response'); })
+    .mockResolvedValueOnce({data:null,error:null});
+  mockPublishReceipt.mockRejectedValueOnce(new Error('Offline')).mockImplementationOnce(async filters => ({
+    data: filters.member_draft_publish_key === committed ? {id:'existing',member_draft_publish_key:committed} : null,error:null,
+  }));
+  const form=await mount(true,{draftId:'existing'});
+  await act(async()=>{await form.post();}); expect(form.title()).toBe('Local test walk');
+  if (changed) form.setTitle('A different plan');
+  await act(async()=>{await form.post();});
+  expect(form.confirmation().visible).toBe(!changed); expect(mockMember).not.toHaveBeenCalled();
+  expect(mockInvite).toHaveBeenCalledTimes(changed?0:1); expect(mockInsert).not.toHaveBeenCalled();
 });

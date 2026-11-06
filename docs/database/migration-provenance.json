@@ -147,6 +147,11 @@
       "file": "supabase/migrations/20260906231000_has_refund_authority_self_only.sql",
       "reason": "Security repair for the still-held refund-authority function. The base function does not exist in production while 20260904010000_refund_authority_grants.sql remains held. Keep this follow-up excluded until the full refund-authority chain is rebuilt, contract-tested together, and separately approved for production.",
       "source": "supabase/migrations/20260906231000_has_refund_authority_self_only.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261106010000_atomic_member_draft_publish.sql",
+      "reason": "Private draft publication prerequisite. Verify event and membership policies and triggers on a schema copy and obtain separate release approval before promotion or client distribution.",
+      "source": "docs/database/review-only/20261106010000_atomic_member_draft_publish.sql"
     }
   ],
   "unresolved_versions": [
