@@ -228,6 +228,26 @@ it('shows every incomplete publish section and clears corrected fields independe
   expect(field(form.tree, 'Your message, required').props.value).toBe('Hi');
 });
 
+it('lists the outstanding fields at the actions for the last attempted action', async () => {
+  const form = await mount(false, { prefillStartTime: '', prefillEventDate: '' });
+  form.setTitle('');
+  act(() => {
+    form.tree.root.findByType(CategoryChips).props.onSelect(null);
+    field(form.tree, 'Your message, required').props.onChangeText('Hi');
+    field(form.tree, 'Description, required').props.onChangeText('');
+  });
+  const footer = () => form.tree.root.findAll(node =>
+    node.props.accessibilityRole === 'alert' && Array.isArray(node.props.children)
+    && node.props.children[0]?.startsWith?.('To '))[0]?.props.children.join('');
+  await act(async () => { await form.post(); });
+  expect(footer()).toBe('To post, add\nTitle · Category · Message (10+ characters) · Description · Day · Start time');
+  form.setTitle('A walk');
+  expect(footer()).toBe('To post, add\nCategory · Message (10+ characters) · Description · Day · Start time');
+  await act(async () => { await form.saveDraft(); });
+  expect(footer()).toBe('To save your draft, add\nDay · Start time');
+  expect(mockInsert).not.toHaveBeenCalled();
+});
+
 it('keeps optional publish details optional when saving a draft', async () => {
   const form = await mount();
   form.setTitle('');
