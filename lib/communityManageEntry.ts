@@ -5,7 +5,7 @@ import { CreatorPageScopeExpired, type CreatorPageScope } from './creatorPageRev
 import { getPageTeam, type PageTeamRoster } from './creatorPageTeam';
 import { getCreatorAccess, isAdminTierRole, type LedCommunity } from './creatorMode';
 import { mediaUUID } from './creatorPageEventMedia';
-import { newCreatorEventRoute } from './creatorEventRoute';
+import { canCreateLegacyCommunityEvent, newCreatorEventRoute } from './creatorEventRoute';
 import { managementRoute } from './managementNavigation';
 
 export type CommunityManageEntry = { kind: 'page'; route: string } | { kind: 'legacy'; communityId: string; route: string };
@@ -28,7 +28,7 @@ async function publicationExists(id: string, scope: CreatorPageScope) {
   if (result.data && (result.data.page_id !== id || result.data.page_kind !== 'community')) throw Error('This community’s page could not be confirmed.');
   return !!result.data;
 }
-type CommunityCreatorContext = { kind: 'page'; owner: boolean; team?: PageTeamRoster } | { kind: 'legacy'; community: LedCommunity };
+type CommunityCreatorContext = { kind: 'page'; owner: boolean; team?: PageTeamRoster } | { kind: 'legacy'; community: LedCommunity; canCreateEvent: boolean };
 async function resolveContext(id: string, scope: CreatorPageScope, pagesEnabled: boolean): Promise<CommunityCreatorContext | null> {
   if (!mediaUUID(id)) throw Error('Check this community link.');
   await authorization(scope);
@@ -56,7 +56,7 @@ async function resolveContext(id: string, scope: CreatorPageScope, pagesEnabled:
   }
   const access = await getCreatorAccess(scope.userId); await authorization(scope);
   const community = access.ledCommunities.find(item => item.id === id);
-  return community ? { kind: 'legacy', community } : null;
+  return community ? { kind: 'legacy', community, canCreateEvent: canCreateLegacyCommunityEvent(access, community) } : null;
 }
 
 export async function resolveCommunityManageEntry(id: string, scope: CreatorPageScope, pagesEnabled: boolean): Promise<CommunityManageEntry | null> {
@@ -89,7 +89,7 @@ export async function resolveCommunityCreatorActions(id: string, scope: CreatorP
   const action = (key: CommunityCreatorAction['key'], title: string, route: string): CommunityCreatorAction => ({ key, title, route, legacyCommunityId: id });
   return [
     ...(community.status === 'draft' && admin ? [action('setup', 'Continue setup', `${managementRoute('community')}?fromCommunityId=${id}`)] : []),
-    ...(community.status === 'active' && (admin || community.role === 'events') ? [action('event', 'Create event', newCreatorEventRoute('community', id))] : []),
+    ...(context.canCreateEvent ? [action('event', 'Create event', newCreatorEventRoute('community', id))] : []),
     ...(admin ? [action('edit', 'Edit community', `/creator/edit-page?communityId=${id}`)] : []),
   ];
 }

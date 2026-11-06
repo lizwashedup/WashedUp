@@ -10,6 +10,8 @@ The approved QA transaction created a draft under the existing leader’s author
 
 The App Review test account read capability version 1 and looked up a fresh request over the authenticated HTTPS API. Anonymous access was denied. The integrated iPhone 13 simulator also recovered the same pending request across real process restarts with simulated server responses. Live HTTP writes through the integrated phone UI remain a release check. All 427 integrated tests, 87 isolated PostgreSQL checks and the [full regression run](https://github.com/lizwashedup/WashedUp/actions/runs/42138892091) passed.
 
+The private build from PR 168 subsequently passed the phone save/reopen check over loopback HTTP. On an iPhone SE simulator, a cold restart followed by You manage → the community → Events → Drafts recovered the original title, free RSVP choice and capacity of 24. In a second save, the local PostgREST server committed before the relay dropped the response. Check save → Open draft recovered the original 12-person draft with exactly one create request. The test used fictional accounts and a disposable PostgreSQL database. The production HTTP checks above cover authenticated reads. Evidence is in `/Users/liz/Desktop/WashedUp/Implementation/creator-draft-phone-http-20261105/result.json`.
+
 The deployment, independent verification, rollback baseline and HTTP evidence are recorded in `/Users/liz/Desktop/WashedUp/Implementation/creator-daily-workflow-20261105/draft-live-rollout-result.json`. The original review and rollback instructions follow for reference.
 
 ## What changes for a creator

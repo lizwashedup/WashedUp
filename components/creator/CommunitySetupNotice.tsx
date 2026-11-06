@@ -23,8 +23,8 @@ export function CommunitySetupNotice({ community, onNavigate }: {
     </Text>
     <Text style={[s.body, { fontFamily: fonts.regular }]}>
       {archived ? 'New events aren’t available for this community. Choose an active community or organization to create one.'
-        : canFinish ? 'Your community is still a draft. Finish and publish its page before creating an event.'
-        : 'A community admin needs to finish and publish this page before you can create an event.'}
+        : canFinish ? 'Your community is still a draft. Finish setup to publish its page.'
+        : 'A community admin needs to finish and publish this page before its first event.'}
     </Text>
     {action && <Pressable accessibilityRole="button" accessibilityLabel={action} style={s.action}
       onPress={() => onNavigate(archived ? MANAGEMENT_HOME : managementRoute('community'))}>

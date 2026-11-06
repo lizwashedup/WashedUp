@@ -12,8 +12,8 @@ it('binds community creation to the exact authorized identity',async()=>{
  expect(await resolveLegacyEventCreate('community',id,scope)).toMatchObject({workspace:'community',community:{id}});expect(mockAccess).toHaveBeenCalledWith('alice');
  await prepareLegacyEventCreate({workspace:'community',community:club() as any},scope);expect(mockPrepare).toHaveBeenCalledWith(expect.objectContaining({legacy:expect.objectContaining({workspace:'community',communityId:id})}),scope);
 });
-it.each(['member_care','finance','member'])('does not borrow another community’s leader role for %s access',async role=>{
- mockAccess.mockResolvedValue({hasEventHostGrant:true,ledCommunities:[club(role),club('leader','active',other)]});await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow('not available');
+it.each(['admin','events','member_care','finance','member'])('does not borrow another community’s leader role for %s access',async role=>{
+ mockAccess.mockResolvedValue({hasEventHostGrant:true,ledCommunities:[club(role),club('leader','active',other)]});await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow('Ask a leader or co-leader');
 });
 it.each(['draft','archived'])('does not create under a %s community',async status=>{mockAccess.mockResolvedValue({ledCommunities:[club('leader',status)]});await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow();});
 it('explains how an authorized creator can recover from a draft community',async()=>{
@@ -21,7 +21,12 @@ it('explains how an authorized creator can recover from a draft community',async
  await expect(resolveLegacyEventCreate('community',id,scope)).rejects.toThrow('Publish its page from community Settings');
  expect(mockPrepare).not.toHaveBeenCalled();
 });
-it('permits the events role for its own active community',async()=>{mockAccess.mockResolvedValue({ledCommunities:[club('events')]});await expect(resolveLegacyEventCreate('community',id,scope)).resolves.toMatchObject({community:{id}});});
+it('rechecks approval for a leader before saving an open form', async () => {
+  const context = await resolveLegacyEventCreate('community', id, scope);
+  mockAccess.mockResolvedValue({hasLeaderGrant:false,hasEventHostGrant:false,ledCommunities:[club()]});
+  await expect(prepareLegacyEventCreate(context, scope)).rejects.toThrow('approved creator access');
+  expect(mockPrepare).not.toHaveBeenCalled();
+});
 it('requires a current organization approval and no mixed identity',async()=>{
  await expect(resolveLegacyEventCreate('organization',id,scope)).rejects.toThrow('Choose');
  mockAccess.mockResolvedValue({hasEventHostGrant:false,ledCommunities:[club()]});await expect(resolveLegacyEventCreate('organization',undefined,scope)).rejects.toThrow('unavailable');

@@ -1,4 +1,4 @@
-import { newCreatorEventRoute } from './creatorEventRoute';
+import { canCreateLegacyCommunityEvent, newCreatorEventRoute } from './creatorEventRoute';
 import { getCreatorAccess, isAdminTierRole, type CreatorAccess } from './creatorMode';
 import { fetchMyGrants, type OperatorGrant } from './operatorApplications';
 import { requestWithDeadline } from './requestWithDeadline';
@@ -27,7 +27,7 @@ export function communitySetupDestinations(access: CreatorAccess): CreationDesti
     .filter(community => community.status === 'draft' && isAdminTierRole(community.role))
     .map(community => ({
       id: community.id, title: community.name,
-      description: 'Finish and publish this community’s page before creating its first event.',
+      description: 'Finish setting up this community’s page.',
       route: managementRoute('community'), workspace: 'community', communityId: community.id,
     }));
 }
@@ -39,7 +39,7 @@ export function creationDestinations(kind: SceneCreationKind, access: CreatorAcc
     if (access.hasEventHostGrant) destinations.push({ id: 'organization', title: 'Your organization',
       description: 'Create an event under your public name or organization.', route: newCreatorEventRoute('organization'), workspace: 'organization' });
     for (const community of access.ledCommunities) {
-      if (community.status !== 'active' || !(isAdminTierRole(community.role) || community.role === 'events')) continue;
+      if (!canCreateLegacyCommunityEvent(access, community)) continue;
       destinations.push({ id: community.id, title: community.name, description: 'Create an event for this community.',
         route: newCreatorEventRoute('community', community.id), workspace: 'community', communityId: community.id });
     }

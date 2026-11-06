@@ -21,11 +21,15 @@ it('disabled page capabilities leave the established legacy path independent of 
 it('wrong-account sessions are rejected before data reads',async()=>{mockSession.mockResolvedValue({data:{session:{user:{id:other},access_token:'other'}},error:null});await expect(resolveCommunityManageEntry(id,scope,true)).rejects.toThrow();expect(mockRpc).not.toHaveBeenCalled();});
 it('a retired visit discards a late ownership result',async()=>{mockRpc.mockImplementation(async()=>{live=false;return{data:true,error:null};});await expect(resolveCommunityManageEntry(id,scope,true)).rejects.toThrow();expect(mockAccess).not.toHaveBeenCalled();});
 
-it.each(['leader','co_leader','admin','events'])('active legacy %s can start an event for this community',async role=>{
- mockAccess.mockResolvedValue({ledCommunities:[{id,role,status:'active'}]});
+it.each(['leader','co_leader'])('approved legacy %s can start an event for this community',async role=>{
+ mockAccess.mockResolvedValue({hasLeaderGrant:true,ledCommunities:[{id,role,status:'active'}]});
  const actions=await resolveCommunityCreatorActions(id,scope,true);
  expect(actions.find(a=>a.key==='event')).toMatchObject({route:`/creator/event-form?workspace=community&communityId=${id}`,legacyCommunityId:id});
- expect(actions.some(a=>a.key==='edit')).toBe(role!=='events');
+ expect(actions.some(a=>a.key==='edit')).toBe(true);
+});
+it.each(['admin', 'events'])('preserves other legacy %s actions without offering a rejected save', async role => {
+  mockAccess.mockResolvedValue({hasEventHostGrant:true,ledCommunities:[{id,role,status:'active'},{id:other,role:'leader',status:'active'}]});
+  expect((await resolveCommunityCreatorActions(id,scope,true)).map(action => action.key)).toEqual(role === 'admin' ? ['edit'] : []);
 });
 it.each(['member_care','finance'])('%s does not inherit another community’s admin rights',async role=>{
  mockAccess.mockResolvedValue({ledCommunities:[{id,role,status:'active'},{id:other,role:'leader',status:'active'}]});

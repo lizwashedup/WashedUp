@@ -1,4 +1,4 @@
-import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { canCreateLegacyCommunityEvent, newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import { CommunityDailyActions } from '../../components/creator/CommunityDailyActions';
 import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import { ScaledText as Text } from '../../components/ScaledText';
@@ -44,6 +44,7 @@ export default function CreatorTodayScreen() {
   const accessRead = useCreatorAccessRead();
   const { data: access } = accessRead;
   const community = useLedCommunity(access);
+  const canStartEvent = canCreateLegacyCommunityEvent(access, community);
 
   const membersQuery = useQuery({
     queryKey: ['creator-members', community?.id],
@@ -180,9 +181,9 @@ export default function CreatorTodayScreen() {
             destination -- app/creator/member-invites.tsx, backend live since
             2026-09-05 -- so it's wired in here in the spec's fixed order. */}
         <View style={styles.quickActions}>
-          {community?.status === 'active' && <TouchableOpacity
+          {canStartEvent && community && <TouchableOpacity
             style={[styles.quickAction, styles.quickActionPrimary]}
-            onPress={() => router.push((community ? newCreatorEventRoute('community', community.id) : '/(tabs)/friends/manage') as never)}
+            onPress={() => router.push(newCreatorEventRoute('community', community.id) as never)}
             accessibilityRole="button"
             accessibilityLabel="Create event"
             activeOpacity={0.85}
@@ -256,13 +257,13 @@ export default function CreatorTodayScreen() {
           <View style={{ flex: 1, minWidth: 0 }}>
             {/* copy to the taste gate: the card's own eyebrow gives hierarchy */}
             <Text style={styles.cardEyebrow}>{nextEvent ? 'your next event' : 'events'}</Text>
-            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : community?.status === 'active' ? 'Create your next event' : 'Your events'}</Text>
+            <Text style={styles.cardTitle} >{nextEvent ? nextEvent.title : canStartEvent ? 'Create your next event' : 'Your events'}</Text>
             <Text style={styles.cardMeta}>
               {nextEvent
                 ? [nextEvent.event_date ? formatEventDateLA(nextEvent.event_date) : null, nextEvent.venue]
                     .filter(Boolean)
                     .join(' · ')
-                : community?.status === 'active' ? 'Bring your community together. Start with an event.' : 'Find existing events and saved drafts here.'}
+                : canStartEvent ? 'Bring your community together. Start with an event.' : 'Find existing events and saved drafts here.'}
             </Text>
             {attendanceLabel && (
               <Text style={styles.cardCounts} numberOfLines={1}>{attendanceLabel}</Text>
