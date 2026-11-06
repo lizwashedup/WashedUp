@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, SectionList, Text } from 'react-native';
+import { ActivityIndicator, Modal, SectionList, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { AfterglowFallbackFonts } from '../../../constants/Typography';
 import PeopleSearchBar from '../../yours/search/PeopleSearchBar';
@@ -92,6 +92,22 @@ it.each(['excluded', 'removed', 'read-error'])('does not confirm a stale selecti
   act(() => oldConfirm());
   expect(fixture.onConfirm).not.toHaveBeenCalled();
   expect(action(fixture.tree.root, 'Add 1 person')).toBeUndefined();
+});
+
+it('keeps the native modal mounted when the opening identity read resolves', () => {
+  identity = { ...account(), viewerId: undefined, isLoading: true };
+  const picker = mount();
+  const modal = picker.tree.root.findByType(Modal);
+  currentEpoch++;
+  identity = account('viewer');
+  picker.update();
+  expect(picker.tree.root.findByType(Modal)).toBe(modal);
+  select(picker.tree.root, 'alice');
+  act(() => action(picker.tree.root, 'Add 1 person').props.onPress());
+  expect(picker.onConfirm).toHaveBeenCalledTimes(1);
+  picker.update(false);
+  expect(picker.tree.root.findByType(Modal)).toBe(modal);
+  expect(modal.props.visible).toBe(false);
 });
 
 it('clears selections when closed externally, reopened, or switched to another account', () => {
