@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { BrandedAlert } from '../BrandedAlert';
 import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
@@ -48,7 +49,7 @@ type ReportContext = {
   authRevision: number;
 };
 type ReportVisit = { context: ReportContext; visible: boolean; retired: boolean };
-type ReportAttempt = { visit: ReportVisit };
+type ReportAttempt = { visit: ReportVisit; phase: 'checking' | 'sending' };
 type ReportSuccess = { context: ReportContext; allowedVisit: ReportVisit };
 type ReportAlert = { title: string; message: string; visit: ReportVisit; success?: ReportSuccess };
 
@@ -72,6 +73,7 @@ export function ReportModal({
   const successRef = useRef<ReportSuccess | null>(null);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selection, setSelection] = useState<{ visit: ReportVisit; reason: string } | null>(null);
+  const [accountErrorVisit, setAccountErrorVisit] = useState<ReportVisit | null>(null);
   const [attempt, setAttempt] = useState<ReportAttempt | null>(null);
   const [alertInfo, setAlertInfo] = useState<ReportAlert | null>(null);
 
@@ -88,6 +90,7 @@ export function ReportModal({
     activeVisit.current = visit;
     attemptRef.current = null;
     setAttempt(null);
+    setAccountErrorVisit(null);
     setSelection(null);
     const success = successRef.current;
     // Only the successful submit's own visible -> hidden transition inherits
@@ -140,7 +143,8 @@ export function ReportModal({
   const handleClose = () => {
     // Dismissal remains available if account/scope eligibility is unknown.
     if (activeVisit.current !== visit || !visible || visit.retired ||
-        authRevisionRef.current !== context.authRevision || attemptRef.current?.visit === visit) return;
+        authRevisionRef.current !== context.authRevision ||
+        (attemptRef.current?.visit === visit && attemptRef.current.phase === 'sending')) return;
     visit.retired = true;
     setSelection(null);
     setAlertInfo(null);
@@ -149,14 +153,15 @@ export function ReportModal({
 
   const handleSubmit = async () => {
     if (!selectedReason || !reportedUserId || !visitIsCurrent(visit) || attemptRef.current?.visit === visit) return;
-    const ownedAttempt: ReportAttempt = { visit };
+    let ownedAttempt: ReportAttempt = { visit, phase: 'checking' };
+    setAccountErrorVisit(null);
     attemptRef.current = ownedAttempt;
     setAttempt(ownedAttempt);
     setAlertInfo(null);
     const ownsAttempt = () => attemptRef.current === ownedAttempt && visitIsCurrent(visit);
 
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: { user }, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!ownsAttempt()) return;
       if (authError) throw authError;
       if (!user || (scope && user.id !== scope.userId) ||
@@ -166,6 +171,9 @@ export function ReportModal({
       const reporterId = scope?.userId ?? user.id;
       if (authUser.current === undefined) authUser.current = reporterId;
 
+      ownedAttempt = { visit, phase: 'sending' };
+      attemptRef.current = ownedAttempt;
+      setAttempt(ownedAttempt);
       const { error } = await supabase.from('reports').insert({
         reporter_user_id: reporterId,
         reported_user_id: reportedUserId,
@@ -194,7 +202,12 @@ export function ReportModal({
       }, 350);
       onClose();
     } catch {
-      if (ownsAttempt()) setAlertInfo({
+      if (!ownsAttempt()) return;
+      if (ownedAttempt.phase === 'checking') {
+        setAccountErrorVisit(visit);
+        return;
+      }
+      setAlertInfo({
         title: 'Could not submit report',
         message: 'Please email hello@washedup.app and we\'ll look into it.',
         visit,
@@ -223,7 +236,9 @@ export function ReportModal({
           <TouchableOpacity
             onPress={handleClose}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            disabled={submitting}
+            accessibilityLabel="Close report"
+            accessibilityRole="button"
+            disabled={submitting && attempt?.phase === 'sending'}
           >
             <Ionicons name="close" size={22} color={Colors.asphalt} />
           </TouchableOpacity>
@@ -288,6 +303,11 @@ export function ReportModal({
             },
           ]}
         >
+          {accountErrorVisit === visit && scopeReady && (
+            <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.accountError}>
+              We couldn’t check your account. Try submitting again.
+            </Text>
+          )}
           <TouchableOpacity
             style={[styles.submitBtn, (!selectedReason || !scopeReady) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
@@ -422,6 +442,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderTopWidth: 1,
     borderTopColor: Colors.inputBg,
+  },
+  accountError: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: FontSizes.bodySM,
+    color: Colors.asphalt,
+    marginBottom: 8,
   },
   submitBtn: {
     backgroundColor: Colors.terracotta,

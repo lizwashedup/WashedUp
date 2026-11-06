@@ -75,16 +75,16 @@ it('submits the original report schema once and shows success after its own clos
   expect(f.alert()).toMatchObject({ visible: true, title: 'Report submitted' });
 });
 
-it('locks duplicate retained submit and Android back callbacks before rerender', async () => {
+it('locks duplicate submit and lets Back cancel before the account check finishes', async () => {
   const auth = deferred<ReturnType<typeof user>>(); mockGetUser.mockReturnValue(auth.promise);
   const f = mount(); f.choose();
   const submit = f.submit(); const close = f.close;
   let first!: Promise<void>; let second!: Promise<void>;
   act(() => { first = submit(); second = submit(); close(); });
   expect(mockGetUser).toHaveBeenCalledTimes(1);
-  expect(f.onClose).not.toHaveBeenCalled();
+  expect(f.onClose).toHaveBeenCalledTimes(1);
   await act(async () => { auth.resolve(user()); await Promise.all([first, second]); });
-  expect(mockInsert).toHaveBeenCalledTimes(1);
+  expect(mockInsert).not.toHaveBeenCalled();
 });
 
 it('never adopts a replacement account returned by delayed auth', async () => {
@@ -316,10 +316,36 @@ it('keeps missing identity and auth errors retryable without dispatching an inse
   mockGetUser.mockResolvedValueOnce({ ...user(), error: new Error('identity unavailable') });
   const f = mount(); f.choose();
   await act(async () => { await f.submit()(); });
-  expect(f.alert().visible).toBe(true);
+  expect(f.tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toMatch(/check your account/);
   await act(async () => { await f.submit()(); });
   expect(mockInsert).not.toHaveBeenCalled();
   expect(f.submitDisabled()).toBe(false);
   await act(async () => { await f.submit()(); });
   expect(mockInsert).toHaveBeenCalledTimes(1);
+});
+
+
+it('recovers a stalled account check and retries the original reason exactly once', async () => {
+  const auth = deferred<ReturnType<typeof user>>();
+  mockGetUser.mockReturnValueOnce(auth.promise);
+  const f = mount(); f.choose('Harassment or bullying');
+  let work!: Promise<void>;
+  act(() => { work = f.submit()(); });
+  await act(async () => { jest.advanceTimersByTime(12_000); await work; });
+  expect(f.tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toMatch(/check your account/);
+  expect(f.submitDisabled()).toBe(false);
+  expect(mockInsert).not.toHaveBeenCalled();
+  await act(async () => { await f.submit()(); auth.resolve(user()); });
+  expect(mockInsert).toHaveBeenCalledTimes(1);
+  expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({ reason: 'Harassment or bullying' }));
+});
+
+it('locks Close once the report write is dispatched', async () => {
+  const write = deferred<{error: null}>(); mockInsert.mockReturnValueOnce(write.promise);
+  const f = mount(); f.choose(); let pending!: Promise<void>;
+  await act(async () => { pending = f.submit()(); });
+  expect(mockInsert).toHaveBeenCalledTimes(1);
+  act(() => f.close()); expect(f.onClose).not.toHaveBeenCalled();
+  await act(async () => { write.resolve({error:null}); await pending; });
+  expect(f.onClose).toHaveBeenCalledTimes(1);
 });
