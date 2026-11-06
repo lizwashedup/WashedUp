@@ -726,3 +726,47 @@ it('cannot acknowledge an old room page when the viewport changes after leaving'
   visible = true; retained(); await flush();
   expect(readReceipts).not.toHaveBeenCalled(); expect(clearNotifications).not.toHaveBeenCalled();
 });
+
+it.each(['event', 'circle'] as const)('acknowledges exposed live %s messages once, even across a delayed refresh', async kind => {
+  jest.useFakeTimers();
+  try {
+    const key = { kind, id: 'room' };
+    const parent = kind === 'event' ? { event_id: key.id } : { circle_id: key.id, event_id: null };
+    const live = message(5, { ...parent, created_at: '2026-11-06T12:00:00.123457Z' });
+    const earlier = message(4, { ...parent, created_at: '2026-11-06T12:00:00.123456Z' });
+    const held = deferred<ReadResult>();
+    blocked = ['blocked-person'];
+    readMessages.mockResolvedValueOnce(result()).mockReturnValueOnce(held.promise);
+    let exposed = false;
+    const fixture = mount(key, () => true, () => exposed);
+    await flush();
+    let refresh!: Promise<void>;
+    act(() => { refresh = fixture.chat.refetch(true); });
+    await flush();
+    await emit('INSERT', live);
+    await emit('INSERT', earlier);
+    await emit('INSERT', live);
+    await act(async () => { await jest.advanceTimersByTimeAsync(250); });
+    expect(readReceipts).not.toHaveBeenCalled();
+    expect(fixture.chat.messages.map(row => row.id)).toContain(live.id);
+    exposed = true;
+    fixture.chat.checkVisiblePage();
+    await emit('INSERT', message(6, { ...parent, user_id: 'viewer' }));
+    await emit('INSERT', message(7, { ...parent, user_id: 'blocked-person' }));
+    await emit('INSERT', message(8, {event_id: 'other-room', circle_id: 'other-room'}));
+    await act(async () => { await jest.advanceTimersByTimeAsync(250); });
+    expect(readReceipts).toHaveBeenCalledTimes(1);
+    expect(readReceipts.mock.calls[0][0]).toMatchObject({[kind === 'event' ? 'event_id' : 'circle_id']: 'room', user_id: 'viewer', last_read_at: live.created_at});
+    held.resolve(result(earlier));
+    await act(async () => { await refresh; });
+    await emit('INSERT', live);
+    fixture.chat.checkVisiblePage();
+    await act(async () => { await jest.advanceTimersByTimeAsync(250); });
+    expect(readReceipts).toHaveBeenCalledTimes(1);
+    expect(clearNotifications).toHaveBeenCalledTimes(kind === 'event' ? 1 : 0);
+    expect(readMessages).toHaveBeenCalledTimes(2);
+  } finally {
+    cleanup.splice(0).forEach(close => close());
+    jest.useRealTimers();
+  }
+});
