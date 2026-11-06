@@ -21,6 +21,7 @@ export interface PlanJoinSheetProps {
   confirmed: boolean;
   error?: string | null;
   unconfirmed: boolean;
+  unavailable?: boolean;
   busy: boolean;
   canJoin: boolean;
   onMessage: (value: string) => void;
@@ -69,7 +70,8 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
   const active = () => current() && latest.current.visible && !closing.current;
   const blocked = () => !active() || latest.current.busy || !!operation.current;
   const disabled = props.busy || pending !== null;
-  const editable = !disabled && !uncertain.current;
+  const checkOnly = uncertain.current || !!props.unavailable;
+  const editable = !disabled && !checkOnly;
   const canSubmit = props.canJoin && props.confirmed && !!props.message.trim() && props.message.length <= 200 && !uncertain.current;
 
   const close = () => {
@@ -86,8 +88,8 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
   const run = async (kind: 'join' | 'check') => {
     if (blocked()) return;
     const value = latest.current;
-    if (kind === 'join' && (!value.canJoin || !value.confirmed || !value.message.trim() || value.message.length > 200 || uncertain.current)) return;
-    if (kind === 'check' && !uncertain.current) return;
+    if (kind === 'join' && (!value.canJoin || !value.confirmed || !value.message.trim() || value.message.length > 200 || uncertain.current || value.unavailable)) return;
+    if (kind === 'check' && !uncertain.current && !value.unavailable) return;
     const attempt = {}; operation.current = attempt;
     setPending(kind); setCallbackError(null); Keyboard.dismiss();
     try {
@@ -105,10 +107,10 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
       }
     }
   };
-  const label = pending === 'check' ? 'Checking…' : disabled ? 'Joining…' : uncertain.current ? 'Check plan' : 'Join';
+  const label = pending === 'check' ? 'Checking…' : disabled ? 'Joining…' : uncertain.current ? 'Check plan' : props.unavailable ? 'View plan' : 'Join';
   // The uncertainty notice already explains the membership result once.
   const shownError = (!props.unconfirmed && props.error) || callbackError;
-  const actionDisabled = disabled || (!uncertain.current && !canSubmit);
+  const actionDisabled = disabled || (!checkOnly && !canSubmit);
 
   return <Modal visible={props.visible} transparent animationType="fade" statusBarTranslucent
     onRequestClose={close} onDismiss={dismiss} onAccessibilityEscape={close}>
@@ -137,7 +139,7 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
             accessibilityLabel="Say something to everyone (required)" accessibilityHint="Your message is posted to the plan chat when you join. Maximum 200 characters."
             placeholder="Hey everyone! Can't wait" placeholderTextColor={fonts ? AfterglowColors.muted : Colors.textLight}
             value={props.message} onChangeText={value => {
-              if (blocked() || uncertain.current) return;
+              if (blocked() || uncertain.current || latest.current.unavailable) return;
               setCallbackError(null); latest.current.onMessage(value);
             }} editable={editable} multiline maxLength={200} inputAccessoryViewID={JOIN_KEYBOARD_ACCESSORY_ID} />
           <View style={styles.hintRow}>
@@ -146,7 +148,7 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
           </View>
           <TouchableOpacity style={styles.checkRow} activeOpacity={0.7} disabled={!editable}
             accessibilityRole="checkbox" accessibilityLabel="I'm coming" aria-checked={props.confirmed} accessibilityState={{ checked: props.confirmed, disabled: !editable }}
-            onPress={() => { if (!blocked() && !uncertain.current) latest.current.onConfirmed(!latest.current.confirmed); }}>
+            onPress={() => { if (!blocked() && !uncertain.current && !latest.current.unavailable) latest.current.onConfirmed(!latest.current.confirmed); }}>
             <View style={[styles.checkbox, props.confirmed && styles.checkboxChecked]}>
               {props.confirmed && <Text style={styles.checkmark}>✓</Text>}
             </View>
@@ -159,7 +161,7 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
           {!!shownError && <Text style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="polite">{shownError}</Text>}
         </ScrollView>
         <View style={styles.footer}>
-          <TouchableOpacity onPress={() => { void run(uncertain.current ? 'check' : 'join'); }}
+          <TouchableOpacity onPress={() => { void run(uncertain.current || props.unavailable ? 'check' : 'join'); }}
             style={[styles.joinButton, actionDisabled && styles.disabled]} disabled={actionDisabled} activeOpacity={0.85}
             accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: actionDisabled, busy: disabled }}>
             {disabled && <ActivityIndicator size="small" color={fonts ? AfterglowColors.white : Colors.white} />}

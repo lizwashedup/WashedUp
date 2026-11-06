@@ -9,7 +9,7 @@ import { friendlyError } from '../lib/friendlyError';
 import { logError } from '../lib/logger';
 import { withDeadline, withTimeout } from '../lib/withTimeout';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
-import { classifyPlanJoinReceipt, type PlanJoinRpc } from '../lib/planJoinSafety';
+import { classifyPlanJoinReceipt, type PlanJoinDenial, type PlanJoinRpc } from '../lib/planJoinSafety';
 import type { CirclePlanContext } from './useCirclePlanContext';
 
 export type PlanJoinResult = { greetingUnconfirmed?: string; greetingNotSent?: string };
@@ -18,14 +18,16 @@ type Options = {
   eventId: string; viewerId: string | null; epoch: number; isCurrent: () => boolean;
   ready: boolean; startTime?: string; endTime?: string | null; status?: unknown;
   circle: CirclePlanContext | undefined; age: number | null; gender: string | null;
-  onJoined: (result: PlanJoinResult) => void; onError: (message: string) => void;
+  onJoined: (result: PlanJoinResult) => void; onError: (message: string, reason?: PlanJoinDenial) => void;
 };
 type JoinState = { pending: Call | null; result: 'idle' | 'unknown' | 'joined' };
 type Call = { eventId: string; viewerId: string; greeting?: string; rpc: PlanJoinRpc;
   startTime: string; endTime?: string | null; status?: unknown; age: number | null; gender: string | null;
   ownChat: boolean; state: JoinState; isCurrent: () => boolean; dispatched: boolean };
 class UnknownJoin extends Error {}
-class ConfirmedJoinRefusal extends Error {}
+class ConfirmedJoinRefusal extends Error {
+  constructor(readonly reason: PlanJoinDenial) { super(denialCopy[reason]); }
+}
 const unknownCopy = 'We haven’t received confirmation yet. Check this plan before trying to join again.';
 const denialCopy = {
   full: 'This plan just filled up.', not_found: 'This plan is no longer available.',
@@ -133,7 +135,7 @@ export function usePlanJoin(options: Options) {
       }
       const receipt = classifyPlanJoinReceipt(result?.data, call.rpc);
       if (receipt.kind === 'unknown') throw new UnknownJoin();
-      if (receipt.kind === 'denied') throw new ConfirmedJoinRefusal(denialCopy[receipt.reason]);
+      if (receipt.kind === 'denied') throw new ConfirmedJoinRefusal(receipt.reason);
       call.state.result = 'joined'; // remains locked even if this visit retired
       if (!call.isCurrent()) return false;
       if (!call.ownChat) return {};
@@ -146,7 +148,9 @@ export function usePlanJoin(options: Options) {
       // malformed-receipt failures in Sentry.
       if (!(error instanceof ConfirmedJoinRefusal)) logError(error, 'plan.join');
       if (error instanceof UnknownJoin) call.state.result = 'unknown';
-      if (call.isCurrent()) latest.current.onError(error instanceof UnknownJoin ? unknownCopy : friendlyError(error, 'Couldn’t join this plan. Try again.'));
+      if (!call.isCurrent()) return;
+      if (error instanceof ConfirmedJoinRefusal) latest.current.onError(error.message, error.reason);
+      else latest.current.onError(error instanceof UnknownJoin ? unknownCopy : friendlyError(error, 'Couldn’t join this plan. Try again.'));
     },
     onSettled: (_data, _error, call) => {
       if (call.state.pending === call) call.state.pending = null;

@@ -91,7 +91,7 @@ import { openUrl } from '../../lib/url';
 import LinkifiedText from '../../components/LinkifiedText';
 import { friendlyError } from '../../lib/friendlyError';
 import { logError } from '../../lib/logger';
-import { joinErrorSurface } from '../../lib/planJoinSafety';
+import { joinErrorSurface, type PlanJoinDenial } from '../../lib/planJoinSafety';
 import { buildPlanEditRulePatch } from '../../lib/planEditRules';
 import { resolveManagePlanImageUrl } from '../../lib/planPhotoEdit';
 import {
@@ -274,7 +274,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<{ message: string; reason?: PlanJoinDenial } | null>(null);
+  function openJoinSheet() {
+    setJoinError(null);
+    setJoinModalVisible(true);
+  }
   const [shareAfterJoinPending, setShareAfterJoinPending] = useState(false);
   const joinedNotification = useRef<{ userId: string; planId: string; isCurrent: () => boolean } | null>(null);
   const finishJoinNotifications = () => {
@@ -708,7 +712,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
   const joiningRef = useRef(false);
   const [joinPreparing, setJoinPreparing] = useState(false);
-  const joinReady = !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
+  const noSpotAvailable = contextReady && membersQuery.isSuccess && effectiveIsFull && (isCirclePlan || !waitlistNotified);
+  const refusedSpot = joinModalVisible && (joinError?.reason === 'full' || joinError?.reason === 'waitlist_priority');
+  const joinReady = !noSpotAvailable && !refusedSpot && !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
   const showGreetingProblem = (greeting: { text: string; notSent: boolean }) => {
     const isCurrent = joinMutation.isCurrent;
     const recovery = { isCurrent };
@@ -775,9 +781,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       }
 
     },
-    onError: (message) => {
-      if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError(message);
-      else setBrandedAlert({ visible: true, title: 'Joining this plan', message });
+    onError: (message, reason) => {
+      if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError({ message, reason });
+      else {
+        invitationCompletion.current = null;
+        setBrandedAlert({ visible: true, title: 'Joining this plan', message });
+      }
     },
   });
 
@@ -829,7 +838,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     } catch {
       if (joinMutation.isCurrent()) {
         const message = 'Couldn’t check the joining details. Try again.';
-        if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError(message);
+        if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError({ message });
         else setBrandedAlert({ visible: true, title: 'Joining this plan', message });
       }
     } finally {
@@ -1605,7 +1614,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         ) : waitlistNotified ? (
           <TouchableOpacity
             style={styles.claimSpotButton}
-            onPress={() => { hapticLight(); setJoinModalVisible(true); }}
+            onPress={() => { hapticLight(); openJoinSheet(); }}
             activeOpacity={0.85}
           >
             <Text style={styles.claimSpotText}>Claim Your Spot</Text>
@@ -1648,7 +1657,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
                 const complete=invitation.prepareAcceptance();if(!complete)return;
                 invitationCompletion.current=complete;hapticMedium();
                 if(isCirclePlan&&circleViewerIsMember)requestJoin(undefined);
-                else setJoinModalVisible(true);
+                else openJoinSheet();
               }} activeOpacity={0.9}>
               <Text numberOfLines={1} style={styles.acceptInviteText}>Join the plan</Text>
             </TouchableOpacity>
@@ -1667,8 +1676,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               if (isCirclePlan && circleViewerIsMember) {
                 requestJoin(undefined);
               } else {
-                setJoinError(null);
-                setJoinModalVisible(true);
+                openJoinSheet();
               }
             }}
             activeOpacity={0.9}
@@ -1687,11 +1695,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       <PlanJoinSheet visible={joinModalVisible} planId={id} appearance={appearance}
         planTitle={plan.title} dateLabel={`${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}`}
-        message={joinMessage} confirmed={joinConfirmed} error={joinError} unconfirmed={joinMutation.unconfirmed}
+        message={joinMessage} confirmed={joinConfirmed} error={joinError?.message ?? (noSpotAvailable ? 'This plan just filled up.' : null)}
+        unavailable={noSpotAvailable || refusedSpot} unconfirmed={joinMutation.unconfirmed}
         busy={joinPreparing || joinMutation.isPending} canJoin={joinReady}
         onMessage={(value) => { setJoinMessage(value); setJoinError(null); }} onConfirmed={setJoinConfirmed}
         onJoin={() => requestJoin(joinMessage)} onClose={() => {invitationCompletion.current=null;setJoinModalVisible(false);}}
-        onCheck={async () => { setJoinModalVisible(false); await Promise.all([membersQuery.refetch(), planQuery.refetch()]); }}
+        onCheck={async () => { invitationCompletion.current = null; setJoinModalVisible(false); await Promise.all([membersQuery.refetch(), planQuery.refetch()]); }}
         onDismiss={() => {
           if (modalTransition) { finishPlanModalDismiss('join', modalTransition); return; }
           if (pendingGreetingProblem && joinMutation.isCurrent()) {
