@@ -395,6 +395,38 @@ it('keeps the survey ahead of the primer and a TOP rating defers the primer for 
   await tick(2000); expect(primers()).toHaveLength(0); expect(mockRegister).not.toHaveBeenCalled();
 });
 
+it.each(['account change', 'unmount'])('retires the delayed review request on %s', async transition => {
+  mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); await mount();
+  act(() => { tree!.root.findByType('SurveyFixture' as any).props.onComplete(true); }); await flush();
+  if (transition === 'unmount') await unmount(); else await emitAuth('SIGNED_IN', PERSON_B);
+  await tick(1000); expect(mockReview).not.toHaveBeenCalled();
+});
+it('a retained survey callback cannot request review for another account', async () => {
+  mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); await mount();
+  const complete = tree!.root.findByType('SurveyFixture' as any).props.onComplete;
+  await emitAuth('SIGNED_IN', PERSON_B); act(() => { complete(true); }); await tick(1000);
+  expect(mockReview).not.toHaveBeenCalled();
+});
+it('coalesces duplicate TOP completions into one review request', async () => {
+  mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); await mount();
+  const complete = tree!.root.findByType('SurveyFixture' as any).props.onComplete;
+  act(() => { complete(true); complete(true); }); await tick(1000); expect(mockReview).toHaveBeenCalledTimes(1);
+});
+it('does not let an older handoff timer unlock a newer dismissal', async () => {
+  mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); await mount();
+  const complete = tree!.root.findByType('SurveyFixture' as any).props.onComplete;
+  act(() => { complete(false); }); await tick(200);
+  act(() => { complete(false); }); await tick(200); expect(primers()).toHaveLength(0);
+  await tick(200); expect(primers()).toHaveLength(1);
+});
+it('revokes a dispatched review helper’s presentation guard immediately on account change', async () => {
+  mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); const pending=deferred<void>();mockReview.mockReturnValueOnce(pending.promise);
+  await mount();act(()=>{tree!.root.findByType('SurveyFixture' as any).props.onComplete(true);});await tick(460);
+  const guard=mockReview.mock.calls[0][0];expect(typeof guard).toBe('function');expect(guard()).toBe(true);
+  act(()=>{mockUser=PERSON_B;for(const callback of mockAuthListeners)void callback('SIGNED_IN',{user:PERSON_B});expect(guard()).toBe(false);});
+  pending.resolve();await flush();
+});
+
 it('does not revive eligibility that resolves after a TOP survey hands off to review', async () => {
   const eligibility = deferred<string>(); mockEligibility.mockReturnValue(eligibility.promise);
   mockSurveyRpc.mockResolvedValueOnce(surveyPayload()); await mount();
