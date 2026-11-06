@@ -10,6 +10,14 @@ export function useInboxNotificationScope(userId: string | null, visible: boolea
     committed.current = visit;
     return () => { if (committed.current === visit) committed.current = null; };
   }, [visit]);
-  return useMemo(() => ({ userId, isCurrent: () => committed.current === visit && visible && !!userId && viewer.viewerId === userId && !viewer.isLoading && !viewer.error && viewer.isCurrent() }),
-    [userId, visible, visit, viewer.viewerId, viewer.isLoading, viewer.error, viewer.isCurrent]);
+  const ready = !!userId && viewer.viewerId === userId && !viewer.isLoading && !viewer.error;
+  const readOwner = useMemo(() => ({
+    userId,
+    isCurrent: () => ready && viewer.isCurrent(),
+  }), [userId, ready, viewer.isCurrent]);
+  const identityUnavailable = !viewer.isLoading && !ready;
+  return useMemo(() => ({
+    userId, epoch: viewer.epoch, ready, readOwner, identityUnavailable, retryIdentity: viewer.retry,
+    isCurrent: () => committed.current === visit && visible && readOwner.isCurrent(),
+  }), [userId, viewer.epoch, ready, readOwner, identityUnavailable, viewer.retry, visit, visible]);
 }

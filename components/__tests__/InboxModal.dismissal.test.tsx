@@ -5,12 +5,16 @@ import InboxModal from '../InboxModal';
 const mockPush = jest.fn(), mockClose = jest.fn(), mockWrite = jest.fn();
 let mockCurrent = true;
 let mockInvites: any[] = [];
+let mockNoticeError = false;
+let mockExpiresAt: string | null = null;
+const mockRetryNotices = jest.fn();
 const mockClient = { invalidateQueries: jest.fn().mockResolvedValue(undefined), setQueryData: jest.fn() };
 const mockReadInvite = jest.fn(), mockFilters = jest.fn();
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
-jest.mock('../../hooks/useInboxNotificationScope', () => ({ useInboxNotificationScope: () => ({ userId: 'fictional-viewer', isCurrent: () => mockCurrent }) }));
+jest.mock('../../hooks/useInboxNotificationScope', () => ({ useInboxNotificationScope: () => ({ ready: true, epoch: 1, userId: 'fictional-viewer', isCurrent: () => mockCurrent }) }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient, useQuery: ({queryKey}: any) => ({
-  data: queryKey[0] === 'app-notifications' ? [{id:'fictional-notice',type:'member_joined',title:'Fictional reminder',event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: jest.fn(), isLoading: false,
+  isError: queryKey[0] === 'app-notifications' && mockNoticeError,
+  data: queryKey[0] === 'app-notifications' ? mockNoticeError ? undefined : [{id:'fictional-notice',type:'member_joined',title:'Fictional reminder',expires_at:mockExpiresAt,event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: queryKey[0] === 'app-notifications' ? mockRetryNotices : jest.fn(), isLoading: false,
 }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: () => {
   let writing=false;
@@ -26,7 +30,7 @@ jest.mock('../BrandedAlert', () => ({ BrandedAlert: () => null }));
 jest.mock('../legal/ParticipationNotice', () => ({ ParticipationNotice: () => null }));
 let tree: ReactTestRenderer;
 const row = () => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === 'Fictional reminder'))!;
-beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockInvites = []; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
+beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockInvites = []; mockNoticeError = false; mockExpiresAt = null; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
 afterEach(() => act(() => tree.unmount()));
 it('does not open a chat before its native inbox window dismisses', async () => {
   await act(async () => row().props.onPress());
@@ -194,5 +198,27 @@ it('times out a stalled reply and a stale failure cannot affect a reopened sheet
     expect(renderedText()).toContain('Not This Time');
     expect(renderedText()).not.toContain('Retry decline');
     expect(mockWrite).toHaveBeenCalledTimes(1);
+  } finally {jest.useRealTimers();}
+});
+
+it('shows retry on a first notice-read failure, including alongside a loaded invitation',async()=>{
+  mockNoticeError = true;
+  act(()=>tree.update(renderInbox()));
+  expect(renderedText()).toContain('Couldn’t refresh your notifications.');
+  expect(renderedText().join(' ')).not.toMatch(/will show up here/);
+  await showInvite();
+  expect(renderedText()).toContain('Sunset picnic');
+  act(()=>inviteButton('Retry').props.onPress());
+  expect(mockRetryNotices).toHaveBeenCalledTimes(1);
+});
+
+it('removes a locally expired notice while the inbox stays open',async()=>{
+  jest.useFakeTimers();
+  try {
+    mockExpiresAt = new Date(Date.now() + 800).toISOString();
+    act(()=>tree.update(renderInbox()));
+    expect(renderedText()).toContain('Fictional reminder');
+    await act(async()=>{await jest.advanceTimersByTimeAsync(801);});
+    expect(renderedText()).not.toContain('Fictional reminder');
   } finally {jest.useRealTimers();}
 });
