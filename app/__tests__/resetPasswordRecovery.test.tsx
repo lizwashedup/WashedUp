@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Text, TextInput, TouchableOpacity, Platform } from 'react-native';
+import { Text, TextInput, TouchableOpacity, Platform, Dimensions, ScrollView, StyleSheet } from 'react-native';
+import { FontSizes } from '../../constants/Typography';
 import ResetPasswordScreen from '../reset-password';
 import { BrandedAlert } from '../../components/BrandedAlert';
 const mockUpdate = jest.fn(), mockSignOut = jest.fn(), mockReplace = jest.fn();
@@ -34,12 +35,13 @@ const fill = () => act(() => { for (const field of fields()) field.props.onChang
 const submit = async () => { await act(async () => { await action().props.onPress(); }); };
 const chooseExit = async () => { act(() => { alert().buttons[0].onPress(); alert().onClose(); }); await flush(); };
 const dismiss = async () => { act(() => alert().onDismiss()); await flush(); };
+const originalWindow = Dimensions.get('window');
 beforeEach(async () => {
   jest.clearAllMocks(); mockViewer = 'person-a'; mockEpoch = 1; mockFocused = true; mockLoading = false;
   mockUpdate.mockReset().mockResolvedValue({ error: null }); mockSignOut.mockReset().mockResolvedValue({ error: null });
   await act(async () => { tree = create(screen()); }); fill();
 });
-afterEach(() => { act(() => tree?.unmount()); tree = undefined; });
+afterEach(() => { act(() => tree?.unmount()); tree = undefined; act(() => Dimensions.set({ window: originalWindow })); });
 it('dispatches one update for rapid button and keyboard submit', async () => {
   const p = deferred(); mockUpdate.mockReturnValue(p.promise);
   act(() => { action().props.onPress(); fields()[1].props.onSubmitEditing(); }); await flush();
@@ -119,4 +121,34 @@ it('does not run a retained sign-in button against a later successful visit', as
   await submit(); act(() => alert().onClose()); await dismiss(); const oldExit = action().props.onPress;
   mockFocused = false; await redraw(); mockFocused = true; await redraw(); fill(); await submit();
   act(() => { oldExit(); }); await dismiss(); expect(mockSignOut).not.toHaveBeenCalled();
+});
+
+it('retains secure fields, drafts and the pending write while text resizes on a small screen', async () => {
+  const inputs = fields(), scroll = tree!.root.findByType(ScrollView);
+  const pendingWrite = deferred(); mockUpdate.mockReturnValueOnce(pendingWrite.promise);
+  act(() => { void action().props.onPress(); }); await flush();
+  for (const fontScale of [1.35, 3.2, 1]) {
+    act(() => Dimensions.set({ window: { ...originalWindow, width: 320, height: 568, fontScale } })); await flush();
+    expect(tree!.root.findByType(ScrollView)).toBe(scroll);
+    expect(fields()).toEqual(inputs);
+    for (const input of fields()) {
+      expect(input.props.value).toBe('fictional-test-only');
+      expect(input.props.secureTextEntry).toBe(true);
+      const style = StyleSheet.flatten(input.props.style);
+      // Effective type scales once, in both directions, without remounting the
+      // native editor or losing a pending password update.
+      const effectiveSize = style.fontSize * (input.props.allowFontScaling === false ? 1 : fontScale);
+      expect(effectiveSize).toBeCloseTo(FontSizes.bodyLG * fontScale);
+      expect(style.minHeight).toBeGreaterThanOrEqual(effectiveSize + 24);
+    }
+    expect(action().props.disabled).toBe(true);
+    act(() => { void fields()[1].props.onSubmitEditing(); }); await flush();
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+  }
+  pendingWrite.resolve({ error: new Error('offline') }); await flush();
+  expect(text('Please try again')).toBe(true);
+  expect(action().props.disabled).toBe(false);
+  expect(fields()[0].props.value).toBe('fictional-test-only');
+  expect(scroll.findAllByType(Text).some(node => String(node.props.children).includes('Please try again'))).toBe(true);
+  expect(mockSignOut).not.toHaveBeenCalled();
 });

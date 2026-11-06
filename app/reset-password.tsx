@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
-  Text,
+  ScrollView,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
@@ -10,7 +10,9 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
+import { ScaledText as Text } from '../components/ScaledText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from 'expo-router';
@@ -28,6 +30,13 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../components/keyboard/KeyboardDoneB
 const MIN_PASSWORD_LENGTH = 8;
 
 export default function ResetPasswordScreen() {
+  const { fontScale } = useWindowDimensions();
+  // Update the native font explicitly: iOS can retain its old scaled measurement
+  // after a system text-size change. Keep the input mounted to preserve editing.
+  const inputSize = {
+    fontSize: FontSizes.bodyLG * fontScale,
+    minHeight: Math.max(52, FontSizes.bodyLG * fontScale + 24),
+  };
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [newPasswordVisible, setNewPasswordVisible] = useState(false);
@@ -125,6 +134,13 @@ export default function ResetPasswordScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
+        <ScrollView
+          accessibilityLabel="Password reset form"
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.container}>
             <Image source={require('../assets/images/washedup-logo.png')} style={styles.logo} contentFit="contain" />
@@ -136,7 +152,8 @@ export default function ResetPasswordScreen() {
 
             <View style={styles.passwordWrap}>
               <TextInput
-                style={[styles.input, newPasswordFocused && styles.inputFocused]}
+                style={[styles.input, inputSize, newPasswordFocused && styles.inputFocused]}
+                allowFontScaling={false}
                 accessibilityLabel="New password"
                 placeholder="New password"
                 placeholderTextColor={Colors.textMedium}
@@ -170,7 +187,8 @@ export default function ResetPasswordScreen() {
             <View style={styles.passwordWrap}>
               <TextInput
                 ref={confirmInputRef}
-                style={[styles.input, confirmPasswordFocused && styles.inputFocused]}
+                style={[styles.input, inputSize, confirmPasswordFocused && styles.inputFocused]}
+                allowFontScaling={false}
                 accessibilityLabel="Confirm new password"
                 placeholder="Confirm new password"
                 placeholderTextColor={Colors.textMedium}
@@ -214,7 +232,7 @@ export default function ResetPasswordScreen() {
               {loading ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
-                <Text style={styles.primaryButtonText}>{saved ? 'Sign in' : 'Update Password'}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.primaryButtonText}>{saved ? 'Sign in' : 'Update Password'}</Text>
               )}
             </TouchableOpacity>
 
@@ -230,6 +248,7 @@ export default function ResetPasswordScreen() {
             )}
           </View>
         </TouchableWithoutFeedback>
+        </ScrollView>
       </KeyboardAvoidingView>
       <BrandedAlert
         visible={!!alertInfo}
@@ -251,10 +270,13 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
   container: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: 40,
+    paddingBottom: 24,
   },
   logo: {
     width: 260,
@@ -277,14 +299,14 @@ const styles = StyleSheet.create({
   gap20: { height: 20 },
   gap12: { height: 12 },
   input: {
-    height: 52,
+    minHeight: 52,
     backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 14,
     paddingLeft: 16,
     paddingRight: 48,
-    paddingVertical: 0,
+    paddingVertical: 12,
     fontFamily: Fonts.sans,
     fontSize: FontSizes.bodyLG,
     color: Colors.asphalt,
@@ -305,7 +327,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryButton: {
-    height: 52,
+    minHeight: 52,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 14,
     backgroundColor: Colors.terracotta,
     justifyContent: 'center',
