@@ -65,17 +65,28 @@ export function TermsReacceptance({ enabled }: { enabled: boolean }) {
   const visible = ready && !local?.accepted && !!data?.needsAcceptance;
 
   const handleAccept = async () => {
-    if (!current() || !visible || pending.current?.visit === visit) return;
+    if (!current() || !visible || !account.viewerId || !data?.termsVersion || pending.current?.visit === visit) return;
     const attempt = { visit };
     pending.current = attempt;
     setResult({ visit, busy: true, problem: null, accepted: false });
     let ok = false;
-    try { ok = await recordMemberTermsAcceptance(); }
+    let changed = false;
+    try {
+      const receipt = await recordMemberTermsAcceptance(account.viewerId, data.termsVersion);
+      if (!current()) return;
+      if (receipt === 'outdated') {
+        changed = true;
+        // Refresh the displayed version, but never affirm it on the old tap.
+        const fresh = await getMemberTermsStatus();
+        if (!current()) return;
+        if (fresh.termsVersion) queryClient.setQueryData(queryKey, fresh);
+      } else ok = receipt === true;
+    }
     catch { /* A failed affirmative request stays available for explicit retry. */ }
     finally { if (pending.current === attempt) pending.current = null; }
     if (!current()) return;
     setResult({ visit, busy: false, accepted: ok,
-      problem: ok ? null : 'that did not go through. give it another try.' });
+      problem: ok ? null : changed ? 'The terms have changed. Review them before agreeing again.' : 'We couldn’t confirm your agreement. Please try again.' });
     if (ok) {
       void queryClient.invalidateQueries({ queryKey, exact: true });
     }

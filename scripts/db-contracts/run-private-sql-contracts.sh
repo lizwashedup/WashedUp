@@ -368,6 +368,8 @@ run_participation_assent_contract() {
   docker exec -i "$CONTAINER_ID" psql -X -v ON_ERROR_STOP=1 -U postgres -d participation_assent_contract < "$REPO_ROOT/supabase/migrations/20260716233736_participation_notice_evidence_proposal_49.sql"
   docker exec -i "$CONTAINER_ID" psql -X -v ON_ERROR_STOP=1 -U postgres -d participation_assent_contract < "$REPO_ROOT/docs/database/review-only/20261106020000_exact_participation_assent.sql"
   psql_file participation_assent_contract /contracts/206_participation_assent_contract.sql
+  docker exec -i "$CONTAINER_ID" psql -X -v ON_ERROR_STOP=1 -U postgres -d participation_assent_contract < "$REPO_ROOT/docs/database/review-only/20261106021000_exact_member_terms_acceptance.sql"
+  psql_file participation_assent_contract /contracts/207_member_terms_receipt_contract.sql
 }
 
 if [ "$CONTRACT_LANE" = "participation-assent" ]; then
