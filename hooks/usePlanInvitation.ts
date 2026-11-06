@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 
 type Reply = 'accepted' | 'declined';
@@ -31,11 +32,11 @@ export function usePlanInvitation(options:Options){
     const valid=()=>validVisit()&&version===state.revision;
     state.loading=true;state.error=null;publish();
     try{
-      const auth=await supabase.auth.getUser();if(!valid())return;
+      const auth=await requestWithDeadline(supabase.auth.getUser(), 12_000);if(!valid())return;
       if(auth.error||auth.data.user?.id!==options.viewerId)throw new Error('Account unavailable');
       let q=supabase.from('plan_invites').select(fields).eq('event_id',options.eventId).eq('recipient_id',options.viewerId);
       q=attempt?q.eq('id',attempt.invitation.id):q.eq('status','pending').order('created_at',{ascending:true}).order('id',{ascending:true}).limit(1);
-      const result=await q.maybeSingle();if(!valid())return;
+      const result=await requestWithDeadline(q.maybeSingle(), 12_000);if(!valid())return;
       if(result.error!==null||(result.data!==null&&!own(result.data,options.eventId,options.viewerId)))throw new Error('Invitation unavailable');
       if(attempt){
         if(!result.data||result.data.id!==attempt.invitation.id)throw new Error('Invitation unavailable');
@@ -56,11 +57,11 @@ export function usePlanInvitation(options:Options){
     const attempt:Attempt={invitation,reply,phase:'pending'},valid=capture();
     state.attempt=attempt;state.busy=true;state.revision++;state.error=null;publish();let dispatched=false;
     try{
-      const auth=await supabase.auth.getUser();
+      const auth=await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if(!valid()||!latest.current.canRespond()){state.attempt=null;return;}
       if(auth.error||auth.data.user?.id!==options.viewerId)throw new Error('Account unavailable');
       if(reply==='accepted'){
-        const member=await supabase.from('event_members').select('event_id,user_id,status').eq('event_id',options.eventId).eq('user_id',options.viewerId).maybeSingle();
+        const member=await requestWithDeadline(supabase.from('event_members').select('event_id,user_id,status').eq('event_id',options.eventId).eq('user_id',options.viewerId).maybeSingle(), 12_000);
         if(!valid()||!latest.current.canRespond()){state.attempt=null;return;}
         if(member.error!==null||member.data?.event_id!==options.eventId||member.data?.user_id!==options.viewerId||member.data?.status!=='joined')throw new Error('Membership unconfirmed');
       }

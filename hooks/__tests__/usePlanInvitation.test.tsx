@@ -44,3 +44,43 @@ it('does not prepare joining after its account retires',async()=>{const h=await 
 
 it('allows keeping an invitation only after a known rejected decline',async()=>{mockWrite.mockResolvedValueOnce({data:null,error:{code:'42501'}});const h=await mount();await act(async()=>h.current.decline());act(()=>h.current.keepInvitation());expect(h.current.attempt).toBeNull();expect(h.current.invitation).toEqual(invite);expect(h.current.prepareAcceptance()).toEqual(expect.any(Function));expect(mockWrite).toHaveBeenCalledTimes(1);});
 it('cannot discard an uncertain decline as though it failed',async()=>{mockWrite.mockResolvedValue(result(null));const h=await mount();await act(async()=>h.current.decline());act(()=>h.current.keepInvitation());expect(h.current.attempt?.phase).toBe('unknown');});
+
+it.each(['account','invitation'])('recovers stalled initial %s reads and ignores their late result',async stage=>{
+ jest.useFakeTimers();const wait=deferred();(stage==='account'?mockAuth:mockRead).mockReturnValueOnce(wait.promise);
+ try {
+  const h=await mount();expect(h.current.loading).toBe(true);
+  await act(async()=>{await jest.advanceTimersByTimeAsync(12001);});
+  expect(h.current.loading).toBe(false);expect(h.current.ready).toBe(false);expect(h.current.error).toContain('Couldn’t check');
+  await act(async()=>{wait.resolve(stage==='account'?auth():result(invite));await jest.advanceTimersByTimeAsync(1);});
+  expect(h.current.ready).toBe(false);expect(h.current.invitation).toBeNull();expect(mockWrite).not.toHaveBeenCalled();
+  await act(async()=>h.current.refresh());expect(h.current.ready).toBe(true);expect(h.current.invitation).toEqual(invite);
+ } finally {jest.clearAllTimers();jest.useRealTimers();}
+});
+it.each(['account','membership'])('recovers stalled reply %s preflight without writing late',async stage=>{
+ const h=await mount(),wait=deferred();(stage==='account'?mockAuth:mockMember).mockReturnValueOnce(wait.promise);jest.useFakeTimers();
+ try {
+  act(()=>{if(stage==='account')void h.current.decline();else h.current.prepareAcceptance()!();});
+  await act(async()=>{await jest.advanceTimersByTimeAsync(12001);});
+  expect(h.current.busy).toBe(false);expect(h.current.attempt?.phase).toBe('failed');expect(mockWrite).not.toHaveBeenCalled();
+  await act(async()=>{wait.resolve(stage==='account'?auth():result({event_id:'plan',user_id:'alice',status:'joined'}));await jest.advanceTimersByTimeAsync(1);});
+  expect(mockWrite).not.toHaveBeenCalled();
+  await act(async()=>h.current.retry());expect(mockWrite).toHaveBeenCalledTimes(1);expect(mockWrite.mock.calls[0][0].status).toBe(stage==='account'?'declined':'accepted');
+ } finally {jest.clearAllTimers();jest.useRealTimers();}
+});
+it('keeps an already dispatched reply pending instead of making it retryable on a clock',async()=>{
+ const h=await mount(),wait=deferred();mockWrite.mockReturnValueOnce(wait.promise);jest.useFakeTimers();
+ try {
+  act(()=>{void h.current.decline();});await act(async()=>{await jest.advanceTimersByTimeAsync(45000);});
+  expect(h.current.busy).toBe(true);expect(h.current.attempt?.phase).toBe('pending');expect(mockWrite).toHaveBeenCalledTimes(1);
+  await act(async()=>{wait.resolve(result({...invite,status:'declined'}));await jest.advanceTimersByTimeAsync(1);});expect(h.current.invitation).toBeNull();
+ } finally {jest.clearAllTimers();jest.useRealTimers();}
+});
+it('keeps an uncertain reply protected when its recovery read stalls',async()=>{
+ mockWrite.mockRejectedValueOnce(new Error('lost receipt'));const h=await mount();await act(async()=>h.current.decline());
+ mockRead.mockReturnValueOnce(new Promise(()=>{}));jest.useFakeTimers();
+ try {
+  act(()=>{void h.current.refresh();});await act(async()=>{await jest.advanceTimersByTimeAsync(12001);});
+  expect(h.current.loading).toBe(false);expect(h.current.ready).toBe(false);expect(h.current.attempt?.phase).toBe('unknown');
+  await act(async()=>h.current.retry());expect(mockWrite).toHaveBeenCalledTimes(1);
+ } finally {jest.clearAllTimers();jest.useRealTimers();}
+});
