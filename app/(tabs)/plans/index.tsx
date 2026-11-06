@@ -689,7 +689,7 @@ export default function PlansScreen() {
         </View>
       ) : savedPlans.feedback?.kind === 'error' ? (
         <View style={styles.feedback} accessibilityLiveRegion="polite">
-          <Text style={styles.feedbackText}>{!savedPlans.feedback.call.wantSaved ? "Couldn't remove this plan from saved." : "Couldn't save this plan."}</Text>
+          <Text style={styles.feedbackText}>{savedPlans.feedback.uncertain ? 'Couldn’t confirm this bookmark change.' : !savedPlans.feedback.call.wantSaved ? "Couldn't remove this plan from saved." : "Couldn't save this plan."}</Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry saving plan" style={styles.feedbackAction} onPress={savedPlans.retry}>
             <Text numberOfLines={1} style={styles.feedbackActionText}>Try again</Text>
           </TouchableOpacity>

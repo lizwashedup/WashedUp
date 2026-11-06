@@ -8,9 +8,20 @@ import { hapticError } from '../lib/haptics';
 
 type SaveCall = {
   account: string; eventId: string; wasSaved: boolean; wantSaved: boolean; title: string;
-  announce: boolean; isCurrent: () => boolean;
+  announce: boolean; checkFirst?: boolean; isCurrent: () => boolean;
 };
-type Feedback = { call: SaveCall; kind: 'saving' | 'error' };
+type Feedback = { call: SaveCall; kind: 'saving' | 'error'; uncertain?: boolean };
+class BookmarkUnconfirmedError extends Error {}
+
+async function checkBookmark(call: SaveCall): Promise<boolean> {
+  const result = await requestWithDeadline(supabase.from('wishlists').select('event_id')
+    .eq('user_id', call.account).eq('event_id', call.eventId).maybeSingle(), 8000).catch(() => null);
+  if (!call.isCurrent()) throw new Error('Obsolete save');
+  if (!result || result.error || (result.data !== null && result.data?.event_id !== call.eventId)) {
+    throw new BookmarkUnconfirmedError('Couldn’t confirm your saved plans.');
+  }
+  return result.data !== null;
+}
 
 /** Existing wishlist collection and writes, with account-owned receipts.
  * Saving a plan is independent of membership or invitations. */
@@ -52,10 +63,21 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
       const { data: { user }, error } = await requestWithDeadline(supabase.auth.getUser(), 8000);
       if (!call.isCurrent() || user?.id !== call.account) throw new Error('Obsolete save');
       if (error) throw error;
-      const result = !call.wantSaved
-        ? await supabase.from('wishlists').delete().eq('user_id', call.account).eq('event_id', call.eventId)
-        : await supabase.from('wishlists').insert({ user_id: call.account, event_id: call.eventId });
-      if (result.error) throw result.error;
+      if (call.checkFirst && await checkBookmark(call) === call.wantSaved) return;
+      if (!call.isCurrent()) throw new Error('Obsolete save');
+      let writeError: unknown;
+      try {
+        const result = !call.wantSaved
+          ? await supabase.from('wishlists').delete().eq('user_id', call.account).eq('event_id', call.eventId)
+          : await supabase.from('wishlists').insert({ user_id: call.account, event_id: call.eventId });
+        if (!result.error) return;
+        writeError = result.error;
+      } catch (error) {
+        writeError = error;
+      }
+      if (!call.isCurrent()) throw new Error('Obsolete save');
+      if ((writeError as { code?: string } | null)?.code === '42501') throw writeError;
+      if (await checkBookmark(call) !== call.wantSaved) throw writeError;
     },
     onMutate: async (call: SaveCall) => {
       const key = ['wishlists', call.account];
@@ -71,13 +93,13 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
       setFeedback(old => old?.call === call ? null : old);
       if (call.wantSaved && call.announce) onSavedRef.current(call.eventId, call.title);
     },
-    onError: (_error, call, context) => {
+    onError: (error, call, context) => {
       // Restore only this plan. A failed save must not undo another plan's
       // successful optimistic update in the same account's collection.
       if (context?.optimistic) queryClient.setQueryData<string[]>(['wishlists', call.account], (old = []) =>
         call.wasSaved ? [...new Set([...old, call.eventId])] : old.filter(id => id !== call.eventId),
       );
-      if (call.isCurrent()) { hapticError(); setFeedback({ call, kind: 'error' }); }
+      if (call.isCurrent()) { hapticError(); setFeedback({ call, kind: 'error', uncertain: error instanceof BookmarkUnconfirmedError }); }
     },
     onSettled: (_result, _error, call) => {
       const key = lockKey(call.account, call.eventId);
@@ -95,15 +117,15 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
   });
 
   const canWrite = !!userId && identity.viewerId === userId && identity.isCurrent() && !identity.error && !identity.isLoading && query.isSuccess;
-  const toggle = (eventId: string, title: string, announce = true, desired?: boolean) => {
+  const toggle = (eventId: string, title: string, announce = true, desired?: boolean, checkFirst = false) => {
     const currentVisit = renderedVisit;
     if (!currentVisit || visit.current !== currentVisit || ownerRef.current !== owner || !userId || identity.viewerId !== userId || !identity.isCurrent() ||
         identity.error || identity.isLoading || !query.isSuccess || pending.current.has(lockKey(userId, eventId))) return;
     const wasSaved = (queryClient.getQueryData<string[]>(['wishlists', userId]) ?? []).includes(eventId);
     const wantSaved = desired ?? !wasSaved;
-    if (wantSaved === wasSaved) { setFeedback(null); return; }
+    if (wantSaved === wasSaved && !checkFirst) { setFeedback(null); return; }
     const call: SaveCall = {
-      account: userId, eventId, title, announce,
+      account: userId, eventId, title, announce, checkFirst,
       wasSaved, wantSaved,
       isCurrent: () => ownerRef.current === owner && visit.current === currentVisit && identity.isCurrent(),
     };
@@ -119,7 +141,11 @@ export function useFeedWishlist(userId: string | null, onSaved: (eventId: string
     retryIdentity: identity.retry,
     feedback: activeFeedback,
     pending: (eventId: string) => !!userId && pending.current.has(lockKey(userId, eventId)),
-    retry: () => { if (activeFeedback?.kind === 'error') toggle(activeFeedback.call.eventId, activeFeedback.call.title, activeFeedback.call.announce, activeFeedback.call.wantSaved); },
+    retry: () => {
+      if (activeFeedback?.kind !== 'error') return;
+      const { call, uncertain } = activeFeedback;
+      toggle(call.eventId, call.title, call.announce, call.wantSaved, uncertain);
+    },
     dismissFeedback: () => setFeedback(null),
   };
 }

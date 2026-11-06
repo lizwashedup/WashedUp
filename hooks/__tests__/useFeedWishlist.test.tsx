@@ -3,6 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { useFeedWishlist } from '../useFeedWishlist';
 
+const mockSavedStatus = jest.fn();
 const mockGetUser = jest.fn(), mockWrite = jest.fn(), mockRead = jest.fn();
 let mockEpoch = 1, mockAccount = 'alice';
 let mockIdentityError: Error | null = null;
@@ -21,7 +22,10 @@ jest.mock('../../lib/haptics', () => ({ hapticError: jest.fn() }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: () => mockGetUser() },
   from: (table: string) => ({
-    select: () => ({ eq: (_field: string, account: string) => mockRead(account) }),
+    select: () => ({ eq: (_field: string, account: string) => ({
+      then: (ok:any,fail:any) => mockRead(account).then(ok,fail),
+      eq: (_event:string,id:string) => ({maybeSingle:()=>mockSavedStatus(account,id)}),
+    }) }),
     insert: (row: { user_id: string; event_id: string }) => mockWrite('insert', table, row),
     delete: () => ({ eq: (_field: string, account: string) => ({ eq: (_event: string, eventId: string) => mockWrite('delete', table, { user_id: account, event_id: eventId }) }) }),
   }),
@@ -46,6 +50,7 @@ async function mount(initial: string[] | undefined = []) {
   };
 }
 beforeEach(() => {
+  mockSavedStatus.mockReset().mockResolvedValue({data:null,error:null});
   jest.clearAllMocks(); mockEpoch = 1; mockAccount = 'alice'; mockIdentityError = null; onlineManager.setOnline(true);
   mockGetUser.mockImplementation(async () => ({ data: { user: { id: mockAccount } }, error: null }));
   mockWrite.mockResolvedValue({ error: null }); mockRead.mockResolvedValue({ data: [], error: null });
@@ -75,7 +80,7 @@ it('returned Supabase errors roll back and leave an actionable retry without a S
 
 it('a failed remove restores saved state and never announces a new save', async () => {
   mockRead.mockResolvedValue({ data: [{ event_id: 'plan-one' }], error: null });
-  mockWrite.mockResolvedValue({ error: new Error('offline') }); const f = await mount(['plan-one']);
+  mockWrite.mockResolvedValue({ error: new Error('offline') }); mockSavedStatus.mockResolvedValue({data:{event_id:'plan-one'},error:null}); const f = await mount(['plan-one']);
   f.toggle(); await flush();
   expect(mockWrite).toHaveBeenCalledWith('delete', 'wishlists', { user_id: 'alice', event_id: 'plan-one' });
   expect(f.client.getQueryData(['wishlists', 'alice'])).toEqual(['plan-one']);
@@ -143,16 +148,32 @@ it('uses current cached membership rather than a retained visual bookmark state,
   expect(f.saved).not.toHaveBeenCalled();
 });
 
-it('retry preserves save intent when reconciliation already found the plan saved', async () => {
+it('confirms a committed save after the response is lost without a second write or false error', async () => {
   mockWrite.mockResolvedValueOnce({ error: new Error('lost receipt') });
+  mockSavedStatus.mockResolvedValueOnce({data:{event_id:'plan-one'},error:null});
   mockRead.mockResolvedValue({ data: [{ event_id: 'plan-one' }], error: null });
   const f = await mount(); f.toggle(); await flush();
-  expect(f.current.feedback?.kind).toBe('error');
-  expect(f.client.getQueryData(['wishlists', 'alice'])).toEqual(['plan-one']);
-  act(() => f.current.retry()); await flush();
+  expect(mockSavedStatus).toHaveBeenCalledWith('alice','plan-one');
+  expect(f.current.feedback).toBeNull(); expect(f.saved).toHaveBeenCalledTimes(1);
+  expect(f.client.getQueryData(['wishlists','alice'])).toEqual(['plan-one']);
   expect(mockWrite).toHaveBeenCalledTimes(1);
-  expect(mockWrite.mock.calls[0][0]).toBe('insert');
-  expect(f.current.feedback).toBeNull();
+});
+
+it.each([true,false])('rechecks before retrying an uncertain save (already saved: %s)', async committed => {
+  const f=await mount(); mockWrite.mockRejectedValueOnce(Error('offline'));
+  mockSavedStatus.mockRejectedValueOnce(Error('status offline')); f.toggle();await flush();
+  expect(f.current.feedback?.uncertain).toBe(true); expect(f.saved).not.toHaveBeenCalled();
+  mockSavedStatus.mockResolvedValueOnce({data:committed?{event_id:'plan-one'}:null,error:null});
+  act(()=>f.current.retry());await flush();
+  expect(mockWrite).toHaveBeenCalledTimes(committed?1:2);expect(f.saved).toHaveBeenCalledTimes(1);
+});
+
+it('retires a late status read rather than announcing the previous account’s save', async () => {
+  const f=await mount(), status=deferred<any>();
+  mockWrite.mockRejectedValueOnce(Error('offline'));mockSavedStatus.mockReturnValueOnce(status.promise);
+  f.toggle();await flush();mockEpoch++;mockAccount='bob';f.update('bob');
+  await act(async()=>status.resolve({data:{event_id:'plan-one'},error:null}));await flush();
+  expect(f.saved).not.toHaveBeenCalled();expect(f.current.feedback).toBeNull();expect(mockWrite).toHaveBeenCalledTimes(1);
 });
 
 it('pending state belongs to an account even when both accounts see the same plan', async () => {
