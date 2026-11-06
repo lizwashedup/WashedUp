@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { leaveCircleWithReceipt } from '../lib/circles/leaveReceipt';
 import { circleKeys } from '../lib/circles/keys';
 import { markChatListDirty } from '../lib/chatListSignal';
 import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
@@ -14,7 +15,7 @@ import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
 type LeaveResult = 'left' | 'not_member';
 export interface LeaveCircleScope { userId: string; isCurrent: () => boolean }
 type Owner = { userId: string | null | undefined; revision: number; scope: LeaveCircleScope | null | undefined };
-type Attempt = { owner: Owner; circleId: string };
+type Attempt = { owner: Owner; circleId: string; checkOnly: boolean };
 type Options = MutateOptions<LeaveResult, Error, string>;
 
 export class ObsoleteCircleLeaveError extends Error {
@@ -67,13 +68,9 @@ export function useLeaveCircle(userId: string | null | undefined, scope?: LeaveC
         if (authError) throw authError;
         if (!user || user.id !== captured.userId) throw new ObsoleteCircleLeaveError();
         if (authUser.current === undefined) authUser.current = user.id;
-        const { data, error } = await supabase.rpc('leave_circle', { p_circle_id: attempt.circleId });
+        const result = await leaveCircleWithReceipt(qc, user.id, attempt.circleId, () => requireCurrent(captured), attempt.checkOnly);
         requireCurrent(captured);
-        if (error) throw error;
-        // Both outcomes confirm there is no joined membership. Unknown data
-        // must not remove the chat or be presented as a successful leave.
-        if (data !== 'left' && data !== 'not_member') throw new Error('Could not confirm you left. Check the circle before trying again.');
-        return data;
+        return result;
       } catch (error) {
         requireCurrent(captured);
         throw error;
@@ -95,11 +92,11 @@ export function useLeaveCircle(userId: string | null | undefined, scope?: LeaveC
 
   // Capture before React Query schedules mutationFn. Its observer may adopt
   // newer hook options; a retained public callback still belongs to its owner.
-  const begin = (circleId: string): Attempt => {
+  const begin = (circleId: string, checkOnly = false): Attempt => {
     requireCurrent(owner);
     if (!circleId.trim()) throw new Error('Choose a circle to leave.');
     if (pending.current?.owner === owner) throw new Error('A circle leave request is already pending.');
-    const attempt = { owner, circleId };
+    const attempt = { owner, circleId, checkOnly };
     pending.current = attempt;
     return attempt;
   };
@@ -112,8 +109,8 @@ export function useLeaveCircle(userId: string | null | undefined, scope?: LeaveC
     if (!current(owner) || pending.current?.owner === owner || !circleId.trim()) return;
     mutation.mutate(begin(circleId), callbacks(options));
   };
-  const mutateAsync = async (circleId: string, options?: Options) => {
-    const attempt = begin(circleId);
+  const runAsync = async (circleId: string, options?: Options, checkOnly = false) => {
+    const attempt = begin(circleId, checkOnly);
     try {
       const result = await mutation.mutateAsync(attempt, callbacks(options));
       requireCurrent(attempt.owner);
@@ -125,7 +122,8 @@ export function useLeaveCircle(userId: string | null | undefined, scope?: LeaveC
   };
   const belongs = mutation.variables?.owner === owner && current(owner);
   return {
-    ...mutation, mutate, mutateAsync, variables: belongs ? mutation.variables?.circleId : undefined,
+    ...mutation, mutate, mutateAsync: (id: string, options?: Options) => runAsync(id, options),
+    checkStatusAsync: (id: string) => runAsync(id, undefined, true), variables: belongs ? mutation.variables?.circleId : undefined,
     data: belongs ? mutation.data : undefined, error: belongs ? mutation.error : null,
     failureReason: belongs ? mutation.failureReason : null, failureCount: belongs ? mutation.failureCount : 0,
     isPending: belongs && mutation.isPending, isSuccess: belongs && mutation.isSuccess,

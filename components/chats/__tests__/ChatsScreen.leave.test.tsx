@@ -7,9 +7,10 @@ import ChatsScreen from '../../../app/(tabs)/chats/index';
 import { BrandedAlert } from '../../BrandedAlert';
 import { COPY } from '../../yours/state/constants';
 import { useChatList, type ChatPreview } from '../../../hooks/useChatList';
+import { CircleLeaveUnconfirmed } from '../../../lib/circles/leaveReceipt';
 import { supabase } from '../../../lib/supabase';
 
-const mockMutateAsync = jest.fn();
+const mockMutateAsync = jest.fn(), mockCheck = jest.fn();
 const mockRemoveChat = jest.fn();
 const mockRefetch = jest.fn();
 let mockCachedUserId: string | null = 'alice';
@@ -33,7 +34,7 @@ jest.mock('../../../hooks/useChatList', () => ({ useChatList: jest.fn() }));
 jest.mock('../../../hooks/useCommunityChatRows', () => ({ useCommunityChatRows: () => ({ data: [], viewerId: 'alice', isLoading: false, error: null, refetch: jest.fn() }) }));
 jest.mock('../../yours/state/useAuthUserId', () => ({ useAuthUserId: () => ({ data: mockCachedUserId }) }));
 jest.mock('../../../hooks/useLeaveCircle', () => ({
-  useLeaveCircle: () => ({ isPending: false, mutateAsync: mockMutateAsync }),
+  useLeaveCircle: () => ({ isPending: false, mutateAsync: mockMutateAsync, checkStatusAsync: mockCheck }),
   isObsoleteCircleLeave: (error: unknown) => error instanceof Error && error.name === 'ObsoleteCircleLeaveError',
 }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITIES_ENABLED: true, GROUPS_ENABLED: true, COMMUNITY_CHAT_GROUPING_ENABLED: true, CHAT_DELETE_ENABLED: true, YOURS_PAGE_ENABLED: true }));
@@ -286,4 +287,18 @@ it('keeps an already confirmed removal when its receipt arrives after leaving Ch
   blur();
   await act(async () => { pending.resolve('left'); await operation; });
   expect(mockRemoveChat).toHaveBeenCalledWith(circle.conversationId);
+});
+
+
+it.each([circle, dm])('Check status for $title reads once without another destructive action', async chat => {
+  mockMutateAsync.mockRejectedValueOnce(new CircleLeaveUnconfirmed());
+  mockCheck.mockResolvedValueOnce('not_member');
+  await mount(); open(chat); await act(async()=>{await confirm();});
+  expect(row(chat)).toBeDefined();
+  const retry=tree!.root.findAllByType(BrandedAlert).flatMap(n=>n.props.buttons??[])
+    .find(b=>b.text==='Check status').onPress;
+  await act(async()=>{retry();retry();});
+  expect(mockCheck.mock.calls).toEqual([[chat.conversationId]]);
+  expect(mockMutateAsync).toHaveBeenCalledTimes(1);
+  expect(row(chat)).toBeUndefined();expect(row(plan)).toBeDefined();
 });

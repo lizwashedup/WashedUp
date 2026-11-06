@@ -24,6 +24,7 @@ import { CIRCLE_HOME } from '../../constants/YoursDesign';
 import { COPY } from '../../components/yours/state/constants';
 import { hapticSelection } from '../../lib/haptics';
 import { useCircle } from '../../hooks/useCircle';
+import { CircleLeaveUnconfirmed } from '../../lib/circles/leaveReceipt';
 import { useLeaveCircle, isObsoleteCircleLeave } from '../../hooks/useLeaveCircle';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { circleDisplay } from '../../lib/circles/display';
@@ -122,17 +123,21 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const editingScope = useMemo(() => userId ? { userId, isCurrent: isCurrentEditingEntry } : null, [userId, isCurrentEditingEntry]);
   useLayoutEffect(() => { if (!canEditCover) setEditOpen(false); }, [canEditCover]);
 
-  const doLeave = async () => {
-    if (!isCurrentEntry() || pendingLeave.current) return;
+  const doLeave = async (checkOnly = false) => {
+    if (!canNavigate() || !isCurrentEntry() || pendingLeave.current) return;
     const attempt = {};
     pendingLeave.current = attempt;
     try {
-      await leaveCircle.mutateAsync(circleId);
+      await (checkOnly ? leaveCircle.checkStatusAsync(circleId) : leaveCircle.mutateAsync(circleId));
       // Both confirmed outcomes leave the entire circle stack invalid.
-      if (isCurrentEntry() && pendingLeave.current === attempt) router.dismissAll();
+      if (canNavigate() && isCurrentEntry() && pendingLeave.current === attempt) router.dismissAll();
     } catch (error) {
-      if (isCurrentEntry() && pendingLeave.current === attempt && !isObsoleteCircleLeave(error)) {
-        Alert.alert(COPY.circleLeaveError);
+      if (canNavigate() && isCurrentEntry() && pendingLeave.current === attempt && !isObsoleteCircleLeave(error)) {
+        if (error instanceof CircleLeaveUnconfirmed) Alert.alert(error.message, undefined, [
+          { text: 'Close', style: 'cancel' },
+          { text: 'Check status', onPress: () => { void doLeave(true); } },
+        ]);
+        else Alert.alert(COPY.circleLeaveError);
       }
     } finally {
       // An obsolete operation still releases its own guard, never a newer one.
@@ -293,7 +298,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
         message={COPY.circleLeaveBody}
         buttons={[
           { text: COPY.circleLeaveStay, style: 'cancel' },
-          { text: COPY.circleLeaveGo, style: 'destructive', onPress: doLeave },
+          { text: COPY.circleLeaveGo, style: 'destructive', onPress: () => { void doLeave(); } },
         ]}
         onClose={() => { if (isCurrentContext()) setConfirmLeave(false); }}
       />
