@@ -1,3 +1,5 @@
+import { randomUUID } from 'expo-crypto';
+import { DraftUnavailable, publishOwnedDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
  * Main plan composer, with optional development-gated Afterglow presentation.
@@ -80,21 +82,10 @@ import PeoplePickerSheet, { type PickedPerson } from '../../components/post/Peop
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 type RequiredField = 'title' | 'category' | 'message' | 'description' | 'when';
-class DraftUnavailable extends Error {}
 const unavailableDraftAlert = {
   title: 'Draft unavailable',
   message: 'This draft may have been posted or deleted. Your edits are still here. Check Yours for the latest plan.',
 };
-
-async function updateOwnedDraft(id: string, viewerId: string, changes: Record<string, unknown>) {
-  const { data, error } = await supabase.from('events').update(changes)
-    .eq('id', id).eq('creator_user_id', viewerId).eq('status', 'draft')
-    .select('id').maybeSingle();
-  if (error) throw error;
-  if (data === null) throw new DraftUnavailable();
-  if (data?.id !== id) throw new Error('Could not confirm the draft update.');
-  return { id };
-}
 
 type ValidationMode = 'post' | 'draft';
 type ComposerWrite = {
@@ -206,6 +197,9 @@ export default function PlanComposerV2() {
   const [confirmMeta, setConfirmMeta] = useState('');
   const [shareWanted, setShareWanted] = useState(false);
   const [recoveryNudge, setRecoveryNudge] = useState(false);
+  const recoveryText = params.draftId ? 'Couldn’t confirm the post. Your edits are here. Tap Post to try again.'
+    : appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.'
+    : "that didn't go through. your plan is here. tap post to try again.";
   const neverPostedRef = useRef(false);
   // Synchronous lock against a real double-tap: `loading` state alone has a
   // render-commit lag a fast second tap can beat (closure on the button's
@@ -215,10 +209,12 @@ export default function PlanComposerV2() {
   const mountedRef = useRef(false);
   const photoVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
+  const draftPublishRequest = useRef<{ snapshot: string; key: string } | null>(null);
   const writeRef = useRef<ComposerWrite | null>(null);
   // Retirement removes only this attempt's temporary card. Restoring its old
   // cache snapshot here could erase newer data when the same account returns.
   const retireWrite = useCallback(() => {
+    draftPublishRequest.current = null;
     const write = writeRef.current;
     writeRef.current = null;
     submittingRef.current = false;
@@ -608,6 +604,7 @@ export default function PlanComposerV2() {
 
   const resetFields = () => { setValidationMode(null); resetDraftFields(); };
   const resetForm = () => {
+    draftPublishRequest.current = null;
     resetFields();
     // Clear every prefill/duplicate param after a successful post. Otherwise a
     // "Post your own" leaves duplicatedFromEventId (and the rest) in route state,
@@ -871,7 +868,12 @@ export default function PlanComposerV2() {
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       let insertedEvent: { id: string } | null = null;
       if (params.draftId) {
-        insertedEvent = await updateOwnedDraft(String(params.draftId), user.id, row);
+        const draftId = String(params.draftId);
+        const snapshot = JSON.stringify([user.id, draftId, row, inviteIds]);
+        if (draftPublishRequest.current?.snapshot !== snapshot) {
+          draftPublishRequest.current = { snapshot, key: randomUUID() };
+        }
+        insertedEvent = await publishOwnedDraft(draftId, user.id, row, draftPublishRequest.current.key, () => ownsWrite(write));
         if (!ownsWrite(write)) return;
       } else {
         const { data: inserted, error } = await supabase
@@ -885,7 +887,7 @@ export default function PlanComposerV2() {
       }
 
       if (!insertedEvent?.id) throw new Error('The saved plan could not be confirmed.');
-      if (insertedEvent.id) {
+      if (!params.draftId) {
         const { error: memberErr } = await supabase.from('event_members').insert({
           event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
         });
@@ -900,36 +902,32 @@ export default function PlanComposerV2() {
           if (retryErr) {
             // Best-effort rollback of the orphaned event. Error-check it: a
             // failed delete leaves an event with no host member, so flag that
-            // case distinctly - both paths fall through to the quiet gold
-            // recovery below so the creator can simply retry. A resumed draft
-            // rolls back to 'draft' instead of being deleted.
-            const { error: rollbackErr } = params.draftId
-              ? (await supabase.from('events').update({ status: 'draft' }).eq('id', insertedEvent.id)) 
-              : (await supabase.from('events').delete().eq('id', insertedEvent.id));
+            // case distinctly before returning to the composer.
+            const { error: rollbackErr } = await supabase.from('events').delete().eq('id', insertedEvent.id);
             if (!ownsWrite(write)) return;
             throw new Error(rollbackErr ? 'member_orphan' : 'member');
           }
         }
-        // Event + host member rows both committed: swap the optimistic card's
-        // temp id for the real one so it's tappable and routes correctly. Done
-        // only now (not right after the event insert) so an orphan rollback above
-        // still removes the card via the catch's rollback().
-        optimistic?.commit(insertedEvent.id);
-        write.optimistic = null;
-        // If this was a "Post your own" duplicate, notify the source plan's
-        // waitlist (fire-and-forget; mirrors LegacyComposer).
-        if (params.duplicatedFromEventId) {
-          supabase.rpc('notify_waitlist_duplicate_plan', {
-            p_original_event_id: String(params.duplicatedFromEventId),
-            p_new_event_id: insertedEvent.id,
-            p_creator_user_id: user.id,
-          }).then(({ error: notifyErr }) => {
-            if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
-          });
-        }
-        if (inviteIds.length > 0) {
-          void postInvitations.send(invitationRequest, insertedEvent.id, user.id);
-        }
+      }
+      // Event + host member rows both committed: swap the optimistic card's
+      // temp id for the real one so it's tappable and routes correctly. Done
+      // only now (not right after the event insert) so an orphan rollback above
+      // still removes the card via the catch's rollback().
+      optimistic?.commit(insertedEvent.id);
+      write.optimistic = null;
+      // If this was a "Post your own" duplicate, notify the source plan's
+      // waitlist (fire-and-forget; mirrors LegacyComposer).
+      if (params.duplicatedFromEventId) {
+        supabase.rpc('notify_waitlist_duplicate_plan', {
+          p_original_event_id: String(params.duplicatedFromEventId),
+          p_new_event_id: insertedEvent.id,
+          p_creator_user_id: user.id,
+        }).then(({ error: notifyErr }) => {
+          if (notifyErr) console.warn('[post] notify_waitlist_duplicate_plan failed:', notifyErr.message);
+        });
+      }
+      if (inviteIds.length > 0) {
+        void postInvitations.send(invitationRequest, insertedEvent.id, user.id);
       }
 
       queryClient.invalidateQueries({ queryKey: ['events', 'feed'] });
@@ -1295,7 +1293,7 @@ export default function PlanComposerV2() {
         {nudge === 'recovery' ? (
           <TouchableOpacity style={styles.recoveryNudge} accessibilityRole="button" accessibilityLabel="Dismiss posting reminder" onPress={() => setRecoveryNudge(false)} activeOpacity={0.8}>
             <View style={styles.recoveryDot} />
-            <Text style={styles.recoveryText}>{appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.' : "that didn't go through. your plan is here. tap post to try again."}</Text>
+            <Text style={styles.recoveryText}>{recoveryText}</Text>
           </TouchableOpacity>
         ) : null}
         <View style={styles.summaryCard}>
