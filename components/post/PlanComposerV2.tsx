@@ -50,6 +50,7 @@ import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
 } from '../../constants/Neighborhoods';
+import { savedAgeLabel } from '../../lib/planEditRules';
 import { PLAN_CATEGORIES } from '../../constants/Categories';
 import { COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
@@ -129,6 +130,8 @@ export default function PlanComposerV2() {
     prefillDropIn?: string;
     prefillAllowDuplicate?: string;
     prefillAgeRange?: string;
+    prefillCustomAgeMin?: string;
+    prefillCustomAgeMax?: string;
     prefillGenderPref?: string;
     prefillGroupSize?: string;
     prefillTicketsUrl?: string;
@@ -170,7 +173,7 @@ export default function PlanComposerV2() {
     dateSelected, setDateSelected, timeHour, setTimeHour, timeMinute, setTimeMinute,
     timePeriod, setTimePeriod, timeSelected, setTimeSelected, endTimeHour, setEndTimeHour,
     endTimeMinute, setEndTimeMinute, endTimePeriod, setEndTimePeriod, endTimeSelected, setEndTimeSelected,
-    groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges,
+    groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges, customAgeBounds, setCustomAgeBounds,
     ticketUrl, setTicketUrl, dropIn, setDropIn, allowDuplicate, setAllowDuplicate,
     description, setDescription, invited, setInvited,
     revision: draftRevision, resetFields: resetDraftFields,
@@ -377,7 +380,15 @@ export default function PlanComposerV2() {
       // can't seed max_invites above the 8-max capacity invariant.
       if (!isNaN(n)) setGroupSize(Math.max(MIN_GROUP - 1, Math.min(MAX_GROUP - 1, n)));
     }
-    if (params.prefillAgeRange) {
+    if (params.prefillCustomAgeMin || params.prefillCustomAgeMax) {
+      const min = params.prefillCustomAgeMin ? Number(params.prefillCustomAgeMin) : null;
+      const max = params.prefillCustomAgeMax ? Number(params.prefillCustomAgeMax) : null;
+      const valid = (n: number | null) => n === null || (Number.isSafeInteger(n) && n >= 0);
+      if (valid(min) && valid(max) && (min === null || max === null || min <= max)) {
+        setAgeRanges([]);
+        setCustomAgeBounds({ min, max });
+      }
+    } else if (params.prefillAgeRange) {
       const parsed = String(params.prefillAgeRange).split(',').map((s) => s.trim())
         .filter((s): s is AgeRange => (AGE_RANGES as readonly string[]).includes(s));
       if (parsed.length > 0) setAgeRanges(parsed);
@@ -543,6 +554,7 @@ export default function PlanComposerV2() {
 
   const toggleAgeRange = (range: AgeRange) => {
     hapticSelection();
+    setCustomAgeBounds(null);
     if (range === 'All Ages') { setAgeRanges(['All Ages']); return; }
     setAgeRanges((prev) => {
       const filtered = prev.filter((r) => r !== 'All Ages');
@@ -642,7 +654,7 @@ export default function PlanComposerV2() {
       prefillImageUrl: undefined, prefillStartTime: undefined,
       prefillEndTime: undefined, prefillEventDate: undefined,
       prefillDropIn: undefined, prefillAllowDuplicate: undefined,
-      prefillAgeRange: undefined, prefillGenderPref: undefined,
+      prefillAgeRange: undefined, prefillCustomAgeMin: undefined, prefillCustomAgeMax: undefined, prefillGenderPref: undefined,
       prefillGroupSize: undefined, prefillTicketsUrl: undefined,
       prefillExploreEventId: undefined,
       duplicatedFromEventId: undefined,
@@ -708,7 +720,7 @@ export default function PlanComposerV2() {
       }
       endTimeIso = endDt.toISOString();
     }
-    const ageBounds = ageRangesToMinMax(ageRanges);
+    const ageBounds = customAgeBounds ?? ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
       start_time: startTime.toISOString(),
@@ -821,7 +833,7 @@ export default function PlanComposerV2() {
     const write = beginWrite();
     if (!write) return;
     // Freeze this attempt's fields; the form resets only after confirmation.
-    const ageBounds = ageRangesToMinMax(ageRanges);
+    const ageBounds = customAgeBounds ?? ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
       start_time: startTime.toISOString(),
@@ -1215,7 +1227,7 @@ export default function PlanComposerV2() {
             </View>
           </View>
           <View style={styles.audienceRow}>
-            <Text style={styles.subLabel}>{appearance ? 'Ages' : 'ages'}</Text>
+            <Text style={styles.subLabel}>{customAgeBounds ? savedAgeLabel(customAgeBounds.min, customAgeBounds.max) : appearance ? 'Ages' : 'ages'}</Text>
             <View style={styles.pillWrap}>
               {AGE_RANGES.map((r) => {
                 const on = ageRanges.includes(r);

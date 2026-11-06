@@ -39,6 +39,7 @@ export function usePlanComposerDraft() {
   // ── How many + audience ──
   const [groupSize, setGroupSize] = useState(6); // max_invites; UI shows groupSize+1 total
   const [genderPref, setGenderPref] = useState<GenderPreference>('mixed');
+  const [customAgeBounds, setCustomAgeBounds] = useState<{ min: number | null; max: number | null } | null>(null);
   const [ageRanges, setAgeRanges] = useState<AgeRange[]>([]);
 
   // ── Link/tickets, joinability, + secondary optional fields (surfaced from the
@@ -54,14 +55,14 @@ export function usePlanComposerDraft() {
   const revision = useMemo(() => ({}), [
     title, exploreEventId, category, imageUrl, creatorMessage, location, locationLat, locationLng, neighborhood,
     dateMonth, dateDay, dateYear, dateSelected, timeSelected, timeHour, timeMinute, timePeriod,
-    endTimeHour, endTimeMinute, endTimePeriod, endTimeSelected, groupSize, genderPref, ageRanges,
+    endTimeHour, endTimeMinute, endTimePeriod, endTimeSelected, groupSize, genderPref, ageRanges, customAgeBounds,
     ticketUrl, dropIn, allowDuplicate, description, invited,
   ]);
 
   const resetFields = () => {
     setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
-    setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]);
+    setTicketUrl(''); setDescription(''); setGenderPref('mixed'); setAgeRanges([]); setCustomAgeBounds(null);
     setGroupSize(6); setDateSelected(false); setTimeSelected(false); setDropIn(true);
     setAllowDuplicate(true); setInvited([]);
     setEndTimeSelected(false);
@@ -77,7 +78,7 @@ export function usePlanComposerDraft() {
     dateSelected, setDateSelected, timeHour, setTimeHour, timeMinute, setTimeMinute,
     timePeriod, setTimePeriod, timeSelected, setTimeSelected, endTimeHour, setEndTimeHour,
     endTimeMinute, setEndTimeMinute, endTimePeriod, setEndTimePeriod, endTimeSelected, setEndTimeSelected,
-    groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges,
+    groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges, customAgeBounds, setCustomAgeBounds,
     ticketUrl, setTicketUrl, dropIn, setDropIn, allowDuplicate, setAllowDuplicate,
     description, setDescription, invited, setInvited,
     revision, resetFields,
