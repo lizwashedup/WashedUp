@@ -642,3 +642,16 @@ it('does not manufacture a receipt from an optimistic-only list',async()=>{
   await act(async()=>fixture.chat.refetch(true));expect(readReceipts).not.toHaveBeenCalled();expect(clearNotifications).not.toHaveBeenCalled();
   await act(async()=>{delivery.resolve({data:message(1),error:null});await sending;});
 });
+
+it('keeps history and offers retry when a refresh has no page; a confirmed empty page still clears it',async()=>{
+  readMessages.mockResolvedValueOnce(result(message(1))).mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce(result());
+  const fixture=mount();await flush();await act(async()=>fixture.chat.refetch(true));
+  expect(fixture.chat.messages.map(row=>row.id)).toEqual([message(1).id]);expect(fixture.chat.loadError).toBe(true);
+  await act(async()=>fixture.chat.refetch(true));expect(fixture.chat.messages).toEqual([]);expect(fixture.chat.loadError).toBe(false);
+});
+it('retains the earlier-history cursor on a missing page and recovers on explicit retry',async()=>{
+  readMessages.mockResolvedValueOnce(result(...Array.from({length:60},(_,i)=>message(i+1)))).mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce(result(message(0)));
+  const fixture=mount();await flush();await act(async()=>fixture.chat.loadOlder());
+  expect(fixture.chat.olderLoadError).toBe(true);expect(fixture.chat.messages).toHaveLength(60);
+  await act(async()=>fixture.chat.loadOlder(true));expect(fixture.chat.olderLoadError).toBe(false);expect(fixture.chat.messages[0].id).toBe(message(0).id);
+});

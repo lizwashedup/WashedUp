@@ -38,6 +38,13 @@ export interface ChatMessage {
   } | null;
 }
 
+// A successful plural history read returns an array, including for an empty
+// room. A missing representation must leave the page and cursor retryable.
+export function requireMemberHistoryPage(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) throw new Error('Chat history was not returned.');
+  return value;
+}
+
 /**
  * A chat conversation is keyed by either a plan (event) or a circle. The hook
  * switches its data source, realtime channel, and read path on this key. Plan
