@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../lib/supabase';
+import { submitMemberReport } from '../../lib/memberReportSubmission';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { BrandedAlert } from '../BrandedAlert';
 import Colors from '../../constants/Colors';
@@ -174,16 +175,19 @@ export function ReportModal({
       ownedAttempt = { visit, phase: 'sending' };
       attemptRef.current = ownedAttempt;
       setAttempt(ownedAttempt);
-      const { error } = await supabase.from('reports').insert({
+      const receipt = await submitMemberReport({
         reporter_user_id: reporterId,
         reported_user_id: reportedUserId,
         reason: selectedReason,
         reported_event_id: eventId ?? null,
         details: eventId ? 'Reported from plan' : 'Reported from user search',
-      });
+      }, ownsAttempt);
 
       if (!ownsAttempt()) return;
-      if (error) throw error;
+      if (receipt === 'previous') {
+        setAlertInfo({ title: 'Earlier report received', message: 'Your earlier reason was submitted. Tap Submit Report again to send this reason separately.', visit });
+        return;
+      }
 
       const success: ReportSuccess = { context, allowedVisit: visit };
       successRef.current = success;
@@ -208,8 +212,8 @@ export function ReportModal({
         return;
       }
       setAlertInfo({
-        title: 'Could not submit report',
-        message: 'Please email hello@washedup.app and we\'ll look into it.',
+        title: 'Could not confirm report',
+        message: 'Try submitting again to check whether we received your report. You can also email hello@washedup.app.',
         visit,
       });
     } finally {
@@ -303,6 +307,11 @@ export function ReportModal({
             },
           ]}
         >
+          {visibleAlert && !visibleAlert.success && (
+            <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.accountError}>
+              {visibleAlert.message}
+            </Text>
+          )}
           {accountErrorVisit === visit && scopeReady && (
             <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.accountError}>
               We couldn’t check your account. Try submitting again.
@@ -326,7 +335,7 @@ export function ReportModal({
     </Modal>
 
     <BrandedAlert
-      visible={!!visibleAlert}
+      visible={!!visibleAlert?.success}
       title={visibleAlert?.title ?? ''}
       message={visibleAlert?.message}
       onClose={() => setAlertInfo(current => current === visibleAlert ? null : current)}
