@@ -9,6 +9,8 @@ import { hapticLight } from '../lib/haptics';
 type Options = {
   eventId: string; enabled: boolean; startTime: string; endTime?: string | null;
   status?: string; onError: () => void;
+  viewerId?: string;
+  openDraft?: (params: Record<string, string>) => void;
 };
 const sourceFields = 'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood, explore_event_id, circle_id, status';
 
@@ -16,7 +18,7 @@ const sourceFields = 'id, title, description, start_time, end_time, drop_in, all
  * focused visit and account. Nothing is posted by this hook. */
 export function usePlanCardDuplicate(options: Options) {
   const router = useRouter();
-  const owner = useMemo(() => ({}), [options.eventId, options.enabled, options.startTime, options.endTime, options.status]);
+  const owner = useMemo(() => ({}), [options.eventId, options.viewerId, options.enabled, options.startTime, options.endTime, options.status]);
   const latest = useRef({ owner, options }); latest.current = { owner, options };
   const visit = useRef<object | null>(null);
   const pending = useRef<object | null>(null);
@@ -46,7 +48,7 @@ export function usePlanCardDuplicate(options: Options) {
     try {
       const auth = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!current()) return;
-      if (auth.error || !auth.data.user || (accountId !== undefined && accountId !== auth.data.user.id)) throw new Error('Account unavailable');
+      if (auth.error || !auth.data.user || (options.viewerId && auth.data.user.id !== options.viewerId) || (accountId !== undefined && accountId !== auth.data.user.id)) throw new Error('Account unavailable');
       accountId = auth.data.user.id;
       const { data, error } = await requestWithDeadline(
         supabase.from('events').select(sourceFields).eq('id', options.eventId).single(), 12_000,
@@ -57,7 +59,9 @@ export function usePlanCardDuplicate(options: Options) {
         getPlanLifecycle({ status: data.status, startTime: data.start_time, endTime: data.end_time }).isClosed) {
         throw new Error('Plan is no longer available to copy');
       }
-      router.push({ pathname: '/(tabs)/post', params: buildDuplicatePostParams(data, options.eventId) });
+      const params = buildDuplicatePostParams(data, options.eventId);
+      if (latest.current.options.openDraft) latest.current.options.openDraft(params);
+      else router.push({ pathname: '/(tabs)/post', params });
       openedDraft = true;
     } catch {
       if (current()) latest.current.options.onError();
