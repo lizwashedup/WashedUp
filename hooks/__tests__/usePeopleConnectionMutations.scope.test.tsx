@@ -182,3 +182,44 @@ describe('plan visibility ownership', () => {
     expect(mockRpc).toHaveBeenCalledTimes(2); expect(f.invalidate).toHaveBeenCalledTimes(6);
   });
 });
+
+describe('bounded account preflight', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+  it.each(['sendRequest', 'accept', 'decline', 'remove', 'setVisibility'] as const)('releases stalled %s without a write and permits an explicit retry', async kind => {
+    const gate = deferred<any>(); mockGetUser.mockReturnValueOnce(gate.promise);
+    const f = mount(), entry = scope(), onError = jest.fn();
+    const value = kind === 'sendRequest' ? { recipientId: 'bea', context: 'handle_lookup' }
+      : kind === 'decline' ? { requesterId: 'bea' } : kind === 'setVisibility' ? { global: true } : 'bea';
+    const perform = () => (f.current[kind].mutateAsync as any)(value, { scope: entry, onError });
+    let outcome: any;
+    act(() => { void observe(perform()).then(result => { outcome = result; }); }); await flush();
+    expect(mockRpc).not.toHaveBeenCalled();
+    await act(async () => { await jest.advanceTimersByTimeAsync(8000); });
+    expect(outcome?.error?.name).toBe('RequestDeadlineError');
+    // React Query publishes the settled observer state on the next timer turn.
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+    expect(f.current[kind].isPending).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(f.invalidate).not.toHaveBeenCalled();
+    await act(async () => gate.resolve({ data: { user: { id: 'alice' } }, error: null }));
+    expect(mockRpc).not.toHaveBeenCalled();
+    await act(async () => { await perform(); });
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+  it('does not deliver timeout feedback to a retired visit', async () => {
+    const gate = deferred<any>(); mockGetUser.mockReturnValueOnce(gate.promise);
+    const f = mount(), entry = scope(), onError = jest.fn(); let outcome: any;
+    act(() => { void observe(f.current.accept.mutateAsync('bea', { scope: entry, onError })).then(result => { outcome = result; }); }); await flush();
+    entry.live = false;
+    await act(async () => { await jest.advanceTimersByTimeAsync(8000); });
+    expect(isObsoletePeopleConnection(outcome?.error)).toBe(true);
+    expect(onError).not.toHaveBeenCalled(); expect(mockRpc).not.toHaveBeenCalled();
+  });
+  it('keeps a completed preflight from timing out later', async () => {
+    const f = mount(), onError = jest.fn();
+    await act(async () => { await f.current.accept.mutateAsync('bea', { scope: scope(), onError }); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(8000); });
+    expect(mockRpc).toHaveBeenCalledTimes(1); expect(onError).not.toHaveBeenCalled();
+  });
+});
