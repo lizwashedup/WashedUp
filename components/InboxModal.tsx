@@ -5,7 +5,7 @@ import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
 import { CommunityNoticeInboxRow } from './notifications/CommunityNoticeInboxRow';
 import { PageInvitationInboxRow } from './notifications/PageInvitationInboxRow';
 import { AttendeeMessageInboxRow } from './notifications/AttendeeMessageInboxRow';
-import { loadAttendeeNoticeLinks } from '../lib/attendeeMessageNotification';
+import { readInboxInvitations, readInboxNotifications } from '../lib/inboxReads';
 import { PageUpdateInboxRow } from './notifications/PageUpdateInboxRow';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight } from '../lib/haptics';
@@ -16,6 +16,7 @@ import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Modal,
   Platform,
   Pressable,
@@ -119,96 +120,44 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [visible]);
 
-  const { data: pendingInvites = [], isLoading: loadingInvites } = useQuery({
-    queryKey: ['pending-invites', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        const { data: inviteRows } = await supabase
-          .from('plan_invites')
-          .select('id, event_id, sender_id, status, created_at, events (id, title, start_time, status, member_count, max_invites)')
-          .eq('recipient_id', userId)
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false });
-
-        const active = (inviteRows ?? []).filter((inv: any) => inv.events && ['forming', 'active', 'full'].includes(inv.events.status));
-        if (active.length === 0) return [];
-
-        const senderIds = [...new Set(active.map((inv: any) => inv.sender_id).filter(Boolean))];
-        const { data: profiles } = await supabase
-          .from('profiles_public')
-          .select('id, first_name_display, profile_photo_url')
-          .in('id', senderIds);
-
-        const profileMap: Record<string, any> = {};
-        (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-        return active.map((inv: any) => ({ ...inv, profiles: profileMap[inv.sender_id] ?? null }));
-      } catch { return []; }
-    },
-    enabled: !!userId && visible,
-    staleTime: 0,
+  const enabled = visible && notificationScope.ready;
+  const inviteRead = useQuery({
+    queryKey: ['pending-invites', userId, notificationScope.epoch],
+    queryFn: () => readInboxInvitations(notificationScope.readOwner),
+    enabled, retry: false, staleTime: 0,
   });
-
-  const { data: appNotifications = [], refetch: refetchNotifs, isLoading: loadingNotifs } = useQuery({
-    queryKey: ['app-notifications', userId],
-    queryFn: async () => {
-      if (!userId) return [];
-      try {
-        try { await supabase.rpc('expire_stale_notifications'); } catch {}
-        // Filter expired-but-still-unread rows directly so the display
-        // doesn't depend on the RPC above succeeding. Mirrors the same
-        // filter on the bell-count query in ProfileButton so the two
-        // always agree.
-        const { data } = await supabase
-          .from('app_notifications')
-          .select('id, type, title, body, event_id, actor_user_id, status, expires_at, created_at')
-          .eq('user_id', userId)
-          .eq('status', 'unread')
-          .neq('type', 'plan_invite')
-          .neq('type', 'new_message')
-          .or('expires_at.is.null,expires_at.gt.now()')
-          .order('created_at', { ascending: false })
-          .limit(30);
-
-        if (!data || data.length === 0) return [];
-
-        const sceneCandidates = data.filter((n:any) => n.type === 'broadcast' && !n.event_id);
-        let sceneTargets = new Map<string,string|null>();
-        let sceneTargetsUnknown = false;
-        if (sceneCandidates.length) {
-          try { sceneTargets = await loadAttendeeNoticeLinks(sceneCandidates.map((n:any)=>n.id), {userId,isCurrent:()=>true}); }
-          catch { sceneTargetsUnknown = true; }
-        }
-
-        // Resolve avatars by structured actor_user_id (set by the relevant
-        // notification triggers). Old rows pre-migration carry NULL and fall
-        // through to the Bell fallback in the renderer.
-        const actorIds = Array.from(
-          new Set((data as any[]).filter(n => n.type !== 'creator_page_update' && n.type !== 'page_team_invitation').map((n) => n.actor_user_id).filter(Boolean))
-        );
-        let photoMap: Record<string, string> = {};
-        if (actorIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from('profiles_public')
-            .select('id, profile_photo_url')
-            .in('id', actorIds);
-          (profiles ?? []).forEach((p: any) => {
-            if (p.id && p.profile_photo_url) photoMap[p.id] = p.profile_photo_url;
-          });
-        }
-
-        return (data as any[]).map((n) => ({
-          ...n,
-          scene_update: !!sceneTargets.get(n.id) || (sceneTargetsUnknown && n.type === 'broadcast' && !n.event_id),
-          sender_photo: n.type !== 'creator_page_update' && n.type !== 'page_team_invitation' && n.actor_user_id ? (photoMap[n.actor_user_id] ?? null) : null,
-        }));
-      } catch { return []; }
-    },
-    enabled: !!userId && visible,
-    staleTime: 0,
+  const noticeRead = useQuery({
+    queryKey: ['app-notifications', userId, notificationScope.epoch],
+    queryFn: () => readInboxNotifications(notificationScope.readOwner),
+    enabled, retry: false, staleTime: 0,
   });
-
+  const pendingInvites = enabled ? inviteRead.data ?? [] : [];
+  const [expiryRevision, refreshExpiry] = useState(0);
+  const now = Date.now();
+  const appNotifications = enabled ? (noticeRead.data ?? []).filter(row =>
+    !row.expires_at || Date.parse(row.expires_at) > now) : [];
+  const nextExpiry = appNotifications.reduce((next, row) =>
+    row.expires_at ? Math.min(next, Date.parse(row.expires_at)) : next, Infinity);
+  useEffect(() => {
+    if (!enabled || !Number.isFinite(nextExpiry)) return;
+    const refresh = () => refreshExpiry(value => value + 1);
+    const timer = setTimeout(refresh, Math.max(0, Math.min(nextExpiry - Date.now(), 2147483647)));
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refresh(); });
+    return () => { clearTimeout(timer); subscription.remove(); };
+  }, [nextExpiry, enabled, expiryRevision]);
+  const { refetch: refetchNotifs, isLoading: loadingNotifs } = noticeRead;
+  const loadingInvites = inviteRead.isLoading;
+  const inviteError = enabled && (inviteRead.isError || inviteRead.data === null);
+  const noticeError = enabled && (noticeRead.isError || noticeRead.data === null);
+  const identityError = visible && notificationScope.identityUnavailable;
+  const readFailed = identityError || inviteError || noticeError;
+  const retryInbox = () => {
+    if (!visible || activeVisit.current !== visit || closingRef.current) return;
+    if (identityError) { void notificationScope.retryIdentity(); return; }
+    if (!notificationScope.isCurrent()) return;
+    if (inviteError) void inviteRead.refetch({ cancelRefetch: false });
+    if (noticeError) void noticeRead.refetch({ cancelRefetch: false });
+  };
   const totalInboxCount = pendingInvites.length + appNotifications.length;
 
   // Opening the inbox runs expire_stale_notifications on the server, which
@@ -475,9 +424,20 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               </TouchableOpacity>
             )}
           </View>
-          {loadingInvites || loadingNotifs ? (
+          {readFailed && (
+            <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+              <Text accessibilityLiveRegion="polite" style={s.meta}>
+                {identityError || (inviteError && noticeError) ? 'Couldn’t refresh your inbox.' :
+                  inviteError ? 'Couldn’t refresh your invitations.' : 'Couldn’t refresh your notifications.'}
+              </Text>
+              <TouchableOpacity accessibilityRole="button" onPress={retryInbox} style={{ paddingVertical: 10 }}>
+                <Text style={s.clearAllText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {totalInboxCount === 0 && !readFailed && (!enabled || loadingInvites || loadingNotifs) ? (
             <ActivityIndicator color={Colors.terracotta} style={{ paddingVertical: 32 }} />
-          ) : totalInboxCount === 0 ? (
+          ) : totalInboxCount === 0 && !readFailed ? (
             <View style={{ alignItems: 'center', paddingVertical: 32 }}>
               <Bell size={36} color={Colors.terracotta} />
               <Text style={[s.meta, { marginTop: 12, textAlign: 'center' }]}>
@@ -486,11 +446,6 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
             </View>
           ) : (
             <ScrollView decelerationRate="normal" style={s.list} bounces={false}>
-              {totalInboxCount === 0 && (
-                <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-                  <Text style={[s.meta, { textAlign: 'center' }]}>Nothing new right now</Text>
-                </View>
-              )}
               {pendingInvites.map((inv: any) => {
                 const sender = inv.profiles;
                 const plan = inv.events;

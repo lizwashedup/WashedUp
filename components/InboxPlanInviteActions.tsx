@@ -10,7 +10,7 @@ import { Fonts, FontSizes } from '../constants/Typography';
 
 type Phase = 'idle' | 'saving' | 'retry' | 'unknown' | 'checking' | 'done';
 type ReplyRow = { id: string; event_id: string; recipient_id: string; status: string };
-type Scope = {userId: string | null; isCurrent: () => boolean};
+type Scope = {epoch: number; userId: string | null; isCurrent: () => boolean};
 const fields = 'id,event_id,recipient_id,status';
 const rejected = new Set(['P0001','42501','23502','23503','23505','23514','22P02','28000','28P01','40001','40P01']);
 
@@ -40,7 +40,7 @@ export function InboxPlanInviteActions({ id, eventId, scope, visit, isOpen, onOp
       // A confirmed response belongs to this row and recipient even if the
       // sheet closed while waiting. Never remove another account's entries.
       if (active()) set('done');
-      client.setQueryData<{id: string; event_id: string}[]>(['pending-invites', userId], rows => rows?.filter(row => row.id !== id || row.event_id !== eventId));
+      client.setQueryData<{id: string; event_id: string}[]>(['pending-invites', userId, scope.epoch], rows => rows?.filter(row => row.id !== id || row.event_id !== eventId));
       for (const key of [['pending-invites', userId], [...INBOX_COUNT_KEY, userId], [...PENDING_INVITES_BADGE_KEY, userId]]) {
         void client.invalidateQueries({queryKey:key}).catch(() => {});
       }
