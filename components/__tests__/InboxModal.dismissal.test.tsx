@@ -534,3 +534,21 @@ it('does not repeat a pending chat acknowledgement on an immediate second inbox 
   await act(async () => { finish({error: null}); });
   expect(mockPush).toHaveBeenCalledTimes(2);
 });
+
+it('keeps Pass retryable for an open spot and checks uncertain dismissal without passing again', async () => {
+  mockNoticeType = 'waitlist_spot'; await act(async () => tree.update(renderInbox()));
+  const control = (label: string) => tree.root.findByProps({ accessibilityRole: 'button', accessibilityLabel: label });
+  mockWrite.mockResolvedValueOnce({error:{code:'42501'}});
+  await act(async () => control('Pass').props.onPress());
+  expect(renderedText()).toContain('Retry pass');
+  mockWrite.mockResolvedValueOnce({error:null,count:null});
+  await act(async () => control('Retry pass').props.onPress());
+  expect(renderedText()).toContain('Check status');
+  mockReadInvite.mockResolvedValueOnce({error:null,count:0});
+  await act(async () => control('Check status').props.onPress());
+  expect(mockWrite).toHaveBeenCalledTimes(2);
+  expect(mockClient.setQueryData.mock.calls[0][1]([{id:'fictional-notice'},{id:'other'}])).toEqual([{id:'other'}]);
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(mockDecline).not.toHaveBeenCalled();
+  expect(mockAccept).not.toHaveBeenCalled();
+});

@@ -451,9 +451,21 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                   <InboxNotificationRow key={`notif-${notif.id}`} notice={notif}
                     scope={notificationScope} visit={visit} isOpen={() => !closingRef.current && activeVisit.current === visit}
                     showDismiss={completed || (!isWaitlist && !isExceptionInvite)}
+                    openSpotActions={isWaitlist ? ({ pass, label, busy }) => (
+                      <View style={[s.waitlistActions, { flexWrap: 'wrap' }]}>
+                        <TouchableOpacity style={s.claimBtn} accessibilityRole="button" accessibilityLabel="Claim Spot"
+                          disabled={busy} onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)}>
+                          <Text style={s.claimText}>Claim Spot</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.cantGoBtn} accessibilityRole="button" accessibilityLabel={label}
+                          disabled={busy} onPress={pass}>
+                          <Text style={s.cantGoText}>{label}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : undefined}
                     onOpen={isExceptionInvite ? () => {} : hasAction
                       ? () => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
-                      : isWaitlist ? () => handleNotifAction(notif.id, 'read') : undefined}>
+                      : undefined}>
                     {(notif.type === 'people_request' || notif.type === 'people_request_accepted') && (
                       <View style={s.peopleAccent} />
                     )}
@@ -469,16 +481,6 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       {notif.body && <Text style={s.notifBody} numberOfLines={2}>{notif.body}</Text>}
                       {timeLeft !== null && timeLeft > 0 && (
                         <Text style={s.expiry}>{timeLeft < 1 ? 'Expires soon' : `${timeLeft}h left to respond`}</Text>
-                      )}
-                      {isWaitlist && (
-                        <View style={s.waitlistActions}>
-                          <TouchableOpacity style={s.claimBtn} onPress={() => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type)} activeOpacity={0.7}>
-                            <Text style={s.claimText}>Claim Spot</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={s.cantGoBtn} onPress={() => handleNotifAction(notif.id, 'read', undefined, notif.type)} activeOpacity={0.7}>
-                            <Text style={s.cantGoText}>Pass</Text>
-                          </TouchableOpacity>
-                        </View>
                       )}
                       {completed && <Text style={s.notifBody} accessibilityLiveRegion="polite">
                         {decision === 'declined' ? 'You declined this invitation.' : decision === 'expired'
