@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 
-export type WaitlistEntry = { id: string; event_id: string; user_id: string; notified?: boolean; exception_status?: string | null; exception_expires_at?: string | null };
+export type WaitlistEntry = { id: string; event_id: string; user_id: string; notified?: boolean; exception_status?: string | null; exception_invited_at?: string | null; exception_expires_at?: string | null };
 type Ticket = { readonly key: string; readonly desired: boolean; readonly rowId: string; conflict: boolean };
 type Outcome = { kind: 'pending' | 'unknown' | 'refused' | 'conflict' } | { kind: 'confirmed'; entry: WaitlistEntry | null };
 type Listener = (ticket: Ticket, outcome: Outcome) => void;
