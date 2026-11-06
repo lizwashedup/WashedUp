@@ -5,9 +5,17 @@ import { usePeopleConnectionMutations, type PeopleConnectionScope, isObsoletePeo
 import { UnconfirmedPeopleConnectionError } from '../../lib/yours/connectionRequests';
 
 const mockRpc = jest.fn(), mockGetUser = jest.fn();
+const mockReadPair = jest.fn();
+const accepted = { requester_user_id: 'bea', recipient_user_id: 'alice', status: 'accepted', can_re_request: true };
+const removed = { ...accepted, status: 'removed', can_re_request: false };
 let mockViewer: string | null = 'alice';
 const mockListeners = new Set<(event: string, session: { user: { id: string } } | null) => void>();
 jest.mock('../../lib/supabase', () => ({ supabase: {
+  from: (table: string) => ({
+    select: () => ({ in: (column: string, first: string[]) => ({
+      in: (otherColumn: string, second: string[]) => mockReadPair(table, column, first, otherColumn, second),
+    }) }),
+  }),
   rpc: (...args: unknown[]) => mockRpc(...args),
   auth: { getUser: () => mockGetUser(), onAuthStateChange: (fn: typeof mockListeners extends Set<infer T> ? T : never) => {
     mockListeners.add(fn); return { data: { subscription: { unsubscribe: () => mockListeners.delete(fn) } } };
@@ -37,6 +45,7 @@ function mount(cache = new MutationCache()) {
 }
 function observe<T>(promise: Promise<T>) { return promise.then(value => ({ value, error: null }), error => ({ value: undefined, error })); }
 beforeEach(() => { jest.clearAllMocks(); mockViewer = 'alice'; mockListeners.clear(); onlineManager.setOnline(true);
+  mockReadPair.mockReset().mockResolvedValue({ data: [accepted], error: null });
   mockRpc.mockReset().mockResolvedValue({ data: 'requested', error: null });
   mockGetUser.mockReset().mockImplementation(async () => ({ data: { user: mockViewer ? { id: mockViewer } : null }, error: null }));
 });
@@ -280,4 +289,66 @@ it('does not time out or repeat an invitation once its write has started', async
     expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.current.ping.isPending).toBe(true);
     await act(async () => gate.resolve({ data: null, error: null })); expect((await result).error).toBeNull();
   } finally { jest.useRealTimers(); }
+});
+
+
+describe('removing an accepted person', () => {
+  it('confirms a lost success for this pair and refreshes Yours without a second write', async () => {
+    const f = mount();
+    mockReadPair.mockResolvedValueOnce({ data: [accepted] }).mockResolvedValueOnce({ data: [removed] });
+    mockRpc.mockRejectedValueOnce(new Error('Lost response'));
+    const outcome = await observe(f.current.remove.mutateAsync('bea', { scope: scope() }));
+    expect(outcome.error).toBeNull();
+    expect(mockReadPair).toHaveBeenCalledWith('people_connections', 'requester_user_id', ['alice', 'bea'], 'recipient_user_id', ['alice', 'bea']);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(f.invalidate).toHaveBeenCalledWith({ queryKey: ['yours', 'grid', 'alice'] });
+  });
+
+  it('rechecking an uncertain removal from a fresh visit recognizes the saved marker', async () => {
+    const f = mount();
+    mockReadPair.mockResolvedValueOnce({ data: [accepted] }).mockRejectedValueOnce(new Error('Offline'));
+    mockRpc.mockRejectedValueOnce(new Error('Lost response'));
+    expect((await observe(f.current.remove.mutateAsync('bea', { scope: scope() }))).error).toBeTruthy();
+    expect(f.invalidate).not.toHaveBeenCalled();
+    f.unmount();
+    const reopened = mount();
+    mockReadPair.mockResolvedValueOnce({ data: [removed] });
+    await reopened.current.remove.mutateAsync('bea', { scope: scope() });
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(reopened.invalidate).toHaveBeenCalled();
+  });
+
+  it.each([null, { ...removed, recipient_user_id: 'other' }, { ...removed, can_re_request: true }, { ...removed, status: 'pending' }])(
+    'leaves an unverified relationship alone (%j)', async row => {
+      const f = mount();
+      mockReadPair.mockResolvedValueOnce({ data: row ? [row] : [] });
+      expect((await observe(f.current.remove.mutateAsync('bea', { scope: scope() }))).error).toBeTruthy();
+      expect(mockRpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves a rejected removal and permits a deliberate retry after reconnecting in the opposite direction', async () => {
+    const f = mount();
+    const reverse = { ...accepted, requester_user_id: 'alice', recipient_user_id: 'bea' };
+    mockReadPair.mockResolvedValue({ data: [removed, reverse] });
+    mockRpc.mockResolvedValueOnce({ error: { code: '42501', message: 'Refused' } });
+    expect((await observe(f.current.remove.mutateAsync('bea', { scope: scope() }))).error).toBeTruthy();
+    expect(f.invalidate).not.toHaveBeenCalled();
+    await f.current.remove.mutateAsync('bea', { scope: scope() });
+    expect(mockRpc).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['account', 'back', 'access'])('cannot start the write if %s changes during the pair check', async kind => {
+    const f = mount(), gate = deferred<any>(), visit = scope();
+    let eligible = true;
+    mockReadPair.mockReturnValueOnce(gate.promise);
+    const result = observe(f.current.remove.mutateAsync('bea', { scope: { ...visit, canDispatch: () => eligible } }));
+    await flush();
+    if (kind === 'account') act(() => auth('bob'));
+    if (kind === 'back') visit.live = false;
+    if (kind === 'access') eligible = false;
+    gate.resolve({ data: [accepted] });
+    expect((await result).error).toBeTruthy();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
 });

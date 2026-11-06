@@ -140,7 +140,7 @@ it('cancel invalidates a retained Remove callback before it can dispatch', () =>
   const f = mount(); f.openRemove(); const remove = f.button('Remove person').props.onPress; act(() => f.button('Cancel').props.onPress()); act(() => remove()); expect(mockRemove).not.toHaveBeenCalled();
 });
 it('remove failure keeps relationship intact and offers another deliberate attempt', async () => {
-  mockRemove.mockRejectedValueOnce(new Error('failed')); const f = mount(); f.openRemove(); await act(async () => f.button('Remove person').props.onPress()); expect(mockBack).not.toHaveBeenCalled(); expect(f.text()).toContain('remove');
+  mockRemove.mockRejectedValueOnce(new Error('failed')); const f = mount(); f.openRemove(); await act(async () => f.button('Remove person').props.onPress()); expect(mockBack).not.toHaveBeenCalled(); expect(f.text()).toContain('confirm the removal');
   f.openRemove(); await act(async () => f.button('Remove person').props.onPress()); expect(mockRemove).toHaveBeenCalledTimes(2); expect(mockBack).toHaveBeenCalledTimes(1);
 });
 it('old remove failures cannot close a newly opened confirmation after focus return', async () => {
