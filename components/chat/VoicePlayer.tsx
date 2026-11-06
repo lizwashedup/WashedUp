@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Pressable, ActivityIndicator, Platform, StyleSheet, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { ChatSizedText } from './ChatSizedText';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
@@ -59,6 +60,7 @@ function formatTime(value: number): string {
 }
 
 export default function VoicePlayer({ uri, durationSeconds, isOwn, appearance }: VoicePlayerProps) {
+  const navigation = React.useContext(NavigationContext);
   const player = useAudioPlayer(uri, { updateInterval: PLAYER_UPDATE_MS });
   const playerStatus = useAudioPlayerStatus(player);
   const visit = useMemo(() => ({}), [uri, player]);
@@ -171,26 +173,43 @@ export default function VoicePlayer({ uri, durationSeconds, isOwn, appearance }:
     if (!isCurrent() || attemptRef.current || retryPendingRef.current) return;
     if (failed) { await retry(); return; }
     if (loading && !isPlaying) return;
-    await run(async canContinue => {
-      if (isPlaying) {
-        player.pause();
-        releaseVoice(visit);
-        return;
-      }
-      if (currentVoice && currentVoice.visit !== visit) currentVoice.pause();
-      const request: VoicePlayback = { visit, pause: () => player.pause() };
-      currentVoice = request;
-      let started = false;
-      try {
-        if (atEnd) await player.seekTo(0);
-        if (!canContinue() || currentVoice !== request) return;
-        player.play();
-        started = true;
-      } finally {
-        if (!started && currentVoice === request) currentVoice = null;
-      }
-    }, 'Couldn’t play this recording.');
-  }, [isCurrent, failed, retry, loading, isPlaying, atEnd, player, run, visit]);
+    if (navigation && !navigation.isFocused()) return;
+    let stopWatching: (() => void) | undefined;
+    try {
+      await run(async canContinue => {
+        if (isPlaying) {
+          player.pause();
+          releaseVoice(visit);
+          return;
+        }
+        if (currentVoice && currentVoice.visit !== visit) currentVoice.pause();
+        const request: VoicePlayback = { visit, pause: () => player.pause() };
+        currentVoice = request;
+        let started = false;
+        try {
+          if (atEnd) {
+            // A pushed profile or another tab can leave this player mounted.
+            // End the pending replay on blur, including a quick Back.
+            const attempt = attemptRef.current;
+            stopWatching = navigation?.addListener('blur', () => {
+              if (!isCurrent() || attemptRef.current !== attempt) return;
+              attemptRef.current = null;
+              setBusy(false);
+              if (currentVoice === request) currentVoice = null;
+            });
+            await player.seekTo(0);
+          }
+          if (!canContinue() || currentVoice !== request || navigation?.isFocused() === false) return;
+          player.play();
+          started = true;
+        } finally {
+          if (!started && currentVoice === request) currentVoice = null;
+        }
+      }, 'Couldn’t play this recording.');
+    } finally {
+      stopWatching?.();
+    }
+  }, [isCurrent, failed, retry, loading, isPlaying, atEnd, player, run, visit, navigation]);
 
   const cycleSpeed = useCallback(async () => {
     if (!isCurrent() || loading || failed || retryPendingRef.current) return;
