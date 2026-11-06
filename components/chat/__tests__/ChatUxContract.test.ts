@@ -24,8 +24,10 @@ describe('chat and event-form UX contracts', () => {
   it('starts a reply when a plain text message is tapped', () => {
     const thread = source('components/chat/ChatThread.tsx');
 
-    expect(thread).toContain("const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;");
-    expect(thread).toContain('onStartReply?.(message.id)');
+    const bubble = source('components/chat/ChatMessageBubble.tsx');
+
+    expect(bubble).toContain("const canTapToReply = message.message_type === 'user' && !message.image_url && !firstUrl;");
+    expect(bubble).toContain('onStartReply?.(message.id)');
     expect(thread).toContain('onStartReply={!isPast ? handleTriggerReply : undefined}');
     expect(thread).toContain('requestAnimationFrame(() => { if (canWrite()) textInputRef.current?.focus(); });');
   });
