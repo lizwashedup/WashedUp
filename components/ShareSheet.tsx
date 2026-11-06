@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import {
   View,
@@ -10,10 +10,14 @@ import {
   Share,
   Platform,
   Alert,
+  AccessibilityInfo,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { hapticLight } from '../lib/haptics';
+import { getPlanShareUrl } from '../lib/sharePlan';
+import { getClipboardWriter } from '../lib/clipboardWriter';
+import { Toast } from './Toast';
 import { useRouter } from 'expo-router';
 
 interface Props {
@@ -27,29 +31,40 @@ interface Props {
 export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const deepLink = slug ? `https://washedup.app/plans/${slug}` : `https://washedup.app/e/${planId}`;
-
+  const deepLink = getPlanShareUrl({ id: planId, slug });
   const focused = useIsFocused();
+  const writeClipboard = visible && focused ? getClipboardWriter() : null;
+  const linkAction = writeClipboard ? 'Copy link' : 'Share link';
+
   const [closing, setClosing] = useState(false);
-  const active = useRef(false);
+  const opening = useMemo(() => ({}), [focused, visible, deepLink]);
+  const active = useRef<object | null>(null);
   const busy = useRef(false);
+  const copyAttempt = useRef<object | null>(null);
+  const [copyError, setCopyError] = useState(false);
+  const [copied, setCopied] = useState(false);
   const pending = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    active.current = focused;
+    active.current = focused ? opening : null;
+    copyAttempt.current = null;
+    setCopyError(false);
+    if (visible || !focused) setCopied(false);
     busy.current = false;
     pending.current = null;
     setClosing(false);
-    return () => { active.current = false; pending.current = null; };
-  }, [focused, visible, planId]);
+    return () => { active.current = null; pending.current = null; copyAttempt.current = null; };
+  }, [focused, visible, opening]);
 
   const finishDismissal = () => {
+    if (active.current !== opening) return;
     const next = pending.current;
     pending.current = null;
-    if (active.current) next?.();
+    next?.();
   };
   const closeThen = (next?: () => void) => {
-    if (!visible || !active.current || busy.current) return;
+    if (!visible || active.current !== opening || busy.current) return;
     busy.current = true;
+    copyAttempt.current = null;
     pending.current = () => { onClose(); next?.(); };
     setClosing(true);
     if (Platform.OS !== 'ios') finishDismissal();
@@ -65,17 +80,35 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
     hapticLight();
     closeThen(() => router.push('/(tabs)/friends?tab=people' as any));
   };
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
+    if (!visible || active.current !== opening || busy.current || copyAttempt.current) return;
     hapticLight();
-    // Preserve the existing link-only native share fallback.
-    closeThen(() => share(deepLink));
+    if (!writeClipboard) {
+      closeThen(() => share(deepLink));
+      return;
+    }
+    const attempt = {};
+    copyAttempt.current = attempt;
+    setCopyError(false);
+    try {
+      if (!await writeClipboard(deepLink)) throw Error('Copy unavailable');
+      if (copyAttempt.current !== attempt) return;
+      closeThen(() => {
+        setCopied(true);
+        AccessibilityInfo.announceForAccessibility('Link copied');
+      });
+    } catch {
+      if (copyAttempt.current === attempt) setCopyError(true);
+    } finally {
+      if (copyAttempt.current === attempt) copyAttempt.current = null;
+    }
   };
   const handleShareVia = () => {
     hapticLight();
     closeThen(() => share(`${planTitle}\n${deepLink}`));
   };
 
-  return (
+  return (<>
     <Modal visible={visible && focused && !closing} transparent animationType="slide" onRequestClose={() => closeThen()} onDismiss={finishDismissal} statusBarTranslucent>
       <Pressable accessible={false} style={styles.overlay} onPress={() => closeThen()}>
         <Pressable accessible={false} accessibilityViewIsModal style={[styles.sheet, { paddingBottom: Math.max(40, insets.bottom + 16) }]} onPress={(e) => e.stopPropagation()}>
@@ -93,13 +126,14 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
             <Ionicons name="chevron-forward" size={16} color="#A09385" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.option} onPress={handleCopyLink} disabled={closing} accessibilityRole="button" accessibilityLabel="Copy link" activeOpacity={0.7}>
+          <TouchableOpacity style={styles.option} onPress={handleCopyLink} disabled={closing} accessibilityRole="button" accessibilityLabel={linkAction} activeOpacity={0.7}>
             <View style={styles.iconWrap}>
               <Ionicons name="link-outline" size={20} color="#B5522E" />
             </View>
             <View style={styles.optionText}>
-              <Text style={styles.optionLabel}>Copy link</Text>
+              <Text style={styles.optionLabel}>{linkAction}</Text>
               <Text style={styles.optionSub}>{deepLink}</Text>
+              {copyError && <Text accessibilityRole="alert" style={styles.optionSub}>Couldn’t copy. Try again or use Share via.</Text>}
             </View>
             <Ionicons name="copy-outline" size={16} color="#A09385" />
           </TouchableOpacity>
@@ -117,7 +151,8 @@ export function ShareSheet({ visible, planId, planTitle, slug, onClose }: Props)
         </Pressable>
       </Pressable>
     </Modal>
-  );
+    {copied && !visible && focused && <Toast visible message="Link copied" onDismiss={() => setCopied(false)} />}
+  </>);
 }
 
 const styles = StyleSheet.create({
