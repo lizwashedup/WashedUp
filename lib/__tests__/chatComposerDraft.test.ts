@@ -85,3 +85,14 @@ it('keeps an edit when another device changed only who the same name refers to',
  mockQuery.mockResolvedValue({data:{id:parent,user_id:user,content:text,mention_data:other,message_type:'user',image_url:null},error:null});
  await expect(verifyChatComposerTarget(room,attempt,owner)).rejects.toThrow('changed');
 });
+
+it('recovers an older pending reply selection and attempt without changing the send identity or later typing', async () => {
+  const legacy = 'optimistic-' + parent;
+  const draft = {...emptyChatComposer(), text:'Later typing', reply:{id:legacy,content:'Parent',senderName:'You'},
+    attempt:{id:'kept-send-id',text:'Earlier reply',replyId:legacy,edit:null}};
+  await saveChatComposer(room,owner,draft);
+  const {draft:restored} = await readChatComposer(room,owner);
+  expect(restored.reply?.id).toBe(parent);
+  expect(prepareChatComposer(restored)).toEqual({...draft.attempt,replyId:parent});
+  expect(restored.text).toBe('Later typing');
+});

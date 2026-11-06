@@ -334,6 +334,18 @@ it('preserves a newly selected reply while an earlier message confirms', async (
   expect(mockSend.mock.calls[1][2]).toBe('reply-target');
 });
 
+it('replies to the same message when its temporary bubble is replaced by the receipt', async () => {
+  const target = '52000000-0000-4000-8000-000000000001';
+  const local = 'optimistic-' + target;
+  mockChat.messages = [fixtureMessage(local, 'First note')] as any;
+  await mount();
+  act(() => messageControls(local).onStartReply(local));
+  mockChat.messages = [fixtureMessage(target, 'First note')] as any;
+  await update();
+  type('Reply to the first note'); act(() => sendTap()({}, true)); await flush();
+  expect(mockSend.mock.calls[0][2]).toBe(target);
+});
+
 it('preserves a different selected edit while an earlier edit confirms', async () => {
   (mockChat as any).messages = [fixtureMessage('first-edit', 'First original'), fixtureMessage('second-edit', 'Second original')];
   const pending = deferred<boolean>(); mockChat.editMessage.mockReturnValueOnce(pending.promise);

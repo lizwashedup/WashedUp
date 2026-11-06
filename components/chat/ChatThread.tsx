@@ -79,7 +79,7 @@ import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { compareChatSequence } from '../../lib/chatPaging';
 import { PhotoSendSession } from '../../lib/photoSendSession';
 import { useChatComposerDraft } from '../../hooks/useChatComposerDraft';
-import { checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
+import { chatReplyTargetId, checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
 import { useChat, isObsoleteChatOperation, isUnconfirmedChatReaction, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
 import { friendlyError } from '../../lib/friendlyError';
 import MiniProfileCard from '../MiniProfileCard';
@@ -1301,7 +1301,7 @@ function ChatThread(props: ChatThreadProps) {
       (item): item is ChatMessage => !('type' in item) && item.id === msgId,
     );
     if (!msg) return;
-    changeDraft({ reply: { id: msg.id, content: msg.content, senderName: msg.user_id === currentUserId ? 'You' : msg.sender?.first_name ?? 'Someone' }, edit: null });
+    changeDraft({ reply: { id: chatReplyTargetId(msg.id), content: msg.content, senderName: msg.user_id === currentUserId ? 'You' : msg.sender?.first_name ?? 'Someone' }, edit: null });
     setActivePanel(null);
     requestAnimationFrame(() => { if (canWrite()) textInputRef.current?.focus(); });
   }, [canWrite, changeDraft, currentUserId]);

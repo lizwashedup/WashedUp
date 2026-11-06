@@ -11,6 +11,22 @@ export type ChatDraftEdit = { mentions?: ChatMentionDocument | null; id: string;
 export type ChatDraftAttempt = { mentions?: ChatMentionDocument | null; id: string; text: string; replyId: string | null; edit: ChatDraftEdit | null };
 export type ChatComposerDraft = { attemptDetached?: boolean; mentions?: ChatMentionDocument | null; text: string; reply: ChatDraftReply | null; edit: ChatDraftEdit | null; attempt: ChatDraftAttempt | null };
 export const emptyChatComposer = (): ChatComposerDraft => ({ text: '', reply: null, edit: null, attempt: null });
+// The local bubble uses this prefix until its insert response arrives. A
+// reply always belongs to the UUID sent to the database.
+export function chatReplyTargetId(id: string): string {
+  const local = /^optimistic-([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.exec(id);
+  return local?.[1] ?? id;
+}
+
+function restoreReplyTargets(draft: ChatComposerDraft): ChatComposerDraft {
+  return {
+    ...draft,
+    reply: draft.reply ? { ...draft.reply, id: chatReplyTargetId(draft.reply.id) } : null,
+    attempt: draft.attempt?.replyId
+      ? { ...draft.attempt, replyId: chatReplyTargetId(draft.attempt.replyId) }
+      : draft.attempt,
+  };
+}
 const identifier = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 100 && /^[\w-]+$/.test(v);
 const text = (v: unknown): v is string => typeof v === 'string' && v.length <= 10000;
 const validEdit = (v: any): boolean => v === null || !!v && identifier(v.id) && text(v.content) && validOptionalMentionDocument(v.content, v.mentions);
@@ -41,7 +57,7 @@ export async function readChatComposer(room: ConversationKey, owner: ChatOperati
   return serial(k, async () => {
     current(owner);
     const memory = retained.get(k);
-    if (memory) return { draft: memory, unsaved: true };
+    if (memory) return { draft: restoreReplyTargets(memory), unsaved: true };
     const raw = await AsyncStorage.getItem(k);
     current(owner);
     if (raw === null) return { draft: emptyChatComposer(), unsaved: false };
@@ -49,7 +65,7 @@ export async function readChatComposer(room: ConversationKey, owner: ChatOperati
     if (saved.version !== 1 || saved.userId !== owner.userId || saved.kind !== room.kind || saved.id !== room.id || !valid(saved.draft)) {
       throw Error('Your saved message could not be read.');
     }
-    return { draft: saved.draft as ChatComposerDraft, unsaved: false };
+    return { draft: restoreReplyTargets(saved.draft), unsaved: false };
   });
 }
 export async function saveChatComposer(room: ConversationKey, owner: ChatOperationScope, draft: ChatComposerDraft) {
