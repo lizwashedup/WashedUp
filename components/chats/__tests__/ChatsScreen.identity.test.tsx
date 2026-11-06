@@ -287,3 +287,21 @@ it('drops a queued row tap on account change or blur and opens the current conve
   act(press());
   expect(mockPush.mock.calls).toEqual([['/(tabs)/chats/plan-bob']]);
 });
+
+it('can refresh a confirmed empty inbox without leaving, and a second gesture shares that read', async () => {
+  const result = deferred();
+  mockOldRefetch.mockReturnValueOnce(result.promise);
+  jest.mocked(useChatList).mockImplementation(() => ({
+    chats: [], loading: false, loadError: false, refetch: mockOldRefetch, removeChat: jest.fn(),
+  }));
+  await mount();
+  const button = () => tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === 'Refresh chats');
+  expect(texts()).toContain('Join a plan to start chatting');
+  expect(button()).toBeDefined();
+  const pull = tree.root.findByType(RefreshControl).props.onRefresh;
+  act(() => { button()!.props.onPress(); pull(); });
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  expect(button()!.props.disabled).toBe(true);
+  await act(async () => { result.resolve(undefined); await result.promise; });
+  expect(button()!.props.disabled).toBe(false);
+});
