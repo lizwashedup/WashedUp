@@ -35,7 +35,7 @@ import { deleteEventTemplate, listEventTemplates, type EventTemplate } from '../
 import { deriveEventState, hasUnpublishedTickets, needsAttention, pickNextUpcomingEvent, type EventState } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { hapticLight } from '../../lib/haptics';
-import { supabase } from '../../lib/supabase';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { CREATOR_PAGES_ENABLED, EVENT_SUMMARY_ENABLED } from '../../constants/FeatureFlags';
 import { useLedCommunity } from '../../lib/selectedCommunity';
 import { eventBelongsToWorkspace, useWorkspace } from '../../lib/workspaceContext';
@@ -92,6 +92,13 @@ function PosterThumb({ eventId, imageUrl, title }: { eventId: string; imageUrl: 
   );
 }
 
+async function readForCreator<T>(scope: CreatorPageScope | null, read: (userId: string) => Promise<T>) {
+  if (!scope?.isCurrent()) throw new Error('The creator account changed.');
+  const result = await requestWithDeadline(read(scope.userId), 12_000);
+  if (!scope.isCurrent()) throw new Error('The creator account changed.');
+  return result;
+}
+
 export default function CreatorEventsScreen() {
   const { width, fontScale } = useWindowDimensions();
   const singleColumnActions = width < 360 || fontScale > 1.2;
@@ -102,26 +109,38 @@ export default function CreatorEventsScreen() {
   const { section } = useLocalSearchParams<{ section?: string }>();
   const [segment, setSegment] = useState<Segment>(section === 'drafts' ? 'drafts' : 'attention');
   useFocusEffect(useCallback(() => { if (section === 'drafts') setSegment('drafts'); }, [section]));
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
+  const { scope: creatorScope, account, focused } = useCreatorPageScope('creator-events');
+  const currentAccount = focused && !!creatorScope && !account.isLoading && !account.error && account.isCurrent();
+  const ownerKey = [account.viewerId, account.epoch];
+  const accessRead = useQuery({
+    queryKey: ['creator-access', ...ownerKey],
+    queryFn: () => readForCreator(creatorScope, userId => getCreatorAccess(userId)),
+    enabled: currentAccount,
+    retry: false,
+  });
+  const access = currentAccount && !accessRead.isError ? accessRead.data : undefined;
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
   const canStartEvent = workspace === 'organization' ? access?.hasEventHostGrant : workspace === 'community' && canCreateLegacyCommunityEvent(access, community);
 
   const eventsQuery = useQuery({
-    queryKey: ['creator-events-tab', workspace, community?.id],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-      return getCreatorEvents(workspace === 'community' && community ? [community.id] : [], user.id);
-    },
+    queryKey: ['creator-events-tab', workspace, community?.id, ...ownerKey],
+    queryFn: () => readForCreator(creatorScope, userId =>
+      getCreatorEvents(workspace === 'community' && community ? [community.id] : [], userId)),
     enabled: access != null && workspace != null,
   });
-  const { data: allEvents = [], refetch, isRefetching } = eventsQuery;
+  const allEvents = access && workspace ? eventsQuery.data ?? [] : [];
+  const eventsFailed = !!account.error || accessRead.isError || eventsQuery.isError;
+  const isRefetching = accessRead.isFetching || eventsQuery.isRefetching;
+  const refetch = () => {
+    if (account.error) return account.retry();
+    if (!creatorScope?.isCurrent()) return;
+    return accessRead.isError || !access ? accessRead.refetch() : eventsQuery.refetch();
+  };
   const events = allEvents.filter((event) =>
     eventBelongsToWorkspace(event, workspace, community?.id ?? null),
   );
 
-  const {scope: templateAccountScope,account: templateAccount} = useCreatorPageScope('creator-template-library');
   const templateEpoch = useRef(0);
   const [templateVisit,setTemplateVisit] = useState({active: AppState.currentState === 'active',epoch: 0});
   useEffect(() => {
@@ -131,20 +150,21 @@ export default function CreatorEventsScreen() {
     });
     return () => listener.remove();
   }, []);
-  const templateScope = useMemo<CreatorPageScope | null>(() => templateAccountScope && templateVisit.active ? {
-    userId: templateAccountScope.userId,
-    isCurrent: () => templateAccountScope.isCurrent() && AppState.currentState === 'active' && templateVisit.epoch === templateEpoch.current,
-  } : null, [templateAccountScope,templateVisit]);
+  const templateScope = useMemo<CreatorPageScope | null>(() => creatorScope && templateVisit.active ? {
+    userId: creatorScope.userId,
+    isCurrent: () => creatorScope.isCurrent() && AppState.currentState === 'active' && templateVisit.epoch === templateEpoch.current,
+  } : null, [creatorScope,templateVisit]);
   const readTemplates = useCallback((owned: CreatorPageScope) => listCreatorEventTemplates(owned), []);
   const pageTemplates = useCreatorPageRead(CREATOR_PAGES_ENABLED ? templateScope : null, readTemplates);
-  const { data: ordinaryTemplates = [] } = useQuery({
-    queryKey: ['event-templates'],
-    queryFn: listEventTemplates,
-    enabled: !CREATOR_PAGES_ENABLED,
+  const ordinaryTemplateRead = useQuery({
+    queryKey: ['event-templates', ...ownerKey],
+    queryFn: () => readForCreator(creatorScope, listEventTemplates),
+    enabled: !CREATOR_PAGES_ENABLED && currentAccount,
+    retry: false,
   });
   const templates: (EventTemplate | PageEventLibraryTemplate)[] = CREATOR_PAGES_ENABLED
     ? templateScope?.isCurrent() && !pageTemplates.loading && !pageTemplates.error ? pageTemplates.data ?? [] : []
-    : ordinaryTemplates;
+    : currentAccount ? ordinaryTemplateRead.data ?? [] : [];
   const removeTemplate = useMutation({
     mutationFn: (template: EventTemplate | PageEventLibraryTemplate) => {
       if (!CREATOR_PAGES_ENABLED) return deleteEventTemplate(template.id);
@@ -338,8 +358,8 @@ export default function CreatorEventsScreen() {
   };
 
   const segmentBody = () => {
-    if (segment !== 'templates' && eventsQuery.isPending) return <Text style={styles.empty} accessibilityLiveRegion="polite">Loading your events…</Text>;
-    if (segment !== 'templates' && eventsQuery.isError && events.length === 0) return null;
+    if (segment !== 'templates' && eventsFailed && events.length === 0) return null;
+    if (segment !== 'templates' && (!currentAccount || eventsQuery.isPending)) return <Text style={styles.empty} accessibilityLiveRegion="polite">Loading your events…</Text>;
     switch (segment) {
       case 'attention':
         return attention.length > 0
@@ -362,11 +382,18 @@ export default function CreatorEventsScreen() {
           ? past.map((e) => renderEventCard(e, { past: true }))
           : <Text style={styles.empty}>{EMPTY_HINTS.past}</Text>;
       case 'templates':
-        if (CREATOR_PAGES_ENABLED && (templateAccount.isLoading || pageTemplates.loading)) return <Text style={styles.empty}>Checking your templates…</Text>;
-        if (CREATOR_PAGES_ENABLED && (!templateScope?.isCurrent() || templateAccount.error || pageTemplates.error)) return <View>
+        if (account.isLoading) return <Text style={styles.empty}>Checking your templates…</Text>;
+        if (account.error || (CREATOR_PAGES_ENABLED ? pageTemplates.error : ordinaryTemplateRead.isError)) return <View>
           <Text accessibilityRole="alert" style={styles.empty}>Couldn’t load your templates. Check this account and your page access, then try again.</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check template library" onPress={() => void (templateAccount.error ? templateAccount.retry() : pageTemplates.refresh()).catch(() => undefined)}><Text style={styles.empty}>Check templates</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check template library" onPress={() => {
+            if (account.error) void account.retry();
+            else if (CREATOR_PAGES_ENABLED) void pageTemplates.refresh().catch(() => undefined);
+            else if (creatorScope?.isCurrent()) void ordinaryTemplateRead.refetch();
+          }}><Text style={styles.empty}>Check templates</Text></TouchableOpacity>
         </View>;
+        if (!currentAccount || (CREATOR_PAGES_ENABLED ? !templateScope?.isCurrent() || pageTemplates.loading : ordinaryTemplateRead.isPending)) {
+          return <Text style={styles.empty}>Checking your templates…</Text>;
+        }
         // S-04: same nested-touchable fix as renderEventCard above -- the
         // outer used to be one TouchableOpacity, silently swallowing the
         // delete "X" from screen readers.
@@ -466,11 +493,11 @@ export default function CreatorEventsScreen() {
           ))}
         </ScrollView>
 
-        {segment !== 'templates' && eventsQuery.isError && <View style={styles.readState} accessibilityLiveRegion="polite">
+        {segment !== 'templates' && eventsFailed && <View style={styles.readState} accessibilityLiveRegion="polite">
           <Text style={styles.cardTitle}>Events unavailable</Text>
           <Text style={styles.cardMeta}>{events.length ? 'Showing saved events. Retry to check for changes.' : 'Your events couldn’t be loaded. Try again.'}</Text>
-          <TouchableOpacity style={styles.retry} accessibilityRole="button" accessibilityLabel="Retry events" disabled={eventsQuery.isFetching} onPress={() => void refetch()}>
-            <Text style={styles.cardAction}>{eventsQuery.isFetching ? 'Checking…' : 'Retry'}</Text>
+          <TouchableOpacity style={styles.retry} accessibilityRole="button" accessibilityLabel="Retry events" disabled={isRefetching} onPress={() => void refetch()}>
+            <Text style={styles.cardAction}>{isRefetching ? 'Checking…' : 'Retry'}</Text>
           </TouchableOpacity>
         </View>}
         {segment === 'next' && next && <Text style={styles.cardMeta}>Your next scheduled event. Events needing a review appear in Needs attention.</Text>}

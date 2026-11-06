@@ -3,7 +3,19 @@ const mockAppListeners=new Set<(value:string)=>void>();let mockAppState='active'
 jest.mock('react-native',()=>new Proxy(jest.requireActual('react-native'),{get:(target,key)=>key==='AppState'?{get currentState(){return mockAppState;},addEventListener:(_:string,fn:(v:string)=>void)=>{mockAppListeners?.add(fn);return{remove:()=>mockAppListeners?.delete(fn)};}}:Reflect.get(target,key)}));
 const mockList=jest.fn(),mockDelete=jest.fn(),mockLegacyDelete=jest.fn(),mockPush=jest.fn();let mockPages=true,mockCurrent=true;const mockScope={userId:'0e6e1827-0f87-4e03-b42b-7ade8219725b',isCurrent:()=>mockCurrent};
 const mockOrdinary={id:'0fd00000-0000-4000-8000-000000000003',name:'Ordinary story',fields:{image_url:''},community_id:null,created_at:'2026-09-15T01:00:00Z'};
-jest.mock('../../../hooks/useCreatorPageScope',()=>({useCreatorPageScope:()=>({scope:mockScope,account:{isLoading:false,error:null}})}));
+jest.mock('../../../hooks/useCreatorPageScope', () => ({
+  useCreatorPageScope: () => ({
+    scope: mockScope,
+    focused: true,
+    account: {
+      viewerId: mockScope.userId,
+      epoch: 1,
+      isLoading: false,
+      error: null,
+      isCurrent: mockScope.isCurrent,
+    },
+  }),
+}));
 jest.mock('../../../lib/creatorPageEventTemplateLibrary',()=>({...jest.requireActual('../../../lib/creatorPageEventTemplateLibrary'),listCreatorEventTemplates:(...a:unknown[])=>mockList(...a),deleteCreatorEventTemplate:(...a:unknown[])=>mockDelete(...a)}));
 jest.mock('../../../lib/creatorEvents',()=>({listEventTemplates:jest.fn(),deleteEventTemplate:(...a:unknown[])=>mockLegacyDelete(...a)}));
 jest.mock('../../../lib/creatorMode',()=>({getCreatorAccess:async()=>({}),getCreatorEvents:async()=>[]}));
