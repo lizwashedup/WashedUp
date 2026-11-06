@@ -97,7 +97,7 @@ it('locks rapid submit but allows dismissal during an unfinished network request
   f.update({ visible: false }); f.update({ visible: true }); await flush(); f.choose();
   await act(async () => write.resolve({ data: 1, error: null })); await flush();
   expect(f.done).not.toHaveBeenCalled(); expect(f.close).toHaveBeenCalledTimes(1);
-  expect(f.confirm().props.disabled).toBe(false);
+  expect(f.button('Check status').props.disabled).toBe(false);
 });
 it('does not dispatch an add when the sheet closes before its auth check begins', async () => {
   const f = mount(); await flush(); f.choose();
@@ -111,7 +111,7 @@ it('does not close or alert into a reopened sheet after an old request fails', a
   const f = mount(); await flush(); f.choose(); act(() => { void f.confirm().props.onPress(); }); await flush();
   f.update({ visible: false }); f.update({ visible: true }); await flush(); f.choose();
   await act(async () => write.resolve({ data: null, error: new Error('late failure') })); await flush();
-  expect(Alert.alert).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled(); expect(f.confirm().props.disabled).toBe(false);
+  expect(Alert.alert).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled(); expect(f.button('Check status').props.disabled).toBe(false);
 });
 it('shows a people read error with retry instead of the no-people empty state', async () => {
   mockGrid.mockResolvedValue({ data: null, error: new Error('read failed') }); const f = mount(); await flush();
@@ -171,7 +171,7 @@ it('does not publish a late add success after unmount or into a replacement acco
 });
 
 it('retains selection and the existing membership after a current add failure for manual retry', async () => {
-  mockAdd.mockResolvedValueOnce({ data: null, error: new Error('trust check failed') });
+  mockAdd.mockResolvedValueOnce({ data: null, error: {code:'42501',message:'trust check failed'} });
   const f = mount(); await flush(); f.choose(); act(() => { void f.confirm().props.onPress(); }); await flush();
   expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
   expect(f.button('Bob').props.accessibilityState.checked).toBe(true);

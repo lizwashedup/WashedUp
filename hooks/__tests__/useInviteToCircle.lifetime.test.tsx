@@ -109,7 +109,7 @@ it('suppresses callbacks and cache invalidation after unmount during the RPC', a
 });
 
 it('keeps a current RPC error retryable without cache or success effects', async () => {
-  mockRpc.mockResolvedValueOnce({ data: null, error: new Error('circle trust check failed') });
+  mockRpc.mockResolvedValueOnce({ data: null, error: {code:'42501',message:'circle trust check failed'} });
   const f = mount(); const failed = jest.fn();
   await act(async () => { await f.hook.mutateAsync(['bob'], { onError: failed }).catch(() => {}); }); await flush();
   expect(failed).toHaveBeenCalledTimes(1); expect(f.invalidate).not.toHaveBeenCalled();
