@@ -42,3 +42,23 @@ it('requires the versions returned for the notice and passes them back on an exp
   await expect(recordParticipationAssent({ ...ctx, versions: undefined }, 'viewer')).resolves.toBe(false);
   expect(mockRpc).toHaveBeenCalledTimes(2);
 });
+
+it('retires an unanswered status read without authorizing the join or starting a second request', async () => {
+  jest.useFakeTimers();
+  try {
+    mockRpc.mockClear();
+    let finish!: (value: unknown) => void;
+    let signal: AbortSignal | undefined;
+    mockRpc.mockReturnValueOnce({
+      abortSignal: (value: AbortSignal) => { signal = value; return new Promise(resolve => { finish = resolve; }); },
+    });
+    const result = expect(getParticipationNoticeStatus()).rejects.toThrow('took too long');
+    await jest.advanceTimersByTimeAsync(12_000);
+    await result;
+    expect(signal?.aborted).toBe(true);
+    finish({ data: [{ needs_assent: false }], error: null });
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    mockRpc.mockResolvedValueOnce({ data: [{ needs_assent: true, notice_version: '1.0', terms_version: '3.0' }], error: null });
+    await expect(getParticipationNoticeStatus()).resolves.toMatchObject({ needsAssent: true });
+  } finally { jest.useRealTimers(); }
+});

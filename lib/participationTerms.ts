@@ -14,6 +14,7 @@
  * recorded the action does not proceed.
  */
 
+import { requestWithDeadline } from './requestWithDeadline';
 import { withDeadline } from './withTimeout';
 import { supabase } from './supabase';
 
@@ -33,7 +34,9 @@ export interface ParticipationAssentContext {
 }
 
 export async function getParticipationNoticeStatus(): Promise<{ needsAssent: boolean; versions?: ParticipationVersions }> {
-  const { data, error } = await supabase.rpc('get_participation_notice_status');
+  // No membership write has started. Let the member retry this read, even if
+  // the first connection never answers. A late result cannot authorize a join.
+  const { data, error } = await requestWithDeadline(supabase.rpc('get_participation_notice_status'), 12_000);
   if (error) {
     if (isFunctionMissing(error.code)) return { needsAssent: false };
     return { needsAssent: true };
