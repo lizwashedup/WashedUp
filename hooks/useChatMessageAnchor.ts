@@ -12,33 +12,33 @@ export function useChatMessageAnchor(roomId: string | undefined, messageId: unkn
   return { anchor, clearAnchor, anchorKey: anchor ? `${anchor.source}:${anchor.id}` : null };
 }
 
-export function useChatAnchorScroll<T>(list: React.RefObject<FlatList<T> | null>, targetKey: string | null, index: number) {
-  const request = useMemo(() => ({ key: targetKey, attempts: 0, done: false, corrected: false, measured: false, cancelled: false }), [targetKey]);
+export function useChatAnchorScroll<T>(list: React.RefObject<FlatList<T> | null>, targetKey: string | null, index: number, listVisit: unknown) {
+  // A new room/account list must position itself even when it shows the same notification.
+  const request = useMemo(() => ({ frame: null as number | null, attempts: 0, done: false, corrected: false, measured: false, cancelled: false }), [targetKey, listVisit]);
   const active = useRef(request); active.current = request;
-  const frame = useRef<number | null>(null);
   const jump = useCallback(() => {
     if (active.current !== request || !targetKey || request.cancelled || index < 0 || request.done || request.attempts >= 5 || !list.current) return;
     request.attempts++;
     request.done = true;
     list.current.scrollToIndex({ index, animated: false, viewPosition: 0.35 });
-    if (request.measured && !request.corrected) {
+    if (request.done && request.measured && !request.corrected) {
       request.corrected = true;
       request.done = false;
-      frame.current = requestAnimationFrame(jump);
+      request.frame = requestAnimationFrame(jump);
     }
   }, [request, targetKey, index, list]);
   const cancel = useCallback(() => {
     request.cancelled = true;
-    if (frame.current !== null) cancelAnimationFrame(frame.current);
-    frame.current = null;
+    if (request.frame !== null) cancelAnimationFrame(request.frame);
+    request.frame = null;
   }, [request]);
   useEffect(() => { request.cancelled = false; return cancel; }, [request, cancel]);
   const schedule = useCallback(() => {
     if (request.cancelled || active.current !== request) return;
-    if (frame.current !== null) cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(jump);
+    if (request.frame !== null) cancelAnimationFrame(request.frame);
+    request.frame = requestAnimationFrame(jump);
   }, [jump, request]);
-  useEffect(() => { schedule(); return () => { if (frame.current !== null) cancelAnimationFrame(frame.current); }; }, [schedule]);
+  useEffect(() => { schedule(); return () => { if (request.frame !== null) cancelAnimationFrame(request.frame); }; }, [schedule]);
   const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
     if (active.current !== request || !targetKey || request.cancelled || request.attempts >= 5) return;
     request.done = false;

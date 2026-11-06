@@ -467,7 +467,8 @@ export default function CommunityTopicScreen() {
   const chronologicalMessages: (TopicMessage | CommunityRoomMessage)[] = introLayout ? roomItems : anchor ? messages : visibleMessages;
   // Inverted lists start at the latest message, without an estimated end jump.
   const listMessages = useMemo(() => chronologicalMessages.slice().reverse(), [chronologicalMessages]);
-  const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? listMessages.findIndex(message => 'source' in message ? message.key === anchorKey : message.id === anchor.id) : -1);
+  const messageListKey = `${id}:${muteViewer.viewerId}:${muteViewer.epoch}:${introLayout ? 'intros' : 'topic'}:${anchorKey ?? 'latest'}`;
+  const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? listMessages.findIndex(message => 'source' in message ? message.key === anchorKey : message.id === anchor.id) : -1, messageListKey);
   const coreReadScope = useMemo(() => ({ userId: myId ?? '', isCurrent: entryIsCurrent }), [myId, entryIsCurrent]);
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(introLayout?.communityId, 'intros', coreReadScope, !!introLayout);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
@@ -1191,7 +1192,7 @@ export default function CommunityTopicScreen() {
             <FlatList
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-              key={`${id}:${muteViewer.viewerId}:${muteViewer.epoch}:${introLayout ? 'intros' : 'topic'}:${anchorKey ?? 'latest'}`}
+              key={messageListKey}
               ref={listRef}
               data={listMessages}
               inverted
