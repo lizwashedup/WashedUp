@@ -367,6 +367,13 @@ export default function ChatsScreen() {
     ] : []),
   ], [listItems, pastChats, pastExpanded]);
 
+  const isCurrentAccount = leaveViewer.isCurrent;
+  const openChat = useCallback((chat: ChatPreview) => {
+    // A tap already queued by native can arrive after the inbox or account changes.
+    if (!authUserId || !inboxFocused.current || !isCurrentAccount()) return;
+    router.push(chatHref(chat) as any);
+  }, [authUserId, isCurrentAccount, router]);
+
   const renderListItem = useCallback(({ item }: { item: ListItem }) => {
     if (item.t === 'past-header') {
       return (
@@ -408,7 +415,7 @@ export default function ChatsScreen() {
       <ChatRow
         chat={item.chat}
         conversationFonts={conversationFonts}
-        onPress={() => router.push(chatHref(item.chat) as any)}
+        onPress={() => openChat(item.chat)}
         onLongPress={
           CHAT_DELETE_ENABLED && item.chat.kind === 'circle'
             ? () => handleRowLongPress(item.chat)
@@ -417,7 +424,7 @@ export default function ChatsScreen() {
       />
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, handleRowLongPress, conversationFonts, pastExpanded]);
+  }, [router, openChat, handleRowLongPress, conversationFonts, pastExpanded]);
 
   if (COMMUNITY_CHAT_GROUPING_ENABLED && communityId) {
     return (
