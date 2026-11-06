@@ -1,4 +1,5 @@
 import React from 'react';
+import { TextInput } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -124,6 +125,26 @@ describe('basics.tsx onboarding-draft regressions', () => {
       button.findAllByType(Text).some((text) => text.props.children === 'continue'),
     )!;
   }
+
+  it('advances the keyboard through both names, then validates email without submitting the form', async () => {
+    const tree = await mountAdultDraft('not-an-email');
+    const [first, last, email] = tree.root.findAllByType(TextInput);
+    const focusLast = jest.fn();
+    const focusEmail = jest.fn();
+    last.instance.focus = focusLast;
+    email.instance.focus = focusEmail;
+    act(() => first.props.onSubmitEditing());
+    expect(focusLast).toHaveBeenCalledTimes(1);
+    expect(focusEmail).not.toHaveBeenCalled();
+    act(() => last.props.onSubmitEditing());
+    expect(focusEmail).toHaveBeenCalledTimes(1);
+    expect(email.props.returnKeyType).toBe('done');
+    act(() => email.props.onSubmitEditing());
+    expect(JSON.stringify(tree.toJSON())).toContain('enter a valid email address.');
+    expect([first.props.value, last.props.value, email.props.value]).toEqual(['Test', 'Member', 'not-an-email']);
+    expect(profileChain().update).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
 
   it.each(['', 'invalid-email'])('requires a valid onboarding email even when the other fields are complete (%s)', async (email) => {
     const tree = await mountAdultDraft(email);

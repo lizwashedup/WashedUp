@@ -80,6 +80,8 @@ function is18Plus(birthday: Date): boolean {
 }
 
 export default function OnboardingBasicsScreen() {
+  const lastNameInput = useRef<TextInput>(null);
+  const emailInput = useRef<TextInput>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -567,6 +569,7 @@ export default function OnboardingBasicsScreen() {
                   textContentType="givenName"
                   autoComplete="given-name"
                   returnKeyType="next"
+                  onSubmitEditing={() => lastNameInput.current?.focus()}
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
@@ -574,6 +577,7 @@ export default function OnboardingBasicsScreen() {
                 <Text style={styles.label}>last name</Text>
                 <TextInput
                   style={styles.input}
+                  ref={lastNameInput}
                   value={lastName}
                   onChangeText={(t) => { markEdited('lastName'); setLastName(t ?? ''); }}
                   placeholder="last name"
@@ -582,6 +586,7 @@ export default function OnboardingBasicsScreen() {
                   textContentType="familyName"
                   autoComplete="family-name"
                   returnKeyType="next"
+                  onSubmitEditing={() => emailInput.current?.focus()}
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 />
               </View>
@@ -591,6 +596,7 @@ export default function OnboardingBasicsScreen() {
             <Text style={styles.label}>email</Text>
             <TextInput
               style={[styles.input, emailError ? styles.inputError : null]}
+              ref={emailInput}
               value={email}
               onChangeText={(t) => {
                 markEdited('email');
@@ -607,7 +613,7 @@ export default function OnboardingBasicsScreen() {
               autoComplete="email"
               autoCapitalize="none"
               autoCorrect={false}
-              returnKeyType="next"
+              returnKeyType="done"
               inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             />
             {emailError ? (
