@@ -122,6 +122,19 @@ function useDetailedEnrichment(eventText = 'Plan preview', circleText = 'Circle 
   };
 }
 
+it('publishes a permitted Circle preview as soon as privacy is known while the plan read is still pending', async () => {
+  const privacy = deferred();
+  jest.mocked(readMemberChatBlockPreferences).mockReturnValueOnce(privacy.promise);
+  mockMembership = () => new Promise(() => {});
+  mockCircles = async () => circleMembership();
+  useDetailedEnrichment();
+  await mount('circle-first-paint-privacy');
+  expect(value.chats.map(chat => chat.last_message)).not.toContain('Aster: Circle preview');
+  await act(async () => privacy.resolve(new Set()));
+  expect(value.chats).toEqual([expect.objectContaining({kind:'circle', title:'Coastal circle', last_message:'Aster: Circle preview'})]);
+  expect(value.loading).toBe(false);
+});
+
 it.each(['failed', 'stalled'] as const)('publishes available circles while event membership is %s', async failure => {
   mockMembership = failure === 'failed'
     ? async () => ({ data: null, error: new Error('Event membership unavailable') })
