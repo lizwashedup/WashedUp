@@ -4,12 +4,17 @@
  * null on permission denial or cancel. The caller uploads the base64 to
  * circle-covers and points cover_upload_id at it.
  */
+import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 export async function pickCoverPhoto(): Promise<{ base64: string; uri: string } | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) return null;
+  // On iOS the system picker can return a selected photo even when the app
+  // has no access to browse the library itself.
+  if (Platform.OS !== 'ios') {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return null;
+  }
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsEditing: true,
