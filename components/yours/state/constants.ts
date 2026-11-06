@@ -311,6 +311,7 @@ export const COPY = {
   dmDeleteGo: 'Delete',
   dmDeleteError: "Couldn't delete just now. Try again.",
   // Load failure.
+  circleUnavailable: 'Circle unavailable.',
   circleLoadError: "This circle didn't load.",
   // Circle chat (the shared chat surface) + its header.
   circleChatStart: 'This is the beginning. Say something to get it going.',

@@ -48,7 +48,8 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const [editOpen, setEditOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const entrySerial = useRef(0);
-  const entry = useMemo(() => ({ serial: ++entrySerial.current }), [circleId, userId, viewerEpoch, isError]);
+  const unavailable = data === null;
+  const entry = useMemo(() => ({ serial: ++entrySerial.current }), [circleId, userId, viewerEpoch, isError, unavailable]);
   const activeEntry = useRef<typeof entry | null>(null);
   const entryReadable = useRef(false);
   entryReadable.current = !!userId && !!data && !isLoading && !isError;
@@ -186,8 +187,8 @@ function CircleDetail({ circleId }: { circleId: string }) {
         </View>
       ) : isError || !data ? (
         <View style={styles.center}>
-          <Text style={[styles.errorText, appearance && { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted }]}>{COPY.circleLoadError}</Text>
-          <Pressable
+          <Text style={[styles.errorText, appearance && { ...AfterglowType.body, fontFamily: fonts.regular, color: AfterglowColors.muted }]}>{unavailable ? COPY.circleUnavailable : COPY.circleLoadError}</Text>
+          {!unavailable && <Pressable
             onPress={() => { if (isCurrentContext()) void refetch(); }}
             onPressIn={() => { if (isCurrentContext()) setRetryPressed(true); }}
             onPressOut={() => { if (isCurrentContext()) setRetryPressed(false); }}
@@ -196,7 +197,7 @@ function CircleDetail({ circleId }: { circleId: string }) {
             accessibilityLabel={COPY.circlesRetry}
           >
             <Text style={[styles.retryLabel, appearance && { ...AfterglowType.body, fontFamily: fonts.semibold, color: AfterglowColors.clay }]}>{COPY.circlesRetry}</Text>
-          </Pressable>
+          </Pressable>}
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
