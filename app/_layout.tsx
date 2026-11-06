@@ -58,7 +58,7 @@ import { KeyboardDoneBar } from '../components/keyboard/KeyboardDoneBar';
 import { ChatKeyboardProvider } from '../components/keyboard/ChatKeyboard';
 import { logError } from '../lib/logger';
 import { queryClient } from '../lib/queryClient';
-import { withTimeout } from '../lib/withTimeout';
+import { withDeadline, withTimeout } from '../lib/withTimeout';
 import { useSessionLogger } from '../hooks/useSessionLogger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED, CREATOR_PAGES_ENABLED } from '../constants/FeatureFlags';
@@ -140,6 +140,11 @@ export const unstable_settings = {
   // Start with (tabs) so we never flash login before auth check completes
   initialRouteName: '(tabs)',
 };
+
+// Expo Router normally omits group segments from usePathname.
+function inConversation(path: string) {
+  return /^\/(?:\(tabs\)\/)?(?:chats\/(?:circle\/)?[^/]+|community-(?:thread|topic)\/[^/]+)\/?$/.test(path);
+}
 
 function RootLayout() {
   const [loaded, error] = useFonts({
@@ -456,7 +461,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // AT TIME ZONE 'America/Los_Angeles' so a plan that happened earlier
         // today PT does NOT trigger the modal — only plans on a strictly
         // earlier PT calendar day do. Returns null when nothing is eligible.
-        const { data, error } = await supabase.rpc('get_pending_post_plan_survey');
+        const { data, error } = await withDeadline(
+          supabase.rpc('get_pending_post_plan_survey'), 8000, 'startup survey eligibility',
+        );
         if (!isCurrent()) return;
         if (error) {
           console.warn('[WashedUp] Survey RPC failed:', error.message);
@@ -488,7 +495,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // plan once a plan_feedback row exists; if that insert ever failed
         // or the user skipped offline, this guarantees the survey can never
         // re-block them on a later cold start (incident 2026-05-18).
-        if (await isPostPlanSurveyHandled(payload.plan.id, authedUserId) || !isCurrent()) return;
+        // A missing dismissal answer is not permission to re-prompt. Leave the
+        // survey eligible next launch if this read stalls or the member is chatting.
+        if (await withTimeout(isPostPlanSurveyHandled(payload.plan.id, authedUserId), 2000, true)
+          || !isCurrent() || inConversation(pathnameRef.current)) return;
 
         setSurveyPlan({
           id: payload.plan.id,
@@ -568,7 +578,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         const status = await getPushPrimerEligibility();
         // This read never registers a device or requests OS permission. A
         // failed/unknown lookup is not evidence that permission is unasked.
-        if (!isCurrent() || status !== 'requestable') return;
+        if (!isCurrent() || status !== 'requestable' || inConversation(pathnameRef.current)) return;
         pushPrimerVisitRef.current = { identity: primerIdentity };
         setPushPrimerFeedback(null);
         setPushPrimerPending(false);

@@ -500,3 +500,41 @@ it('keeps the same plan available to the next account after the first handles it
   await unmount(); mockUser = PERSON_A; await mount();
   expect(tree!.root.findAllByType('SurveyFixture' as any)).toHaveLength(0);
 });
+
+it.each(['/chats/plan-one', '/chats/circle/circle-one', '/community-thread/room', '/community-topic/room'])('keeps a delayed startup survey off the open conversation %s', async (path) => {
+  const pending = deferred<any>();
+  mockSurveyRpc.mockReturnValue(pending.promise);
+  await mount();
+  act(() => { mockPath = path; mockRedraw?.(); });
+  pending.resolve(surveyPayload()); await flush();
+  expect(mockPath).toBe(path);
+  expect(tree!.root.findAllByType('SurveyFixture' as any)).toHaveLength(0);
+  expect(primers()).toHaveLength(0);
+  expect(mockNativePermission).not.toHaveBeenCalled();
+});
+
+it.each(['eligibility', 'local dismissal'])('lets a requested plan primer proceed when the optional survey %s read stalls', async (which) => {
+  const pending = deferred<any>();
+  if (which === 'eligibility') mockSurveyRpc.mockReturnValue(pending.promise);
+  else {
+    mockSurveyRpc.mockResolvedValue(surveyPayload());
+    jest.spyOn(AsyncStorage, 'multiGet').mockReturnValueOnce(pending.promise);
+  }
+  await mount();
+  act(() => requestPlanNotificationPrompt({ userId: PERSON_A.id, planId: 'fixture', reason: 'posted' }, () => true));
+  await tick(15_000); await tick(400);
+  expect(primer().title).toBe('Know when people join');
+  pending.resolve(which === 'eligibility' ? surveyPayload() : []); await flush();
+  expect(tree!.root.findAllByType('SurveyFixture' as any)).toHaveLength(0);
+  expect(primer().title).toBe('Know when people join');
+  expect(mockNativePermission).not.toHaveBeenCalled();
+});
+
+it('keeps the ordinary survey eligible on the inbox list', async () => {
+  const pending = deferred<any>();
+  mockSurveyRpc.mockReturnValue(pending.promise);
+  await mount();
+  act(() => { mockPath = '/chats'; mockRedraw?.(); });
+  pending.resolve(surveyPayload()); await flush();
+  expect(tree!.root.findAllByType('SurveyFixture' as any)).toHaveLength(1);
+});
