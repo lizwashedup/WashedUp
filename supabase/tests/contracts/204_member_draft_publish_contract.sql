@@ -42,4 +42,27 @@ BEGIN
   IF FOUND THEN RAISE EXCEPTION 'A different account published the draft'; END IF;
 END;
 $$;
+-- A new draft's primary key also identifies a retry after a lost receipt.
+DO $$
+DECLARE
+  draft uuid := gen_random_uuid();
+  me uuid := auth.uid();
+BEGIN
+  INSERT INTO public.events(id,title,status) VALUES(draft,'First version','draft') ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.events(id,title,status) VALUES(draft,'Revised title','draft') ON CONFLICT (id) DO NOTHING;
+  IF FOUND THEN RAISE EXCEPTION 'A retry inserted another draft'; END IF;
+  UPDATE public.events SET title='Revised title' WHERE id=draft AND creator_user_id=me AND status='draft';
+  IF NOT FOUND THEN RAISE EXCEPTION 'Retry failed to save current edits'; END IF;
+  PERFORM set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',true);
+  UPDATE public.events SET title='Wrong account' WHERE id=draft AND creator_user_id=auth.uid() AND status='draft';
+  IF FOUND THEN RAISE EXCEPTION 'Another account replaced draft content'; END IF;
+  PERFORM set_config('request.jwt.claim.sub',me::text,true);
+  UPDATE public.events SET status='forming' WHERE id=draft;
+  INSERT INTO public.events(id,title,status) VALUES(draft,'Stale retry','draft') ON CONFLICT (id) DO NOTHING;
+  UPDATE public.events SET title='Stale retry' WHERE id=draft AND creator_user_id=me AND status='draft';
+  IF FOUND OR NOT EXISTS (SELECT 1 FROM public.events WHERE id=draft AND status='forming' AND title='Revised title') THEN
+    RAISE EXCEPTION 'Stale retry changed the published plan';
+  END IF;
+END;
+$$;
 RESET ROLE;

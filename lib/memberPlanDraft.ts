@@ -13,6 +13,18 @@ export async function updateOwnedDraft(id: string, viewerId: string, changes: Re
   return { id };
 }
 
+// The same new form keeps its client-generated primary key across retries.
+// A conflict can update only a draft that still belongs to this creator.
+export async function saveNewPlanDraft(id: string, viewerId: string, fields: Record<string, unknown>, isCurrent: () => boolean) {
+  const { data, error } = await supabase.from('events')
+    .upsert({ ...fields, id, creator_user_id: viewerId }, { onConflict: 'id', ignoreDuplicates: true })
+    .select('id').maybeSingle();
+  if (error) throw error;
+  if (data?.id === id) return;
+  if (data !== null) throw new Error('Could not confirm the new draft.');
+  if (isCurrent()) await updateOwnedDraft(id, viewerId, fields);
+}
+
 // The database commits the marked draft transition and creator membership
 // together. Only this attempt's key can confirm a response lost in transit.
 export async function publishOwnedDraft(id: string, viewerId: string, changes: Record<string, unknown>,
