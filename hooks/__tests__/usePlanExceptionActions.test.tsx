@@ -36,12 +36,13 @@ function writes() { return mockRpc.mock.calls.filter(([name]) => name === 'accep
 function records() { return mockRpc.mock.calls.filter(([name]) => name === 'record_participation_assent'); }
 function mount(overrides: Partial<Options> = {}) {
   const onAccepted = jest.fn(), onDeclined = jest.fn(), onNotice = jest.fn(), onNoticeComplete = jest.fn(), onError = jest.fn();
+  const refreshInbox = jest.fn().mockResolvedValue(undefined);
   let props = overrides, current!: Controller;
   function Harness() {
     const epoch = mockEpoch;
     current = usePlanExceptionActions({ eventId: 'plan-a', viewerId: mockAccount, epoch, isCurrent: () => epoch === mockEpoch,
       available: true, organizerUserId: 'creator-a', organizerName: 'Amelia',
-      onAccepted, onDeclined, onNotice, onNoticeComplete, onError, ...props });
+      onAccepted, onDeclined, onNotice, onNoticeComplete, onError, refreshInbox, ...props });
     return null;
   }
   let tree!: ReturnType<typeof create>;
@@ -49,7 +50,7 @@ function mount(overrides: Partial<Options> = {}) {
   let mounted = true;
   const unmount = () => { if (mounted) act(() => tree.unmount()); mounted = false; };
   cleanups.push(unmount);
-  return { onAccepted, onDeclined, onNotice, onNoticeComplete, onError, unmount,
+  return { onAccepted, onDeclined, onNotice, onNoticeComplete, onError, refreshInbox, unmount,
     get current() { return current; },
     update(next: Partial<Options> = {}) { props = { ...props, ...next }; act(() => tree.update(<Harness />)); },
     accept() { act(() => { void current.requestAccept(); }); },
@@ -233,10 +234,22 @@ it('notification account preflight rejects a replacement account without false c
   expect(mockUpdate).not.toHaveBeenCalled(); expect(f.onAccepted).not.toHaveBeenCalled();
 });
 
-it('retiring while notification cleanup runs prevents current feedback', async () => {
-  const notification = deferred<Result>(); mockUpdate.mockReturnValue(notification.promise);
-  const f = mount(); f.accept(); await flush(); act(() => mockBlur?.());
-  await act(async () => notification.resolve({ error: null })); expect(f.onAccepted).not.toHaveBeenCalled(); expect(f.onError).not.toHaveBeenCalled();
+it.each(['accept', 'decline'] as const)('shows confirmed %s while notification cleanup is pending and never navigates a second time', async kind => {
+  const notification = deferred<Result>();
+  mockUpdate.mockReturnValue(notification.promise);
+  const f = mount();
+  f[kind](); await flush();
+  const feedback = kind === 'accept' ? f.onAccepted : f.onDeclined;
+  expect(feedback).toHaveBeenCalledTimes(1);
+  expect(f.refreshInbox).not.toHaveBeenCalled();
+  f[kind](); await flush();
+  expect(writes()).toHaveLength(1);
+  act(() => mockBlur?.());
+  mockAccount = 'bob'; mockEpoch++; f.update();
+  await act(async () => notification.resolve({ error: null }));
+  expect(feedback).toHaveBeenCalledTimes(1);
+  expect(f.refreshInbox.mock.calls).toEqual([['alice']]);
+  expect(f.onError).not.toHaveBeenCalled();
 });
 
 it.each([{ available: false }, { viewerId: null }, { eventId: '' }])('does not begin from an unavailable entry: %p', options => {

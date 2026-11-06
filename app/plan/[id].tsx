@@ -628,14 +628,18 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       queryClient.invalidateQueries({ queryKey: ['feed-member-ids'] });
       queryClient.invalidateQueries({ queryKey: ['waitlisted-plans'] });
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
-      queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
       router.replace(`/(tabs)/chats/${id}` as any);
     },
     onDeclined: () => {
       hapticLight();
       setExceptionStatus('declined');
       queryClient.invalidateQueries({ queryKey: WAITLIST_MANAGER_KEY(id ?? '') });
-      queryClient.invalidateQueries({ queryKey: ['inbox-count'] });
+    },
+    refreshInbox: async viewerId => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['inbox-count', viewerId] }),
+        queryClient.invalidateQueries({ queryKey: ['app-notifications', viewerId] }),
+      ]);
     },
     onError: (error, kind) => {
       setBrandedAlert({
