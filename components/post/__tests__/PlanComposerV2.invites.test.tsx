@@ -198,6 +198,8 @@ it.each<[Record<string, string>, string]>([
 it('points to a missing title without posting or clearing the entered message', async () => {
   const form = await mount();
   form.setTitle('   ');
+  expect(JSON.stringify(form.tree.toJSON())).toContain('Add a title to save or post.');
+  expect(form.tree.root.findByProps({ accessibilityLabel: 'post the plan' }).props.disabled).toBe(false);
   const focus = jest.fn();
   form.tree.root.findByType(EditorialTitleField).props.inputRef.current = { focus };
   await act(async () => { await form.post(); });

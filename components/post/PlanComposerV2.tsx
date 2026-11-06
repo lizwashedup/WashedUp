@@ -549,7 +549,7 @@ export default function PlanComposerV2() {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1 });
       if (!isCurrent() || result.canceled || !result.assets?.[0]) return;
       stage = 'prepare';
-      const manipulated = await ImageManipulator.manipulateAsync(result.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true });
+      const manipulated = await requestWithDeadline(ImageManipulator.manipulateAsync(result.assets[0].uri, [{ resize: { width: 1200 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true }), 30_000);
       if (!isCurrent()) return;
       if (!manipulated.base64) throw new Error('Missing prepared image');
       setImageUrl(manipulated.uri);
@@ -644,7 +644,7 @@ export default function PlanComposerV2() {
     : appearance ? `Open to ${groupSize}` : `open to ${groupSize}`;
   const summaryMeta = [whenSummary, placeSummary, peopleSummary].join(' · ');
 
-  const canPost = title.trim().length > 0 && dateSelected && timeSelected && category !== null && creatorMessage.trim().length >= MSG_MIN && description.trim().length > 0 && !loading && !imageLoading;
+  const actionsBusy = loading || imageLoading;
 
   // Validate in screen order, so the first correction is also the next field
   // the member sees. Drafts keep their existing, smaller set of requirements.
@@ -655,6 +655,9 @@ export default function PlanComposerV2() {
     ...(mode === 'post' && !description.trim() ? { description: 'Add a description so people know what to expect.' } : {}),
     ...(!dateSelected || !timeSelected ? { when: !dateSelected && !timeSelected ? 'Choose a day and a start time.' : !dateSelected ? 'Choose a day for your plan.' : 'Choose a start time.' } : {}),
   });
+  const nextRequired = Object.values(requiredErrors('post'))[0];
+  const summaryHeading = imageLoading ? 'Adding photo…' : title.trim() || 'Add a title to save or post.';
+  const summaryDetail = title.trim() && nextRequired ? nextRequired : summaryMeta;
   const fieldErrors: Partial<Record<RequiredField, string>> = validationMode ? requiredErrors(validationMode) : {};
   const validateRequired = (mode: ValidationMode) => {
     const errors = requiredErrors(mode);
@@ -738,7 +741,6 @@ export default function PlanComposerV2() {
   // ── Save as draft (COMMUNITIES_ENABLED): title + when are enough; the rest
   // waits. No host member row, no feed presence, no waitlist notify - the row
   // sits at status 'draft', visible only in Yours until it posts. ──
-  const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
   const handleSaveDraft = async () => {
     if (!isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
     if (!validateRequired('draft')) return;
@@ -941,7 +943,7 @@ export default function PlanComposerV2() {
     }
 
     // Background insert. `loading` tracks the real in-flight window so the post
-    // button's spinner is reachable and `canPost`'s !loading is a true second
+    // button's spinner is reachable and the loading guard is a second
     // guard against a re-submit racing the insert (alongside confirmVisible).
     // submittingRef is the synchronous guard above (see its declaration).
     try {
@@ -1068,12 +1070,8 @@ export default function PlanComposerV2() {
           <Text style={styles.cancel}>{appearance ? 'Cancel' : 'cancel'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{appearance ? 'New plan' : 'new plan'}</Text>
-        {/* Stays tappable when the form is incomplete so handleSubmit can surface
-            field errors and reveal the first missing section. Only a genuine
-            in-flight post (loading/imageLoading) blocks the tap; the greyed
-            look is still keyed to !canPost. */}
         <TouchableOpacity onPress={handleSubmit} disabled={loading || imageLoading} accessibilityRole="button" accessibilityLabel="Post" accessibilityState={{ disabled: loading || imageLoading, busy: loading }} style={appearance ? styles.headerAction : undefined} hitSlop={12}>
-          <Text style={[styles.postInline, !canPost && styles.postInlineOff]}>{appearance ? 'Post' : 'post'}</Text>
+          <Text style={[styles.postInline, actionsBusy && styles.postInlineOff]}>{appearance ? 'Post' : 'post'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -1388,13 +1386,13 @@ export default function PlanComposerV2() {
         ) : null}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle} numberOfLines={1}>
-            {title.trim() || (appearance ? 'Your plan' : 'your plan')}
+            {summaryHeading}
           </Text>
-          <Text style={styles.summaryMeta} numberOfLines={1}>{summaryMeta}</Text>
+          <Text style={styles.summaryMeta} numberOfLines={nextRequired ? 2 : 1}>{summaryDetail}</Text>
         </View>
         <View style={appearance ? styles.postActions : undefined}>
         <TouchableOpacity
-          style={[styles.postBtn, !canPost && styles.postBtnOff]}
+          style={[styles.postBtn, actionsBusy && styles.postBtnOff]}
           accessibilityRole="button" accessibilityLabel={appearance ? "Post plan" : "post the plan"} accessibilityState={{ disabled: loading || imageLoading, busy: loading }}
           onPress={handleSubmit}
           disabled={loading || imageLoading}
@@ -1411,7 +1409,7 @@ export default function PlanComposerV2() {
             accessibilityRole="button" accessibilityLabel={appearance ? "Save draft" : "save it as a draft"} accessibilityState={{ disabled: loading || imageLoading }}
           >
             {/* LIZ COPY */}
-            <Text style={[styles.draftLink, !canSaveDraft && styles.draftLinkOff]}>{appearance ? 'Save draft' : 'save it as a draft'}</Text>
+            <Text style={[styles.draftLink, actionsBusy && styles.draftLinkOff]}>{appearance ? 'Save draft' : 'save it as a draft'}</Text>
           </TouchableOpacity>
         )}
         </View>
