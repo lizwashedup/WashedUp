@@ -85,6 +85,7 @@ import { friendlyError } from '../../lib/friendlyError';
 import { hapticLight } from '../../lib/haptics';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { useObservedUser } from '../../hooks/useObservedUser';
+import { useVisibleCommunityRead } from '../../hooks/useVisibleCommunityRead';
 import { useCommunityCoreReadAcknowledgement } from '../../hooks/useCommunityCoreReadAcknowledgement';
 import { getCommunityRoomIdentities, getCommunityRoomHistory, type CommunityRoomCursor } from '../../lib/communityRoomHistory';
 import { CommunityChatPreferenceControl } from '../../components/chats/CommunityChatPreferenceControl';
@@ -95,7 +96,6 @@ import {
   getCommunityChatMembers,
   getCommunityChatPayload,
   getPinnedCommunityEvent,
-  markBroadcastsRead,
   deleteCommunityMessage,
   editCommunityMessage,
   sendCommunityMessage,
@@ -424,15 +424,28 @@ export default function CommunityThreadScreen() {
     isCurrent: () => coreFocused.current && AppState.currentState === 'active' && operationScope.isCurrent(),
   }), [operationScope]);
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(id, 'main', readAcknowledgementScope, !!coreLayout);
+  // Only server history is eligible; the delivery list also has local sends.
+  const ordinaryRead = useVisibleCommunityRead('main', id ?? '', readAcknowledgementScope, broadcasts,
+    !!id && admissionVisit.allowed && !coreLayout && !anchor,
+    !isLoading && broadcasts.length > 0 && !profileUserId && !replyRequest && !reactionDetails
+      && !reactionPickerMsgId && !messageMenu && !alertInfo && !showReport && !photoPreviewOpen && !locationPickerOpen && !photoSelection.selectedId);
   const visibleRead = useRef<(items: ViewToken<CommunityBroadcast>[]) => void>(() => {});
   visibleRead.current = items => {
-    if (!coreLayout || !admissionIsCurrent()) return;
+    if (!admissionIsCurrent()) return;
+    if (!coreLayout) {
+      ordinaryRead.rowsVisible(items.filter(row => row.isViewable).map(row => row.item.id));
+      return;
+    }
     const visible = new Set(items.filter(item => item.isViewable).map(item => item.item.id));
     // Reader order preserves microseconds and the server's exact tie ordering.
     const newestVisible = broadcasts.find(message => visible.has(message.id));
     if (newestVisible) readAcknowledgement.acknowledge({ broadcast: newestVisible });
   };
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<CommunityBroadcast>[] }) => { if (entryIsCurrent()) visibleRead.current(viewableItems); }, [entryIsCurrent]);
+  const activeReadList = useRef(messageQueryKey);
+  activeReadList.current = messageQueryKey;
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<CommunityBroadcast>[] }) => {
+    if (activeReadList.current === messageQueryKey && entryIsCurrent()) visibleRead.current(viewableItems);
+  }, [entryIsCurrent, messageQueryKey]);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }).current;
   const newestMessageId = broadcasts[0]?.id;
   useEffect(() => {
@@ -467,20 +480,12 @@ export default function CommunityThreadScreen() {
     if (!id || !operationScope.isCurrent()) return;
     let active = true;
     const scope = { userId: operationScope.userId, isCurrent: () => active && operationScope.isCurrent() };
-    if (!coreLayout && !anchor) markBroadcastsRead(id, scope)
-      .then(() => {
-        if (!scope.isCurrent()) return;
-        queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
-        queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
-      })
-      .catch(() => {});
     const stop = subscribeCommunityMain({
       channelName: `community-thread-${id}-${myId}-${viewer.epoch}`,
       communityId: id, isCurrent: scope.isCurrent,
       hasMessage: messageId => menuMessages.current.some(message => message.id === messageId),
       hasMessages: () => menuMessages.current.length > 0,
       refresh: () => queryClient.invalidateQueries({ queryKey: messageQueryKey, exact: true }),
-      onMessage: () => { if (!coreLayout && !anchor) void markBroadcastsRead(id, scope).catch(() => {}); },
     });
     return () => {
       active = false;
