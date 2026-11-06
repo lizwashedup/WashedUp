@@ -117,9 +117,9 @@ it('keeps both joined plans while removing a newly blocked author’s preview, i
   expect(snippets()).not.toContain('Fictional lighthouse');expect(snippets()).toContain('Fictional umbrella');
 });
 
-it('uses the preceding permitted message on cold entry and counts only permitted unread authors',async()=>{
+it.each(['event','circle'] as const)('uses the preceding permitted %s message and counts only permitted unread authors',async kind=>{
   jest.mocked(readMemberChatBlockPreferences).mockResolvedValueOnce(new Set(['synthetic-peer']));
-  mockKind='event';mockParents=[parent('sunset')];mockReads=[];
+  mockKind=kind;mockParents=[parent('sunset')];mockReads=[];
   mockMessages=[message('sunset','blocked','2026-11-06T12:00:00Z'),{...message('sunset','Earlier allowed','2026-11-06T11:00:00Z'),user_id:'allowed'}];
   await act(async()=>{tree=create(<Probe viewer="pre-existing-block"/>);});
   expect(value.chats[0]).toMatchObject({title:'sunset',last_message:'Earlier allowed',unread_count:1});

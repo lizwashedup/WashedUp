@@ -193,34 +193,3 @@ export async function fetchEventChatPreviews(
 
   return eventPreviews;
 }
-
-// A blocked latest message still proves the joined conversation exists. Read
-// the prior permitted snippet separately so filtering cannot hide the plan.
-export async function replaceBlockedEventActivity(rows: ChatPreview[], viewer: string, blocked: ReadonlySet<string>,
-  names: ReadonlyMap<string, string>, read: ScopedRead): Promise<ChatPreview[]> {
-  const affected = rows.filter(row => row.last_message_user_id && blocked.has(row.last_message_user_id));
-  if (!affected.length) return rows;
-  // Keep PostgREST URLs bounded. With a very long block list the caller
-  // will still redact the preview and retain the plan and permitted badge.
-  if (blocked.size > 100) return rows;
-  const replacements = new Map<string, ChatPreview>();
-  const list = '(' + [...blocked].map(id => '"' + id.replace(/["\\]/g, '\\$&') + '"').join(',') + ')';
-  for (let offset = 0; offset < affected.length; offset += 50) {
-    const batch = affected.slice(offset, offset + 50);
-    const { data, error } = await read(supabase.from('events')
-      .select('id, latest_message:messages!messages_event_id_fkey(event_id,user_id,content,created_at,image_url,audio_url,message_type)')
-      .in('id', batch.map(row => row.eventId!)).not('latest_message.user_id', 'in', list)
-      .order('created_at', {referencedTable:'latest_message', ascending:false})
-      .order('id', {referencedTable:'latest_message', ascending:false})
-      .limit(1, {referencedTable:'latest_message'}));
-    if (error) throw error;
-    const parents = new Map((data ?? []).map(parent => [parent.id, parent.latest_message?.[0]]));
-    for (const row of batch) {
-      const msg = parents.get(row.eventId!);
-      if (!msg?.user_id || msg.event_id !== row.eventId || blocked.has(msg.user_id)) continue;
-      replacements.set(row.conversationId, {...row, last_message_user_id:msg.user_id, last_message_at:msg.created_at,
-        last_message:formatChatPreview(msg, msg.user_id === viewer ? 'You' : names.get(msg.user_id) ?? null)});
-    }
-  }
-  return rows.map(row => replacements.get(row.conversationId) ?? row);
-}
