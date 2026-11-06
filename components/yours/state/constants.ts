@@ -608,5 +608,5 @@ export const COPY = {
   ppCreated: (n: number) => `${n} ${n === 1 ? 'plan' : 'plans'} created`,
   ppPhoneVerified: 'phone verified',
   ppNewHere: 'New to WashedUp',
-  ppRemoveError: "Couldn't remove them just now. Try again.",
+  ppRemoveError: "Couldn't confirm the removal. Try again.",
 } as const;

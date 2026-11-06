@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { removePeopleConnection } from '../lib/yours/removePeopleConnection';
 import { yoursKeys } from '../lib/yours/keys';
 import { INBOX_COUNT_KEY } from '../constants/QueryKeys';
 import { sendOrAcceptPeopleRequest, UnconfirmedPeopleConnectionError } from '../lib/yours/connectionRequests';
@@ -50,7 +51,7 @@ type Runtime = {
 
 /** Capture before React Query can pause/defer execution. Validate at the
  * actual mutation boundary, including resumed offline work and auth epochs. */
-function useConnectionMutation<R, V>(write: (value: V) => Promise<R>, runtime: Runtime) {
+function useConnectionMutation<R, V>(write: (value: V, checks: { current: () => void; dispatch: () => void }) => Promise<R>, runtime: Runtime) {
   const mutation = useMutation<R, Error, CapturedCall<V>>({
     mutationFn: async call => {
       runtime.requireCurrent(call);
@@ -60,9 +61,12 @@ function useConnectionMutation<R, V>(write: (value: V) => Promise<R>, runtime: R
         if (error) throw error;
         if (!user || user.id !== call.scope.userId) throw new ObsoletePeopleConnectionError();
       }
-      runtime.requireCurrent(call);
-      if (call.scope?.canDispatch && !call.scope.canDispatch()) throw new Error('no_pending_request');
-      const result = await write(call.value);
+      const checkDispatch = () => {
+        runtime.requireCurrent(call);
+        if (call.scope?.canDispatch && !call.scope.canDispatch()) throw new Error('no_pending_request');
+      };
+      checkDispatch();
+      const result = await write(call.value, { current: () => runtime.requireCurrent(call), dispatch: checkDispatch });
       runtime.requireCurrent(call);
       return result;
     },
@@ -153,9 +157,9 @@ export function usePeopleConnectionMutations(userId: string | null | undefined) 
     const { error } = await supabase.rpc('decline_people_request', { p_requester: args.requesterId, p_block: args.block ?? false });
     if (error) throw error;
   }, runtime);
-  const remove = useConnectionMutation(async (otherId: string) => {
-    const { error } = await supabase.rpc('remove_connection', { p_other: otherId });
-    if (error) throw error;
+  const remove = useConnectionMutation(async (otherId: string, checks) => {
+    if (!userId) throw new ObsoletePeopleConnectionError();
+    await removePeopleConnection(otherId, userId, checks);
   }, runtime);
   const setVisibility = useConnectionMutation(async (args: { global?: boolean | null; personId?: string | null; hidden?: boolean | null }) => {
       const { error } = await supabase.rpc('set_plan_visibility', {
