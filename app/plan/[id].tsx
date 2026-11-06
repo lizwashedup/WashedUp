@@ -183,13 +183,14 @@ function openDirections(locationText: string, coords?: { latitude: number; longi
     showLocation({
       latitude: coords.latitude,
       longitude: coords.longitude,
+      googleForceLatLon: true,
       title: locationText,
       dialogTitle: 'Get Directions',
       dialogMessage: 'Choose your maps app',
       cancelText: 'Cancel',
     });
   } else {
-    const encoded = encodeURIComponent(locationText);
+    const encoded = encodeURIComponent(coords ? `${coords.latitude},${coords.longitude}` : locationText);
     const url = Platform.OS === 'ios'
       ? `maps://?q=${encoded}`
       : `geo:0,0?q=${encoded}`;
