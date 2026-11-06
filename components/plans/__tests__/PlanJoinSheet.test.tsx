@@ -1,5 +1,5 @@
 import React from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
+import { InputAccessoryView, Keyboard, KeyboardAvoidingView, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { PlanJoinSheet, type PlanJoinSheetProps } from '../PlanJoinSheet';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
@@ -204,4 +204,13 @@ it('retains legacy defaults and opts into title-first cream/Mona with the same i
   expect(StyleSheet.flatten(sheet.props.style).backgroundColor).toBe(AfterglowColors.paper);
   expect(f.button("I'm coming").props.accessibilityState.checked).toBe(true);
   expect(f.input().props.value).toBe('Hi everyone! Looking forward to it.');
+});
+
+it('connects the greeting to the keyboard bar in the same iOS modal', () => {
+  const f = mount({message:"I can't wait",confirmed:false});
+  const bar = f.modal().findByType(InputAccessoryView);
+  expect(bar.props.nativeID).toBe(f.input().props.inputAccessoryViewID);
+  expect(f.input().props.value).toBe("I can't wait");
+  expect(f.callbacks.onClose).not.toHaveBeenCalled();
+  expect(f.callbacks.onJoin).not.toHaveBeenCalled();
 });

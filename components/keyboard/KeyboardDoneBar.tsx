@@ -13,12 +13,12 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 
 export const KEYBOARD_DONE_ACCESSORY_ID = 'globalKeyboardDone';
 
-export function KeyboardDoneBar() {
+export function KeyboardDoneBar({ nativeID = KEYBOARD_DONE_ACCESSORY_ID }: { nativeID?: string } = {}) {
   if (Platform.OS !== 'ios') return null;
   return (
-    <InputAccessoryView nativeID={KEYBOARD_DONE_ACCESSORY_ID}>
+    <InputAccessoryView nativeID={nativeID}>
       <View style={styles.bar}>
-        <Pressable onPress={Keyboard.dismiss} hitSlop={12} style={styles.btn}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Done" onPress={Keyboard.dismiss} hitSlop={12} style={styles.btn}>
           <Text style={styles.label}>Done</Text>
         </Pressable>
       </View>
