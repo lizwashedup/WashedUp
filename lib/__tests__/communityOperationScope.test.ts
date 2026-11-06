@@ -729,3 +729,19 @@ describe('community chat inbox responses', () => {
     await expect(community.getCommunityChatPayload()).resolves.toEqual({ cards, attendee_topics });
   });
 });
+
+
+describe.each([
+  ['Main', () => community.getCommunityBroadcasts('room-a',undefined,scope()), 'messages'],
+  ['topic', () => community.getTopicMessages('topic-a',undefined,scope()), 'messages'],
+  ['replies', () => community.getBroadcastReplies('parent-a',scope()), 'replies'],
+] as const)('%s history', (_kind, read, rows) => {
+  it.each([null, {}, ''])('rejects a missing or malformed collection (%p)', async data => {
+    execute.mockResolvedValueOnce({data,error:null});
+    await expect(read()).rejects.toThrow('Chat history could not be loaded');
+  });
+  it('uses the empty state for a confirmed empty list', async () => {
+    execute.mockResolvedValueOnce({data:[],error:null});
+    await expect(read()).resolves.toMatchObject({[rows]:[],hasMore:false,olderCursor:null});
+  });
+});
