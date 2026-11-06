@@ -9,6 +9,7 @@ import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { useCreatorPageScope } from '../../hooks/useCreatorPageScope';
 import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
 import { communitySetupDestinations, creationDestinations, loadCreationEntry, type SceneCreationKind } from '../../lib/creationEntry';
+import { loadManagedOrganizationName } from '../../lib/creatorManagement';
 import { setWorkspace } from '../../lib/workspaceContext';
 import { setSelectedCommunityId } from '../../lib/selectedCommunity';
 
@@ -21,6 +22,10 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
   const { fonts } = useAfterglowFonts(true, 'creator');
   const { scope, account } = useCreatorPageScope(`create-${kind}`);
   const { data, loading, error, refresh } = useCreatorPageRead(scope, loadCreationEntry);
+  const organizationName = useCreatorPageRead(
+    kind === 'event' && data?.access.hasEventHostGrant ? scope : null,
+    loadManagedOrganizationName,
+  );
   const navigation = useRef<object | null>(null);
   const ready = !!scope?.isCurrent() && !account.isLoading && !account.error && !loading && !error && !!data;
   const latest = useRef({ scope, ready, data });
@@ -56,7 +61,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
     {ready && <>
       {kind === 'event' && destinations.length > 0 && <Text style={[styles.label, { fontFamily: fonts.medium }]}>Created by</Text>}
       {destinations.map(destination => <View key={destination.id} style={styles.card}>
-        <PageAction compact disclosure title={destination.title} onPress={() => go(destination.route, () => {
+        <PageAction compact disclosure title={destination.workspace === 'organization' ? organizationName.data ?? destination.title : destination.title} onPress={() => go(destination.route, () => {
           setWorkspace(destination.workspace);
           setSelectedCommunityId(destination.communityId ?? null);
         })} />

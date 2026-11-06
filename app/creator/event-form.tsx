@@ -1,3 +1,6 @@
+import { SavedEventOrganizer } from '../../components/creator/SavedEventOrganizer';
+import { useCreatorPageRead } from '../../hooks/useCreatorPageRead';
+import { loadManagedOrganizationName } from '../../lib/creatorManagement';
 import { ScaledText } from '../../components/ScaledText';
 import { LegacyEventCreateGate } from '../../components/creator/LegacyEventCreateGate';
 import { prepareLegacyEventCreate, type LegacyEventCreateContext } from '../../lib/legacyEventCreate';
@@ -148,6 +151,10 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
   const appearance = useMemo(() => ({ fonts, sunset: true }), [fonts]);
   // A page context comes only from the authorized saved-page/event gate, never route text.
   const operationScope = pageScope ?? creationScope;
+  const organizationName = useCreatorPageRead(
+    creationContext?.workspace === 'organization' ? creationScope ?? null : null,
+    loadManagedOrganizationName,
+  );
   const confirmedCreatedEvent = React.useRef<string | null>(null);
   const draftCreation = useOperatorEventDraft(creationContext?.community?.id ?? null, creationScope);
   const assertPageVisit = () => { if (operationScope && !operationScope.isCurrent()) throw new CreatorPageScopeExpired(); };
@@ -1907,9 +1914,9 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
             <TextInput style={styles.input} value={publicName} onChangeText={setPublicName} maxLength={80} placeholder="a brand or venue name" placeholderTextColor={Colors.inkSoft} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
             </View>
 
-            <Text style={styles.sectionHeader}>Created by</Text>
+            <Text style={styles.sectionHeader}>Organizer</Text>
             <View style={styles.sectionCard}>
-            {creationContext && <Text style={styles.fieldLabel}>{creationContext.community?.name ?? 'Your organization'}</Text>}
+            {creationContext && <Text style={styles.fieldLabel}>{creationContext.community?.name ?? (creationScope?.isCurrent() ? organizationName.data : null) ?? 'Your organization'}</Text>}
             {!editing && !creationContext && !community && (
               <>
                 <Text style={styles.fieldLabel}>whose event is this</Text>
@@ -1940,11 +1947,8 @@ function EventFormScreen({ pageContext, pageScope, pageEvent, creationContext, c
                 <Text style={styles.fieldHint}>this one is set at posting and stays put.</Text>
               </>
             )}
-            {editing && (
-              <Text style={styles.fieldHint}>
-                {pageContext ? `From ${String(pageContext.name)}. This event stays with this page.` : eventCommunityId ? 'a community event, set at posting.' : 'a standalone event, set at posting.'}
-              </Text>
-            )}
+            {editing && pageContext && <Text style={styles.fieldHint}>From {pageContext.name}. This event stays with this page.</Text>}
+            {editing && !pageContext && id && <SavedEventOrganizer eventId={id} style={styles.fieldLabel} />}
 
             {((!editing && fromCommunity && !!community) || (editing && !!eventCommunityId)) && (
               <>

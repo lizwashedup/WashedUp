@@ -9,6 +9,8 @@ let mockCurrent = true, mockLoading = false, mockError: string | undefined, mock
 const mockScope = { userId: 'creator', isCurrent: () => mockCurrent };
 const mockEmpty = { ledCommunities: [], hasLeaderGrant: false, hasEventHostGrant: false, isRevoked: false };
 let mockData: any;
+let mockOrganizationName: string | null;
+jest.mock('../../../lib/creatorManagement', () => ({ loadManagedOrganizationName: jest.fn() }));
 jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args) }, Redirect: () => null, useLocalSearchParams: () => ({}) }));
 jest.mock('../../../components/creator/pages/PageFrame', () => ({
   PageFrame: ({ children }: any) => require('react').createElement(require('react-native').View, {}, children),
@@ -16,7 +18,7 @@ jest.mock('../../../components/creator/pages/PageFrame', () => ({
 }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').CreatorFonts }) }));
 jest.mock('../../../hooks/useCreatorPageScope', () => ({ useCreatorPageScope: () => ({ scope: mockScope, account: { viewerId: 'creator', isLoading: false, error: null } }) }));
-jest.mock('../../../hooks/useCreatorPageRead', () => ({ useCreatorPageRead: () => ({ data: mockData, loading: mockLoading, error: mockError, refresh: mockRefresh }) }));
+jest.mock('../../../hooks/useCreatorPageRead', () => ({ useCreatorPageRead: (scope: unknown, read: unknown) => ({ data: read === require('../../../lib/creatorManagement').loadManagedOrganizationName ? (scope ? mockOrganizationName : null) : mockData, loading: mockLoading, error: mockError, refresh: mockRefresh }) }));
 jest.mock('../../../lib/creatorMode', () => ({ getCreatorAccess: jest.fn(), isAdminTierRole: (role: string) => ['leader', 'co_leader', 'admin'].includes(role) }));
 jest.mock('../../../lib/operatorApplications', () => ({ fetchMyGrants: jest.fn() }));
 jest.mock('../../../lib/workspaceContext', () => ({ setWorkspace: (...args: unknown[]) => mockWorkspace(...args) }));
@@ -28,7 +30,7 @@ const mount = (kind: 'event' | 'community' = 'event') => act(() => { tree = crea
 const actions = () => tree.root.findAllByType(PageAction);
 const action = (title: string) => actions().find(node => node.props.title === title)!;
 const text = () => tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockLoading = false; mockError = undefined; mockPages = false; mockData = { access: mockEmpty, grants: [] }; mockRefresh.mockResolvedValue(undefined); });
+beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockLoading = false; mockError = undefined; mockPages = false; mockOrganizationName = null; mockData = { access: mockEmpty, grants: [] }; mockRefresh.mockResolvedValue(undefined); });
 afterEach(() => act(() => tree?.unmount()));
 
 it.each([['event', '/creator/apply-events'], ['community', '/creator/apply-community']] as const)('takes an unapproved %s creator to the correct existing application', (kind, route) => {
@@ -55,6 +57,15 @@ it('explains the community role requirement before offering a separate creator a
   expect(action('Sunset Club')).toBeUndefined();
   expect(text()).toContain('a leader or co-leader role there');
   expect(text()).toContain('under a separate public name or organization');
+});
+it('names the organization alongside the community when an account manages both', () => {
+  mockOrganizationName = 'Local Sunset Events';
+  mockData.access = { ...mockEmpty, hasEventHostGrant: true, ledCommunities: [{ id: 'sunset', name: 'Local Sunset Club', role: 'co_leader', status: 'active' }] };
+  mount();
+  expect(action('Local Sunset Club')).toBeDefined();
+  act(() => action('Local Sunset Events').props.onPress());
+  expect(mockCommunity).toHaveBeenCalledWith(null);
+  expect(mockPush).toHaveBeenCalledWith('/creator/event-form?workspace=organization');
 });
 it('clears a previous community selection before opening organization tools', () => {
   mockData.access = { ...mockEmpty, hasEventHostGrant: true }; mount();
