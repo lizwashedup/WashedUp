@@ -35,3 +35,16 @@ it('does not spin on malformed dates or overflow a distant timer', () => {
   act(() => jest.advanceTimersByTime(2147483647));
   expect(jest.getTimerCount()).toBe(1);
 });
+
+it('updates a page whose end time passed between rendering and installing its timer', () => {
+  const cutoff = Date.now() + 15;
+  let renderedTime = 0;
+  function Detail() {
+    renderedTime = usePlanClock([{ start_time: '2029-12-31T23:00:00Z', end_time: new Date(cutoff).toISOString() }]);
+    React.useLayoutEffect(() => { jest.setSystemTime(cutoff + 1); }, []);
+    return null;
+  }
+  act(() => { tree = create(<Detail />); });
+  act(() => jest.advanceTimersByTime(1));
+  expect(renderedTime).toBeGreaterThanOrEqual(cutoff);
+});
