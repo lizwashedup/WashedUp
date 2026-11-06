@@ -12,6 +12,10 @@ jest.mock('../../lib/supabase', () => ({ supabase: { from: (table: string) => {
 } } }));
 const { useMyPlans, useSavedPlans, useWaitlistedPlans } = require('../useMyPlansData') as typeof import('../useMyPlansData');
 const event = { id: 'plan', title: 'Walk', creator_user_id: 'person', status: 'forming', end_time: '2040-01-01T20:00:00Z', member_count: 3, max_invites: 6, circle_id: 'circle', circle_visibility: 'open', stranger_cap: 6 };
+function context() {
+  const { QueryClient } = jest.requireActual('@tanstack/react-query');
+  return { client: new QueryClient(), signal: new AbortController().signal };
+}
 beforeEach(() => {
   jest.useFakeTimers();
   mockGroups = true; mockQuery.mockReset().mockImplementation(options => options);
@@ -21,7 +25,7 @@ beforeEach(() => {
   }));
 });
 it.each([useMyPlans, useSavedPlans, useWaitlistedPlans])('preserves Circle provenance and creator in %p without inventing outside places', async hook => {
-  hook('viewer'); const rows = await mockQuery.mock.calls[0][0].queryFn();
+  hook('viewer'); const rows = await mockQuery.mock.calls[0][0].queryFn(context());
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ circle_metadata_known: true, circle_id: 'circle', stranger_cap: 6, spots_remaining: null, end_time: '2040-01-01T20:00:00Z', member_count: 12, creator: { id: 'person', first_name_display: 'Amelia' } });
   expect(circlePlanCardState(rows[0])).toMatchObject({ kind: 'open', remaining: null });
@@ -31,13 +35,13 @@ it.each([useMyPlans, useSavedPlans, useWaitlistedPlans])('preserves Circle prove
 });
 it('retains the explicit left-membership exclusion for personal plans', async () => {
   mockRead.mockImplementation((table, _fields, filters) => ({ data: table === 'events' ? [event] : table === 'event_members' ? filters.status === 'left' ? [{ event_id: 'plan' }] : [{ events: event }] : [], error: null }));
-  useMyPlans('viewer'); expect(await mockQuery.mock.calls[0][0].queryFn()).toEqual([]);
+  useMyPlans('viewer'); expect(await mockQuery.mock.calls[0][0].queryFn(context())).toEqual([]);
 });
 afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
 it.each(['useMyPlans', 'useSavedPlans', 'useWaitlistedPlans'])('keeps held Circle columns out when disabled for %s', async name => {
   mockGroups = false;
   jest.isolateModules(() => { require('../useMyPlansData')[name]('viewer'); });
-  await mockQuery.mock.calls[0][0].queryFn();
+  await mockQuery.mock.calls[0][0].queryFn(context());
   expect(mockRead.mock.calls.every(([, fields]) => !fields.includes('circle_id'))).toBe(true);
 });
 
@@ -54,14 +58,14 @@ it.each([
   ? {data:null,error:new Error('offline')} : normal(t,fields,filters));
  require('../useMyPlansData')[name]('viewer');
  const options=mockQuery.mock.calls[0][0];
- await expect(options.queryFn()).rejects.toThrow('offline');
+ await expect(options.queryFn(context())).rejects.toThrow('offline');
  expect(options.retry).toBe(false);
 });
 it.each(['useMyPlans','useMyPlanDrafts','useSavedPlans','useWaitlistedPlans'])('%s bounds a stalled read without publishing a late empty result', async name => {
  let finish!: (value:any) => void;
  mockRead.mockReturnValue(new Promise(resolve => {finish=resolve;}));
  require('../useMyPlansData')[name]('viewer');
- const request=mockQuery.mock.calls[0][0].queryFn();
+ const request=mockQuery.mock.calls[0][0].queryFn(context());
  const outcome=expect(request).rejects.toThrow('took too long');
  await jest.advanceTimersByTimeAsync(name==='useSavedPlans'?8000:12000);
  await outcome; finish({data:[],error:null}); await Promise.resolve();
@@ -70,8 +74,46 @@ it('opts the Interested collection into strict read failures and a deadline', as
  const reader=require('../../lib/fetchPlans').fetchInterestedPlans;
  reader.mockReturnValue(new Promise(() => {}));
  require('../useMyPlansData').useInterestedPlans('viewer');
- const request=mockQuery.mock.calls[0][0].queryFn();
+ const request=mockQuery.mock.calls[0][0].queryFn(context());
  const outcome=expect(request).rejects.toThrow('took too long');
  await jest.advanceTimersByTimeAsync(12000);await outcome;
  expect(reader).toHaveBeenCalledWith({throwOnError:true});
+});
+
+describe('the Waitlisted section', () => {
+ const key = ['waitlisted-plans','viewer'];
+ const other = ['waitlisted-plans','other'];
+ const Sunday = {id:'sunday'}, Coffee = {id:'coffee'};
+ function prepare() {
+  const ctx = context();
+  ctx.client.setQueryData(key, [Coffee,Sunday]); ctx.client.setQueryData(other, [Coffee]);
+  useWaitlistedPlans('viewer');
+  return {ctx, read: () => mockQuery.mock.calls[0][0].queryFn(ctx)};
+ }
+ it.each([null, {}, [{event_id:'sunday'},{}]])('retains the last list and offers retry on an incomplete membership response', async data => {
+  const {ctx,read}=prepare(); mockRead.mockReturnValue({data,error:null});
+  await expect(read()).rejects.toThrow('confirm'); expect(ctx.client.getQueryData(key)).toEqual([Coffee,Sunday]);
+ });
+ it('retains only still-owned rows when the subsequent plan lookup fails', async () => {
+  const {ctx,read}=prepare();
+  mockRead.mockReturnValueOnce({data:[{event_id:'sunday'}],error:null}).mockReturnValueOnce({data:null,error:null});
+  await expect(read()).rejects.toThrow('confirm'); expect(ctx.client.getQueryData(key)).toEqual([Sunday]);
+  expect(ctx.client.getQueryData(other)).toEqual([Coffee]);
+ });
+ it.each(['42501',403])('removes cached rows after an explicit access denial: %s',async denial=>{
+  const {ctx,read}=prepare();
+  mockRead.mockReturnValueOnce({data:null,error:{code:typeof denial==='string'?denial:'',message:'Denied'},status:denial});
+  await expect(read()).rejects.toMatchObject({message:'Denied'});expect(ctx.client.getQueryData(key)).toEqual([]);
+  expect(ctx.client.getQueryData(other)).toEqual([Coffee]);
+ });
+ it('accepts a genuine empty result after the active-plan filter',async()=>{
+  const {ctx,read}=prepare();mockRead.mockReturnValueOnce({data:[{event_id:'sunday'}],error:null}).mockReturnValueOnce({data:[],error:null});
+  await expect(read()).resolves.toEqual([]);expect(ctx.client.getQueryData(key)).toEqual([]);
+ });
+ it('does not prune a newer cache after the request deadline',async()=>{
+  let finish!:(value:any)=>void; const {ctx,read}=prepare();
+  mockRead.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
+  const assertion=expect(read()).rejects.toThrow('too long');await jest.advanceTimersByTimeAsync(12000);await assertion;
+  finish({data:[],error:null});await jest.advanceTimersByTimeAsync(0);expect(ctx.client.getQueryData(key)).toEqual([Coffee,Sunday]);
+ });
 });

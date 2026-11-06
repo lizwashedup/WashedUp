@@ -181,61 +181,105 @@ export function useMyPlans(userId: string | null | undefined) {
   });
 }
 
-/** Plans the user is waitlisted on (active/forming/full). */
+function validPlanId(id: unknown): id is string {
+  return typeof id === 'string' && id.trim().length > 0;
+}
+
+function waitlistAccessDenied(error: { code?: string }, status: number): boolean {
+  return error.code === '42501' || error.code === 'PGRST301' ||
+    status === 401 || status === 403;
+}
+
+async function readWaitlistedPlans(userId: string, retainOnly: (ids: Set<string>) => void): Promise<Plan[]> {
+  // Step 1: get waitlisted event IDs (no FK on event_waitlist, so join won't work)
+  const { data: waitlistRows, error: waitlistError, status: waitlistStatus } = await supabase
+    .from('event_waitlist')
+    .select('event_id')
+    .eq('user_id', userId);
+
+  if (waitlistError) {
+    if (waitlistAccessDenied(waitlistError, waitlistStatus)) retainOnly(new Set());
+    throw waitlistError;
+  }
+  if (!Array.isArray(waitlistRows) || !waitlistRows.every(row => validPlanId(row?.event_id))) {
+    throw new Error('Could not confirm your waitlist entries.');
+  }
+  const eventIds = [...new Set(waitlistRows.map(row => row.event_id as string))];
+  const owned = new Set(eventIds);
+  retainOnly(owned);
+  if (eventIds.length === 0) return [];
+
+  // Step 2: fetch the actual events
+  const { data: eventsData, error: eventsError, status: eventsStatus } = await supabase
+    .from('events')
+    .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug' + CIRCLE_COLUMNS)
+    .in('id', eventIds)
+    .in('status', ['forming', 'active', 'full']);
+
+  if (eventsError) {
+    if (waitlistAccessDenied(eventsError, eventsStatus)) retainOnly(new Set());
+    throw eventsError;
+  }
+  const rows: unknown = eventsData; // The selected columns depend on the Circle feature flag.
+  if (!Array.isArray(rows) || !rows.every(row => validPlanId(row?.id) && owned.has(row.id))) {
+    throw new Error('Could not confirm your waitlisted plans.');
+  }
+  const active = rows;
+  retainOnly(new Set(active.map(row => row.id)));
+  if (active.length === 0) return [];
+
+  const creatorIds = [...new Set(active.map((e: any) => e.creator_user_id).filter(Boolean))] as string[];
+  const { data: profiles, error: profileError } = creatorIds.length > 0
+    ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
+    : { data: [] as any[], error: null };
+
+  if (profileError) throw profileError;
+  const profileMap: Record<string, any> = {};
+  (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+
+  const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
+
+  // Fetch creator milestone marks into the shared cache.
+  await populateCreatorMarks(creatorIds);
+
+  return active.map((e: any) => {
+    const hp = profileMap[e.creator_user_id] ?? null;
+    return {
+      ...circleFields(e),
+      id: e.id, title: e.title, start_time: e.start_time, end_time: e.end_time ?? null,
+      location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
+      image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
+      max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
+      member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0), status: e.status ?? 'forming', host_message: e.host_message ?? null,
+      creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
+    } as Plan;
+  });
+}
+
+/** Plans the member is still waitlisted on and allowed to see. */
 export function useWaitlistedPlans(userId: string | null | undefined) {
+  const queryKey = ['waitlisted-plans', userId] as const;
   return useQuery<Plan[]>({
-    queryKey: ['waitlisted-plans', userId],
-    queryFn: () => requestWithDeadline((async () => {
+    queryKey,
+    queryFn: async context => {
       if (!userId) return [];
-
-      // Step 1: get waitlisted event IDs (no FK on event_waitlist, so join won't work)
-      const { data: waitlistRows, error: waitlistError } = await supabase
-        .from('event_waitlist')
-        .select('event_id')
-        .eq('user_id', userId);
-
-      if (waitlistError) throw waitlistError;
-      const eventIds = (waitlistRows ?? []).map((w: any) => w.event_id as string);
-      if (eventIds.length === 0) return [];
-
-      // Step 2: fetch the actual events
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select('id, title, start_time, end_time, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, min_invites, member_count, status, creator_user_id, host_message, neighborhood, slug' + CIRCLE_COLUMNS)
-        .in('id', eventIds)
-        .in('status', ['forming', 'active', 'full']);
-
-      if (eventsError) throw eventsError;
-      const active = eventsData ?? [];
-      if (active.length === 0) return [];
-
-      const creatorIds = [...new Set(active.map((e: any) => e.creator_user_id).filter(Boolean))] as string[];
-      const { data: profiles, error: profileError } = creatorIds.length > 0
-        ? await supabase.from('profiles_public').select('id, first_name_display, profile_photo_url').in('id', creatorIds)
-        : { data: [] as any[], error: null };
-
-      if (profileError) throw profileError;
-      const profileMap: Record<string, any> = {};
-      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
-
-      const realCounts = await fetchRealMemberCounts(active.map((e: any) => e.id));
-
-      // Fetch creator milestone marks into the shared cache.
-      await populateCreatorMarks(creatorIds);
-
-      return active.map((e: any) => {
-        const hp = profileMap[e.creator_user_id] ?? null;
-        return {
-          ...circleFields(e),
-          id: e.id, title: e.title, start_time: e.start_time, end_time: e.end_time ?? null,
-          location_text: e.location_text ?? null, location_lat: e.location_lat ?? null, location_lng: e.location_lng ?? null,
-          image_url: e.image_url ?? null, category: e.primary_vibe ?? null, gender_rule: e.gender_rule ?? null,
-          max_invites: e.max_invites ?? null, min_invites: e.min_invites ?? null,
-          member_count: Math.max(1, realCounts[e.id] ?? e.member_count ?? 0), status: e.status ?? 'forming', host_message: e.host_message ?? null,
-          creator: hp ? { id: hp.id, first_name_display: hp.first_name_display ?? null, profile_photo_url: hp.profile_photo_url ?? null } : null,
-        } as Plan;
-      });
-    })(), MY_PLANS_TIMEOUT_MS),
+      const { client, signal } = context;
+      let active = true;
+      // A confirmed removal must survive a failure in the subsequent details read.
+      // A cancelled or timed-out request must never prune a newer result.
+      const retainOnly = (ids: Set<string>) => {
+        if (!active || signal.aborted) return;
+        const cached = client.getQueryData<Plan[]>(queryKey);
+        if (cached?.some(row => !ids.has(row.id))) {
+          client.setQueryData(queryKey, cached.filter(row => ids.has(row.id)));
+        }
+      };
+      try {
+        return await requestWithDeadline(readWaitlistedPlans(userId, retainOnly), MY_PLANS_TIMEOUT_MS);
+      } finally {
+        active = false;
+      }
+    },
     retry: false,
     enabled: !!userId,
     staleTime: 30_000,
