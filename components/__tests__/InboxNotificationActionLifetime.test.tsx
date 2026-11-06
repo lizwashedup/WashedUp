@@ -37,7 +37,8 @@ it('does not dispatch a retained callback after an auth event before props updat
 it('allows the newly committed same-account visit after an account roundtrip',async()=>{
  act(()=>{emit('bob');emit('alice');});await flush();await act(async()=>{await handler('notice','acted','plan','waitlist_spot');});expect(push).toHaveBeenCalledWith('/plan/plan');expect(mockUpdate).toHaveBeenCalledWith({status:'acted'});
 });
-it.each([['member_joined','/(tabs)/chats/plan'],['waitlist_request','/waitlist/plan'],['album_upload_prompt','/album/upload/plan'],['album_ready','/album/plan']])('preserves %s current navigation and mark semantics',async(type,route)=>{
+// Chat-opening notices are exercised with the rendered native modal in InboxModal.dismissal.test.tsx.
+it.each([['waitlist_request','/waitlist/plan'],['album_upload_prompt','/album/upload/plan'],['album_ready','/album/plan']])('preserves %s current navigation and mark semantics',async(type,route)=>{
  await act(async()=>{await handler('notice','acted','plan',type);});expect(push).toHaveBeenCalledWith(route);expect(close).toHaveBeenCalledTimes(1);expect(mockUpdate).toHaveBeenCalledWith({status:'acted'});expect(refresh).toHaveBeenCalledTimes(1);
 });
 it('preserves current dismissal without navigation and current write error feedback',async()=>{

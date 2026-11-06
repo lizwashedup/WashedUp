@@ -7,6 +7,7 @@ const mockTerms = jest.fn(), mockAssent = jest.fn(), mockAccept = jest.fn(), moc
 const mockWaitlist = jest.fn();
 const mockMembership = jest.fn(), mockAuthUser = jest.fn();
 let mockException = false;
+let mockNoticeType = 'member_joined';
 jest.mock('../../lib/participationTerms', () => ({ getParticipationNoticeStatus: () => mockTerms(), recordParticipationAssent: (context: unknown) => mockAssent(context) }));
 jest.mock('../../lib/waitlistExceptions', () => ({ ...jest.requireActual('../../lib/waitlistExceptions'), acceptWaitlistException: (id: string) => mockAccept(id), declineWaitlistException: (id: string) => mockDecline(id) }));
 const mockPush = jest.fn(), mockClose = jest.fn(), mockWrite = jest.fn();
@@ -21,7 +22,7 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 jest.mock('../../hooks/useInboxNotificationScope', () => ({ useInboxNotificationScope: () => ({ ready: true, epoch: 1, userId: 'fictional-viewer', isCurrent: () => mockCurrent }) }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient, useQuery: ({queryKey}: any) => ({
   isError: queryKey[0] === 'app-notifications' && mockNoticeError,
-  data: queryKey[0] === 'app-notifications' ? mockNoticeError ? undefined : [{id:'fictional-notice',type:mockException ? 'exception_invite' : 'member_joined',title:'Fictional reminder',expires_at:mockExpiresAt,event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: queryKey[0] === 'app-notifications' ? mockRetryNotices : jest.fn(), isLoading: false,
+  data: queryKey[0] === 'app-notifications' ? mockNoticeError ? undefined : [{id:'fictional-notice',type:mockException ? 'exception_invite' : mockNoticeType,title:'Fictional reminder',expires_at:mockExpiresAt,event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: queryKey[0] === 'app-notifications' ? mockRetryNotices : jest.fn(), isLoading: false,
 }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: { auth: { getUser: () => mockAuthUser() }, from: (table: string) => {
   let writing=false;
@@ -38,13 +39,15 @@ jest.mock('../BrandedAlert', () => ({ BrandedAlert: () => null }));
 jest.mock('../legal/ParticipationNotice', () => ({ ParticipationNotice: () => null }));
 let tree: ReactTestRenderer;
 const row = () => tree.root.findAllByType(TouchableOpacity).find(n => n.findAllByType(Text).some(t => t.props.children === 'Fictional reminder'))!;
-beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockInvites = []; mockNoticeError = false; mockExpiresAt = null; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
+beforeEach(() => { jest.clearAllMocks(); mockCurrent = true; mockNoticeType = 'member_joined'; mockInvites = []; mockNoticeError = false; mockExpiresAt = null; Platform.OS = 'ios'; mockWrite.mockResolvedValue({error:null}); act(() => { tree = create(<InboxModal visible userId="fictional-viewer" onClose={mockClose} />); }); });
 afterEach(() => act(() => tree.unmount()));
 it('does not open a chat before its native inbox window dismisses', async () => {
   await act(async () => row().props.onPress());
   expect(mockPush).not.toHaveBeenCalled();
   act(() => tree.root.findByType(Modal).props.onDismiss());
   expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/fictional-plan');
+  expect(mockClient.invalidateQueries).toHaveBeenCalledWith({queryKey:['app-notifications','fictional-viewer',1],exact:true});
+  expect(mockClient.invalidateQueries).toHaveBeenCalledWith({queryKey:['inbox-count','fictional-viewer',1],exact:true});
 });
 it('does not dispatch the same row action twice in one frame', async () => {
   const press = row().props.onPress;
@@ -88,6 +91,7 @@ it('allows Android to open without waiting for the iOS-only completion', async (
   expect(mockClose).toHaveBeenCalledTimes(1);
 });
 it('ignores a pending row result when the user closes the inbox', async () => {
+  mockNoticeType = 'people_ping'; await act(async () => tree.update(renderInbox()));
   let resolve!: (value: any) => void;
   mockWrite.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
   let pending!: Promise<void>;
@@ -100,6 +104,7 @@ it('ignores a pending row result when the user closes the inbox', async () => {
   expect(mockClose).toHaveBeenCalledTimes(1);
 });
 it('releases a rejected action for retry without leaving the inbox', async () => {
+  mockNoticeType = 'people_ping'; await act(async () => tree.update(renderInbox()));
   mockWrite.mockRejectedValueOnce(Error('offline'));
   await act(async () => row().props.onPress());
   expect(tree.root.findByType(Modal).props.visible).toBe(true);
@@ -496,4 +501,36 @@ describe('the inbox waitlist exception invitation', () => {
     expect(mockDecline).not.toHaveBeenCalled();
     expect(renderedText()).not.toContain('You declined this invitation.');
   });
+});
+
+
+it.each(['member_joined', 'invite_accepted', 'event_reminder'])('opens a %s chat after dismissal even while acknowledgement is pending', async kind => {
+  mockNoticeType = kind; await act(async () => tree.update(renderInbox()));
+  let settle!: (r: any) => void;
+  mockWrite.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+  act(() => { void row().props.onPress(); });
+  await act(async () => { await Promise.resolve(); });
+  expect(mockPush).not.toHaveBeenCalled();
+  expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  act(() => tree.root.findByType(Modal).props.onDismiss());
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/fictional-plan');
+  await act(async () => { settle({error: {message: 'offline'}}); });
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockFilters).toHaveBeenCalledWith(true, 'user_id', 'fictional-viewer');
+  expect(mockFilters).toHaveBeenCalledWith(true, 'status', 'unread');
+});
+
+it('does not repeat a pending chat acknowledgement on an immediate second inbox visit', async () => {
+  let finish!: (r: any) => void;
+  mockWrite.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await act(async () => row().props.onPress());
+  act(() => tree.root.findByType(Modal).props.onDismiss());
+  await act(async () => tree.update(renderInbox(false)));
+  await act(async () => tree.update(renderInbox()));
+  await act(async () => row().props.onPress());
+  act(() => tree.root.findByType(Modal).props.onDismiss());
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledTimes(2); // two explicit visits
+  await act(async () => { finish({error: null}); });
+  expect(mockPush).toHaveBeenCalledTimes(2);
 });

@@ -7,6 +7,7 @@ import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
 import { CommunityNoticeInboxRow } from './notifications/CommunityNoticeInboxRow';
 import { PageInvitationInboxRow } from './notifications/PageInvitationInboxRow';
 import { AttendeeMessageInboxRow } from './notifications/AttendeeMessageInboxRow';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { readInboxInvitations, readInboxNotifications } from '../lib/inboxReads';
 import { PageUpdateInboxRow } from './notifications/PageUpdateInboxRow';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -63,6 +64,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
   const insets = useSafeAreaInsets();
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  const chatAcknowledgements = useRef(new Set<string>());
   const notificationActions = useRef(new Set<string>());
   const visit = useMemo(() => ({}), [visible, userId]);
   const activeVisit = useRef<object | null>(null);
@@ -161,6 +163,27 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     actions.add(notifId);
     hapticLight();
     try {
+      if (action === 'acted' && eventId && userId &&
+          (notifType === 'member_joined' || notifType === 'invite_accepted' || notifType === 'event_reminder')) {
+        // Opening an existing thread does not depend on clearing its bell entry.
+        // Only invalidate this owner's cache; a late receipt never navigates.
+        const key = JSON.stringify([userId, notifId]);
+        if (!chatAcknowledgements.current.has(key)) {
+          chatAcknowledgements.current.add(key);
+          void requestWithDeadline(supabase.from('app_notifications').update({ status: 'acted' })
+            .eq('id', notifId).eq('user_id', userId).eq('status', 'unread'), 12_000)
+            .finally(() => chatAcknowledgements.current.delete(key))
+            .then(({ error }) => {
+              if (error) return;
+              return Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['app-notifications', userId, notificationScope.epoch], exact: true }),
+                queryClient.invalidateQueries({ queryKey: [...INBOX_COUNT_KEY, userId, notificationScope.epoch], exact: true }),
+              ]);
+            }).catch(() => { /* The next inbox read reconciles an uncertain receipt. */ });
+        }
+        navigateAfterDismiss(`/(tabs)/chats/${eventId}`);
+        return;
+      }
       await supabase.from('app_notifications').update({ status: action }).eq('id', notifId).eq('user_id', userId);
       if (!notificationScope.isCurrent() || closingRef.current) return;
       // Don't delete waitlist row here — let cleanup_waitlist_on_join trigger handle it
@@ -209,9 +232,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
         return;
       }
       if (action === 'acted' && eventId) {
-        if (notifType === 'member_joined' || notifType === 'invite_accepted' || notifType === 'event_reminder') {
-          navigateAfterDismiss(`/(tabs)/chats/${eventId}` as any);
-        } else if (notifType === 'waitlist_request' || notifType === 'exception_slot_refunded') {
+        if (notifType === 'waitlist_request' || notifType === 'exception_slot_refunded') {
           // The manager query has a 30s staleTime; force it fresh so the
           // creator doesn't land on a stale counter/list after tapping a
           // "someone wants in" / "slot opened back up" notification.
