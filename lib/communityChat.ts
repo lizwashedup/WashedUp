@@ -359,16 +359,19 @@ export async function markBroadcastsRead(communityId: string, scope?: CommunityO
   if (error) throw error;
 }
 
-export async function markTopicRead(topicId: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function markTopicRead(topicId: string, seenAt: string, scope: CommunityOperationScope): Promise<void> {
+  const user = await requestWithDeadline(communityOperationUser(scope), 8000);
   if (!user) return;
-  const { error } = await supabase
-    .from('community_topic_reads')
-    .upsert(
-      { topic_id: topicId, user_id: user.id, last_read_at: new Date().toISOString() },
-      { onConflict: 'topic_id,user_id' },
-    );
-  if (error) throw error;
+  const row = { topic_id: topicId, user_id: user.id, last_read_at: seenAt };
+  // Ignore a concurrent insert, then advance an existing position only if it
+  // is older. Neither a delayed phone nor scrolling up can rewind the marker.
+  const inserted = await scopedCommunityRequest(scope, () => supabase.from('community_topic_reads')
+    .upsert(row, { onConflict: 'topic_id,user_id', ignoreDuplicates: true }).select('last_read_at'));
+  if (inserted.error) throw inserted.error;
+  if (inserted.data?.length) return;
+  const updated = await scopedCommunityRequest(scope, () => supabase.from('community_topic_reads')
+    .update({ last_read_at: seenAt }).eq('topic_id', topicId).eq('user_id', user.id).lt('last_read_at', seenAt));
+  if (updated.error) throw updated.error;
 }
 
 // -- broadcasts (the pinned voice) ----------------------------------------------

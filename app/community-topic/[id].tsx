@@ -63,6 +63,7 @@ import { useCommunityConversationNotifications } from '../../hooks/useCommunityC
 import { useCommunityTopicMute } from '../../hooks/useCommunityTopicMute';
 import { compareCommunityRoomSequence } from '../../lib/communityRoomWindow';
 import { getCommunityIntroRoom, type CommunityRoomMessage, type CommunityReadTargets } from '../../lib/communityRoomHistory';
+import { useVisibleTopicRead } from '../../hooks/useVisibleTopicRead';
 import { useCommunityCoreReadAcknowledgement } from '../../hooks/useCommunityCoreReadAcknowledgement';
 import { BroadcastCard } from '../../components/communities/BroadcastCard';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
@@ -106,7 +107,7 @@ import {
   getCommunityChatMembers,
   getTopicFirstMessage,
   hasSaidHiInTopic,
-  markTopicRead,
+
   deleteTopicMessage,
   getTopicMeta,
   type TopicMessage,
@@ -479,9 +480,20 @@ export default function CommunityTopicScreen() {
   const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? listMessages.findIndex(message => 'source' in message ? message.key === anchorKey : message.id === anchor.id) : -1, messageListKey);
   const coreReadScope = useMemo(() => ({ userId: myId ?? '', isCurrent: entryIsCurrent }), [myId, entryIsCurrent]);
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(introLayout?.communityId, 'intros', coreReadScope, !!introLayout);
+  const topicReadEnabled = !!id && usesLegacyHistory && !anchor && !!myId && myId === muteViewer.viewerId;
+  // Topic history may arrive before the event's introduction requirement.
+  // Only acknowledge when this room is known to be ordinary or its gate has opened.
+  const knownReadableRoom = topic ? (!topic.explore_event_id || justSaidHi || saidHi === true)
+    : !!topicMeta && topicMeta.id === id && topicMeta.explore_event_id === null;
+  const topicReadable = knownReadableRoom && !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId;
+  const ordinaryRead = useVisibleTopicRead(id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
   visibleRead.current = items => {
-    if (!introLayout || !entryIsCurrent()) return;
+    if (!introLayout) {
+      ordinaryRead.rowsVisible(items.flatMap(({ item, isViewable }) => isViewable && !('source' in item) ? [item.id] : []));
+      return;
+    }
+    if (!entryIsCurrent()) return;
     const keys = new Set(items.flatMap(item => item.isViewable && 'source' in item.item ? [item.item.key] : []));
     const targets: CommunityReadTargets = {};
     for (const item of roomItems.slice().reverse()) {
@@ -490,9 +502,13 @@ export default function CommunityTopicScreen() {
     }
     readAcknowledgement.acknowledge(targets);
   };
+  // FlatList's callbacks can outlive the anchored/latest list that created them.
+  const readWindow = useMemo(() => ({}), [messageListKey, identityScope]);
+  const activeReadWindow = useRef(readWindow);
+  activeReadWindow.current = readWindow;
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<TopicMessage | CommunityRoomMessage>[] }) => {
-    if (introLayout && identityScope.isCurrent()) visibleRead.current(viewableItems);
-  }, [identityScope, !!introLayout]);
+    if (activeReadWindow.current === readWindow && identityScope.isCurrent()) visibleRead.current(viewableItems);
+  }, [identityScope, readWindow]);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }).current;
   const photos = useMemo(() => messages.flatMap(message =>
     message.id !== welcomeMessage?.id && message.image_url
@@ -510,10 +526,9 @@ export default function CommunityTopicScreen() {
   };
 
   // The hook owns live message/reaction refresh. This screen owns read markers
-  // and chat-list invalidation because those are navigation concerns.
+  // through visibility and refreshes chat lists when leaving the topic.
   useEffect(() => {
     if (!id || !usesLegacyHistory || anchor) return;
-    markTopicRead(id).catch(() => {});
     return () => {
       queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
       queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
@@ -841,15 +856,6 @@ export default function CommunityTopicScreen() {
     if (!isAtBottom && arrived > 0) setUnreadWhileScrolled(count => count + arrived);
   }, [isAtBottom, visibleMessages, !!introLayout, introLayout ? roomItems : null, myId]);
 
-  // Review finding 2026-08-29: keying off messages.length stops detecting new
-  // arrivals once the room hits the 300-message query cap, since an insert
-  // just replaces the oldest row instead of growing the array. The newest
-  // message's own id always changes on a real arrival, capped or not.
-  const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
-  useEffect(() => {
-    if (!anchor && id && lastMessageId && usesLegacyHistory) markTopicRead(id).catch(() => {});
-  }, [id, lastMessageId, usesLegacyHistory, anchorKey]);
-
   const renderMessage = ({ item, index, previousMessage, showDayOverride }: { item: TopicMessage; index: number; previousMessage?: TopicMessage | null; showDayOverride?: boolean }) => {
     const mine = item.sender_id === myId;
     const previous = previousMessage === undefined ? (index > 0 ? visibleMessages[index - 1] : null) : previousMessage;
@@ -1152,7 +1158,7 @@ export default function CommunityTopicScreen() {
           // the room (even while gated below), not buried behind "say hi
           // first". Same neutral card language as the gate card; gold stays
           // reserved for the documented tappable-only exceptions.
-          <View style={styles.welcomeCard}>
+          <View key={welcomeMessage.id} onLayout={() => ordinaryRead.welcomeVisible(welcomeMessage.id)} style={styles.welcomeCard}>
             <Text style={styles.welcomeLabel}>a note from the creator</Text>
             <Text style={styles.welcomeBody}>{welcomeMessage.body}</Text>
           </View>
