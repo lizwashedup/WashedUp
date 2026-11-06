@@ -24,9 +24,10 @@ async function addToAppleCalendar(
   location?: string,
 ): Promise<boolean> {
   if (!Calendar) {
-    Alert.alert('Not available', 'Apple Calendar requires a native rebuild. Use Google Calendar instead.');
+    Alert.alert('Not available', 'Apple Calendar isn’t available here. You can use Google Calendar instead.');
     return false;
   }
+  let calendarId: string;
   try {
     const { status } = await Calendar.requestCalendarPermissionsAsync();
     if (status !== 'granted') {
@@ -36,15 +37,21 @@ async function addToAppleCalendar(
 
     const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
     const defaultCal = calendars.find(c => c.allowsModifications && c.source?.name === 'iCloud')
-      ?? calendars.find(c => c.allowsModifications)
-      ?? calendars[0];
+      ?? calendars.find(c => c.allowsModifications);
 
     if (!defaultCal) {
       Alert.alert('No calendar found', 'Could not find a writable calendar on this device.');
       return false;
     }
 
-    await Calendar.createEventAsync(defaultCal.id, {
+    calendarId = defaultCal.id;
+  } catch {
+    Alert.alert('Couldn’t open Apple Calendar', 'Try again or choose Google Calendar.');
+    return false;
+  }
+
+  try {
+    const eventId = await Calendar.createEventAsync(calendarId, {
       title,
       startDate: start,
       endDate: end,
@@ -53,10 +60,12 @@ async function addToAppleCalendar(
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
 
-    return true;
+    if (typeof eventId === 'string' && eventId.trim()) return true;
   } catch {
-    return false;
+    // A missing receipt does not tell us whether the calendar saved the event.
   }
+  Alert.alert('Couldn’t confirm the calendar entry', 'Check Apple Calendar for this plan before trying again.');
+  return false;
 }
 
 export function showAddToCalendar(
@@ -88,7 +97,10 @@ export function showAddToCalendar(
       async (idx) => {
         if (idx === 0) {
           const ok = await addToAppleCalendar(title, interval.start, interval.end, location);
-          if (ok) onSuccess?.();
+          if (ok) {
+            if (onSuccess) onSuccess();
+            else Alert.alert('Added to your calendar', title);
+          }
         } else if (idx === 1) {
           await openGoogleCalendar();
         }
