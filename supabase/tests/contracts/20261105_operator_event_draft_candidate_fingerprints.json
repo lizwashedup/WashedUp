@@ -1,0 +1,41 @@
+[
+  {
+    "acl": [
+      "postgres=X/postgres",
+      "authenticated=X/postgres"
+    ],
+    "md5": "c3aa08c79c8b4db6d084940d3fff3e59",
+    "identity": "cancel_operator_event_draft_attempt(uuid,jsonb)"
+  },
+  {
+    "acl": [
+      "postgres=X/postgres",
+      "authenticated=X/postgres"
+    ],
+    "md5": "ecf318cecd34741546dc73f3b5f924ee",
+    "identity": "create_operator_event_draft(uuid,jsonb,uuid,text,integer,double precision,double precision)"
+  },
+  {
+    "acl": [
+      "postgres=X/postgres",
+      "authenticated=X/postgres"
+    ],
+    "md5": "4f012c4e005d57babd0143e6b482ac61",
+    "identity": "get_operator_event_draft_attempt(uuid)"
+  },
+  {
+    "acl": [
+      "postgres=X/postgres",
+      "authenticated=X/postgres"
+    ],
+    "md5": "b7e1bd216504609a5895b0ce9e76af5f",
+    "identity": "get_operator_event_draft_capability()"
+  },
+  {
+    "acl": [
+      "postgres=X/postgres"
+    ],
+    "md5": "04da71d8bf42e369b8e19e747d72b841",
+    "identity": "operator_event_draft_authorize(uuid)"
+  }
+]

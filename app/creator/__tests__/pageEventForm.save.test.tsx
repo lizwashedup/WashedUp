@@ -1,3 +1,4 @@
+jest.mock('../../../hooks/useOperatorEventDraft',()=>({useOperatorEventDraft:()=>({enabled:false,ready:true,supported:false,canStart:()=>true})}));
 import React from 'react';import {act,create,type ReactTestRenderer} from 'react-test-renderer';import {TextInput,TouchableOpacity,Text} from 'react-native';
 let mockEntryProps:any, mockRouteParams:Record<string,string>|undefined,mockPagesEnabled=true;
 const mockPageId='f5d7644a-2ff5-4def-b0ab-d04b8250892b',mockEventId='0f860000-0000-4000-8000-000000000001',mockUser='0e6e1827-0f87-4e03-b42b-7ade8219725b';

@@ -1,0 +1,1154 @@
+[
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "admin_notes",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "categories",
+      "type": "text[]",
+      "default": "'{}'::text[]",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "category",
+      "type": "text",
+      "default": "'Community'::text",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "city",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "commission_rate",
+      "type": "numeric",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "community_id",
+      "type": "uuid",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "confirmation_message",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "contact_email",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "contact_name",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "default": "now()",
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "description",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "description_blocks",
+      "type": "jsonb",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "end_time",
+      "type": "timestamp with time zone",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "event_date",
+      "type": "date",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "external_url",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "host_user_id",
+      "type": "uuid",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "id",
+      "type": "uuid",
+      "default": "gen_random_uuid()",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "image_url",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "image_url_2",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "image_url_3",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "latitude",
+      "type": "double precision",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "longitude",
+      "type": "double precision",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "members_notified_at",
+      "type": "timestamp with time zone",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "offer_type",
+      "type": "event_offer_type",
+      "default": "'ticketed_event'::event_offer_type",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "owner_community_id",
+      "type": "uuid",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "owner_id",
+      "type": "uuid",
+      "default": "COALESCE(owner_user_id, owner_community_id)",
+      "required": false,
+      "generated": "s"
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "owner_type",
+      "type": "text",
+      "default": null,
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "owner_user_id",
+      "type": "uuid",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "pin_to_chat",
+      "type": "boolean",
+      "default": "true",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "public_name",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "refund_policy",
+      "type": "text",
+      "default": "'until_48h'::text",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "social_proof_visible",
+      "type": "boolean",
+      "default": "true",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "start_time",
+      "type": "timestamp with time zone",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "status",
+      "type": "text",
+      "default": "'Live'::text",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "ticket_capacity",
+      "type": "integer",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "ticket_price",
+      "type": "numeric",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "ticket_type",
+      "type": "text",
+      "default": "'Free'::text",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "timezone",
+      "type": "text",
+      "default": "'America/Los_Angeles'::text",
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "title",
+      "type": "text",
+      "default": null,
+      "required": true,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "default": "now()",
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "venue",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "column",
+    "value": {
+      "acl": null,
+      "name": "venue_address",
+      "type": "text",
+      "default": null,
+      "required": false,
+      "generated": ""
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "event_categories_limit",
+      "definition": "CHECK ((cardinality(categories) <= 2))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "event_exactly_one_owner",
+      "definition": "CHECK ((((owner_type = 'organization'::text) AND (owner_user_id IS NOT NULL) AND (owner_community_id IS NULL)) OR ((owner_type = 'community'::text) AND (owner_community_id IS NOT NULL) AND (owner_user_id IS NULL)) OR ((owner_type = 'platform'::text) AND (owner_user_id IS NULL) AND (owner_community_id IS NULL))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "event_owner_community_fk",
+      "definition": "FOREIGN KEY (owner_community_id) REFERENCES communities(id) ON DELETE SET NULL"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "event_owner_type_valid",
+      "definition": "CHECK ((owner_type = ANY (ARRAY['organization'::text, 'community'::text, 'platform'::text])))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "event_owner_user_fk",
+      "definition": "FOREIGN KEY (owner_user_id) REFERENCES auth.users(id) ON DELETE SET NULL"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_community_id_fkey",
+      "definition": "FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_confirmation_message_len",
+      "definition": "CHECK (((confirmation_message IS NULL) OR (char_length(confirmation_message) <= 2500)))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_host_user_id_fkey",
+      "definition": "FOREIGN KEY (host_user_id) REFERENCES auth.users(id) ON DELETE SET NULL"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_latitude_range",
+      "definition": "CHECK (((latitude IS NULL) OR ((latitude >= ('-90'::integer)::double precision) AND (latitude <= (90)::double precision))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_longitude_range",
+      "definition": "CHECK (((longitude IS NULL) OR ((longitude >= ('-180'::integer)::double precision) AND (longitude <= (180)::double precision))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_pkey",
+      "definition": "PRIMARY KEY (id)"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_public_name_check",
+      "definition": "CHECK (((public_name IS NULL) OR ((char_length(public_name) >= 1) AND (char_length(public_name) <= 80))))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_refund_policy",
+      "definition": "CHECK ((refund_policy = ANY (ARRAY['until_48h'::text, 'none'::text])))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_ticket_capacity_pos",
+      "definition": "CHECK (((ticket_capacity IS NULL) OR (ticket_capacity > 0)))"
+    }
+  },
+  {
+    "kind": "constraint",
+    "value": {
+      "name": "explore_events_timezone_len",
+      "definition": "CHECK (((char_length(timezone) >= 1) AND (char_length(timezone) <= 64)))"
+    }
+  },
+  {
+    "kind": "enum",
+    "value": {
+      "name": "app_role",
+      "labels": [
+        "admin",
+        "moderator",
+        "user"
+      ]
+    }
+  },
+  {
+    "kind": "enum",
+    "value": {
+      "name": "event_offer_type",
+      "labels": [
+        "free_event",
+        "ticketed_event",
+        "course",
+        "drop_in",
+        "class_pack",
+        "subscription"
+      ]
+    }
+  },
+  {
+    "kind": "enum",
+    "value": {
+      "name": "operator_track",
+      "labels": [
+        "event_host",
+        "community_leader"
+      ]
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "(creator_event_is_visible(id) OR creator_event_can_manage(id) OR is_admin(auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "explore_events",
+      "permissive": "RESTRICTIVE",
+      "policyname": "creator_page_explore_visibility",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "ALL",
+      "qual": "(is_admin(auth.uid()) OR has_role(auth.uid(), 'admin'::app_role))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "explore_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "Admins can manage explore events",
+      "schemaname": "public",
+      "with_check": "(is_admin(auth.uid()) OR has_role(auth.uid(), 'admin'::app_role))"
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "(status = 'Live'::text)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "explore_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "Anyone can view live explore events",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "((host_user_id = ( SELECT auth.uid() AS uid)) OR ((community_id IS NOT NULL) AND is_community_leader(community_id, ( SELECT auth.uid() AS uid))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "explore_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "Operators can view own explore events",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "value": {
+      "cmd": "SELECT",
+      "qual": "creator_event_can_manage(id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "explore_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "creator_page_team_event_read",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "md5": "6200e835abfc2526e5ebdc38a3719d49",
+      "name": "create_creator_page_event_draft",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "create_creator_page_event_draft(uuid,uuid,text,text)",
+      "definition": "CREATE OR REPLACE FUNCTION public.create_creator_page_event_draft(p_page_id uuid, p_event_id uuid, p_title text, p_category text)\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE p public.creator_page_drafts; v_community uuid; v_existing public.explore_events; v_delegated boolean; v_receipt public.creator_page_team_event_creations;\nBEGIN\n SELECT * INTO p FROM public.creator_page_drafts WHERE id=p_page_id FOR UPDATE;\n IF auth.uid() IS NULL OR p.id IS NULL OR (p.owner_id<>auth.uid() AND NOT (p.page_kind='community' AND public.is_community_leader(p.id,auth.uid())) AND NOT public.creator_page_team_can_manage(p.id,'page_events'))\n OR NOT public.creator_page_audience_matches(coalesce(p.page_data->>'audience','everyone'),auth.uid()) THEN\n  RAISE EXCEPTION 'Page unavailable' USING ERRCODE='42501'; END IF;\n IF p_event_id IS NULL OR coalesce(btrim(p_title),'')='' OR length(p_title)>120 OR coalesce(btrim(p_category),'')='' THEN\n  RAISE EXCEPTION 'A title and category are required' USING ERRCODE='22023'; END IF;\n v_delegated := p.owner_id<>auth.uid() AND NOT (p.page_kind='community' AND public.is_community_leader(p.id,auth.uid()));\n SELECT * INTO v_receipt FROM public.creator_page_team_event_creations WHERE event_id=p_event_id;\n IF v_delegated THEN\n  IF v_receipt.event_id IS NOT NULL AND (v_receipt.page_id<>p.id OR v_receipt.initiated_by<>auth.uid()\n    OR v_receipt.page_owner_id<>p.owner_id OR v_receipt.requested_title<>btrim(p_title)\n    OR v_receipt.requested_category<>btrim(p_category)) THEN\n   RAISE EXCEPTION 'This saved event attempt does not match' USING ERRCODE='22023'; END IF;\n END IF;\n SELECT * INTO v_existing FROM public.explore_events WHERE id=p_event_id;\n IF v_delegated AND v_receipt.event_id IS NOT NULL THEN\n  IF v_existing.id IS NOT NULL AND v_existing.host_user_id=p.owner_id\n   AND EXISTS(SELECT 1 FROM public.creator_page_events WHERE event_id=p_event_id AND page_id=p.id) THEN RETURN p_event_id; END IF;\n  RAISE EXCEPTION 'The original event is unavailable' USING ERRCODE='42501';\n END IF;\n IF v_existing.id IS NULL AND v_receipt.event_id IS NOT NULL THEN\n  RAISE EXCEPTION 'The original event is unavailable' USING ERRCODE='42501'; END IF;\n IF v_existing.id IS NOT NULL THEN\n  IF v_delegated THEN RAISE EXCEPTION 'Event unavailable' USING ERRCODE='42501'; END IF;\n  IF EXISTS(SELECT 1 FROM public.creator_page_events WHERE event_id=p_event_id AND page_id=p.id) AND v_existing.host_user_id=auth.uid() THEN RETURN p_event_id; END IF;\n  RAISE EXCEPTION 'Event unavailable' USING ERRCODE='42501';\n END IF;\n IF p.page_kind='community' THEN v_community:=public.ensure_creator_page_community(p.id); END IF;\n INSERT INTO public.explore_events(id,title,category,status,host_user_id,community_id,public_name)\n VALUES(p_event_id,btrim(p_title),btrim(p_category),'Draft',CASE WHEN v_delegated THEN p.owner_id ELSE auth.uid() END,v_community,p.page_data->>'name');\n INSERT INTO public.creator_page_events(event_id,page_id) VALUES(p_event_id,p.id);\n IF v_delegated THEN\n  INSERT INTO public.creator_page_team_event_creations(event_id,page_id,initiated_by,page_owner_id,requested_title,requested_category)\n   VALUES(p_event_id,p.id,auth.uid(),p.owner_id,btrim(p_title),btrim(p_category));\n END IF;\n RETURN p_event_id;\nEND;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "md5": "7df4d45c58e09f2826db659d2f3a28bb",
+      "name": "create_creator_page_event_draft_with_categories",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "create_creator_page_event_draft_with_categories(uuid,uuid,text,text[])",
+      "definition": "CREATE OR REPLACE FUNCTION public.create_creator_page_event_draft_with_categories(p_page_id uuid, p_event_id uuid, p_title text, p_categories text[])\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE a public.creator_page_event_category_attempts; result uuid; selected text[]; community boolean;\nBEGIN\n IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Sign in to continue' USING ERRCODE='42501'; END IF;\n PERFORM pg_advisory_xact_lock(hashtextextended(p_event_id::text,0));\n SELECT page_kind='community' INTO community FROM public.creator_page_drafts WHERE id=p_page_id;\n selected:=public.validate_event_categories(p_categories,coalesce(community,false));\n SELECT * INTO a FROM public.creator_page_event_category_attempts WHERE event_id=p_event_id;\n IF a.event_id IS NOT NULL THEN\n  IF a.page_id<>p_page_id OR a.user_id<>auth.uid() OR a.title<>btrim(p_title) OR a.categories<>selected THEN RAISE EXCEPTION 'This saved event attempt does not match' USING ERRCODE='22023'; END IF;\n  -- Recheck exact page authority; never replay category writes over later edits.\n  RETURN public.create_creator_page_event_draft(p_page_id,p_event_id,p_title,selected[1]);\n END IF;\n IF EXISTS(SELECT 1 FROM public.explore_events WHERE id=p_event_id) THEN RAISE EXCEPTION 'Check the original event before continuing' USING ERRCODE='PT409'; END IF;\n result:=public.create_creator_page_event_draft(p_page_id,p_event_id,p_title,selected[1]);\n UPDATE public.explore_events SET categories=selected WHERE id=result;\n INSERT INTO public.creator_page_event_category_attempts VALUES(result,p_page_id,auth.uid(),btrim(p_title),selected);\n RETURN result;\nEND; $function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "f8b427f7f67d2f16eb4294b6a56b8d6a",
+      "name": "creator_community_is_visible",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_community_is_visible(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_community_is_visible(p_community_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT CASE WHEN EXISTS(SELECT 1 FROM public.creator_page_drafts WHERE id=p_community_id)\n OR EXISTS(SELECT 1 FROM public.creator_page_publications WHERE page_id=p_community_id)\n THEN public.creator_page_is_visible(p_community_id)\n ELSE EXISTS(SELECT 1 FROM public.communities c WHERE c.id=p_community_id AND\n  (c.status='active' OR public.is_admin(auth.uid()) OR auth.role()='service_role'\n   OR EXISTS(SELECT 1 FROM public.community_members m WHERE m.community_id=c.id AND m.user_id=auth.uid() AND m.status='active'))) END;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "6e651a2a90cb7eeadf7eaa683e706631",
+      "name": "creator_event_owner_is_eligible",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_event_owner_is_eligible(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_event_owner_is_eligible(p_event_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT CASE WHEN public.creator_event_page_id(p_event_id) IS NULL THEN true ELSE EXISTS(\n  SELECT 1 FROM (SELECT public.creator_event_page_id(p_event_id) AS page_id) l\n  LEFT JOIN public.creator_page_publications pub ON pub.page_id=l.page_id\n  LEFT JOIN public.creator_page_drafts d ON d.id=l.page_id\n  WHERE public.creator_page_audience_matches(coalesce(pub.audience,CASE WHEN d.id IS NOT NULL THEN coalesce(d.page_data->>'audience','everyone') END),auth.uid())\n ) END;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "29ed512cea720bb74a4ba76c7198e5de",
+      "name": "creator_event_page_id",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_event_page_id(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_event_page_id(p_event_id uuid)\n RETURNS uuid\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT coalesce(l.page_id,CASE WHEN EXISTS(SELECT 1 FROM public.creator_page_drafts WHERE id=e.community_id)\n  OR EXISTS(SELECT 1 FROM public.creator_page_publications WHERE page_id=e.community_id) THEN e.community_id END)\n FROM public.explore_events e LEFT JOIN public.creator_page_events l ON l.event_id=e.id WHERE e.id=p_event_id;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "627fb80a7f47d9165a76175b98603be4",
+      "name": "creator_page_audience_matches",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_page_audience_matches(text,uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_page_audience_matches(p_audience text, p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT CASE p_audience WHEN 'everyone' THEN true\n WHEN 'women_only' THEN EXISTS(SELECT 1 FROM public.profiles WHERE id=p_user_id AND gender='woman')\n WHEN 'men_only' THEN EXISTS(SELECT 1 FROM public.profiles WHERE id=p_user_id AND gender='man')\n WHEN 'nonbinary_only' THEN EXISTS(SELECT 1 FROM public.profiles WHERE id=p_user_id AND gender::text IN ('non_binary','non-binary','nonbinary'))\n ELSE false END;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "4c3bf6aa1883eb85c377e75e8fe63133",
+      "name": "creator_page_is_visible",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_page_is_visible(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_page_is_visible(p_page_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT EXISTS(SELECT 1 FROM public.creator_page_publications p\n WHERE p.page_id=p_page_id AND public.creator_page_audience_matches(p.audience,auth.uid())\n AND (p.page_kind='organization' OR EXISTS(SELECT 1 FROM public.communities c WHERE c.id=p.page_id AND c.status='active')));\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "c3ea44ba142e747a846a3435b70c446f",
+      "name": "creator_page_team_event_can_manage",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "creator_page_team_event_can_manage(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.creator_page_team_event_can_manage(p_event_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n SELECT auth.uid() IS NOT NULL AND EXISTS(\n  SELECT 1 FROM public.creator_page_events l JOIN public.explore_events e ON e.id=l.event_id\n  WHERE l.event_id=p_event_id AND public.creator_page_team_can_manage(l.page_id,'page_events')\n );\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "3177e6c6f43fa8ec0dcff0725c41b2f8",
+      "name": "guard_event_category_continuity",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "guard_event_category_continuity()",
+      "definition": "CREATE OR REPLACE FUNCTION public.guard_event_category_continuity()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE selected text[]; primary_category text; second_category text; legacy text; legacy_write boolean:=false;\nBEGIN\n  -- Older records and inserts retain their original single-category storage.\n  IF cardinality(NEW.categories)=0 THEN RETURN NEW; END IF;\n  IF TG_OP='UPDATE' THEN\n    legacy:=OLD.category;\n    legacy_write:=NEW.categories IS NOT DISTINCT FROM OLD.categories;\n  END IF;\n  IF legacy_write\n      AND NEW.category IS DISTINCT FROM OLD.category THEN\n    primary_category:=lower(btrim(NEW.category));\n    IF NEW.community_id IS NOT NULL THEN\n      IF primary_category='community' THEN\n        selected:=ARRAY['community']||ARRAY(SELECT c FROM unnest(OLD.categories)c WHERE c<>'community' LIMIT 1);\n      ELSE selected:=ARRAY[primary_category,'community']; END IF;\n    ELSE\n      second_category:=OLD.categories[2];\n      selected:=ARRAY[primary_category];\n      IF second_category IS NOT NULL AND second_category IS DISTINCT FROM primary_category THEN\n        selected:=array_append(selected,second_category);\n      END IF;\n    END IF;\n  ELSE selected:=NEW.categories;\n  END IF;\n  NEW.categories:=public.validate_event_categories(selected,NEW.community_id IS NOT NULL,legacy);\n  -- An older caller's exact primary value is part of its saved receipt. Keep\n  -- that value/casing while adding the required Community tag to its list.\n  IF NOT legacy_write THEN NEW.category:=NEW.categories[1]; END IF;\n  RETURN NEW;\nEND;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "3fa34c00448e004c6187fddcda65fc73",
+      "name": "has_operator_grant",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "has_operator_grant(uuid,operator_track)",
+      "definition": "CREATE OR REPLACE FUNCTION public.has_operator_grant(p_user_id uuid, p_track operator_track)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select (\n    p_user_id = auth.uid()\n    or is_admin(auth.uid()) or has_role(auth.uid(), 'admin'::app_role)\n    or auth.role() = 'service_role'\n  )\n  and exists (\n    select 1 from operator_grants\n    where user_id = p_user_id and track = p_track and status = 'approved'\n  );\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "=X/postgres",
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "5367994289934bb02d5ed676e5b93955",
+      "name": "has_role",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "has_role(uuid,app_role)",
+      "definition": "CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role app_role)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM public.user_roles\n    WHERE user_id = _user_id AND role = _role\n  );\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "=X/postgres",
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "fd1949d5b7a0d005a95d926b67aecf9a",
+      "name": "is_admin",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "is_admin(uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_admin(user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select public.has_role(user_id, 'admin'::app_role);\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "anon=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "d9a2d97a0ef34d456087e6df78a8c73d",
+      "name": "is_community_leader",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "is_community_leader(uuid,uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_community_leader(p_community_id uuid, p_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select (\n    p_user_id = auth.uid()\n    or is_admin(auth.uid()) or has_role(auth.uid(), 'admin'::app_role)\n    or auth.role() = 'service_role'\n  )\n  and public.creator_community_is_visible(p_community_id)\n  and exists (\n    select 1 from community_members\n    where community_id = p_community_id and user_id = p_user_id\n      and status = 'active' and role in ('leader', 'co_leader')\n  );\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "7fd27366d8185b04d03fca77e6dde8b6",
+      "name": "operator_create_explore_event",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "operator_create_explore_event(text,text,text,text,timestamp with time zone,text,text,text,text,text,uuid,text,boolean,boolean,timestamp with time zone,jsonb,text)",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_create_explore_event(p_title text, p_description text DEFAULT NULL::text, p_image_url text DEFAULT NULL::text, p_event_date text DEFAULT NULL::text, p_start_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_venue text DEFAULT NULL::text, p_venue_address text DEFAULT NULL::text, p_category text DEFAULT NULL::text, p_external_url text DEFAULT NULL::text, p_ticket_price text DEFAULT NULL::text, p_community_id uuid DEFAULT NULL::uuid, p_public_name text DEFAULT NULL::text, p_pin_to_chat boolean DEFAULT true, p_publish boolean DEFAULT true, p_end_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_description_blocks jsonb DEFAULT NULL::jsonb, p_confirmation_message text DEFAULT NULL::text)\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_uid uuid := auth.uid();\n  v_id uuid;\nbegin\n  if v_uid is null then\n    raise exception 'Not signed in';\n  end if;\n  if not (has_operator_grant(v_uid, 'event_host'::operator_track)\n          or has_operator_grant(v_uid, 'community_leader'::operator_track)) then\n    raise exception 'Not authorized';\n  end if;\n  if coalesce(btrim(p_title), '') = '' or char_length(p_title) > 120 then\n    raise exception 'A title is required.';\n  end if;\n  if coalesce(btrim(p_category), '') = '' then\n    raise exception 'Pick a category.';\n  end if;\n  -- S5: a dateless event can be a draft, never Live (LIZ COPY guard)\n  if coalesce(p_publish, true) and coalesce(btrim(p_event_date), '') = '' then\n    raise exception 'Pick a date.';\n  end if;\n  if p_community_id is not null\n     and not is_community_leader(p_community_id, v_uid) then\n    raise exception 'Not authorized for that community';\n  end if;\n  -- 75: when both times exist, order them (client-surfaced guard)\n  if p_end_time is not null and p_start_time is not null\n     and p_end_time <= p_start_time then\n    raise exception 'The end has to come after the start.';\n  end if;\n\n  insert into explore_events (\n    title, description, image_url, event_date, start_time, end_time, venue,\n    venue_address, category, external_url, ticket_price,\n    host_user_id, community_id, public_name, pin_to_chat, status,\n    description_blocks, confirmation_message\n  ) values (\n    btrim(p_title),\n    nullif(btrim(p_description), ''),\n    nullif(btrim(p_image_url), ''),\n    nullif(btrim(p_event_date), '')::date,\n    p_start_time,\n    p_end_time,\n    nullif(btrim(p_venue), ''),\n    nullif(btrim(p_venue_address), ''),\n    nullif(btrim(p_category), ''),\n    nullif(btrim(p_external_url), ''),\n    nullif(btrim(p_ticket_price), '')::numeric,\n    v_uid,\n    p_community_id,\n    nullif(btrim(p_public_name), ''),\n    coalesce(p_pin_to_chat, true),\n    case when coalesce(p_publish, true) then 'Live' else 'Draft' end,\n    p_description_blocks,\n    -- SQL-98: null (or blank) = omit, exactly like every other optional text\n    nullif(btrim(p_confirmation_message), '')\n  ) returning id into v_id;\n\n  -- the chat is born at PUBLISH: a draft gets no topic\n  if coalesce(p_publish, true) and p_community_id is not null then\n    insert into community_topics (community_id, name, created_by, explore_event_id)\n    values (p_community_id, left(btrim(p_title), 60), v_uid, v_id);\n  end if;\n\n  return v_id;\nend;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "md5": "42214c352dd9ef4fadc3860fd2c0be08",
+      "name": "operator_create_explore_event_with_categories",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "operator_create_explore_event_with_categories(text,text,text,text,timestamp with time zone,text,text,text,text,text,uuid,text,boolean,boolean,timestamp with time zone,jsonb,text,text[])",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_create_explore_event_with_categories(p_title text, p_description text DEFAULT NULL::text, p_image_url text DEFAULT NULL::text, p_event_date text DEFAULT NULL::text, p_start_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_venue text DEFAULT NULL::text, p_venue_address text DEFAULT NULL::text, p_category text DEFAULT NULL::text, p_external_url text DEFAULT NULL::text, p_ticket_price text DEFAULT NULL::text, p_community_id uuid DEFAULT NULL::uuid, p_public_name text DEFAULT NULL::text, p_pin_to_chat boolean DEFAULT true, p_publish boolean DEFAULT true, p_end_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_description_blocks jsonb DEFAULT NULL::jsonb, p_confirmation_message text DEFAULT NULL::text, p_categories text[] DEFAULT NULL::text[])\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE result uuid; selected text[]; BEGIN\nselected:=public.validate_event_categories(coalesce(p_categories,ARRAY[p_category]),p_community_id IS NOT NULL);\nresult:=public.operator_create_explore_event(p_title=>p_title,p_description=>p_description,p_image_url=>p_image_url,p_event_date=>p_event_date,p_start_time=>p_start_time,p_venue=>p_venue,p_venue_address=>p_venue_address,p_category=>p_category,p_external_url=>p_external_url,p_ticket_price=>p_ticket_price,p_community_id=>p_community_id,p_public_name=>p_public_name,p_pin_to_chat=>p_pin_to_chat,p_publish=>p_publish,p_end_time=>p_end_time,p_description_blocks=>p_description_blocks,p_confirmation_message=>p_confirmation_message);\nUPDATE public.explore_events SET categories=selected WHERE id=result;\nRETURN result;\nEND;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "md5": "2b3e550cec7434dc624c7311fef69545",
+      "name": "operator_set_event_offer_type",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "operator_set_event_offer_type(uuid,text)",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_set_event_offer_type(p_event_id uuid, p_offer_type text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE e public.explore_events; v_uid uuid:=auth.uid();\nBEGIN\n SELECT * INTO e FROM public.explore_events WHERE id=p_event_id FOR UPDATE;\n IF v_uid IS NULL OR e.id IS NULL OR NOT coalesce((\n  ((e.host_user_id=v_uid OR (e.community_id IS NOT NULL AND public.is_community_leader(e.community_id,v_uid)))\n   AND public.creator_event_owner_is_eligible(e.id))\n  OR public.is_admin(v_uid) OR public.has_role(v_uid,'admin'::public.app_role)),false) THEN\n  RAISE EXCEPTION 'Event unavailable' USING ERRCODE='42501'; END IF;\n -- Match the four currently supported choices; stored enum labels for future\n -- mechanics are retained from the inherited source, not activated here.\n IF p_offer_type IS NULL OR p_offer_type NOT IN('free_event','ticketed_event','course','drop_in') THEN\n  RAISE EXCEPTION 'Choose a supported event offer' USING ERRCODE='22023'; END IF;\n UPDATE public.explore_events SET offer_type=p_offer_type::public.event_offer_type,updated_at=now() WHERE id=e.id;\n RETURN jsonb_build_object('event_id',e.id,'offer_type',p_offer_type);\nEND;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "0c62dc6bed49ddfd1f570d0993a640d5",
+      "name": "operator_set_event_ticket_capacity",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "operator_set_event_ticket_capacity(uuid,integer)",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_set_event_ticket_capacity(p_event_id uuid, p_ticket_capacity integer DEFAULT NULL::integer)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_uid uuid := auth.uid();\n  v_row record;\nbegin\n  if v_uid is null then\n    raise exception 'Not signed in';\n  end if;\n  select id, host_user_id, community_id into v_row\n  from explore_events where id = p_event_id;\n  if v_row.id is null then\n    raise exception 'Event not found';\n  end if;\n  if not coalesce((v_row.host_user_id = v_uid\n          or (v_row.community_id is not null and is_community_leader(v_row.community_id, v_uid))),false) then\n    raise exception 'Not authorized';\n  end if;\n  if p_ticket_capacity is not null and p_ticket_capacity <= 0 then\n    raise exception 'Capacity has to be at least 1, or left blank for unlimited.';\n  end if;\n\n  update explore_events set\n    ticket_capacity = p_ticket_capacity,\n    updated_at = now()\n  where id = p_event_id;\nend;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "a77a14fb99d46f1a38ecaf8fe5b590d9",
+      "name": "operator_set_explore_event_coords",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "operator_set_explore_event_coords(uuid,double precision,double precision)",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_set_explore_event_coords(p_event_id uuid, p_latitude double precision DEFAULT NULL::double precision, p_longitude double precision DEFAULT NULL::double precision)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_uid uuid := auth.uid();\n  v_row record;\nbegin\n  if v_uid is null then\n    raise exception 'Not signed in';\n  end if;\n  select id, host_user_id, community_id into v_row\n  from explore_events where id = p_event_id;\n  if v_row.id is null then\n    raise exception 'Event not found';\n  end if;\n  if not (v_row.host_user_id = v_uid\n          or (v_row.community_id is not null and is_community_leader(v_row.community_id, v_uid))\n          or public.creator_page_team_event_can_manage(p_event_id)) then\n    raise exception 'Not authorized';\n  end if;\n  -- both or neither: a lone latitude is never a place\n  if (p_latitude is null) <> (p_longitude is null) then\n    raise exception 'Coordinates travel as a pair';\n  end if;\n\n  update explore_events set\n    latitude = p_latitude,\n    longitude = p_longitude,\n    updated_at = now()\n  where id = p_event_id;\nend;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "md5": "2edf0789089091d4b85c50481eecbfd6",
+      "name": "operator_update_explore_event",
+      "owner": "postgres",
+      "config": [
+        "search_path=public"
+      ],
+      "identity": "operator_update_explore_event(uuid,text,text,text,text,timestamp with time zone,text,text,text,text,text,text,boolean,text,timestamp with time zone,jsonb,text)",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_update_explore_event(p_event_id uuid, p_title text, p_description text DEFAULT NULL::text, p_image_url text DEFAULT NULL::text, p_event_date text DEFAULT NULL::text, p_start_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_venue text DEFAULT NULL::text, p_venue_address text DEFAULT NULL::text, p_category text DEFAULT NULL::text, p_external_url text DEFAULT NULL::text, p_ticket_price text DEFAULT NULL::text, p_public_name text DEFAULT NULL::text, p_pin_to_chat boolean DEFAULT true, p_status text DEFAULT NULL::text, p_end_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_description_blocks jsonb DEFAULT NULL::jsonb, p_confirmation_message text DEFAULT NULL::text)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_uid uuid := auth.uid();\n  v_row record;\n  v_page uuid;\n  v_readiness jsonb;\nbegin\n  if v_uid is null then\n    raise exception 'Not signed in';\n  end if;\n  select id, host_user_id, community_id, status into v_row\n  from explore_events where id = p_event_id FOR UPDATE;\n  if v_row.id is null then\n    raise exception 'Event not found';\n  end if;\n  if not coalesce((v_row.host_user_id = v_uid\n          or (v_row.community_id is not null and is_community_leader(v_row.community_id, v_uid))\n          or public.creator_page_team_event_can_manage(p_event_id)),false) then\n    raise exception 'Not authorized';\n  end if;\n  -- New page teammates have content authority only. Existing owner and\n  -- legacy co-leader financial/cancellation paths remain unchanged.\n  if not (coalesce(v_row.host_user_id = v_uid,false)\n          or (v_row.community_id is not null and is_community_leader(v_row.community_id,v_uid)))\n     and p_status='Cancelled' then\n    select page_id into v_page from public.creator_page_events where event_id=p_event_id;\n    v_readiness:=public.creator_page_event_readiness(v_page,p_event_id);\n    if p_status='Cancelled' and (v_readiness->>'cancellation_requires_refunds')::boolean then\n      raise exception 'The event organizer needs to complete ticket refunds before this event can be canceled.' using errcode='PT409';\n    end if;\n  end if;\n  if coalesce(btrim(p_title), '') = '' or char_length(p_title) > 120 then\n    raise exception 'A title is required.';\n  end if;\n  if p_status is not null and p_status not in ('Live', 'Completed', 'Cancelled') then\n    raise exception 'Invalid status';\n  end if;\n  if v_row.status = 'Draft' and p_status in ('Completed', 'Cancelled') then\n    -- LIZ COPY\n    raise exception 'This one is still a draft. Publish it or keep shaping it.';\n  end if;\n  if coalesce(btrim(p_category), '') = '' then\n    raise exception 'Pick a category.';\n  end if;\n  -- S5: Live (asked for or carried through the full overwrite) keeps a date;\n  -- this also blocks blanking the date on a Live event. Cancel/complete of a\n  -- dateless legacy row stays allowed. (LIZ COPY guard)\n  if coalesce(p_status, v_row.status) = 'Live'\n     and coalesce(btrim(p_event_date), '') = '' then\n    raise exception 'Pick a date.';\n  end if;\n  -- 75: when both times exist, order them (client-surfaced guard)\n  if p_end_time is not null and p_start_time is not null\n     and p_end_time <= p_start_time then\n    raise exception 'The end has to come after the start.';\n  end if;\n  -- SQL-96: the friendly cap, ahead of the CHECK (LIZ COPY)\n  if p_confirmation_message is not null and char_length(p_confirmation_message) > 2500 then\n    raise exception 'Keep the confirmation note under 2500 characters.';\n  end if;\n\n  update explore_events set\n    title = btrim(p_title),\n    description = nullif(btrim(p_description), ''),\n    image_url = nullif(btrim(p_image_url), ''),\n    event_date = nullif(btrim(p_event_date), '')::date,\n    start_time = p_start_time,\n    end_time = p_end_time,\n    venue = nullif(btrim(p_venue), ''),\n    venue_address = nullif(btrim(p_venue_address), ''),\n    category = nullif(btrim(p_category), ''),\n    external_url = nullif(btrim(p_external_url), ''),\n    ticket_price = nullif(btrim(p_ticket_price), '')::numeric,\n    public_name = nullif(btrim(p_public_name), ''),\n    pin_to_chat = coalesce(p_pin_to_chat, true),\n    status = coalesce(p_status, status),\n    -- 77's DOCUMENTED DEVIATION from full-overwrite: null = leave the rich\n    -- body untouched (it is large and easy to lose); [] = clear it\n    description_blocks = coalesce(p_description_blocks, description_blocks),\n    -- SQL-96, same deviation on purpose: null = keep, '' = clear\n    confirmation_message = case\n      when p_confirmation_message is null then confirmation_message\n      else nullif(btrim(p_confirmation_message), '')\n    end,\n    updated_at = now()\n  where id = p_event_id;\n\n  -- Validate the actual submitted fields before making any page event live.\n  -- Failure rolls back the full overwrite above. Unmapped standalone events\n  -- keep their original publication routine; all page publishers share this gate.\n  if p_status='Live' then\n    select page_id into v_page from public.creator_page_events where event_id=p_event_id;\n    if v_page is not null then\n      if v_row.status not in ('Draft','Live') then\n        raise exception 'This event cannot be published' using errcode='PT409';\n      end if;\n      if v_row.status='Draft' then\n        v_readiness:=public.creator_page_event_readiness(v_page,p_event_id);\n        if not (v_readiness->>'publish_ready')::boolean then\n          raise exception 'Finish the event publishing setup before publishing.' using errcode='PT409',detail=v_readiness->>'publish_reason';\n        end if;\n      end if;\n    end if;\n  end if;\n\n  -- publish flip: the event chat is born NOW; the partial unique index\n  -- (one topic per event) makes a double-publish a clean no-op\n  if v_row.status = 'Draft' and p_status = 'Live' and v_row.community_id is not null then\n    insert into community_topics (community_id, name, created_by, explore_event_id)\n    values (v_row.community_id, left(btrim(p_title), 60), v_uid, p_event_id)\n    on conflict (explore_event_id) where explore_event_id is not null do nothing;\n  end if;\n\n  update community_topics\n  set name = left(btrim(p_title), 60),\n      archived = archived or coalesce(p_status, '') in ('Cancelled', 'Completed')\n  where explore_event_id = p_event_id;\nend;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres",
+        "authenticated=X/postgres"
+      ],
+      "md5": "b201189389415c95a3d7ccb4cc30a323",
+      "name": "operator_update_explore_event_with_categories",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "operator_update_explore_event_with_categories(uuid,text,text,text,text,timestamp with time zone,text,text,text,text,text,text,boolean,text,timestamp with time zone,jsonb,text,text[])",
+      "definition": "CREATE OR REPLACE FUNCTION public.operator_update_explore_event_with_categories(p_event_id uuid, p_title text, p_description text DEFAULT NULL::text, p_image_url text DEFAULT NULL::text, p_event_date text DEFAULT NULL::text, p_start_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_venue text DEFAULT NULL::text, p_venue_address text DEFAULT NULL::text, p_category text DEFAULT NULL::text, p_external_url text DEFAULT NULL::text, p_ticket_price text DEFAULT NULL::text, p_public_name text DEFAULT NULL::text, p_pin_to_chat boolean DEFAULT true, p_status text DEFAULT NULL::text, p_end_time timestamp with time zone DEFAULT NULL::timestamp with time zone, p_description_blocks jsonb DEFAULT NULL::jsonb, p_confirmation_message text DEFAULT NULL::text, p_categories text[] DEFAULT NULL::text[])\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE selected text[]; community boolean; legacy text; BEGIN\nSELECT category INTO legacy FROM public.explore_events WHERE id=p_event_id;\nPERFORM public.operator_update_explore_event(p_event_id=>p_event_id,p_title=>p_title,p_description=>p_description,p_image_url=>p_image_url,p_event_date=>p_event_date,p_start_time=>p_start_time,p_venue=>p_venue,p_venue_address=>p_venue_address,p_category=>p_category,p_external_url=>p_external_url,p_ticket_price=>p_ticket_price,p_public_name=>p_public_name,p_pin_to_chat=>p_pin_to_chat,p_status=>p_status,p_end_time=>p_end_time,p_description_blocks=>p_description_blocks,p_confirmation_message=>p_confirmation_message);\nSELECT community_id IS NOT NULL INTO community FROM public.explore_events WHERE id=p_event_id;\nselected:=public.validate_event_categories(coalesce(p_categories,ARRAY[p_category]),coalesce(community,false),legacy);\nUPDATE public.explore_events SET categories=selected WHERE id=p_event_id;\nEND;\n$function$\n",
+      "security_definer": true
+    }
+  },
+  {
+    "kind": "routine",
+    "value": {
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "md5": "1fc71ac81da31603ff33c30de668d176",
+      "name": "validate_event_categories",
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "identity": "validate_event_categories(text[],boolean,text)",
+      "definition": "CREATE OR REPLACE FUNCTION public.validate_event_categories(p_categories text[], p_community boolean DEFAULT false, p_legacy text DEFAULT NULL::text)\n RETURNS text[]\n LANGUAGE plpgsql\n IMMUTABLE\n SET search_path TO ''\nAS $function$\nDECLARE result text[];\nBEGIN\n IF p_categories IS NULL OR cardinality(p_categories) NOT BETWEEN 1 AND 2 OR array_ndims(p_categories)<>1\n OR EXISTS(SELECT 1 FROM unnest(p_categories) c WHERE c IS NULL OR c NOT IN('music','comedy','nightlife','food and drink','art','fitness','outdoors','community','film','markets','gaming','business & networking','just for fun','other','fitness and outdoors') AND c IS DISTINCT FROM lower(p_legacy))\n OR (SELECT count(DISTINCT c) FROM unnest(p_categories)c)<>cardinality(p_categories)\n THEN RAISE EXCEPTION 'Choose one or two different categories' USING ERRCODE='22023'; END IF;\n result:=p_categories;\n IF p_community AND NOT 'community'=ANY(result) THEN result:=array_prepend('community',result); END IF;\n IF cardinality(result)>2 THEN RAISE EXCEPTION 'Community events include Community and one optional category' USING ERRCODE='22023'; END IF;\n RETURN result;\nEND; $function$\n",
+      "security_definer": false
+    }
+  },
+  {
+    "kind": "table",
+    "value": {
+      "acl": [
+        "postgres=arwdDxtm/postgres",
+        "anon=arwdxtm/postgres",
+        "authenticated=arwdxtm/postgres",
+        "service_role=arwdDxtm/postgres"
+      ],
+      "rls": true,
+      "force_rls": false
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "creator_page_event_gate",
+      "routine": "creator_page_event_publication_guard()",
+      "definition": "CREATE TRIGGER creator_page_event_gate BEFORE INSERT OR UPDATE ON public.explore_events FOR EACH ROW EXECUTE FUNCTION creator_page_event_publication_guard()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.creator_page_event_publication_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE v_page uuid; p public.creator_page_drafts; v_cleanup boolean := false;\nBEGIN\n SELECT page_id INTO v_page FROM public.creator_page_events WHERE event_id=NEW.id;\n IF v_page IS NULL AND NEW.community_id IS NOT NULL THEN\n  SELECT id INTO v_page FROM public.creator_page_drafts WHERE id=NEW.community_id;\n  IF v_page IS NULL THEN SELECT page_id INTO v_page FROM public.creator_page_publications WHERE page_id=NEW.community_id; END IF;\n END IF;\n IF v_page IS NULL THEN RETURN NEW; END IF; -- Existing unmapped events unchanged.\n SELECT * INTO p FROM public.creator_page_drafts WHERE id=v_page FOR SHARE;\n IF TG_OP='UPDATE' AND (NEW.community_id IS DISTINCT FROM OLD.community_id OR NEW.host_user_id IS DISTINCT FROM OLD.host_user_id\n  OR NEW.owner_type IS DISTINCT FROM OLD.owner_type OR NEW.owner_user_id IS DISTINCT FROM OLD.owner_user_id\n  OR NEW.owner_community_id IS DISTINCT FROM OLD.owner_community_id) THEN\n  -- Preserve established FK cleanup/re-homing when an account/community is\n  -- actually deleted. A client cannot use nulls to detach a still-existing owner.\n  v_cleanup := NEW.owner_type IS NOT DISTINCT FROM OLD.owner_type\n   AND (NEW.host_user_id IS NOT DISTINCT FROM OLD.host_user_id OR (NEW.host_user_id IS NULL AND NOT EXISTS(SELECT 1 FROM auth.users WHERE id=OLD.host_user_id)))\n   AND (NEW.community_id IS NOT DISTINCT FROM OLD.community_id OR (NEW.community_id IS NULL AND NOT EXISTS(SELECT 1 FROM public.communities WHERE id=OLD.community_id)))\n   AND (NEW.owner_user_id IS NOT DISTINCT FROM OLD.owner_user_id OR (NEW.owner_user_id IS NULL AND NOT EXISTS(SELECT 1 FROM auth.users WHERE id=OLD.owner_user_id)))\n   AND (NEW.owner_community_id IS NOT DISTINCT FROM OLD.owner_community_id OR (NEW.owner_community_id IS NULL AND NOT EXISTS(SELECT 1 FROM public.communities WHERE id=OLD.owner_community_id)));\n  IF NOT v_cleanup THEN RAISE EXCEPTION 'The saved event must keep its page and creator' USING ERRCODE='PT409'; END IF;\n END IF;\n -- v_cleanup requires the referenced parent to have actually been deleted.\n -- Keep the existing FK action possible; ordinary updates still require publication.\n IF NOT v_cleanup AND NEW.status='Live' AND NOT EXISTS(SELECT 1 FROM public.creator_page_publications pub WHERE pub.page_id=v_page\n   AND (pub.page_kind='organization' OR EXISTS(SELECT 1 FROM public.communities c WHERE c.id=v_page AND c.status='active'))) THEN\n  RAISE EXCEPTION 'Publish the approved page before its event' USING ERRCODE='PT409'; END IF;\n IF NOT v_cleanup AND auth.uid() IS NOT NULL AND NOT public.creator_page_audience_matches(\n  coalesce((SELECT audience FROM public.creator_page_publications WHERE page_id=v_page),p.page_data->>'audience','everyone'),auth.uid()) THEN\n  RAISE EXCEPTION 'Page unavailable' USING ERRCODE='42501'; END IF;\n RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "creator_page_event_media_validation",
+      "routine": "creator_page_event_validate_media()",
+      "definition": "CREATE TRIGGER creator_page_event_media_validation BEFORE INSERT OR UPDATE OF image_url, description_blocks ON public.explore_events FOR EACH ROW EXECUTE FUNCTION creator_page_event_validate_media()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.creator_page_event_validate_media()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE ref text; expected text; b jsonb;\nBEGIN\n IF NEW.image_url LIKE 'creator-event-media:%' THEN\n  ref:=substr(NEW.image_url,length('creator-event-media:')+1);\n  IF NOT EXISTS(SELECT 1 FROM public.creator_page_event_media m WHERE m.event_id=NEW.id AND m.object_name=ref AND m.purpose='cover' AND m.ready_at IS NOT NULL AND m.abandoned_at IS NULL) THEN RAISE EXCEPTION 'Cover upload is not confirmed for this event' USING ERRCODE='22023'; END IF;\n END IF;\n FOR b IN SELECT value FROM jsonb_array_elements(CASE WHEN jsonb_typeof(NEW.description_blocks)='array' THEN NEW.description_blocks ELSE '[]'::jsonb END) LOOP\n  FOREACH expected IN ARRAY ARRAY['path','poster'] LOOP\n   ref:=b->>expected;\n   IF ref LIKE '%/private-%' THEN\n    IF NOT EXISTS(SELECT 1 FROM public.creator_page_event_media m WHERE m.event_id=NEW.id AND m.object_name=ref\n     AND m.purpose=CASE WHEN expected='poster' THEN 'poster' ELSE b->>'type' END AND m.ready_at IS NOT NULL AND m.abandoned_at IS NULL) THEN RAISE EXCEPTION 'Media upload is not confirmed for this event' USING ERRCODE='22023'; END IF;\n   END IF;\n  END LOOP;\n END LOOP;\n RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "event_category_continuity",
+      "routine": "guard_event_category_continuity()",
+      "definition": "CREATE TRIGGER event_category_continuity BEFORE INSERT OR UPDATE OF category, categories, community_id ON public.explore_events FOR EACH ROW EXECUTE FUNCTION guard_event_category_continuity()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.guard_event_category_continuity()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\nDECLARE selected text[]; primary_category text; second_category text; legacy text; legacy_write boolean:=false;\nBEGIN\n  -- Older records and inserts retain their original single-category storage.\n  IF cardinality(NEW.categories)=0 THEN RETURN NEW; END IF;\n  IF TG_OP='UPDATE' THEN\n    legacy:=OLD.category;\n    legacy_write:=NEW.categories IS NOT DISTINCT FROM OLD.categories;\n  END IF;\n  IF legacy_write\n      AND NEW.category IS DISTINCT FROM OLD.category THEN\n    primary_category:=lower(btrim(NEW.category));\n    IF NEW.community_id IS NOT NULL THEN\n      IF primary_category='community' THEN\n        selected:=ARRAY['community']||ARRAY(SELECT c FROM unnest(OLD.categories)c WHERE c<>'community' LIMIT 1);\n      ELSE selected:=ARRAY[primary_category,'community']; END IF;\n    ELSE\n      second_category:=OLD.categories[2];\n      selected:=ARRAY[primary_category];\n      IF second_category IS NOT NULL AND second_category IS DISTINCT FROM primary_category THEN\n        selected:=array_append(selected,second_category);\n      END IF;\n    END IF;\n  ELSE selected:=NEW.categories;\n  END IF;\n  NEW.categories:=public.validate_event_categories(selected,NEW.community_id IS NOT NULL,legacy);\n  -- An older caller's exact primary value is part of its saved receipt. Keep\n  -- that value/casing while adding the required Community tag to its list.\n  IF NOT legacy_write THEN NEW.category:=NEW.categories[1]; END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "event_owner_change",
+      "routine": "tg_event_owner_change()",
+      "definition": "CREATE TRIGGER event_owner_change BEFORE UPDATE OF owner_type, owner_user_id, owner_community_id, community_id, host_user_id ON public.explore_events FOR EACH ROW EXECUTE FUNCTION tg_event_owner_change()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.tg_event_owner_change()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nDECLARE\n  v_reason    text;\n  v_committed boolean;\nBEGIN\n  IF NEW.owner_type IS NOT DISTINCT FROM OLD.owner_type\n     AND NEW.owner_user_id IS NOT DISTINCT FROM OLD.owner_user_id\n     AND NEW.owner_community_id IS NOT DISTINCT FROM OLD.owner_community_id THEN\n    RETURN NEW;\n  END IF;\n\n  -- caller-declared intent, read from the transaction (set outside any function,\n  -- so it is visible here)\n  v_reason := nullif(btrim(coalesce(current_setting('washedup.owner_change_reason', true), '')), '');\n\n  -- (i) re-home after a foreign key cascade nulled the owner out from under us\n  IF NEW.owner_type = 'community' AND NEW.owner_community_id IS NULL THEN\n    IF NEW.host_user_id IS NOT NULL THEN\n      NEW.owner_type    := 'organization';\n      NEW.owner_user_id := NEW.host_user_id;\n    ELSE\n      NEW.owner_type    := 'platform';\n      NEW.owner_user_id := NULL;\n    END IF;\n    v_reason := 'automatic: owning community deleted, event re-homed';\n  ELSIF NEW.owner_type = 'organization' AND NEW.owner_user_id IS NULL THEN\n    NEW.owner_type         := 'platform';\n    NEW.owner_community_id := NULL;\n    v_reason := 'automatic: owning user deleted, event re-homed to platform';\n  END IF;\n\n  SELECT EXISTS (\n           SELECT 1 FROM public.ticket_orders o\n            WHERE o.event_id = NEW.id AND o.status IN ('paid', 'refunded')\n         )\n      OR EXISTS (\n           SELECT 1 FROM public.explore_event_rsvps r\n            WHERE r.explore_event_id = NEW.id AND r.status = 'going'\n         )\n    INTO v_committed;\n\n  -- (ii) invariant 2\n  IF v_reason IS NULL AND v_committed THEN\n    RAISE EXCEPTION\n      'Event % has committed guests; an owner change must be an explicit administrative action. Set washedup.owner_change_reason in this transaction first.',\n      NEW.id\n      USING ERRCODE = 'check_violation';\n  END IF;\n\n  -- (iii) audit\n  INSERT INTO public.event_owner_changes (\n    event_id, changed_by, actor_db_role,\n    previous_owner_type, previous_owner_user_id, previous_owner_community_id,\n    new_owner_type, new_owner_user_id, new_owner_community_id,\n    reason, had_committed_guests\n  ) VALUES (\n    NEW.id, auth.uid(), current_user,\n    OLD.owner_type, OLD.owner_user_id, OLD.owner_community_id,\n    NEW.owner_type, NEW.owner_user_id, NEW.owner_community_id,\n    coalesce(v_reason, 'unspecified: no committed guests at change time'),\n    v_committed\n  );\n\n  RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "event_owner_derive",
+      "routine": "tg_event_owner_derive()",
+      "definition": "CREATE TRIGGER event_owner_derive BEFORE INSERT ON public.explore_events FOR EACH ROW EXECUTE FUNCTION tg_event_owner_derive()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.tg_event_owner_derive()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nBEGIN\n  -- Build 35 code that sets ownership explicitly is left alone.\n  IF NEW.owner_type IS NOT NULL THEN\n    RETURN NEW;\n  END IF;\n\n  -- Same precedence as the section 2 backfill, so a row inserted one second\n  -- after this migration applies is classified identically to one inserted a\n  -- year before it.\n  IF NEW.community_id IS NOT NULL THEN\n    NEW.owner_type         := 'community';\n    NEW.owner_community_id := NEW.community_id;\n    NEW.owner_user_id      := NULL;\n  ELSIF NEW.host_user_id IS NOT NULL THEN\n    NEW.owner_type         := 'organization';\n    NEW.owner_user_id      := NEW.host_user_id;\n    NEW.owner_community_id := NULL;\n  ELSE\n    NEW.owner_type         := 'platform';\n    NEW.owner_user_id      := NULL;\n    NEW.owner_community_id := NULL;\n  END IF;\n\n  RETURN NEW;\nEND;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "explore_events_keep_paid_end_time",
+      "routine": "tg_explore_events_keep_paid_end_time()",
+      "definition": "CREATE TRIGGER explore_events_keep_paid_end_time BEFORE UPDATE OF end_time ON public.explore_events FOR EACH ROW EXECUTE FUNCTION tg_explore_events_keep_paid_end_time()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.tg_explore_events_keep_paid_end_time()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  if new.end_time is null and old.end_time is not null and exists (\n    select 1 from public.ticket_tiers t\n    where t.event_id = new.id and t.price_cents > 0\n  ) then\n    raise exception 'end_time cannot be cleared while the event has paid tiers';\n  end if;\n  return new;\nend;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "explore_events_valid_blocks",
+      "routine": "tg_explore_events_valid_blocks()",
+      "definition": "CREATE TRIGGER explore_events_valid_blocks BEFORE INSERT OR UPDATE OF description_blocks ON public.explore_events FOR EACH ROW EXECUTE FUNCTION tg_explore_events_valid_blocks()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.tg_explore_events_valid_blocks()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_block jsonb;\n  v_type text;\n  v_faq_seen boolean := false;\nbegin\n  if new.description_blocks is null then\n    return new;\n  end if;\n  if jsonb_typeof(new.description_blocks) <> 'array' then\n    raise exception 'description_blocks must be a json array';\n  end if;\n  if jsonb_array_length(new.description_blocks) > 30 then\n    raise exception 'description_blocks holds at most 30 blocks';\n  end if;\n  for v_block in select jsonb_array_elements(new.description_blocks)\n  loop\n    if jsonb_typeof(v_block) <> 'object' then\n      raise exception 'every block must be a json object';\n    end if;\n    v_type := v_block->>'type';\n    if v_type = 'text' then\n      -- 7-21 fix: a MISSING content key made this whole condition NULL and\n      -- the raise skipped (the 66-catch bug class); presence is now\n      -- required explicitly\n      if not (v_block ? 'content')\n         or jsonb_typeof(v_block->'content') <> 'string'\n         or char_length(v_block->>'content') not between 1 and 5000 then\n        raise exception 'a text block needs content, 1..5000 chars';\n      end if;\n    elsif v_type in ('image', 'video') then\n      -- 7-21 fixes carried verbatim: key presence required, the folder pin\n      -- rejects \"..\", a trailing slash, and empty path segments. 77 adds\n      -- the video branch under the SAME path law plus the v1 mp4 rule.\n      if not (v_block ? 'path')\n         or jsonb_typeof(v_block->'path') <> 'string'\n         or char_length(v_block->>'path') > 500\n         or (v_block->>'path') not like (new.id::text || '/%')\n         or (v_block->>'path') like '%..%'\n         or (v_block->>'path') like '%/'\n         or (v_block->>'path') like '%//%' then\n        raise exception 'a media block''s path must live under this event''s own folder';\n      end if;\n      if v_type = 'video' and lower(v_block->>'path') not like '%.mp4' then\n        raise exception 'a video block is hosted mp4 in v1';\n      end if;\n      if v_block ? 'alt' and (jsonb_typeof(v_block->'alt') <> 'string'\n         or char_length(v_block->>'alt') > 300) then\n        raise exception 'a media alt is a string of at most 300 chars';\n      end if;\n    elsif v_type = 'faq' then\n      if v_faq_seen then\n        raise exception 'at most one faq marker per page';\n      end if;\n      v_faq_seen := true;\n    else\n      raise exception 'unknown block type %', coalesce(v_type, '(none)');\n    end if;\n  end loop;\n  return new;\nend;\n$function$\n"
+    }
+  },
+  {
+    "kind": "trigger",
+    "value": {
+      "name": "explore_events_valid_timezone",
+      "routine": "tg_explore_events_valid_timezone()",
+      "definition": "CREATE TRIGGER explore_events_valid_timezone BEFORE INSERT OR UPDATE OF timezone ON public.explore_events FOR EACH ROW EXECUTE FUNCTION tg_explore_events_valid_timezone()",
+      "function_definition": "CREATE OR REPLACE FUNCTION public.tg_explore_events_valid_timezone()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\nbegin\n  begin\n    perform now() at time zone new.timezone;\n  exception when others then\n    raise exception '\"%\" is not a valid IANA timezone', new.timezone;\n  end;\n  return new;\nend;\n$function$\n"
+    }
+  }
+]

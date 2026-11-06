@@ -1,0 +1,56 @@
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { useOperatorEventDraft } from '../useOperatorEventDraft';
+import type { OperatorDraftInput, OperatorDraftReceipt, OperatorDraftOutcome } from '../../lib/operatorEventDraft';
+import type { CreatorPageScope } from '../../lib/creatorPageReview';
+const mockStorage=new Map<string,string>();
+const mockSupport=jest.fn(),mockCreate=jest.fn(),mockGet=jest.fn(),mockCancel=jest.fn(),mockRemove=jest.fn();
+let mockSequence=0;
+jest.mock('../../lib/supabase',()=>({supabase:{}}));
+jest.mock('../../lib/operatorEventDraft',()=>({...jest.requireActual('../../lib/operatorEventDraft'),
+ hasOperatorDraftProtocol:(...a:unknown[])=>mockSupport(...a),createOperatorDraft:(...a:unknown[])=>mockCreate(...a),
+ getOperatorDraftAttempt:(...a:unknown[])=>mockGet(...a),cancelOperatorDraftAttempt:(...a:unknown[])=>mockCancel(...a)}));
+jest.mock('@react-native-async-storage/async-storage',()=>({__esModule:true,default:{
+ getItem:async(k:string)=>mockStorage.get(k)??null,setItem:async(k:string,v:string)=>{mockStorage.set(k,v);},removeItem:(k:string)=>mockRemove(k)}}));
+jest.mock('expo-crypto',()=>({randomUUID:()=>`30000000-0000-4000-8000-${String(++mockSequence).padStart(12,'0')}`}));
+const user='00000000-0000-4000-8000-000000000001',community='10000000-0000-4000-8000-000000000001',event='20000000-0000-4000-8000-000000000001';
+const input:OperatorDraftInput={communityId:community,offerType:'free_event',ticketCapacity:24,latitude:34,longitude:-118,
+ fields:{title:'Sunset picnic',description:'Meet at the park',image_url:'',event_date:'',start_time:null,end_time:null,venue:'LA',venue_address:'',category:'music',categories:['music'],external_url:'',ticket_price:'',public_name:'',pin_to_chat:true,description_blocks:[]}};
+const key=`operator-event-draft:v1:${user}:${community}`;
+const original=()=>({version:1 as const,userId:user,requestId:'30000000-0000-4000-8000-000000000099',input:JSON.parse(JSON.stringify(input))});
+const receipt=(id:string):OperatorDraftReceipt=>({version:1,requestId:id,userId:user,eventId:event,communityId:community,status:'Draft',offerType:'free_event',ticketCapacity:24,latitude:34,longitude:-118,createdAt:'2026-11-05T20:00:00Z'});
+const cancelled=(id:string):OperatorDraftOutcome=>({...receipt(id),eventId:null,status:'Cancelled'});
+let tree:ReactTestRenderer|undefined,api:ReturnType<typeof useOperatorEventDraft>,active:boolean,scope:CreatorPageScope;
+function Probe({owner=scope,club=community}:{owner?:CreatorPageScope;club?:string}){api=useOperatorEventDraft(club,owner);return null;}
+async function settle(){for(let i=0;i<8;i++)await act(async()=>{await Promise.resolve();});}
+async function mount(owner=scope){await act(async()=>{tree=create(<Probe owner={owner}/>);});await settle();}
+function pending(){const attempt=original();mockStorage.set(key,JSON.stringify(attempt));return attempt;}
+beforeEach(()=>{jest.useFakeTimers();jest.clearAllMocks();mockSequence=0;mockStorage.clear();active=true;scope={userId:user,isCurrent:()=>active};
+ mockSupport.mockResolvedValue(true);mockGet.mockResolvedValue(null);mockCreate.mockImplementation(async(id:string)=>receipt(id));mockCancel.mockImplementation(async(id:string)=>cancelled(id));mockRemove.mockImplementation(async(k:string)=>{mockStorage.delete(k);});});
+afterEach(()=>{if(tree)act(()=>tree!.unmount());tree=undefined;jest.useRealTimers();});
+it('checks availability without writing on mount',async()=>{await mount();expect(api!.canStart()).toBe(true);expect(mockCreate).not.toHaveBeenCalled();expect(mockCancel).not.toHaveBeenCalled();});
+it('permits the existing writer only when no pending request and the new protocol is absent',async()=>{mockSupport.mockResolvedValue(false);await mount();expect(api!.supported).toBe(false);expect(api!.canStart()).toBe(true);});
+it('never falls back to old creation for a stored attempt when capability is absent',async()=>{pending();mockSupport.mockResolvedValue(false);await mount();expect(api!.canStart()).toBe(false);expect(api!.error).toBeTruthy();expect(mockCreate).not.toHaveBeenCalled();});
+it('distinguishes unavailable checks from a missing deployment',async()=>{mockSupport.mockRejectedValue(Error('offline'));await mount();expect(api!.canStart()).toBe(false);expect(api!.error).toBeTruthy();mockSupport.mockResolvedValue(true);await act(async()=>{await api!.check();});expect(api!.canStart()).toBe(true);});
+it('recovers a saved draft by reading the original key without resubmitting',async()=>{const p=pending();mockGet.mockResolvedValue(receipt(p.requestId));await mount();expect(api!.saved?.eventId).toBe(event);expect(mockStorage.has(key)).toBe(false);expect(api!.canStart()).toBe(false);expect(mockCreate).not.toHaveBeenCalled();});
+it('keeps absent receipts unresolved and retries only after a deliberate action',async()=>{const p=pending();await mount();expect(api!.retryReady).toBe(true);expect(api!.canStart()).toBe(false);expect(mockCreate).not.toHaveBeenCalled();await act(async()=>{await api!.retry();});expect(mockCreate).toHaveBeenCalledWith(p.requestId,p.input,expect.anything());expect(api!.saved?.eventId).toBe(event);});
+it('durably stores the complete immutable draft before dispatch and prevents another start',async()=>{await mount();mockCreate.mockImplementationOnce(async(id:string,fields:OperatorDraftInput)=>{expect(JSON.parse(mockStorage.get(key)!)).toMatchObject({requestId:id,input:fields});expect(api!.canStart()).toBe(false);return receipt(id);});await act(async()=>{await api!.save(input);});expect(api!.saved?.eventId).toBe(event);expect(mockStorage.size).toBe(0);});
+it('shares a synchronous lock across rapid save actions',async()=>{await mount();await act(async()=>{const outcomes=await Promise.allSettled([api!.save(input),api!.save(input)]);expect(outcomes.filter(r=>r.status==='rejected')).toHaveLength(1);});expect(mockCreate).toHaveBeenCalledTimes(1);});
+it('preserves the original request after a response is lost and after reopening',async()=>{await mount();mockCreate.mockRejectedValueOnce(Error('lost response'));await act(async()=>{await expect(api!.save(input)).rejects.toThrow();});const before=mockStorage.get(key);expect(api!.canStart()).toBe(false);act(()=>tree!.unmount());await mount();expect(mockStorage.get(key)).toBe(before);expect(mockCreate).toHaveBeenCalledTimes(1);expect(api!.retryReady).toBe(true);});
+it('does not overwrite another pending attempt found just before dispatch',async()=>{await mount();const p=pending();await act(async()=>{await expect(api!.save({...input,fields:{...input.fields,title:'Later form'}})).rejects.toThrow();});expect(mockCreate).not.toHaveBeenCalled();expect(api!.pending?.requestId).toBe(p.requestId);});
+it('bounds an unresolved response, keeps the request, and ignores its late success',async()=>{await mount();let resolve!:(v:OperatorDraftReceipt)=>void;mockCreate.mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));let outcome:Promise<unknown>;
+ await act(async()=>{outcome=api!.save(input).catch(e=>e);await Promise.resolve();});await settle();const p=JSON.parse(mockStorage.get(key)!);
+ await act(async()=>{await jest.advanceTimersByTimeAsync(25_001);await outcome;});expect(api!.busy).toBe(false);expect(api!.saved).toBeNull();
+ await act(async()=>{resolve(receipt(p.requestId));});await settle();expect(api!.saved).toBeNull();expect(mockStorage.has(key)).toBe(true);});
+it('does not deliver an old account response into the next account',async()=>{await mount();let resolve!:(v:OperatorDraftReceipt)=>void;mockCreate.mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));let outcome:Promise<unknown>;
+ await act(async()=>{outcome=api!.save(input).catch(e=>e);});await settle();const p=JSON.parse(mockStorage.get(key)!);active=false;
+ const other={userId:'00000000-0000-4000-8000-000000000002',isCurrent:()=>true};await act(async()=>{tree!.update(<Probe owner={other}/>);});await settle();
+ await act(async()=>{resolve(receipt(p.requestId));await outcome;});expect(api!.saved).toBeNull();expect(mockStorage.has(key)).toBe(true);expect(api!.canStart()).toBe(true);});
+it('retains the confirmed ID if local cleanup fails and finishes by a read-only check',async()=>{await mount();mockRemove.mockRejectedValueOnce(Error('disk'));await act(async()=>{await expect(api!.save(input)).rejects.toThrow();});expect(api!.saved?.eventId).toBe(event);expect(mockStorage.has(key)).toBe(true);const p=JSON.parse(mockStorage.get(key)!);mockGet.mockResolvedValue(receipt(p.requestId));await act(async()=>{await api!.check();});expect(api!.error).toBeNull();expect(mockStorage.has(key)).toBe(false);expect(mockCreate).toHaveBeenCalledTimes(1);});
+it('returns to the preserved original fields only after the server seals the request',async()=>{const p=pending();await mount();await act(async()=>{await api!.resumeEditing();});expect(mockCancel).toHaveBeenCalledWith(p.requestId,p.input,expect.anything());expect(api!.restored).toEqual(p.input);expect(api!.canStart()).toBe(true);expect(mockStorage.has(key)).toBe(false);expect(mockCreate).not.toHaveBeenCalled();});
+it('opens an already committed draft instead of returning to a new form',async()=>{const p=pending();mockCancel.mockResolvedValue(receipt(p.requestId));await mount();await act(async()=>{await api!.resumeEditing();});expect(api!.saved?.eventId).toBe(event);expect(api!.restored).toBeNull();expect(api!.canStart()).toBe(false);});
+it('keeps the attempt if cancellation is unconfirmed, then recovers the sealed result by read',async()=>{const p=pending();mockCancel.mockRejectedValueOnce(Error('lost'));await mount();await act(async()=>{await api!.resumeEditing();});expect(api!.canStart()).toBe(false);expect(mockStorage.has(key)).toBe(true);mockGet.mockResolvedValue(cancelled(p.requestId));await act(async()=>{await api!.check();});expect(api!.restored).toEqual(p.input);expect(api!.canStart()).toBe(true);expect(mockCancel).toHaveBeenCalledTimes(1);});
+it('never dispatches both cancellation and retry on a rapid double action',async()=>{pending();await mount();await act(async()=>{await Promise.all([api!.resumeEditing(),api!.retry()]);});expect(mockCancel).toHaveBeenCalledTimes(1);expect(mockCreate).not.toHaveBeenCalled();});
+it('does not dispatch or clear a changed pending request',async()=>{pending();await mount();const changed=original();changed.requestId='30000000-0000-4000-8000-000000000098';mockStorage.set(key,JSON.stringify(changed));await act(async()=>{await api!.retry();});expect(mockCreate).not.toHaveBeenCalled();expect(JSON.parse(mockStorage.get(key)!).requestId).toBe(changed.requestId);});
+it('can recheck when an initially unavailable creator scope becomes ready',async()=>{active=false;await mount();expect(mockSupport).not.toHaveBeenCalled();active=true;await act(async()=>{tree!.update(<Probe/>);});await settle();expect(api!.canStart()).toBe(true);});
+it('recovers a sealed cancellation on remount without automatically creating a new draft',async()=>{const p=pending();mockGet.mockResolvedValue(cancelled(p.requestId));await mount();expect(api!.restored).toEqual(p.input);expect(api!.canStart()).toBe(true);expect(mockCreate).not.toHaveBeenCalled();expect(mockCancel).not.toHaveBeenCalled();});
