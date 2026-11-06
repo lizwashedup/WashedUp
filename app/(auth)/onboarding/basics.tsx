@@ -546,10 +546,7 @@ export default function OnboardingBasicsScreen() {
             contentContainerStyle={styles.scrollContent}
           >
             <View style={styles.gap20} />
-            <Text style={styles.heading}>
-              <Text style={styles.headingSans}>tell us about </Text>
-              <Text style={styles.headingItalic}>you</Text>
-            </Text>
+            <Text style={styles.heading}>tell us about you</Text>
             <Text style={styles.subline}>just the basics.</Text>
 
             <View style={styles.gap28} />
@@ -786,13 +783,12 @@ const styles = StyleSheet.create({
   gap28: { height: 28 },
 
   heading: {
+    fontFamily: Fonts.headline,
     fontSize: 32,
     lineHeight: 44,
     color: Colors.text1,
     marginTop: 16,
   },
-  headingSans: { fontFamily: Fonts.headline },
-  headingItalic: { fontFamily: Fonts.display, fontSize: 40 },
 
   subline: {
     fontFamily: Fonts.sans,

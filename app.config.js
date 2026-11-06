@@ -79,6 +79,7 @@ module.exports = {
       // iOS "Install pods" failure on cloud builds.
       './plugins/withIosModularHeaders',
       './plugins/withIosSceneLifecycle',
+      './plugins/withScreenStackRetirement',
       // Keep camera wording aligned with image-picker's chat/profile capture
       // and expo-camera's event check-in; both use the same OS permission.
       ['expo-camera', { cameraPermission: 'Use your camera to take photos for chats and your profile, and scan event tickets.' }],

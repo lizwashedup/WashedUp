@@ -1,0 +1,9 @@
+{
+  "package": "react-native-screens",
+  "version": "4.16.0",
+  "file": "ios/RNSScreenStack.mm",
+  "baselineSha256": "255734007ec267b321d78b2c6c07a23843fed00f9e7a8ae3b1824133c8fb89b5",
+  "patchedSha256": "b14a0d237d8065445837d3e7ca229c40b398a0c9e2a1027e2547020db88f494f",
+  "patch": "react-native-screens-4.16.0-ios-retirement.patch",
+  "patchSha256": "1640182155b31b6463ae235e064dd4fb2f20fac48c2bf2562e38519063952193"
+}

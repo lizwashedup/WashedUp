@@ -185,11 +185,7 @@ export default function OnboardingPhotoScreen() {
         <ProgressHead step={4} totalSteps={5} onBack={leavePhoto} />
 
         <View style={styles.gap20} />
-        <Text style={styles.heading}>
-          <Text style={styles.headingSans}>add a photo of </Text>
-          <Text style={styles.headingItalic}>you</Text>
-          <Text style={styles.headingSans}>.</Text>
-        </Text>
+        <Text style={styles.heading}>add a photo of you.</Text>
         <Text style={styles.subline}>
           show your face! it helps people feel comfortable meeting up.
         </Text>
@@ -294,13 +290,12 @@ const styles = StyleSheet.create({
   gap20: { height: 20 },
 
   heading: {
+    fontFamily: Fonts.headline,
     fontSize: 32,
     lineHeight: 36,
     color: Colors.text1,
     marginTop: 16,
   },
-  headingSans: { fontFamily: Fonts.headline },
-  headingItalic: { fontFamily: Fonts.display },
 
   subline: {
     fontFamily: Fonts.sans,
