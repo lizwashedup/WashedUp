@@ -40,11 +40,12 @@ let mockUseRealIdentity = false;
 let mockIdentityError: Error | null = null;
 let mockPeopleByAccount: Record<string, YoursGridPerson[]> = {};
 let mockParams: Record<string, string> = {}, mockPeople: YoursGridPerson[];
+const mockStoreReview = jest.fn();
 const mockPush = jest.fn(), mockSetParams = jest.fn(), mockDm = jest.fn(), mockInvalidate = jest.fn();
 const mockListeners = new Set<(event: string, session: { user: { id: string } } | null) => void>();
 jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args), setParams: (...args: unknown[]) => mockSetParams(...args) }, useLocalSearchParams: () => mockParams }));
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
-jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate }) }));
+jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate, setQueryData: mockStoreReview }) }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
 jest.mock('../../../lib/supabase', () => ({ supabase: { auth: { getUser: (...args: unknown[]) => mockGetUser(...args), onAuthStateChange: jest.fn((callback: any) => {
   mockListeners.add(callback); return { data: { subscription: { unsubscribe: () => mockListeners.delete(callback) } } };
@@ -123,6 +124,12 @@ it.each(['plan', 'circle', 'profile'])('consumes the %s action once and uses its
   mount(); open(mockPeople[1]); const props = menu(); press(key, props); press(key, props);
   expect(mockPush).toHaveBeenCalledTimes(1);
   const route = mockPush.mock.calls[0][0];
+  if (key === 'plan') {
+    expect(route).toMatch(/^\/similar-plan\?reviewId=/);
+    expect(mockStoreReview).toHaveBeenCalledWith(['similar-plan-review',expect.any(String),route.split('reviewId=')[1]],
+      expect.objectContaining({prefillInvitePersonId:'jamie'}));
+    return;
+  }
   expect(JSON.stringify(route)).toContain('jamie'); expect(JSON.stringify(route)).not.toContain('amelia');
 });
 

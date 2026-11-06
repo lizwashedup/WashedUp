@@ -18,6 +18,7 @@ import {
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { COPY } from '../state/constants';
 import { hapticSelection } from '../../../lib/haptics';
+import { useQueryClient } from '@tanstack/react-query';
 import { buildComposerWithPerson } from '../../../lib/composerLink';
 import { useObservedUser, type ObservedUser } from '../../../hooks/useObservedUser';
 import { usePersonProfile } from '../../../hooks/usePersonProfile';
@@ -51,6 +52,7 @@ function ObservedProfile(props: PersonProfilePageProps) {
   return <ProfileVisit key={JSON.stringify([viewer.viewerId, viewer.epoch])} {...props} viewer={viewer}/>;
 }
 function ProfileVisit({ userId, targetId, viewer }: PersonProfilePageProps & { viewer: ObservedUser }) {
+  const client = useQueryClient();
   const { styles, appearance } = useProfileStyles();
   const focused = useIsFocused();
   const mounted = useRef(false);
@@ -111,7 +113,7 @@ function ProfileVisit({ userId, targetId, viewer }: PersonProfilePageProps & { v
   const onMakePlan = () => {
     if (!readable() || pending.current?.visit === visit || blocking) return;
     const person = latestProfile.current!; hapticSelection();
-    navigate(buildComposerWithPerson(person.user_id, person.first_name_display, person.profile_photo_url));
+    navigate(buildComposerWithPerson(client, userId, person.user_id, person.first_name_display, person.profile_photo_url));
   };
   const onMore = (anchor: AnchorRect) => {
     if (!readable() || pending.current?.visit === visit || blocking || activeMenu.current?.visit === visit) return;

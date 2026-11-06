@@ -604,8 +604,8 @@ export default function YoursScreen() {
                   // Open the composer with this person pre-attached as a removable
                   // invite chip (the locked rule: a plan from a person is never one
                   // they're not on). Never the generic /post dump.
-                  onPress: () => runMenuAction(menu, person => router.push(buildComposerWithPerson(
-                    person.user_id, person.first_name_display, person.profile_photo_url,
+                  onPress: () => userId && runMenuAction(menu, person => router.push(buildComposerWithPerson(
+                    queryClient, userId, person.user_id, person.first_name_display, person.profile_photo_url,
                   ) as never)),
                 },
                 {

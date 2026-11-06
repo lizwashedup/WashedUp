@@ -7,11 +7,14 @@ import ChatThread from '../ChatThread';
 import MenuCard from '../../menu/MenuCard';
 import AddPeopleSheet from '../../circles/AddPeopleSheet';
 import CirclePlanComposer from '../../circles/plan/CirclePlanComposer';
-import { buildComposerWithPerson } from '../../../lib/composerLink';
 
 let mockAnchor: string | undefined;
 let mockRoomId = 'circle-one', mockViewerId: string | null = 'account-a', mockEpoch = 1;
 let mockError = false, mockNamed = false, mockLoading = false, mockUnavailable = false;
+const mockStoreReview = jest.fn();
+jest.mock('@tanstack/react-query', () => ({
+  ...jest.requireActual('@tanstack/react-query'), useQueryClient: () => ({setQueryData:mockStoreReview}),
+}));
 const mockRefetch = jest.fn();
 const mockPush = jest.fn(), mockBack = jest.fn(), mockNavigate = jest.fn();
 const mockMember = (id: string, name: string) => ({ user_id: id, first_name_display: name, profile_photo_url: null });
@@ -71,7 +74,8 @@ afterEach(() => { act(() => tree?.unmount()); tree = undefined; jest.restoreAllM
 it('preserves the DM plan route and waits for the current menu to finish closing', async () => {
   await mount(); expect(thread().title).toBe('Jamie'); openPlus(); expect(menu().visible).toBe(true); expect(menu().anchor).toEqual(anchor);
   const closed = chooseDm('plan'); expect(mockPush).not.toHaveBeenCalled(); act(() => closed());
-  expect(mockPush).toHaveBeenCalledWith(buildComposerWithPerson('member-one', 'Jamie', null));
+  const id = String(mockPush.mock.calls[0][0]).split('reviewId=')[1];expect(id).toBeTruthy();
+  expect(mockStoreReview).toHaveBeenCalledWith(['similar-plan-review','account-a',id],{prefillInvitePersonId:'member-one',prefillInvitePersonName:'Jamie'});
   act(() => closed()); expect(mockPush).toHaveBeenCalledTimes(1);
 });
 

@@ -4,6 +4,10 @@ import { act, create } from 'react-test-renderer';
 import KeepPage, { type KeepPageProps } from '../KeepPage';
 import { AfterglowFallbackFonts, AfterglowType } from '../../../../constants/Typography';
 import type { ProfileCard } from '../../../../lib/yours/types';
+const mockStoreReview = jest.fn();
+jest.mock('@tanstack/react-query', () => ({
+  ...jest.requireActual('@tanstack/react-query'), useQueryClient: () => ({setQueryData:mockStoreReview}),
+}));
 const mockProfile = jest.fn(), mockMyFace = jest.fn(), mockSend = jest.fn(), mockRemove = jest.fn(), mockVisibility = jest.fn(), mockDm = jest.fn(), mockRefetch = jest.fn(), mockRetry = jest.fn(), mockPush = jest.fn(), mockBack = jest.fn();
 let mockFocused = true, mockViewerId = 'alice', mockEpoch = 0, mockIdentityError: Error | null = null, mockIdentityLoading = false;
 jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args), back: () => mockBack() } }));
@@ -86,7 +90,9 @@ it('does not navigate on an empty DM receipt', async () => {
 });
 it('Make a plan preserves a removable pre-attached invite and suppresses repeat navigation', () => {
   const f = mount(); const plan = f.button('Make a plan').props.onPress; act(() => { plan(); plan(); }); expect(mockPush).toHaveBeenCalledTimes(1);
-  const route = mockPush.mock.calls[0][0]; expect(route).toContain('prefillInvitePersonId=amelia'); expect(route).toContain('prefillInvitePersonName=Amelia'); expect(route).toContain('prefillInvitePersonPhoto=');
+  const id = String(mockPush.mock.calls[0][0]).split('reviewId=')[1];expect(id).toBeTruthy();
+  expect(mockStoreReview).toHaveBeenCalledWith(['similar-plan-review','alice',id],
+    expect.objectContaining({prefillInvitePersonId:'amelia',prefillInvitePersonName:'Amelia',prefillInvitePersonPhoto:expect.any(String)}));
 });
 it('a retained plan action cannot bypass a Message operation that just started', () => {
   const pending = deferred<string>(); mockDm.mockReturnValue(pending.promise); const f = mount(); const plan = f.button('Make a plan').props.onPress, send = f.button('Message Amelia').props.onPress;
