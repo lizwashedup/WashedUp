@@ -16,7 +16,8 @@ jest.mock('../../../hooks/useAfterglowFonts', () => ({
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn().mockResolvedValue(undefined) }));
-jest.mock('@react-navigation/native', () => ({ useFocusEffect: jest.fn() }));
+// These tests interact with a visible inbox; run its focus effects while mounted.
+jest.mock('@react-navigation/native', () => ({ useFocusEffect: (effect: () => void | (() => void)) => require('react').useEffect(effect, [effect]) }));
 // The current screen also instantiates the separately tested notification query,
 // even with its creator-page feature gate disabled in these grouping/leave tests.
 jest.mock('@tanstack/react-query', () => ({

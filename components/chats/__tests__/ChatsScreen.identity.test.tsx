@@ -2,10 +2,12 @@ import React from 'react';
 import { AppState, RefreshControl, Text, TouchableOpacity, type AppStateStatus } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useFocusEffect } from '@react-navigation/native';
+import { ChatInboxRow } from '../ChatInboxRow';
 import ChatsScreen from '../../../app/(tabs)/chats/index';
 import { useChatList, type ChatPreview } from '../../../hooks/useChatList';
 import type { ObservedUser } from '../../../hooks/useObservedUser';
 
+const mockPush = jest.fn();
 const mockGetUser = jest.fn();
 const mockAuthListeners = new Set<(event: string, session: any) => void>();
 const mockRefetch = jest.fn();
@@ -19,7 +21,7 @@ function focusInbox() { let blur: any; act(() => { blur = jest.mocked(useFocusEf
 let mockObserved: ObservedUser;
 const mockClient = { invalidateQueries: jest.fn(), cancelQueries: jest.fn().mockResolvedValue(undefined) };
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: jest.fn() }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient }));
@@ -267,4 +269,21 @@ it('shares a pull with the foreground refresh while both target the same account
   expect(mockOldRefetch).toHaveBeenCalledTimes(1);
   await act(async () => { pending.resolve(undefined); await operation; });
   expect(pullControl().props.refreshing).toBe(false);
+});
+
+
+it('drops a queued row tap on account change or blur and opens the current conversation after returning', async () => {
+  await mount();
+  const blur = focusInbox();
+  const press = () => tree.root.findByType(ChatInboxRow).props.onPress;
+  const alice = press();
+  await emit('bob');
+  act(alice);
+  expect(mockPush).not.toHaveBeenCalled();
+  const bob = press();
+  act(() => { blur(); bob(); });
+  expect(mockPush).not.toHaveBeenCalled();
+  focusInbox();
+  act(press());
+  expect(mockPush.mock.calls).toEqual([['/(tabs)/chats/plan-bob']]);
 });
