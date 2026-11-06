@@ -46,6 +46,7 @@ import { CATEGORY_OPTIONS, type CategoryOption } from '../../../constants/Catego
 import Colors, { AfterglowColors } from '../../../constants/Colors';
 import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
 import { useAfterglowFonts } from '../../../hooks/useAfterglowFonts';
+import { usePlansEntry } from '../../../hooks/usePlansEntry';
 import { useFeedWishlist } from '../../../hooks/useFeedWishlist';
 import { usePlansNearMe } from '../../../hooks/usePlansNearMe';
 import { WHEN_OPTIONS } from '../../../constants/WhenFilter';
@@ -61,7 +62,6 @@ import { postAuthTransitionRef } from '../../../lib/navState';
 import { useBlock } from '../../../hooks/useBlock';
 import { isPlanPast } from '../../../lib/planTime';
 import {
-  markWelcomeShown,
   wasHandlePromptShownThisSession,
   wasWelcomeShownThisSession,
 } from '../../../lib/promptState';
@@ -145,16 +145,14 @@ export default function PlansScreen() {
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
-  const [userId, setUserId] = React.useState<string | null>(null);
+  const { userId, accountUnavailable, retry: retryAccount, showWelcome, dismissWelcome, welcomeChecked } = usePlansEntry();
   const saveOverlayOwner = useMemo(() => ({ userId }), [userId]);
   const saveOverlayOwnerRef = useRef(saveOverlayOwner); saveOverlayOwnerRef.current = saveOverlayOwner;
   useFocusEffect(useCallback(() => {
     setSnackbar(null); setShareSheet(null);
     return () => { setSnackbar(null); setShareSheet(null); };
   }, [saveOverlayOwner]));
-  const [userIdTimedOut, setUserIdTimedOut] = React.useState(false);
-  const [showWelcome, setShowWelcome] = useState(false);
-  const welcomeBannerOpacity = useRef(new Animated.Value(1)).current;
+  const welcomeBannerOpacity = useMemo(() => new Animated.Value(1), [userId]);
   const [welcomeOverlayDone, setWelcomeOverlayDone] = useState(false);
   // Backstop so the welcome overlay can never block touches forever if the
   // feed queries never settle. Set true by a watchdog timer below.
@@ -173,105 +171,12 @@ export default function PlansScreen() {
   });
   const [showProfileCompletePrompt, setShowProfileCompletePrompt] = useState(false);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    let initDone = false;
-
-    async function init() {
-      // Bounded: an unwrapped getSession() can hang on a stale/expired session
-      // whose token refresh never settles, which leaves `userId` null forever →
-      // the feed query stays disabled → the welcome overlay never sees data and
-      // (pre-watchdog builds) traps the user. Fail open to no-session; the
-      // onAuthStateChange listener below and the userIdTimedOut retry recover
-      // once the refresh actually completes. Mirrors app/_layout.tsx.
-      const { data } = await withTimeout(
-        supabase.auth.getSession(),
-        6000,
-        { data: { session: null } } as any,
-      );
-      if (cancelled) return;
-      const id = data.session?.user?.id ?? null;
-
-      if (id) {
-        // Welcome modal gate. Source of truth is profiles.welcome_seen_at;
-        // AsyncStorage is a fast-path cache so we can skip the Supabase read
-        // on subsequent opens. Name and seen-at are fetched separately so a
-        // missing column on the seen-at check can't null out the whole row
-        // and leave the modal rendering "Welcome, friend".
-        try {
-          const key = `has_seen_welcome_${id}`;
-          const cached = await AsyncStorage.getItem(key);
-          if (!cached && !cancelled) {
-            const [nameRes, seenRes] = await Promise.all([
-              supabase
-                .from('profiles')
-                .select('first_name_display')
-                .eq('id', id)
-                .maybeSingle(),
-              supabase
-                .from('profiles')
-                .select('welcome_seen_at')
-                .eq('id', id)
-                .maybeSingle(),
-            ]);
-            const firstName = (nameRes.data as any)?.first_name_display ?? '';
-            // If the seen-at query errors (column missing, RLS, etc.), treat
-            // it as "unknown" and fall back to the AsyncStorage-only flow —
-            // better to skip a maybe-already-seen modal than show it twice.
-            const seenAt = seenRes.error
-              ? 'unknown'
-              : (seenRes.data as any)?.welcome_seen_at ?? null;
-            if (!cancelled) {
-              if (seenAt) {
-                try { await AsyncStorage.setItem(key, '1'); } catch {}
-              } else if (firstName) {
-                setShowWelcome(true);
-                markWelcomeShown();
-                try { await AsyncStorage.setItem(key, '1'); } catch {}
-                supabase
-                  .from('profiles')
-                  .update({ welcome_seen_at: new Date().toISOString() })
-                  .eq('id', id)
-                  .then(() => {});
-              }
-              // else: no name yet (profile still propagating) and not seen.
-              // Deliberately do NOT cache or show — retry next session so
-              // the user gets the modal with their real name, not "friend".
-            }
-          }
-        } catch {}
-      }
-
-      initDone = true;
-      if (!cancelled) setUserId(id);
-    }
-
-    init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (cancelled) return;
-      if (!initDone) return;
-      setUserId(session?.user?.id ?? null);
-    });
-
-    const t = setTimeout(() => {
-      if (cancelled) return;
-      setUserIdTimedOut(true);
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-      clearTimeout(t);
-    };
-  }, []);
-
   // ── Profile-complete prompt ─────────────────────────────────────────────────
   // Fires once ever per user when any of handle/fun_fact/neighborhood is
   // missing and onboarding is complete. Skipped if the handle prompt or
   // welcome modal is showing/was shown this session to avoid back-to-back.
   React.useEffect(() => {
-    if (!userId) return;
+    if (!userId || !welcomeChecked) return;
     if (wasHandlePromptShownThisSession()) return;
     if (wasWelcomeShownThisSession()) return;
 
@@ -310,7 +215,7 @@ export default function PlansScreen() {
       cancelled = true;
       if (delayTimer) clearTimeout(delayTimer);
     };
-  }, [userId]);
+  }, [userId, welcomeChecked]);
 
   const dismissProfileCompletePrompt = useCallback(async () => {
     setShowProfileCompletePrompt(false);
@@ -578,26 +483,15 @@ export default function PlansScreen() {
     [renderItem, memberIdSet, wishlistedSet, handleWishlist, handleReport, handleBlock, handleCreatorPress, appearance, styles, savedPlans.revision, savedPlans.feedback, savedPlans.canWrite],
   );
 
-  const persistWelcomeSeen = useCallback(async () => {
-    if (!userId) return;
-    try { await AsyncStorage.setItem(`has_seen_welcome_${userId}`, '1'); } catch {}
-    supabase
-      .from('profiles')
-      .update({ welcome_seen_at: new Date().toISOString() })
-      .eq('id', userId)
-      .then(() => {});
-  }, [userId]);
-
   const handleWelcomeDismiss = useCallback(() => {
     Animated.timing(welcomeBannerOpacity, {
       toValue: 0,
       duration: 200,
       useNativeDriver: true,
     }).start(() => {
-      setShowWelcome(false);
-      persistWelcomeSeen();
+      dismissWelcome();
     });
-  }, [welcomeBannerOpacity, persistWelcomeSeen]);
+  }, [welcomeBannerOpacity, dismissWelcome]);
 
   // ── Featured events section ──────────────────────────────────────────────────
   const featuredSection = useMemo(() => {
@@ -703,6 +597,11 @@ export default function PlansScreen() {
   // (plus its own min-display timer) to decide when to fade away.
   const dataReady = !!userId && !isLoading && !wishlistsLoading;
   const showWelcomeOverlay = (showWelcome || postAuthTransition) && !welcomeOverlayDone;
+
+  // Once the feed is usable, a late optional greeting stays inline.
+  React.useEffect(() => {
+    if (dataReady && !showWelcomeOverlay) setWelcomeOverlayDone(true);
+  }, [dataReady, showWelcomeOverlay]);
 
   // Watchdog: while the overlay is up and data hasn't resolved, arm a timer
   // that force-releases it. Guarantees the app becomes touchable within
@@ -901,20 +800,11 @@ export default function PlansScreen() {
         )
       ) : (
         <>
-          {userIdTimedOut && !userId ? (
+          {accountUnavailable && !userId ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Having trouble loading</Text>
               <Text style={styles.errorMessage}>Sign in may have timed out. Try again or restart the app.</Text>
-              <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => {
-              setUserIdTimedOut(false);
-              // Bounded retry: don't re-hit an unwrapped getSession() that can
-              // hang the same way the initial load did.
-              withTimeout(
-                supabase.auth.getSession(),
-                6000,
-                { data: { session: null } } as any,
-              ).then(({ data }) => setUserId(data.session?.user?.id ?? null));
-            }}>
+              <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={retryAccount}>
                 <Text numberOfLines={1} style={styles.retryButtonText}>{appearance ? 'Try again' : 'Try Again'}</Text>
               </TouchableOpacity>
             </View>
