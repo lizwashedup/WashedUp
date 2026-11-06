@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -10,18 +10,19 @@ import { logError } from '../lib/logger';
 import { withDeadline, withTimeout } from '../lib/withTimeout';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { classifyPlanJoinReceipt, type PlanJoinDenial, type PlanJoinRpc } from '../lib/planJoinSafety';
+import { planJoinWriteLocks } from '../lib/planJoinWriteLock';
 import type { CirclePlanContext } from './useCirclePlanContext';
 
 export type PlanJoinResult = { greetingUnconfirmed?: string; greetingNotSent?: string };
 
 type Options = {
   eventId: string; viewerId: string | null; epoch: number; isCurrent: () => boolean;
-  ready: boolean; startTime?: string; endTime?: string | null; status?: unknown;
+  membershipConfirmed?: boolean; ready: boolean; startTime?: string; endTime?: string | null; status?: unknown;
   circle: CirclePlanContext | undefined; age: number | null; gender: string | null;
   onJoined: (result: PlanJoinResult) => void; onError: (message: string, reason?: PlanJoinDenial) => void;
 };
-type JoinState = { pending: Call | null; result: 'idle' | 'unknown' | 'joined' };
-type Call = { eventId: string; viewerId: string; greeting?: string; rpc: PlanJoinRpc;
+type JoinState = { pending: Call | null; result: 'idle' | 'joined' };
+type Call = { key: string; token: object; eventId: string; viewerId: string; greeting?: string; rpc: PlanJoinRpc;
   startTime: string; endTime?: string | null; status?: unknown; age: number | null; gender: string | null;
   ownChat: boolean; state: JoinState; isCurrent: () => boolean; dispatched: boolean };
 class UnknownJoin extends Error {}
@@ -78,6 +79,9 @@ export function usePlanJoin(options: Options) {
   // read cannot unlock an uncertain write that may still be committing.
   const states = useRef(new Map<string, JoinState>());
   const stateKey = JSON.stringify([options.viewerId, options.eventId]);
+  const locks = planJoinWriteLocks(client);
+  const getHold = useCallback(() => locks.get(stateKey), [locks, stateKey]);
+  const hold = useSyncExternalStore(locks.subscribe, getHold, getHold);
   if (!states.current.has(stateKey)) states.current.set(stateKey, { pending: null, result: 'idle' });
   const state = states.current.get(stateKey)!;
   const owner = useMemo(() => ({ state }), [options.eventId, options.viewerId, options.epoch]);
@@ -99,6 +103,12 @@ export function usePlanJoin(options: Options) {
     if (terminal === 'cancelled') throw new Error('This plan was cancelled. Nobody new can join.');
     if (terminal === 'completed') throw new Error('This plan is complete. Nobody new can join.');
   };
+  useEffect(() => {
+    // An empty or failed read cannot prove a submitted write didn't commit.
+    if (hold?.checking && options.membershipConfirmed && options.isCurrent()) {
+      locks.finish(stateKey, hold.token);
+    }
+  }, [hold, locks, options.membershipConfirmed, options.isCurrent, stateKey]);
   const mutation = useMutation({
     retry: false,
     mutationFn: async (call: Call): Promise<PlanJoinResult | false> => {
@@ -124,10 +134,29 @@ export function usePlanJoin(options: Options) {
       // their existing handling even if a background refresh changes status.
       requireNonterminal(call);
       if (isPlanPast(call.startTime, call.endTime)) throw new Error('This plan ended. Nobody new can join.');
+      if (!locks.begin(call.key, call.token)) return false;
       call.dispatched = true;
       let result;
       try {
-        result = await supabase.rpc(call.rpc, { p_event_id: call.eventId, p_user_id: call.viewerId, p_age_at_join: call.age, p_gender_at_join: call.gender });
+        const write = Promise.resolve(supabase.rpc(call.rpc, { p_event_id: call.eventId, p_user_id: call.viewerId, p_age_at_join: call.age, p_gender_at_join: call.gender }));
+        const missing = Symbol();
+        const response = await withTimeout<Awaited<typeof write> | typeof missing>(write, 15_000, missing);
+        if (response === missing) {
+          locks.check(call.key, call.token);
+          // Stop blocking the screen, not the server's transaction. A late
+          // receipt may refresh membership, but cannot post an introduction.
+          void write.then(late => {
+            if (locks.get(call.key)?.token !== call.token) return;
+            const denial = late?.error ? null : classifyPlanJoinReceipt(late?.data, call.rpc);
+            if (denial?.kind === 'denied' || rejectedTransactionCodes.has(String(late?.error?.code ?? ''))) {
+              locks.finish(call.key, call.token);
+              if (denial?.kind === 'denied' && call.isCurrent()) latest.current.onError(denialCopy[denial.reason], denial.reason);
+            }
+            for (const part of ['members', 'detail']) void client.invalidateQueries({ queryKey: ['events', part, call.eventId, call.viewerId] });
+          }).catch(() => {});
+          throw new UnknownJoin();
+        }
+        result = response;
       } catch { throw new UnknownJoin(); }
       if (result?.error) {
         if (rejectedTransactionCodes.has(String(result.error.code ?? ''))) throw new Error('Couldn’t join this plan. Check the details and try again.');
@@ -147,12 +176,17 @@ export function usePlanJoin(options: Options) {
       // outcomes, not application failures. Keep genuine transport, auth and
       // malformed-receipt failures in Sentry.
       if (!(error instanceof ConfirmedJoinRefusal)) logError(error, 'plan.join');
-      if (error instanceof UnknownJoin) call.state.result = 'unknown';
+      if (error instanceof UnknownJoin) {
+        if (locks.get(call.key)?.token !== call.token) return;
+        locks.check(call.key, call.token);
+      }
       if (!call.isCurrent()) return;
       if (error instanceof ConfirmedJoinRefusal) latest.current.onError(error.message, error.reason);
       else latest.current.onError(error instanceof UnknownJoin ? unknownCopy : friendlyError(error, 'Couldn’t join this plan. Try again.'));
     },
     onSettled: (_data, _error, call) => {
+      if (call.state.result === 'joined' && !call.isCurrent()) locks.check(call.key, call.token);
+      else if (!(_error instanceof UnknownJoin)) locks.finish(call.key, call.token);
       if (call.state.pending === call) call.state.pending = null;
       publish(call.state);
       if (call.dispatched) for (const queryKey of [
@@ -163,9 +197,9 @@ export function usePlanJoin(options: Options) {
   });
   const join = (greeting?: string) => {
     const o = latest.current;
-    if (!isCurrent() || !o.ready || !o.viewerId || !o.startTime || !o.circle || state.pending || state.result !== 'idle') return;
+    if (locks.get(stateKey) || !isCurrent() || !o.ready || !o.viewerId || !o.startTime || !o.circle || state.pending || state.result !== 'idle') return;
     const call: Call = {
-      eventId: o.eventId, viewerId: o.viewerId, greeting: greeting?.trim() || undefined,
+      key: stateKey, token: {}, eventId: o.eventId, viewerId: o.viewerId, greeting: greeting?.trim() || undefined,
       rpc: o.circle.is_circle_plan ? 'join_circle_plan_atomic' : 'join_event_atomic',
       startTime: o.startTime, endTime: o.endTime, status: o.status, age: o.age, gender: o.gender,
       ownChat: !o.circle.is_circle_plan || o.circle.has_own_chat === true, state, dispatched: false,
@@ -174,5 +208,5 @@ export function usePlanJoin(options: Options) {
     state.pending = call; publish(state); // synchronous lock before React renders
     mutation.mutate(call);
   };
-  return { join, isPending: !!state.pending, unconfirmed: state.result === 'unknown', isCurrent };
+  return { join, isPending: !!state.pending, unconfirmed: !!hold && (hold.checking || hold.token !== state.pending?.token), isCurrent };
 }

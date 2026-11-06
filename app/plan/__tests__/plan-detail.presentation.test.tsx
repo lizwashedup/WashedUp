@@ -1090,3 +1090,13 @@ it('retires a withdrawn plan even if the last good detail is still cached', asyn
   await act(async () => tree.update(<PlanDetailScreen />));
   expect(button("Let's Go →")).toBeDefined();
 });
+
+it('shows confirmed membership and a read-only exit if the joining sheet is still open', async () => {
+  await mount(); act(() => button("Let's Go →").props.onPress());
+  mockUnconfirmed = true; mockMembers.push({ id:'viewer-row', user_id:'viewer' });
+  await act(async () => tree.update(<PlanDetailScreen />));
+  expect(joinSheet()).toMatchObject({ visible:true, membershipConfirmed:true, canJoin:false, unconfirmed:false });
+  await act(async () => joinSheet().onCheck());
+  expect(joinSheet().visible).toBe(false); expect(button('Open Chat')).toBeDefined();
+  expect(mockJoin).not.toHaveBeenCalled();
+});

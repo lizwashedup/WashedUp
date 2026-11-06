@@ -32,8 +32,8 @@ function deferred<T>() {
 }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); }); }
 function joins() { return mockRpc.mock.calls.filter(([name]) => name === 'join_event_atomic' || name === 'join_circle_plan_atomic'); }
-async function mount(overrides: Partial<Options> = {}) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: 2, gcTime: Infinity } } });
+async function mount(overrides: Partial<Options> = {}, shared?: QueryClient) {
+  const client = shared ?? new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: 2, gcTime: Infinity } } });
   const onJoined = jest.fn(), onError = jest.fn();
   let props: Partial<Options> = overrides, current!: Controller;
   function Harness() {
@@ -345,20 +345,40 @@ it.each([['auth', 8000], ['eligibility', 12000]] as const)('recovers a stalled %
   } finally { jest.useRealTimers(); }
 });
 
-it('keeps a dispatched membership write locked beyond the read deadlines', async () => {
+it.each(['joined','not_found'] as const)('frees the screen but never sends a late greeting after a slow %s receipt', async outcome => {
   const receipt = deferred<RpcResult>();
   mockRpc.mockImplementation((name: string) => name === 'can_join_event_gender' ? Promise.resolve({ data: true }) : receipt.promise);
   const f = await mount(); jest.useFakeTimers();
   try {
-    f.join(); await act(async () => jest.advanceTimersByTimeAsync(0));
-    await act(async () => jest.advanceTimersByTimeAsync(30000));
-    expect(f.current.isPending).toBe(true); expect(f.onError).not.toHaveBeenCalled();
-    f.join(); await act(async () => jest.advanceTimersByTimeAsync(1)); expect(joins()).toHaveLength(1);
-    await act(async () => receipt.resolve({ data: 'joined' })); await act(async () => jest.advanceTimersByTimeAsync(1));
-    expect(f.onJoined).toHaveBeenCalledTimes(1); expect(f.current.isPending).toBe(false);
+    f.join('My introduction'); await act(async () => jest.advanceTimersByTimeAsync(1));
+    expect(f.current.isPending).toBe(true);
+    await act(async () => jest.advanceTimersByTimeAsync(15001));
+    expect(f.current.isPending).toBe(false); expect(f.current.unconfirmed).toBe(true);
+    f.join('Again'); await act(async () => jest.advanceTimersByTimeAsync(1)); expect(joins()).toHaveLength(1);
+    await act(async () => receipt.resolve({ data: outcome, error: null })); await act(async () => jest.advanceTimersByTimeAsync(1));
+    expect(mockInsert).not.toHaveBeenCalled(); expect(f.onJoined).not.toHaveBeenCalled();
+    if (outcome === 'not_found') {
+      expect(f.current.unconfirmed).toBe(false);
+      expect(f.onError).toHaveBeenCalledWith(expect.stringContaining('no longer available'), 'not_found');
+    } else expect(f.current.unconfirmed).toBe(true); // a read reconciles membership; never replay the join
   } finally { jest.useRealTimers(); }
 });
 
+it('keeps a submitted request account- and plan-owned across a real unmount and re-entry', async () => {
+  const held = deferred<RpcResult>();
+  mockRpc.mockImplementation((rpc, args) => rpc === 'can_join_event_gender' ? Promise.resolve({data:true}) :
+    args.p_user_id === 'alice' ? held.promise : Promise.resolve({data:'joined'}));
+  const a = await mount(); a.join('Original'); await flush(); a.unmount();
+  const back = await mount({}, a.client);
+  expect(back.current.unconfirmed).toBe(true); back.join('Again'); await flush(); expect(joins()).toHaveLength(1);
+  mockAccount = 'bob'; mockEpoch++; back.update(); expect(back.current.unconfirmed).toBe(false);
+  back.join(); await flush(); expect(joins()).toHaveLength(2);
+  mockAccount = 'alice'; mockEpoch++; back.update(); expect(back.current.unconfirmed).toBe(true);
+  await act(async () => held.reject(new Error('lost response'))); await flush(); back.join(); await flush();
+  expect(joins()).toHaveLength(2); expect(a.onJoined).not.toHaveBeenCalled(); expect(back.current.unconfirmed).toBe(true);
+  back.update({membershipConfirmed:true, ready:false}); await flush(); expect(back.current.unconfirmed).toBe(false);
+  expect(mockInsert.mock.calls.some(([,row])=>row.content === 'Original')).toBe(false);
+});
 it.each(['system', 'greeting', 'system without greeting'])('finishes a confirmed join when the %s receipt stalls, without replaying either write', async stage => {
   const stalled = deferred<{ error: null }>();
   mockInsert.mockImplementation((_table, row) => (stage === 'greeting' ? row.message_type === 'user' : row.message_type === 'system') ? stalled.promise : Promise.resolve({ error: null }));

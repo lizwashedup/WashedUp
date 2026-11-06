@@ -762,6 +762,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   };
   const joinMutation = usePlanJoin({
     eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    membershipConfirmed: isMember && membersQuery.isSuccess && !membersQuery.isFetching,
     ready: joinReady, startTime: plan?.start_time, endTime: plan?.end_time, status: plan?.status,
     circle: circleCtx, age: userAge, gender: userGender,
     onJoined: (result = {}) => {
@@ -826,6 +827,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     },
   });
 
+  const joinedWhileSheetOpen = joinModalVisible && isMember && membersQuery.isSuccess && !membersQuery.isFetching && !joinMutation.isPending;
   useFocusEffect(useCallback(() => () => {
     invitationCompletion.current=null;
     joinedNotification.current = null;
@@ -1755,7 +1757,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       <PlanJoinSheet visible={joinModalVisible} planId={id} appearance={appearance}
         planTitle={plan.title} dateLabel={`${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}`}
         message={joinMessage} confirmed={joinConfirmed} error={joinError?.message ?? (noSpotAvailable ? 'This plan just filled up.' : null)}
-        unavailable={noSpotAvailable || refusedSpot} unconfirmed={joinMutation.unconfirmed}
+        membershipConfirmed={joinedWhileSheetOpen} unavailable={noSpotAvailable || refusedSpot} unconfirmed={!joinedWhileSheetOpen && joinMutation.unconfirmed}
         busy={joinPreparing || joinMutation.isPending} canJoin={joinReady}
         onMessage={(value) => { setJoinMessage(value); setJoinError(null); }} onConfirmed={setJoinConfirmed}
         onJoin={() => requestJoin(joinMessage)} onClose={() => {invitationCompletion.current=null;setJoinModalVisible(false);}}
