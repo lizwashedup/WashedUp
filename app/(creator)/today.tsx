@@ -15,7 +15,7 @@ import { ActivityIndicator, View, ScrollView, TouchableOpacity, StyleSheet, Refr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
-import { useQuery } from '@tanstack/react-query';
+import { useCreatorDashboardRead } from '../../hooks/useCreatorDashboardRead';
 import { ChevronRight, Calendar, Megaphone, Plus, UserPlus } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
@@ -31,7 +31,6 @@ import { getCommunityRooms } from '../../lib/communityChat';
 import { pickNextUpcomingEvent } from '../../lib/organizerHome';
 import { formatEventDateLA } from '../../lib/laDate';
 import { useLedCommunity } from '../../lib/selectedCommunity';
-import { supabase } from '../../lib/supabase';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { getRsvpCount } from '../../lib/eventRsvp';
 import { OfflineBanner } from '../../components/state/StateViews';
@@ -46,25 +45,12 @@ export default function CreatorTodayScreen() {
   const community = useLedCommunity(access);
   const canStartEvent = canCreateLegacyCommunityEvent(access, community);
 
-  const membersQuery = useQuery({
-    queryKey: ['creator-members', community?.id],
-    queryFn: () => getCommunityMembers(community!.id),
-    enabled: !!community,
-  });
-  const broadcastsQuery = useQuery({
-    queryKey: ['creator-broadcasts', community?.id],
-    queryFn: () => getBroadcasts(community!.id),
-    enabled: !!community,
-  });
-  const eventsQuery = useQuery({
-    queryKey: ['creator-events', community?.id],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-      return getCreatorEvents(community ? [community.id] : [], user.id);
-    },
-    enabled: access != null,
-  });
+  const membersQuery = useCreatorDashboardRead(accessRead, ['creator-members', community?.id],
+    () => getCommunityMembers(community!.id), !!community);
+  const broadcastsQuery = useCreatorDashboardRead(accessRead, ['creator-broadcasts', community?.id],
+    () => getBroadcasts(community!.id), !!community);
+  const eventsQuery = useCreatorDashboardRead(accessRead, ['creator-events', community?.id],
+    id => getCreatorEvents(community ? [community.id] : [], id), !!community);
   const { data: members = [], refetch: refetchMembers, isRefetching } = membersQuery;
   const canRefreshMembers = !!community && !!access && !accessRead.isLoading && !accessRead.isError;
   // A join or departure can happen while the creator is on another screen.
@@ -80,11 +66,8 @@ export default function CreatorTodayScreen() {
   // inventory C-02: a real link into the persistent room, not a fabricated
   // "pulse" metric -- room count is genuinely available (community.tsx
   // already fetches this the same way), so the home card can be honest.
-  const roomsQuery = useQuery({
-    queryKey: ['creator-rooms', community?.id],
-    queryFn: () => getCommunityRooms(community!.id),
-    enabled: !!community,
-  });
+  const roomsQuery = useCreatorDashboardRead(accessRead, ['creator-rooms', community?.id],
+    () => getCommunityRooms(community!.id), !!community);
 
   const { data: rooms = [] } = roomsQuery;
   const pending = members.filter((m) => m.status === 'pending');
@@ -97,17 +80,11 @@ export default function CreatorTodayScreen() {
   // C-02: ticket sales take precedence over a free RSVP count when both
   // exist -- same precedence lib/creatorMode.ts's getMemberEventHistory
   // already uses per-member.
-  const attendeesQuery = useQuery({
-    queryKey: ['creator-today-attendees', nextEvent?.id],
-    queryFn: () => getEventAttendees(nextEvent!.id),
-    enabled: !!nextEvent,
-  });
+  const attendeesQuery = useCreatorDashboardRead(accessRead, ['creator-today-attendees', nextEvent?.id],
+    () => getEventAttendees(nextEvent!.id), !!nextEvent);
   const counts = countAttendees(attendeesQuery.data ?? []);
-  const rsvpQuery = useQuery({
-    queryKey: ['creator-today-rsvp-count', nextEvent?.id],
-    queryFn: () => getRsvpCount(nextEvent!.id),
-    enabled: !!nextEvent,
-  });
+  const rsvpQuery = useCreatorDashboardRead(accessRead, ['creator-today-rsvp-count', nextEvent?.id],
+    () => getRsvpCount(nextEvent!.id), !!nextEvent);
   const rsvpCount = rsvpQuery.data ?? null;
   const attendanceLabel = !nextEvent
     ? null

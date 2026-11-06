@@ -28,20 +28,20 @@ import React, { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useCreatorAccessRead } from '../../hooks/useCreatorAccessRead';
+import { useCreatorDashboardRead } from '../../hooks/useCreatorDashboardRead';
 import { Image } from 'expo-image';
 import { AlertTriangle, ChevronRight, Flame, Plus, ScanLine, Ticket, Users } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
 import { EventAction, EventSpacing, EventSurface } from '../../constants/EventDesign';
 import { type AfterglowFontFamilies, FontSizes, LineHeights } from '../../constants/Typography';
-import { getCreatorAccess, getCreatorEvents } from '../../lib/creatorMode';
+import { getCreatorEvents } from '../../lib/creatorMode';
 import { getMyOrganizerProfile } from '../../lib/organizerProfile';
 import { getFollowerCount } from '../../lib/organizerFollows';
 import { getFailedPayouts, getTiers, isLowInventory } from '../../lib/ticketing';
 import { getEventAttendees, countAttendees } from '../../lib/ticketAttendees';
 import { formatEventDateLA } from '../../lib/laDate';
 import { daysUntilLabel, failedPayoutLabel, hasUnpublishedTickets, inventoryLabel, lowInventoryLabel, pickNextUpcomingEvent, sumTierCapacity } from '../../lib/organizerHome';
-import { supabase } from '../../lib/supabase';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { CreatorActionFill } from '../../components/creator/CreatorActionFill';
 import { eventBelongsToWorkspace } from '../../lib/workspaceContext';
@@ -51,36 +51,12 @@ export default function OrganizerHomeScreen() {
   const styles = useMemo(() => createStyles(fonts), [fonts]);
   const router = useRouter();
 
-  const { data: userId = null } = useQuery({
-    queryKey: ['my-user-id'],
-    queryFn: async () => (await supabase.auth.getUser()).data.user?.id ?? null,
-    staleTime: Infinity,
-  });
-
-  const profileQuery = useQuery({
-    queryKey: ['organizer-profile'],
-    queryFn: getMyOrganizerProfile,
-  });
-
+  const accessRead = useCreatorAccessRead();
+  const userId = accessRead.account.viewerId;
+  const profileQuery = useCreatorDashboardRead(accessRead, ['organizer-profile'], () => getMyOrganizerProfile());
   const { data: organizerProfile = null, isPending: organizerProfilePending } = profileQuery;
-
-  // event-host-only has no led communities; shares events.tsx's cache key
-  // shape so the two tabs read the same list instead of double-fetching.
-  const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
-  // S-02: isPending (not isLoading) on purpose -- this query stays `enabled:
-  // false` (so also not "isFetching") for the whole time access is still
-  // loading, and isLoading is isPending && isFetching in this query-client
-  // major version. isPending alone stays true across that whole gap, which
-  // is what actually gates the false "nothing on the calendar" flash below.
-  const eventsQuery = useQuery({
-    queryKey: ['creator-events-tab', 'organization'],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-      return getCreatorEvents([], user.id);
-    },
-    enabled: access != null,
-  });
+  const eventsQuery = useCreatorDashboardRead(accessRead, ['creator-events-tab', 'organization'],
+    id => getCreatorEvents([], id));
   const { data: allEvents = [], isPending: eventsPending } = eventsQuery;
   const events = allEvents.filter((event) => eventBelongsToWorkspace(event, 'organization', null));
 
@@ -88,16 +64,10 @@ export default function OrganizerHomeScreen() {
   const draftEvent = useMemo(() => events.find((event) => event.status === 'Draft') ?? null, [events]);
   const draftHasTicketSetup = !!draftEvent && hasUnpublishedTickets(draftEvent.tiers);
 
-  const tiersQuery = useQuery({
-    queryKey: ['organizer-home-tiers', nextEvent?.id],
-    queryFn: () => getTiers(nextEvent!.id),
-    enabled: !!nextEvent,
-  });
-  const attendeesQuery = useQuery({
-    queryKey: ['organizer-home-attendees', nextEvent?.id],
-    queryFn: () => getEventAttendees(nextEvent!.id),
-    enabled: !!nextEvent,
-  });
+  const tiersQuery = useCreatorDashboardRead(accessRead, ['organizer-home-tiers', nextEvent?.id],
+    () => getTiers(nextEvent!.id), !!nextEvent);
+  const attendeesQuery = useCreatorDashboardRead(accessRead, ['organizer-home-attendees', nextEvent?.id],
+    () => getEventAttendees(nextEvent!.id), !!nextEvent);
   const { data: tiers = [] } = tiersQuery;
   const { data: attendees = [] } = attendeesQuery;
   const inventoryError = tiersQuery.isError || attendeesQuery.isError;
@@ -116,28 +86,19 @@ export default function OrganizerHomeScreen() {
 
   // dormant until proposal 68 applies (lib/organizerFollows.ts): null hides
   // this section entirely rather than showing a fake zero.
-  const followersQuery = useQuery({
-    queryKey: ['organizer-follower-count', userId],
-    queryFn: () => getFollowerCount({ kind: 'organizer', id: userId! }),
-    enabled: !!userId,
-    staleTime: 60_000,
-  });
-
-  // Build 35 Screen 01 exception surfacing: ticket_payouts.status='failed'
-  // across this organizer's events. Empty array hides the card entirely,
-  // same "no fake zero" convention as followerCount above.
-  const payoutsQuery = useQuery({
-    queryKey: ['organizer-home-failed-payouts', userId, 'organization'],
-    queryFn: () => getFailedPayouts([], userId!),
-    enabled: !!userId && access != null,
-    staleTime: 30_000,
-  });
+  const followersQuery = useCreatorDashboardRead(accessRead, ['organizer-follower-count', userId],
+    id => getFollowerCount({ kind: 'organizer', id }), true, 60_000);
+  const payoutsQuery = useCreatorDashboardRead(accessRead, ['organizer-home-failed-payouts', userId, 'organization'],
+    id => getFailedPayouts([], id), true, 30_000);
 
   const { data: followerCount = null } = followersQuery;
   const { data: failedPayouts = [] } = payoutsQuery;
   const producerName = organizerProfile?.display_name || 'Your events';
   const inventoryText = inventoryError ? 'Ticket counts unavailable' : inventoryPending ? 'Checking tickets…' : inventoryLabel(counts.sold, capacity);
   const checkInText = attendeesQuery.isError ? 'Check-in count unavailable' : attendeesQuery.isPending ? 'Checking attendance…' : `${counts.checkedIn} of ${counts.sold} checked in`;
+
+  if (accessRead.isError) return <OrganizationReadState label="Organization access" query={accessRead} />;
+  if (accessRead.isLoading || !userId) return <ActivityIndicator accessibilityLabel="Loading organization management" color={EventAction.primary} />;
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>

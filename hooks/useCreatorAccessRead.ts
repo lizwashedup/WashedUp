@@ -28,6 +28,7 @@ export function useCreatorAccessRead() {
   });
   const current = ready && account.isCurrent();
   return {
+    account, reader,
     data: current && read.isFetchedAfterMount ? read.data : undefined,
     isLoading: account.isLoading || (!account.error && (!current || !read.isFetchedAfterMount)),
     isError: !!account.error || (current && read.isError),

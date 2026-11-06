@@ -1,3 +1,4 @@
+jest.mock('../../../hooks/useObservedUser', () => ({useObservedUser: () => ({viewerId: 'user', epoch: 1, isCurrent: () => true})}));
 jest.mock('../OrganizationDailyActions',()=>({OrganizationDailyActions:()=>null}));
 import React from 'react';
 import { act,create,type ReactTestRenderer } from 'react-test-renderer';
@@ -17,7 +18,7 @@ jest.mock('../../events/EventMediaImage',()=>({EventMediaImage:()=>null}));
 jest.mock('../../../hooks/useAfterglowFonts',()=>({useAfterglowFonts:()=>({fonts:require('../../../constants/Typography').CreatorFonts})}));
 import Screen from '../../../app/(creator)/organizer-home';
 let tree:ReactTestRenderer;
-const result=(data:unknown)=>({data,isError:false,isPending:false,isFetching:false,refetch:mockRefetch});
+const result=(data:unknown)=>({data,isFetchedAfterMount:true,isError:false,isPending:false,isFetching:false,refetch:mockRefetch});
 const visibleText=(node:any):string=>typeof node==='string'?node:Array.isArray(node)?node.map(visibleText).join(''):(node?.children??[]).map(visibleText).join('');
 const render=async()=>{await act(async()=>{tree=create(<Screen/>)});return visibleText(tree.toJSON());};
 beforeEach(()=>{jest.clearAllMocks();mockQueries={
