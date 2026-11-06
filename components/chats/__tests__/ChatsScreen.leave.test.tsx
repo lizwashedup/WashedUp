@@ -44,7 +44,7 @@ jest.mock('../../yours/circles/CircleCover', () => () => null);
 
 const circle: ChatPreview = {
   kind: 'circle', conversationId: 'circle-a', title: 'Weekend walks', category: null,
-  image_url: null, start_time: '2026-09-19T21:00:00Z', member_count: 3,
+  image_url: null, start_time: new Date(Date.now() + 86400000).toISOString(), member_count: 3,
   last_message: 'See you there!', last_message_at: null, unread_count: 1,
   is_past: false, ticket_url: null, member_avatars: [],
 };

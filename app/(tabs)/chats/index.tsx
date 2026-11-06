@@ -1,3 +1,4 @@
+import { useInboxArchiveSections } from '../../../hooks/useInboxArchiveSections';
 import React, { useMemo, useCallback } from 'react';
 import * as Notifications from 'expo-notifications';
 import {
@@ -334,7 +335,7 @@ export default function ChatsScreen() {
     if (section === 'communities') return [];
     return chats;
   }, [chats, section]);
-  const activeChats = useMemo(() => sectionChats.filter(c => !c.is_past), [sectionChats]);
+  const { activeChats, pastChats } = useInboxArchiveSections(sectionChats);
 
   // One unified list (Liz, final structure): every chat type mixed, sorted
   // purely by most recent message, the WhatsApp model. Rows keep their
@@ -365,7 +366,6 @@ export default function ChatsScreen() {
   }, [activeChats, communityRows, communityInbox, section]);
   // Circle chats are persistent (never is_past), so pastChats is always empty in
   // the Circles section and its "Past Plans" footer never renders there.
-  const pastChats = useMemo(() => sectionChats.filter(c => c.is_past), [sectionChats]);
   // Past history belongs to the same virtualized list. Rendering every old
   // conversation inside a footer mounts all its photos and rows at once.
   const visibleItems = useMemo<ListItem[]>(() => [
