@@ -7,7 +7,8 @@ import { consumeChatListDirty } from '../../lib/chatListSignal';
 
 const mockGetUser = jest.fn(), mockRead = jest.fn(), mockWrite = jest.fn(), mockReport = jest.fn(), mockInvalidate = jest.fn();
 const mockWriteFilters = jest.fn();
-const mockQueryClient = { invalidateQueries: mockInvalidate };
+const mockReset = jest.fn();
+const mockQueryClient = { resetQueries: mockReset, invalidateQueries: mockInvalidate };
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockQueryClient }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: (...args: any[]) => mockGetUser(...args) },
@@ -72,6 +73,10 @@ it('preserves the initiating profile list, existing report payload and success c
   await mount(); await open(scope()); await act(async () => confirm()());
   expect(mockWrite).toHaveBeenCalledWith('alice', { blocked_users: ['existing', 'target'] });
   expect(mockReport).toHaveBeenCalledWith(expect.objectContaining({ reporter_user_id: 'alice', reported_user_id: 'target', reason: 'Blocked by user' }));
+  expect(mockReset.mock.calls).toEqual([
+    [{ queryKey: ['events', 'feed', 'alice'] }],
+    [{ queryKey: ['events', 'featured', 'alice'] }],
+  ]);
   expect(mockInvalidate).toHaveBeenCalled(); expect(after).toHaveBeenCalledTimes(1);
   current = 'bob'; act(() => jest.runOnlyPendingTimers()); expect(Alert.alert).toHaveBeenCalledTimes(1);
 });

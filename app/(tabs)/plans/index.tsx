@@ -1,3 +1,4 @@
+import { usePreviousPlansOnDisconnect } from '../../../hooks/usePreviousPlansOnDisconnect';
 import { WelcomeLoading } from '../../../components/plans/PlansWelcomeLoading';
 import { baseStyles, afterglowStyles } from '../../../components/plans/plansDiscoveryStyles';
 import { getSectionDefs, groupIntoFeedItems, filterIntoSections, type FeedItem } from '../../../lib/plansDiscoverySections';
@@ -75,6 +76,7 @@ const WELCOME_OVERLAY_MAX_MS = 10000;
 // gates. Feed uses withDeadline (rejects → React Query retry/isError still
 // work); the lighter queries use withTimeout (resolve empty — they already
 // degrade to [] on error, so this preserves observable behavior).
+const EMPTY_PLANS: Plan[] = [];
 const FEED_DEADLINE_MS = 15000;
 const WISHLISTS_TIMEOUT_MS = 8000;
 const MEMBER_IDS_TIMEOUT_MS = 8000;
@@ -168,9 +170,9 @@ export default function PlansScreen() {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  const { data: allPlans = [], isLoading, isError, error, refetch, isRefetching } = useQuery({
-    queryKey: ['events', 'feed', userId,
-      nearMeActive ? `near:${nearMeCoords!.lat.toFixed(3)},${nearMeCoords!.lng.toFixed(3)},${radiusMi}` : 'all'],
+  const feedArea = nearMeActive ? `near:${nearMeCoords!.lat.toFixed(3)},${nearMeCoords!.lng.toFixed(3)},${radiusMi}` : 'all';
+  const { data: feedData, status: feedStatus, isLoading, isError, error, refetch, isRefetching } = useQuery({
+    queryKey: ['events', 'feed', userId, feedArea],
     // Bounded so a stuck request rejects (and retries) instead of hanging the
     // loading gate forever. See FEED_DEADLINE_MS.
     queryFn: () => withDeadline(
@@ -190,6 +192,9 @@ export default function PlansScreen() {
     // 2026-05-18). staleTime:60_000 already keeps the feed fresh while
     // serving the cached (referentially-stable) array on remount.
   });
+
+  const allPlans = feedData ?? EMPTY_PLANS;
+  const showPreviousFeed = usePreviousPlansOnDisconnect(feedStatus, feedData, error, isCurrentAccount, feedArea);
 
   // Safety net: if the initial feed returns very few results (common for brand-new
   // accounts where the RPC may execute before profile data fully propagates),
@@ -519,6 +524,16 @@ export default function PlansScreen() {
       {/* the approved organizer's front door (7-21): grant-gated, renders
           nothing for everyone else */}
       <CreatorSpaceBanner />
+      {showPreviousFeed && (
+        <View style={styles.feedback} accessibilityLiveRegion="polite">
+          <Text style={styles.feedbackText}>Couldn’t refresh plans. Showing the last list you loaded.</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry refreshing plans"
+            disabled={isRefetching} accessibilityState={{ disabled: isRefetching, busy: isRefetching }}
+            style={styles.feedbackAction} onPress={() => { void refetch(); }}>
+            <Text style={styles.feedbackActionText}>{isRefetching ? 'Retrying…' : 'Try again'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {welcomeBanner}
       {featuredSection}
     </>
@@ -744,7 +759,7 @@ export default function PlansScreen() {
             </View>
           ) : !userId || isLoading || wishlistsLoading ? (
             appearance ? <View style={styles.centered} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><Text style={styles.errorMessage}>Finding plans…</Text></View> : <SkeletonFeed />
-          ) : isError ? (
+          ) : isError && !showPreviousFeed ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Couldn't load plans</Text>
               <Text style={styles.errorMessage}>{friendlyError(error, 'Please try again to see plans.')}</Text>
