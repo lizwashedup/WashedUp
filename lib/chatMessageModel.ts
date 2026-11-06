@@ -7,6 +7,7 @@ export interface MessageReaction {
 
 export interface ReplyTo {
   id: string;
+  user_id?: string;
   content: string;
   sender_name: string | null;
 }

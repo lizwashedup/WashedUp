@@ -38,7 +38,8 @@ import {
   type ConversationKey, type ChatOperationScope, type ChatReactionIntent,
 } from '../lib/chatMessageModel';
 import { acknowledgeMemberChatPage } from '../lib/memberChatReadPosition';
-import { attachSenders, reconcileNewestMessages } from '../lib/chatMessageReads';
+import { subscribeChatListPrivacy } from '../lib/chatListCache';
+import { attachSenders, reconcileNewestMessages, withoutBlockedChatAuthors } from '../lib/chatMessageReads';
 
 function assertChatScope(scope: ChatOperationScope): void {
   if (!scope.userId || !scope.isCurrent()) throw new ObsoleteChatOperationError();
@@ -59,7 +60,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
   // Spread onto inserts/optimistic rows so exactly one parent column is set.
   const parentFields: Record<string, string> = { [parentCol]: conversationId };
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setRawMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [olderLoadError, setOlderLoadError] = useState(false);
@@ -68,6 +69,11 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
   // Ref so the real-time channel closure always has the latest blocked set
   const blockedIdsRef = useRef<Record<string, boolean>>({});
   const blockedReadyRef = useRef(false);
+  const confirmedVisitBlocks = useRef<Record<string, boolean>>({});
+  const setMessages = useCallback((change: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setRawMessages(prev => withoutBlockedChatAuthors(typeof change === 'function' ? change(prev) : change, blockedIdsRef.current));
+  }, []);
+
   const reactionInFlightRef = useRef<Set<string>>(new Set());
   const reactionIntentsRef = useRef(new Map<string, ChatReactionIntent>());
   const messageChangesRef = useRef(new Map<string, object>());
@@ -126,6 +132,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     hasOlderRef.current = false;
     blockedIdsRef.current = {};
     blockedReadyRef.current = false;
+    confirmedVisitBlocks.current = {};
     messagesRef.current = [];
     reactionInFlightRef.current = new Set();
     reactionIntentsRef.current = new Map();
@@ -138,6 +145,17 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     if (!conversationId || !viewerId) return () => {
       if (activeRoomGenerationRef.current === roomGeneration) activeRoomGenerationRef.current = null;
     };
+    const stopPrivacy = subscribeChatListPrivacy((owner, author) => {
+      if (owner !== viewerId || !isCurrentRoom()) return;
+      confirmedVisitBlocks.current[author] = true;
+      blockedIdsRef.current = { ...blockedIdsRef.current, [author]: true };
+      const anchor = readWindowRef.current.anchorId;
+      if (anchor && messagesRef.current.some(row => row.id === anchor && row.user_id === author)) {
+        readWindowRef.current.ready = false;
+        setAnchorUnavailable(true);
+      }
+      setMessages(prev => prev);
+    });
     fetchMessages().catch((err) => logError(err, 'useChat.fetchMessages'));
 
     // Event channel name kept byte-identical to before; circles use a distinct name.
@@ -230,7 +248,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
               if (msg.reply_to_message_id) {
                 const parent = prev.find(m => m.id === msg.reply_to_message_id);
                 if (parent) {
-                  msg = { ...msg, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
+                  msg = { ...msg, reply_to: { id: parent.id, user_id: parent.user_id, content: parent.content, sender_name: parent.sender?.first_name ?? null } };
                 }
               }
               if (optIdx >= 0) {
@@ -292,6 +310,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     );
 
     return () => {
+      stopPrivacy();
       stopWaiting();
       if (isCurrentRoom()) activeRoomGenerationRef.current = null;
       newestRequestRef.current += 1;
@@ -374,7 +393,16 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
           .order('id', { ascending: false })
           .limit(CHAT_NEWEST_PAGE_SIZE), 12_000).then(result => ({ ...result, anchor: null })),
         verifiedUser,
-        verifiedUser.then(() => readBlockedLookup()),
+        verifiedUser.then(async () => {
+          const lookup = await readBlockedLookup();
+          if (isCurrent()) {
+            // Restrict already-painted rows even if history fails or stalls.
+            // Only a usable history page can restore previously excluded rows.
+            blockedIdsRef.current = { ...blockedIdsRef.current, ...lookup, ...confirmedVisitBlocks.current };
+            setMessages(prev => prev);
+          }
+          return lookup;
+        }),
       ]);
       if (!isCurrent()) return;
       const { data, error: messageError, anchor } = snapshot;
@@ -389,7 +417,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
       if (!retainedOlderPages) hasOlderRef.current = more;
       if (user) {
         const msgIds = page.map((m: any) => m.id);
-        const blockedLookup = { ...initialBlockedLookup, ...anchor?.blockedIds };
+        const blockedLookup = { ...initialBlockedLookup, ...anchor?.blockedIds, ...confirmedVisitBlocks.current };
         blockedIdsRef.current = blockedLookup;
         blockedReadyRef.current = true;
         const filtered = page.filter((msg: any) => !blockedLookup[msg.user_id]);
@@ -462,7 +490,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
                 ? {
                     ...message,
                     reply_to: {
-                      id: parent.id,
+                      id: parent.id, user_id: parent.user_id,
                       content: parent.content,
                       sender_name: parent.sender?.first_name ?? null,
                     },
@@ -584,7 +612,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
         return merged.map(message => {
           const parent = message.reply_to_message_id ? byId.get(message.reply_to_message_id) : null;
           return parent
-            ? { ...message, reply_to: { id: parent.id, content: parent.content, sender_name: parent.sender?.first_name ?? null } }
+            ? { ...message, reply_to: { id: parent.id, user_id: parent.user_id, content: parent.content, sender_name: parent.sender?.first_name ?? null } }
             : message;
         });
       });
@@ -722,7 +750,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
         parentMsg = target.data as ChatMessage;
       }
       if (parentMsg) {
-        replyTo = { id: parentMsg.id, content: parentMsg.content, sender_name: parentMsg.sender?.first_name ?? null };
+        replyTo = { id: parentMsg.id, user_id: parentMsg.user_id, content: parentMsg.content, sender_name: parentMsg.sender?.first_name ?? null };
       }
     }
 
