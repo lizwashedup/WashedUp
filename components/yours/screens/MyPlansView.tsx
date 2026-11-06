@@ -1,3 +1,4 @@
+import { randomUUID } from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, SectionList, TouchableOpacity, StyleSheet } from 'react-native';
 import { ScaledText as Text } from '../../ScaledText';
@@ -69,13 +70,25 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const { data: planDrafts = [] } = draftsQuery;
   const [draftAlert, setDraftAlert] = useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
 
+  const mounted = useRef(true);
+  const ownerRef = useRef({ userId });
+  if (ownerRef.current.userId !== userId) ownerRef.current = { userId };
+  const owner = ownerRef.current;
+  const isCurrent = () => mounted.current && ownerRef.current === owner;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
   const openDraft = useCallback((draft: PlanDraft) => {
+    if (!isCurrent()) return;
     hapticLight();
     router.push({
       pathname: '/(tabs)/post',
-      params: { ...buildDuplicatePostParams(draft, null), draftId: draft.id },
+      params: {
+        ...buildDuplicatePostParams(draft, null), draftId: draft.id, draftOwnerId: userId, draftOpenRequest: randomUUID(),
+        prefillCreatorMessage: draft.host_message ?? '', similarPlanRequest: '',
+        prefillInvitePersonId: '', prefillInvitePersonName: '', prefillInvitePersonPhoto: '',
+      },
     } as never);
-  }, [router]);
+  }, [router, owner, userId]);
 
   const confirmDeleteDraft = useCallback((draft: PlanDraft) => {
     // LIZ COPY
@@ -139,12 +152,6 @@ export default function MyPlansView({ userId }: { userId: string }) {
     retry: false,
   });
   const { data: wishlistIds = [] } = wishlistQuery;
-  const mounted = useRef(true);
-  const ownerRef = useRef({ userId });
-  if (ownerRef.current.userId !== userId) ownerRef.current = { userId };
-  const owner = ownerRef.current;
-  const isCurrent = () => mounted.current && ownerRef.current === owner;
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const retryLock = useRef<{ owner: object; attempt: object } | null>(null);
   const [recovery, setRecovery] = useState<{ owner: object; pending: boolean; failed: boolean } | null>(null);
   const collections = [plansQuery, savedQuery, interestedQuery, waitlistedQuery, wishlistQuery,
