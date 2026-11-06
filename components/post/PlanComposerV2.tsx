@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   AccessibilityInfo,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -655,10 +656,20 @@ export default function PlanComposerV2() {
     ...(mode === 'post' && !description.trim() ? { description: 'Add a description so people know what to expect.' } : {}),
     ...(!dateSelected || !timeSelected ? { when: !dateSelected && !timeSelected ? 'Choose a day and a start time.' : !dateSelected ? 'Choose a day for your plan.' : 'Choose a start time.' } : {}),
   });
-  const nextRequired = Object.values(requiredErrors('post'))[0];
+  const errors = requiredErrors(validationMode ?? 'post');
+  const fieldErrors: Partial<Record<RequiredField, string>> = validationMode ? errors : {};
+  const missingLabels = [
+    errors.title && 'Title',
+    errors.category && 'Category',
+    errors.message && `Message (${MSG_MIN}+ characters)`,
+    errors.description && 'Description',
+    errors.when && !dateSelected && 'Day',
+    errors.when && !timeSelected && 'Start time',
+  ].filter(Boolean).join(' · ');
+  const showRequiredSummary = !!validationMode && !!missingLabels;
+  const nextRequired = Object.values(errors)[0];
   const summaryHeading = imageLoading ? 'Adding photo…' : title.trim() || 'Add a title to save or post.';
   const summaryDetail = title.trim() && nextRequired ? nextRequired : summaryMeta;
-  const fieldErrors: Partial<Record<RequiredField, string>> = validationMode ? requiredErrors(validationMode) : {};
   const validateRequired = (mode: ValidationMode) => {
     const errors = requiredErrors(mode);
     const first = (Object.keys(errors) as RequiredField[])[0];
@@ -1061,6 +1072,7 @@ export default function PlanComposerV2() {
   const sheetBottomPad = Platform.OS === 'ios' ? 40 : Math.max(insets.bottom, 16) + 16;
 
   return (
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <SafeAreaView style={styles.screen} edges={['top']}>
       <StatusBar style="dark" />
 
@@ -1080,10 +1092,6 @@ export default function PlanComposerV2() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
-        // iOS: inset scroll content for the keyboard so the title/message inputs
-        // are never covered on shorter screens, with no jump. No-op on Android
-        // (handled by windowSoftInputMode) and when the input is already visible.
-        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
       >
         {/* WHAT + photo */}
@@ -1385,10 +1393,17 @@ export default function PlanComposerV2() {
           </TouchableOpacity>
         ) : null}
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle} numberOfLines={1}>
-            {summaryHeading}
-          </Text>
-          <Text style={styles.summaryMeta} numberOfLines={nextRequired ? 2 : 1}>{summaryDetail}</Text>
+          {showRequiredSummary ? (
+            <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.requiredSummary}>
+              {validationMode === 'draft' ? 'To save your draft, add' : 'To post, add'}{'\n'}
+              {missingLabels}
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.summaryTitle} numberOfLines={1}>{summaryHeading}</Text>
+              <Text style={styles.summaryMeta} numberOfLines={nextRequired ? 2 : 1}>{summaryDetail}</Text>
+            </>
+          )}
         </View>
         <View style={appearance ? styles.postActions : undefined}>
         <TouchableOpacity
@@ -1510,6 +1525,7 @@ export default function PlanComposerV2() {
         onClose={() => setAlertInfo(null)}
       />
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1674,6 +1690,7 @@ const legacyStyles = StyleSheet.create({
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
     paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
   },
+  requiredSummary: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodySM, color: Colors.errorBrand },
   summaryTitle: { fontFamily: Fonts.display, fontSize: 16, color: Colors.darkWarm },
   summaryMeta: { fontFamily: Fonts.sans, fontSize: 13, color: Colors.secondary, marginTop: 2 },
   postBtn: {
