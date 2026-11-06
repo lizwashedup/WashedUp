@@ -1,4 +1,6 @@
+jest.mock('../../lib/memberChatBlockPreferences', () => ({ readMemberChatBlockPreferences: jest.fn(async () => new Set<string>()) }));
 import React from 'react';
+import { readMemberChatBlockPreferences } from '../../lib/memberChatBlockPreferences';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { chatListMemoryCache, removeDepartedPlanPreview } from '../../lib/chatListCache';
 import { useChatList } from '../useChatList';
@@ -375,4 +377,20 @@ it('does not restore a departed plan from an earlier inbox request, but allows a
   mockMembership = async () => membership();
   await act(async () => { await value.refetch(true); });
   expect(value.chats[0].conversationId).toBe(event.id);
+});
+
+it('withholds warm snippets while checking a new visit and leaves the joined row retryable offline',async()=>{
+  const owner='warm-privacy-retry';useDetailedEnrichment();await mount(owner);expect(value.chats[0].last_message).toContain('Plan preview');
+  act(()=>tree.unmount());const hold=deferred();jest.mocked(readMemberChatBlockPreferences).mockReturnValueOnce(hold.promise);
+  await mount(owner);expect(value.chats[0]).toMatchObject({title:event.title,last_message:null,unread_count:0});
+  await act(async()=>hold.resolve(new Set(['synthetic-peer'])));expect(value.chats[0].last_message).toBeNull();
+  jest.mocked(readMemberChatBlockPreferences).mockRejectedValueOnce(Error('Offline'));
+  await act(async()=>{await value.refetch(true);});expect(value.loadError).toBe(true);expect(value.chats[0].last_message).toBeNull();
+});
+it('does not apply an earlier account’s delayed block preferences to the active account',async()=>{
+  const hold=deferred();jest.mocked(readMemberChatBlockPreferences).mockReturnValueOnce(hold.promise);
+  useDetailedEnrichment('Account A');await mount('old-prefs');expect(value.chats[0].last_message).toBeNull();
+  useDetailedEnrichment('Account B');await act(async()=>tree.update(<Probe viewer="new-prefs"/>));
+  await act(async()=>hold.resolve(new Set(['synthetic-peer'])));
+  expect(value.chats[0].last_message).toContain('Account B');
 });

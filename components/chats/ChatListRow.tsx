@@ -45,7 +45,7 @@ export const ChatRow = React.memo(function ChatRow({
       ? getPlanChatTiming(chat.start_time, chat.end_time).remainingHours : null;
     return <ChatInboxRow
       identity={`${chat.kind}:${chat.conversationId}`} title={chat.title}
-      preview={chat.last_message ?? 'Be the first to say hello.'}
+      preview={chat.last_message ?? (chat.preview_unavailable ? 'Open conversation' : 'Be the first to say hello.')}
       timestamp={chat.last_message_at ? formatTime(chat.last_message_at) : null}
       image={chat.image_url} person={chat.is_dm} unread={chat.unread_count}
       fonts={conversationFonts} onPress={onPress} onLongPress={onLongPress}
@@ -100,7 +100,7 @@ export const ChatRow = React.memo(function ChatRow({
 
         <View style={styles.rowBottom}>
           <Text style={[styles.preview, chat.is_past && styles.textPast]} numberOfLines={1}>
-            {chat.last_message ?? 'No messages yet'}
+            {chat.last_message ?? (chat.preview_unavailable ? 'Open conversation' : 'No messages yet')}
           </Text>
         </View>
 

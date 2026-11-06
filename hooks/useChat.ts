@@ -1,3 +1,4 @@
+import { readMemberChatBlockPreferences } from '../lib/memberChatBlockPreferences';
 import { subscribeChatWhenReady, nextChatDataChannelName } from '../lib/chatRealtimeSubscription';
 import { validOptionalMentionDocument, sameChatMentionIdentity, type ChatMentionDocument } from '../lib/chatMentionIdentity';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -345,21 +346,8 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
           queryKey: ['profile-blocked', operationScope.userId],
           staleTime: 60_000,
           queryFn: async () => {
-            const { data: profile, error: profileError } = await scopedChatRequest(readScope, () => supabase
-              .from('profiles')
-              .select('blocked_users')
-              .eq('id', operationScope.userId)
-              .maybeSingle());
-            if (profileError) throw profileError;
-            // A legacy null column is a known empty list. A missing profile
-            // or malformed field does not authorize showing unfiltered chat.
-            const ids = profile?.blocked_users;
-            if (!profile || (ids !== null && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string' && id.length > 0)))) {
-              throw new Error('Could not verify chat privacy settings.');
-            }
-            const lookup: Record<string, boolean> = {};
-            (ids ?? []).forEach((uid: string) => { lookup[uid] = true; });
-            return lookup;
+            const ids = await scopedChatRequest(readScope, () => readMemberChatBlockPreferences(operationScope.userId));
+            return Object.fromEntries(Array.from(ids, id => [id, true]));
           },
         });
       const readBlockedLookup = async () => {
