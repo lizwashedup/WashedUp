@@ -655,3 +655,35 @@ it('retains the earlier-history cursor on a missing page and recovers on explici
   expect(fixture.chat.olderLoadError).toBe(true);expect(fixture.chat.messages).toHaveLength(60);
   await act(async()=>fixture.chat.loadOlder(true));expect(fixture.chat.olderLoadError).toBe(false);expect(fixture.chat.messages[0].id).toBe(message(0).id);
 });
+
+it('removes a confirmed blocked author and quoted text immediately, even when the next history read fails',async()=>{
+  const {removeBlockedPrivateChatPreviews}=require('../../lib/chatListCache');
+  const original=message(1),reply=message(2,{user_id:'allowed',reply_to_message_id:original.id});
+  readMessages.mockResolvedValueOnce(result(original,reply));const fixture=mount();await flush();
+  expect(fixture.chat.messages[1].reply_to?.content).toBe(original.content);
+  act(()=>removeBlockedPrivateChatPreviews('someone-else','other'));await flush();
+  expect(fixture.chat.messages).toHaveLength(2);
+  act(()=>removeBlockedPrivateChatPreviews('viewer','other'));await flush();
+  expect(fixture.chat.messages.map(r=>r.id)).toEqual([reply.id]);expect(fixture.chat.messages[0].reply_to).toBeFalsy();
+  readMessages.mockResolvedValueOnce({data:null,error:new Error('offline')});await act(async()=>fixture.chat.refetch(true));
+  expect(fixture.chat.messages.map(r=>r.id)).toEqual([reply.id]);expect(fixture.chat.loadError).toBe(true);
+});
+it('applies confirmed privacy preferences even if the concurrent history query failed',async()=>{
+  const original=message(1),allowed=message(2,{user_id:'allowed'});
+  readMessages.mockResolvedValueOnce(result(original,allowed));const fixture=mount();await flush();
+  fixture.client.removeQueries({queryKey:['profile-blocked','viewer']});blocked=['other'];
+  readMessages.mockRejectedValueOnce(new Error('offline'));
+  await act(async()=>fixture.chat.refetch(true));await flush();
+  expect(fixture.chat.messages.map(r=>r.id)).toEqual([allowed.id]);expect(fixture.chat.loadError).toBe(true);
+});
+
+it('prevents an older history page in flight from restoring a newly blocked author',async()=>{
+  const {removeBlockedPrivateChatPreviews}=require('../../lib/chatListCache');
+  readMessages.mockResolvedValueOnce(result(...Array.from({length:60},(_,i)=>message(i+1,{user_id:'allowed'}))));
+  const fixture=mount();await flush();
+  const page=deferred<ReadResult>();readMessages.mockReturnValueOnce(page.promise);
+  let pending!:Promise<void>;act(()=>{pending=fixture.chat.loadOlder();});await flush();
+  act(()=>removeBlockedPrivateChatPreviews('viewer','other'));
+  await act(async()=>{page.resolve(result(message(0)));await pending;});
+  expect(fixture.chat.messages).toHaveLength(60);expect(fixture.chat.messages.every(row=>row.user_id==='allowed')).toBe(true);
+});

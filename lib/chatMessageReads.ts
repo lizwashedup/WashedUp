@@ -54,3 +54,22 @@ export function reconcileNewestMessages(
   return mergeChatBurst(mergeChatBurst(refreshed, changed), optimistic);
 }
 
+
+
+// Keep a blocked author's words out of cached quote previews as well as rows.
+// Return the original reference when this page needs no changes.
+export function withoutBlockedChatAuthors(rows: ChatMessage[], blocked: Record<string, boolean>): ChatMessage[] {
+  if (!rows.length || !Object.keys(blocked).length) return rows;
+  // Quotes normally carry their author's ID. Consult the loaded parent for
+  // older in-memory quotes only; leave unaffected arrays and rows untouched.
+  let kept: ChatMessage[] | undefined;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i], quote = row.reply_to;
+    const hideRow = blocked[row.user_id];
+    const quoteAuthor = quote && (quote.user_id ?? rows.find(parent => parent.id === quote.id)?.user_id);
+    const hideQuote = !!quoteAuthor && blocked[quoteAuthor];
+    if (!kept && (hideRow || hideQuote)) kept = rows.slice(0, i);
+    if (kept && !hideRow) kept.push(hideQuote ? { ...row, reply_to: null } : row);
+  }
+  return kept ?? rows;
+}
