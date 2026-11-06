@@ -91,6 +91,7 @@ export function buildDuplicatePostParams(
   eventId: string | null | undefined,
 ): Record<string, string> {
   return {
+    draftId: '', draftOwnerId: '', draftOpenRequest: '', prefillCreatorMessage: '',
     prefillTitle: event?.title ?? '',
     prefillDescription: event?.description ?? '',
     prefillLocation: event?.location_text ?? '',

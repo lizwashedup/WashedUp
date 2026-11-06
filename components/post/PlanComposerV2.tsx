@@ -140,6 +140,9 @@ export default function PlanComposerV2() {
     duplicatedFromEventId?: string;
     // resuming a saved draft: post updates this row instead of inserting
     draftId?: string;
+    draftOwnerId?: string;
+    draftOpenRequest?: string;
+    prefillCreatorMessage?: string;
     similarPlanRequest?: string;
   }>();
 
@@ -207,11 +210,13 @@ export default function PlanComposerV2() {
   const composerVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
   const newDraft = useMemo(() => ({ id: null as string | null, saveAttempted: false }), [
-    composerViewer.epoch, composerViewer.viewerId, params.draftId, params.prefillTitle,
+    composerViewer.epoch, composerViewer.viewerId, params.draftId, params.draftOpenRequest, params.prefillTitle,
     params.prefillInvitePersonId, params.duplicatedFromEventId, params.similarPlanRequest,
   ]);
   const latestDraft = useRef({ form: newDraft, revision: draftRevision });
   useLayoutEffect(() => { latestDraft.current = { form: newDraft, revision: draftRevision }; }, [newDraft, draftRevision]);
+  const draftViewerId = params.draftOwnerId ? composerUserId : undefined;
+  const draftOwnerReady = !params.draftOwnerId || params.draftOwnerId === composerUserId;
   const recoveryText = (params.draftId || newDraft.id) ? 'Couldn’t confirm the post. Your edits are here. Tap Post to try again.'
     : appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.'
     : "that didn't go through. your plan is here. tap post to try again.";
@@ -298,7 +303,14 @@ export default function PlanComposerV2() {
   // so duplicates silently dropped date/time/place/ticket/etc.; this mirrors
   // LegacyComposer's hydration so "Post your own" carries the source plan over. ──
   useEffect(() => {
-    if (params.similarPlanRequest) {
+    if (!draftOwnerReady) {
+      if (composerUserId) {
+        resetForm();
+        setAlertInfo({title: 'Draft unavailable', message: 'Open one of your drafts from Yours.'});
+      }
+      return;
+    }
+    if (params.draftId || params.similarPlanRequest || params.duplicatedFromEventId) {
       // A tab may still contain another draft. Start this review with no
       // previous dates, event links, people, or asynchronous photo/write work.
       retireWrite();
@@ -316,6 +328,9 @@ export default function PlanComposerV2() {
       postedPlanIdRef.current = null;
       setRecoveryNudge(false);
       setAlertInfo(null);
+    }
+    if (params.draftId && params.draftOwnerId && params.draftOwnerId === composerUserId && params.prefillCreatorMessage) {
+      setCreatorMessage(String(params.prefillCreatorMessage));
     }
     if (params.prefillTitle) setTitle(String(params.prefillTitle));
     if (params.prefillExploreEventId) setExploreEventId(String(params.prefillExploreEventId));
@@ -417,7 +432,7 @@ export default function PlanComposerV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto, params.duplicatedFromEventId, params.similarPlanRequest]);
+  }, [draftOwnerReady, draftViewerId, params.draftId, params.draftOpenRequest, params.prefillTitle, params.prefillInvitePersonId, params.prefillInvitePersonName, params.prefillInvitePersonPhoto, params.duplicatedFromEventId, params.similarPlanRequest]);
 
   // ── Invite suggestions (want-in only; reactance fix) ──
   const inviteSuggestions = useMemo<InviteSuggestion[]>(() => {
@@ -631,7 +646,7 @@ export default function PlanComposerV2() {
       prefillGroupSize: undefined, prefillTicketsUrl: undefined,
       prefillExploreEventId: undefined,
       duplicatedFromEventId: undefined,
-      draftId: undefined,
+      draftId: undefined, draftOwnerId: undefined, draftOpenRequest: undefined, prefillCreatorMessage: undefined,
       similarPlanRequest: undefined,
     } as never);
   };
@@ -669,7 +684,7 @@ export default function PlanComposerV2() {
   const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
   const handleSaveDraft = async () => {
     const visit = composerVisit.current;
-    if (!visit || !isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
+    if (!draftOwnerReady || !visit || !isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
     if (!validateRequired('draft')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -763,7 +778,7 @@ export default function PlanComposerV2() {
   // ── Submit (optimistic: the post moment shows instantly; the insert runs in
   // the background and recovers quietly in gold on failure). ──
   const handleSubmit = async () => {
-    if (!isComposerCurrent() || submittingRef.current) return;
+    if (!draftOwnerReady || !isComposerCurrent() || submittingRef.current) return;
     if (photoAttempt.current || loading || imageLoading || confirmVisible) return;
     // If Save may have committed, Post must use that exact draft. A late
     // response must never turn the same form into a second public plan.

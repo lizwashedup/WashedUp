@@ -1061,3 +1061,37 @@ it('does not start a draft write after Cancel during the account check',async()=
   await act(async()=>{identity.resolve({data:{user:{id:'creator'}},error:null});await saving;});
   expect(mockUpdateDraft).not.toHaveBeenCalled();
 });
+
+
+it('reopens two saved drafts with the same title using only their own details and people',async()=>{
+  const form=await mount(true,{draftId:'prior',prefillEndTime:'2040-09-15T06:00:00Z',prefillTicketsUrl:'https://example.invalid/old'});
+  mockParams={prefillTitle:'Local test walk',draftId:'next',draftOwnerId:'creator',draftOpenRequest:'open-next',
+    prefillCreatorMessage:'Meet inside the cafe.',prefillDescription:'',prefillTicketsUrl:'',prefillEndTime:'',
+    prefillCategory:'',prefillStartTime:'2040-09-15T03:00:00Z'};
+  act(()=>form.tree.update(<PlanComposerV2/>));await flush();
+  expect(field(form.tree,'Your message, required').props.value).toBe('Meet inside the cafe.');
+  expect(field(form.tree,'Description, required').props.value).toBe('');
+  expect(form.tree.root.findByType(InvitePeopleSection).props.invited).toEqual([]);
+  mockUpdateDraft.mockResolvedValueOnce({data:{id:'next'},error:null});
+  await act(async()=>{await form.saveDraft();});
+  expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({host_message:'Meet inside the cafe.',tickets_url:null,end_time:null,primary_vibe:null});
+  expect(mockMember).not.toHaveBeenCalled();expect(mockInvite).not.toHaveBeenCalled();
+});
+
+it('ignores another account’s saved-draft handoff',async()=>{
+  const form=await mount(false,{draftId:'private',draftOwnerId:'other-account',draftOpenRequest:'old',
+    prefillTitle:'Other account title',prefillCreatorMessage:'Other account introduction'});
+  expect(form.title()).toBe('');
+  await act(async()=>{await form.saveDraft();await form.post();});
+  expect(mockUpdateDraft).not.toHaveBeenCalled();expect(mockInsert).not.toHaveBeenCalled();
+});
+
+it('starts a duplicate review without the previous draft’s message or invitations',async()=>{
+  const form=await mount(true,{draftId:'mine',draftOwnerId:'creator',draftOpenRequest:'resume'});
+  mockParams={prefillTitle:'Copied walk',duplicatedFromEventId:'public-source'};
+  act(()=>form.tree.update(<PlanComposerV2/>));await flush();
+  expect(form.title()).toBe('Copied walk');
+  expect(field(form.tree,'Your message, required').props.value).toBe('');
+  expect(form.tree.root.findByType(InvitePeopleSection).props.invited).toEqual([]);
+  expect(mockInvite).not.toHaveBeenCalled();
+});
