@@ -114,6 +114,10 @@ import {
 
 export default function CommunityTopicScreen() {
   const router = useRouter();
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/chats');
+  };
   const insets = useSafeAreaInsets();
   // Keep context fixed while history and the composer share native iOS motion.
   // Android/web keep their existing keyboard-avoiding layout and view tree.
@@ -999,7 +1003,7 @@ export default function CommunityTopicScreen() {
             contextLabel={eventTopic ? 'View event' : 'View community'}
             fonts={conversationFonts}
             backLabel="Back"
-            onBack={() => router.back()}
+            onBack={goBack}
             onViewContext={eventTopic && topic?.explore_event_id
               ? () => router.push(`/event/${topic.explore_event_id}` as never)
               : topicMeta?.explore_event_id === null && topicMeta.community_id
@@ -1047,7 +1051,7 @@ export default function CommunityTopicScreen() {
           </View>}
         </> : <>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={12}>
             <ArrowLeft size={22} color={Colors.asphalt} strokeWidth={2.5} />
           </TouchableOpacity>
           <View style={styles.headerTitleWrap}>

@@ -10,6 +10,7 @@ import { formatEventDateLA, formatTimestampLA } from '../../../lib/laDate';
 
 let mockParentNotifications: any;
 jest.mock('../../../hooks/useCommunityChatPreference', () => ({ useCommunityChatPreference: () => mockParentNotifications }));
+const mockCanGoBack = jest.fn(() => true), mockReplace = jest.fn();
 const mockPush = jest.fn(), mockBack = jest.fn(), mockToggle = jest.fn();
 let mockTopic: any, mockMeta: any, mockSaidHi: boolean | undefined;
 let mockCards: any[];
@@ -21,7 +22,7 @@ const event = {
   end_time: '2026-09-19T23:00:00Z', venue: 'Ocean Park', status: 'Published',
   host_user_id: 'creator-a',
 };
-jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ back: mockBack, push: mockPush }), useLocalSearchParams: () => ({ id: 'topic-a' }), Stack: { Screen: () => null } }));
+jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ back: mockBack, push: mockPush, canGoBack: mockCanGoBack, replace: mockReplace }), useLocalSearchParams: () => ({ id: 'topic-a' }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
@@ -202,4 +203,13 @@ it('uses parent mute in a persistent topic header and keeps event-attendee notif
 });
 it('does not show a parent-unmute action in an attendee event header with staged creator features enabled',()=>{
   jest.requireMock('../../../constants/FeatureFlags').CREATOR_PAGES_ENABLED=true;mount();openOptions();expect(button('Unmute all community chats')).toBeUndefined();expect(button('Mute chat')).toBeDefined();
+});
+
+
+it('returns to Chats when a community conversation opened without a previous screen', async () => {
+  mockCanGoBack.mockReturnValueOnce(false);
+  await mount();
+  act(() => button('Back').props.onPress());
+  expect(mockReplace).toHaveBeenCalledWith('/(tabs)/chats');
+  expect(mockBack).not.toHaveBeenCalled();
 });

@@ -18,6 +18,7 @@ jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esM
 
 let mockParentNotifications: any;
 jest.mock('../../../hooks/useCommunityChatPreference', () => ({ useCommunityChatPreference: () => mockParentNotifications }));
+const mockCanGoBack = jest.fn(() => true), mockReplace = jest.fn();
 const mockPush = jest.fn(), mockBack = jest.fn(), mockToggle = jest.fn();
 const mockInvalidate = jest.fn().mockResolvedValue(undefined);
 const mockQueryClient = { invalidateQueries: mockInvalidate, cancelQueries: jest.fn().mockResolvedValue(undefined) };
@@ -27,7 +28,7 @@ let mockOnline = true;
 let mockMute = { muted: false as boolean | null, ready: true, isChecking: false, toggle: mockToggle };
 const mockPinned = { id: 'event-a', title: 'Sunset volleyball', event_date: '2026-09-19T23:00:00Z', venue: 'Ocean Park' };
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
-jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ push: mockPush, back: mockBack }), useLocalSearchParams: () => ({ id: '11111111-1111-4111-8111-111111111111' }), Stack: { Screen: () => null } }));
+jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(callback, [callback]), useRouter: () => ({ push: mockPush, back: mockBack, canGoBack: mockCanGoBack, replace: mockReplace }), useLocalSearchParams: () => ({ id: '11111111-1111-4111-8111-111111111111' }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFonts }) }));
@@ -164,4 +165,13 @@ it('remeasures Main sender, day and timestamp text without replacing history or 
       expect(field.props.value).toBe('Keep my unsent words');
     }
   } finally { flags.COMMUNITY_CHAT_GROUPING_ENABLED = true; }
+});
+
+
+it('returns to Chats when a community conversation opened without a previous screen', async () => {
+  mockCanGoBack.mockReturnValueOnce(false);
+  await mount();
+  act(() => button('Back').props.onPress());
+  expect(mockReplace).toHaveBeenCalledWith('/(tabs)/chats');
+  expect(mockBack).not.toHaveBeenCalled();
 });

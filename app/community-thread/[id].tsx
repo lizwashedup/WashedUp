@@ -116,6 +116,10 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '../../components/keyboard/KeyboardDo
 
 export default function CommunityThreadScreen() {
   const router = useRouter();
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/chats');
+  };
   const insets = useSafeAreaInsets();
   // Keep context fixed while history and the composer share native iOS motion.
   // Android/web keep their existing keyboard-avoiding layout and view tree.
@@ -765,7 +769,7 @@ export default function CommunityThreadScreen() {
         subtitle={coreLayout?.name ?? card?.name ?? 'Everyone in this community'}
         contextLabel="View community"
         fonts={conversationFonts}
-        onBack={() => router.back()}
+        onBack={goBack}
         backLabel="Back"
         onViewContext={id ? currentAction(() => router.push(`/community/${id}` as never)) : undefined}
         actions={<ChatOptionsButton key={`${id}:${myId}:${viewer.epoch}`} fonts={conversationFonts} isCurrent={entryIsCurrent}
