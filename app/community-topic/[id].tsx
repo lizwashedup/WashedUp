@@ -498,7 +498,11 @@ export default function CommunityTopicScreen() {
   const coreReadScope = useMemo(() => ({ userId: myId ?? '', isCurrent: entryIsCurrent }), [myId, entryIsCurrent]);
   const readAcknowledgement = useCommunityCoreReadAcknowledgement(introLayout?.communityId, 'intros', coreReadScope, !!introLayout);
   const topicReadEnabled = !!id && usesLegacyHistory && !anchor && !!myId && myId === muteViewer.viewerId;
-  const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId;
+  const photos = useMemo(() => messages.flatMap(message =>
+    message.id !== welcomeMessage?.id && message.image_url
+      ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [messages, welcomeMessage?.id]);
+  const photoSelection = useChatPhotoSelection(`topic:${id}:${muteViewer.viewerId}`, removedFromCommunity || gated || gateChecking ? [] : photos);
+  const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId && !photoSelection.selectedId;
   const ordinaryRead = useVisibleCommunityRead('topic', id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
   visibleRead.current = items => {
@@ -523,10 +527,7 @@ export default function CommunityTopicScreen() {
     if (activeReadWindow.current === readWindow && identityScope.isCurrent()) visibleRead.current(viewableItems);
   }, [identityScope, readWindow]);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }).current;
-  const photos = useMemo(() => messages.flatMap(message =>
-    message.id !== welcomeMessage?.id && message.image_url
-      ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [messages, welcomeMessage?.id]);
-  const photoSelection = useChatPhotoSelection(`topic:${id}:${muteViewer.viewerId}`, removedFromCommunity || gated || gateChecking ? [] : photos);
+
 
   // only while the room is genuinely empty -- mirrors the RPC's own guard,
   // so the affordance never implies a second welcome could still be set
