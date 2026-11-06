@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { DraftUnavailable, PlanPublishedEarlier, publishMemberPlan, saveNewPlanDraft, saveExistingPlanDraft } from '../../lib/memberPlanDraft';
+import { DraftChanged, DraftUnavailable, PlanPublishedEarlier, publishMemberPlan, saveNewPlanDraft, saveExistingPlanDraft } from '../../lib/memberPlanDraft';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
  * Main plan composer, with optional development-gated Afterglow presentation.
@@ -83,6 +83,9 @@ import PeoplePickerSheet, { type PickedPerson } from '../../components/post/Peop
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 type RequiredField = 'title' | 'category' | 'message' | 'description' | 'when';
+const changedDraftAlert = {
+  title: 'Draft changed', message: 'A newer edit is saved in Yours. Your text is still here to copy. Reopen the draft from Yours to use the latest version.',
+};
 const unavailableDraftAlert = {
   title: 'Draft unavailable',
   message: 'This draft may have been posted or deleted. Your edits are still here. Check Yours for the latest plan.',
@@ -146,6 +149,7 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
     draftId?: string;
     draftOwnerId?: string;
     draftOpenRequest?: string;
+    draftVersion?: string;
     prefillCreatorMessage?: string;
     similarPlanRequest?: string;
   }>();
@@ -217,8 +221,8 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
   const mountedRef = useRef(false);
   const composerVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
-  const newDraft = useMemo(() => ({ id: null as string | null, saveAttempted: false }), [
-    composerViewer.epoch, composerViewer.viewerId, params.draftId, params.draftOpenRequest, params.prefillTitle,
+  const newDraft = useMemo(() => ({ id: null as string | null, saveAttempted: false, version: params.draftVersion === '' ? null : params.draftVersion }), [
+    composerViewer.epoch, composerViewer.viewerId, params.draftId, params.draftOpenRequest, params.draftVersion, params.prefillTitle,
     params.prefillInvitePersonId, params.duplicatedFromEventId, params.similarPlanRequest,
   ]);
   const latestDraft = useRef({ form: newDraft, revision: draftRevision });
@@ -747,9 +751,8 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
       description: description.trim() || null,
       host_message: creatorMessage.trim().slice(0, MSG_LIMIT) || null,
       max_invites: groupSize,
-      min_invites: MIN_GROUP,
+      ...(params.draftId ? {} : { min_invites: MIN_GROUP, city: 'Los Angeles' }),
       status: 'draft',
-      city: 'Los Angeles',
       image_url: (imageUrl && imageUrl.startsWith('http')) ? imageUrl : null,
       neighborhood: neighborhood.trim() || null,
       explore_event_id: exploreEventId,
@@ -765,7 +768,8 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       dispatched = true;
       if (params.draftId) {
-        await saveExistingPlanDraft(String(params.draftId), user.id, row, currentForm);
+        const version = await saveExistingPlanDraft(String(params.draftId), user.id, row, currentForm, newDraft.version);
+        if (currentForm() && version !== undefined) newDraft.version = version;
       } else {
         newDraft.id ??= randomUUID();
         newDraft.saveAttempted = true;
@@ -790,7 +794,8 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
           refetchType: write.isCurrentViewer() ? 'active' : 'none'});
       }
       if (!currentForm()) return;
-      if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
+      if (error instanceof DraftChanged) setAlertInfo(changedDraftAlert);
+      else if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
       else if (dispatched) setAlertInfo({ title: 'Couldn’t confirm the save', message: 'Your edits are still here. Check Yours for the draft before trying again.' });
       else setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
     } finally {
@@ -919,7 +924,7 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
         draftPublishRequest.current = { snapshot, key: randomUUID() };
       }
       const insertedEvent = await publishMemberPlan(planId, user.id, row, draftPublishRequest.current.key,
-        draftId ? 'draft' : 'new', () => ownsWrite(write));
+        draftId ? 'draft' : 'new', () => ownsWrite(write), newDraft.version);
       if (!ownsWrite(write)) return;
       // The database has confirmed the plan and its creator membership.
       optimistic?.commit(insertedEvent.id);
@@ -966,6 +971,9 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
       postInvitations.reset();
       if (error instanceof PlanPublishedEarlier) {
         setAlertInfo({ title: 'Plan already posted', message: 'Open this plan in Yours to review the version that was posted or make changes.' });
+      } else if (error instanceof DraftChanged) {
+        void queryClient.invalidateQueries({ queryKey: ['my-plan-drafts', write.userId] });
+        setAlertInfo(changedDraftAlert);
       } else if (error instanceof DraftUnavailable) {
         setAlertInfo(params.draftId ? unavailableDraftAlert : {
           title: 'Check your draft', message: 'Check Yours for this plan. If it still needs saving, your edits are here. Tap Save draft to try again.',
