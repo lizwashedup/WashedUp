@@ -58,7 +58,7 @@ export async function fetchEventChatPreviews(
       firstPaint.publish(initialRows.map(chat => {
         const cached = cachedEvents.get(chat.conversationId);
         return { ...chat, last_message: cached?.last_message ?? null, last_message_at: cached?.last_message_at ?? null,
-          preview_unavailable: cached?.preview_unavailable, last_message_user_id: cached?.last_message_user_id, unread_by_author: cached?.unread_by_author,
+          preview_unavailable: cached ? cached.preview_unavailable : true, last_message_user_id: cached?.last_message_user_id, unread_by_author: cached?.unread_by_author,
           unread_count: cached?.unread_count ?? 0, member_avatars: cached?.member_avatars ?? [] };
       }));
     }
