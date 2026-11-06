@@ -61,10 +61,11 @@ import { ChatSizedText } from '../../components/chat/ChatSizedText';
 const AVATAR_SIZE = 88;
 const ROW_THUMB_SIZE = 56;
 
-function PageReadRecovery({ retry, pending }: { retry: () => void; pending: boolean }) {
+function ReadRecovery({ retry, pending, message = "Couldn't load the latest details.", label = 'Retry organization page' }:
+  { retry: () => void; pending: boolean; message?: string; label?: string }) {
   return <View>
-    <ChatSizedText style={styles.emptyText} accessibilityRole="alert">Couldn't load the latest details.</ChatSizedText>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry organization page"
+    <ChatSizedText style={styles.emptyText} accessibilityRole="alert">{message}</ChatSizedText>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={label}
       accessibilityState={{ disabled: pending }} disabled={pending} onPress={retry} style={styles.goBackBtn}>
       <ChatSizedText style={styles.goBackText} numberOfLines={1} adjustsFontSizeToFit>{pending ? 'checking' : 'try again'}</ChatSizedText>
     </TouchableOpacity>
@@ -116,7 +117,7 @@ export default function OrganizationProfileScreen() {
 function LegacyOrganizationProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
-  const { data: userId = null } = useAuthUserId();
+  const { data: userId = null, epoch, error: accountError, isLoading: accountLoading, refetch: retryAccount } = useAuthUserId();
 
   const { data: page, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['organization-page', id],
@@ -130,7 +131,7 @@ function LegacyOrganizationProfileScreen() {
   const isOwnPage = !!userId && !!id && userId === id;
 
   const { data: followState } = useQuery({
-    queryKey: ['organizer-follow', 'organizer', id, userId],
+    queryKey: ['organizer-follow', 'organizer', id, userId, epoch],
     queryFn: () => getFollowState(followTarget!, userId!),
     enabled: !!followTarget && !!userId && !isOwnPage,
     staleTime: 30_000,
@@ -190,7 +191,7 @@ function LegacyOrganizationProfileScreen() {
           <ProfileButton compact/>
         </View>
         <View style={styles.centered}>
-          {isError ? <PageReadRecovery retry={() => { void refetch(); }} pending={isFetching} /> : <>
+          {isError ? <ReadRecovery retry={() => { void refetch(); }} pending={isFetching} /> : <>
           {/* LIZ COPY (voice match: "this event is not around anymore.") */}
           <Text style={styles.emptyText}>this page isn't around.</Text>
           <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
@@ -217,7 +218,9 @@ function LegacyOrganizationProfileScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {isError && <PageReadRecovery retry={() => { void refetch(); }} pending={isFetching} />}
+        {isError && <ReadRecovery retry={() => { void refetch(); }} pending={isFetching} />}
+        {accountError && <ReadRecovery message="Couldn't check your account." label="Retry account check"
+          retry={() => { void retryAccount(); }} pending={accountLoading} />}
         {profile.logo_url ? (
           <Image source={{ uri: profile.logo_url }} style={styles.avatar} contentFit="cover" />
         ) : (
