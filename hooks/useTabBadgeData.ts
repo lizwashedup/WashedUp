@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useObservedUser } from './useObservedUser';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
-import { UNREAD_CHATS_KEY } from '../constants/QueryKeys';
+import { UNREAD_CHATS_KEY, PENDING_INVITES_BADGE_KEY } from '../constants/QueryKeys';
 import { YOURS_PAGE_ENABLED } from '../constants/FeatureFlags';
 import { getRequestsSeenAt, REQUESTS_BADGE_KEY } from '../lib/yours/requestsSeen';
 
@@ -35,7 +35,7 @@ export function useTabBadgeData() {
     },
   });
   const invites = useQuery({
-    queryKey: ['pending-invites-badge', userId, viewer.epoch],
+    queryKey: [...PENDING_INVITES_BADGE_KEY, userId, viewer.epoch],
     enabled: !!userId,
     staleTime: 60_000,
     refetchInterval: 120_000,
