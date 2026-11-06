@@ -70,7 +70,8 @@ import { clearPendingDestination, consumePendingDestination, peekPendingCheckout
 import { subscribeAppLinks } from '../lib/subscribeAppLinks';
 import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
-import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
+import { isPostPlanSurveyHandled } from '../lib/postPlanSurveyHandled';
+import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
 import { useRootModalHandoff, ROOT_MODAL_HANDOFF_MS as MODAL_HANDOFF_MS } from '../hooks/useRootModalHandoff';
 import MarkEarnedModal from '../components/marks/MarkEarnedModal';
 import PushPrimerModal from '../components/PushPrimerModal';
@@ -487,7 +488,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         // plan once a plan_feedback row exists; if that insert ever failed
         // or the user skipped offline, this guarantees the survey can never
         // re-block them on a later cold start (incident 2026-05-18).
-        if (await isPostPlanSurveyHandled(payload.plan.id) || !isCurrent()) return;
+        if (await isPostPlanSurveyHandled(payload.plan.id, authedUserId) || !isCurrent()) return;
 
         setSurveyPlan({
           id: payload.plan.id,

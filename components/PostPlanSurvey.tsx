@@ -1,5 +1,4 @@
 import React from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import PostPlanSurveyV3 from './yours/survey/PostPlanSurveyV3';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -43,44 +42,6 @@ export interface SurveyProps {
   // topRated is true when the user committed the TOP rating ("Really good").
   // The owner uses it to fire the native review ask AFTER this modal dismisses.
   onComplete: (topRated: boolean) => void;
-}
-
-// ─── Local suppression (the lockout backstop) ────────────────────────────────
-// The server RPC (get_pending_post_plan_survey) only stops re-prompting once a
-// plan_feedback row exists. If that insert ever fails, the user is offline, or
-// they skip, the survey would otherwise re-block them on every cold start
-// (incident 2026-05-18, a fully locked-out, restart-proof state). This
-// on-device list guarantees that once a user has dealt with a survey it can
-// never re-block them, independent of the network.
-export const POST_PLAN_SURVEY_HANDLED_KEY = 'postPlanSurvey.handledV1';
-
-export async function isPostPlanSurveyHandled(eventId: string): Promise<boolean> {
-  try {
-    const raw = await AsyncStorage.getItem(POST_PLAN_SURVEY_HANDLED_KEY);
-    if (!raw) return false;
-    const ids = JSON.parse(raw) as unknown;
-    return Array.isArray(ids) && ids.includes(eventId);
-  } catch {
-    return false;
-  }
-}
-
-export async function markPostPlanSurveyHandled(eventId: string): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(POST_PLAN_SURVEY_HANDLED_KEY);
-    let ids: string[] = [];
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) ids = parsed as string[];
-      } catch { ids = []; }
-    }
-    if (!ids.includes(eventId)) ids.push(eventId);
-    if (ids.length > 100) ids = ids.slice(-100); // cap unbounded growth
-    await AsyncStorage.setItem(POST_PLAN_SURVEY_HANDLED_KEY, JSON.stringify(ids));
-  } catch {
-    /* best-effort; a successful plan_feedback row also suppresses */
-  }
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────

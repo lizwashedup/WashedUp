@@ -51,8 +51,8 @@ import { hapticSelection, hapticSuccess } from '../../../lib/haptics';
 import { YOURS_PAGE_ENABLED } from '../../../constants/FeatureFlags';
 import { useReduceMotion } from '../a11y/useReduceMotion';
 import { COPY } from '../state/constants';
+import { markPostPlanSurveyHandled } from '../../../lib/postPlanSurveyHandled';
 import {
-  markPostPlanSurveyHandled,
   type SurveyProps,
   type SurveyMember,
 } from '../../PostPlanSurvey';
@@ -241,7 +241,7 @@ function SurveySession({
     Keyboard.dismiss();
     attendanceAttempt.current = null;
     keepAttempt.current = null;
-    void markPostPlanSurveyHandled(plan.id);
+    void markPostPlanSurveyHandled(plan.id, userId);
     if (!wroteRef.current) {
       void supabase
         .rpc('upsert_plan_feedback', {

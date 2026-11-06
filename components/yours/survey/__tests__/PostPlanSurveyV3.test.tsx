@@ -7,7 +7,7 @@ import type { SurveyProps, SurveyMember } from '../../../PostPlanSurvey';
 const mockRpc=jest.fn(),mockAuth=jest.fn(),mockHandled=jest.fn(),mockComplete=jest.fn();
 let mockPeople=true;
 jest.mock('../../../../lib/supabase',()=>({supabase:{rpc:(...args:any[])=>mockRpc(...args),auth:{getUser:()=>mockAuth()}}}));
-jest.mock('../../../PostPlanSurvey',()=>({markPostPlanSurveyHandled:(...args:any[])=>mockHandled(...args)}));
+jest.mock('../../../../lib/postPlanSurveyHandled',()=>({markPostPlanSurveyHandled:(...args:any[])=>mockHandled(...args)}));
 jest.mock('../../../../lib/haptics',()=>({hapticSelection:jest.fn(),hapticSuccess:jest.fn()}));
 jest.mock('../../../../constants/FeatureFlags',()=>({get YOURS_PAGE_ENABLED(){return mockPeople;}}));
 jest.mock('../../a11y/useReduceMotion',()=>({useReduceMotion:()=>true}));
@@ -47,7 +47,7 @@ it('skips selected but unsubmitted answers without reports and retains keep-in-t
  mount();attendance();press('Alex: Didn’t show up');press('Skip attendance');await flush();expect(reports()).toEqual([]);expect(control('Keep in touch with Alex')).toBeDefined();
 });
 it('Not now always exits without submitting selected answers',async()=>{
- mount();attendance();press('Alex: Didn’t show up');press('Not now');await flush();expect(reports()).toEqual([]);expect(mockHandled).toHaveBeenCalledWith('plan');expect(mockComplete).toHaveBeenCalledTimes(1);
+ mount();attendance();press('Alex: Didn’t show up');press('Not now');await flush();expect(reports()).toEqual([]);expect(mockHandled).toHaveBeenCalledWith('plan','me');expect(mockComplete).toHaveBeenCalledTimes(1);
 });
 it('reports failures visibly and retries only reports without a success receipt',async()=>{
  let fail=true;mockRpc.mockImplementation((name,args)=>Promise.resolve(name==='report_no_show' && args.p_no_show_user_id==='bea' && fail ? {error:new Error('offline')} : {data:null,error:null}));
