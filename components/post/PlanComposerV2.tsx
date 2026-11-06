@@ -38,14 +38,14 @@ import Colors, { AfterglowColors } from '../../constants/Colors';
 import { extractFirstUrl } from '../../lib/url';
 import { usePlanComposerDraft } from './usePlanComposerDraft';
 import { legacyStyles, composerAppearance } from './planComposerStyles';
-import { AGE_RANGES, MIN_GROUP, MAX_GROUP, MSG_MIN, MSG_LIMIT, DESC_LIMIT, DESC_WARN_MARGIN, buildDatetime, ageRangesToMinMax, quickDate, sameDay, type GenderPreference, type AgeRange, type QuickKind } from './planComposerRules';
+import { AGE_RANGES, MIN_GROUP, MAX_GROUP, MSG_MIN, MSG_LIMIT, DESC_LIMIT, DESC_WARN_MARGIN, resolveMemberPlanSchedule, ageRangesToMinMax, quickDate, sameDay, type GenderPreference, type AgeRange, type QuickKind } from './planComposerRules';
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { requestPlanNotificationPrompt } from '../../lib/planNotificationPrompt';
 import { checkContent } from '../../lib/contentFilter';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../../constants/PhotoUpload';
-import { MONTHS, getLAWallParts, isValidLAWallTime, resolveOvernightLAEnd } from '../../lib/laDate';
+import { MONTHS, getLAWallParts } from '../../lib/laDate';
 import {
   NEIGHBORHOOD_OPTIONS,
   NEIGHBORHOOD_OTHER,
@@ -110,6 +110,7 @@ export default function PlanComposerV2() {
   const messageInputRef = useRef<TextInput>(null);
   const descriptionInputRef = useRef<TextInput>(null);
   const sectionPositions = useRef<Partial<Record<RequiredField, number>>>({});
+  const [savedSchedule, setSavedSchedule] = useState<{ start?: string; end?: string }>({});
   const [validationMode, setValidationMode] = useState<ValidationMode | null>(null);
   const params = useLocalSearchParams<{
     prefillTitle?: string;
@@ -321,6 +322,9 @@ export default function PlanComposerV2() {
       setImageLoading(false);
       setLoading(false);
       resetFields();
+      if (params.draftId || params.duplicatedFromEventId) {
+        setSavedSchedule({ start: params.prefillStartTime, end: params.prefillEndTime });
+      }
       postInvitations.reset();
       setPeoplePickerOpen(false);
       setShowNeighborhoodPicker(false);
@@ -565,6 +569,11 @@ export default function PlanComposerV2() {
   };
 
   // ── Derived ──
+  const schedule = useMemo(() => resolveMemberPlanSchedule(
+    { y: dateYear, m: dateMonth, d: dateDay, hour24: timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), minute: Number(timeMinute) },
+    endTimeSelected ? { hour24: endTimeHour % 12 + (endTimePeriod === 'PM' ? 12 : 0), minute: Number(endTimeMinute) } : null,
+    savedSchedule,
+  ), [dateYear, dateMonth, dateDay, timeHour, timePeriod, timeMinute, endTimeSelected, endTimeHour, endTimePeriod, endTimeMinute, savedSchedule]);
   const selectedDate = dateSelected ? { year: dateYear, month: dateMonth, day: dateDay } : null;
   const activeQuick: QuickKind | null = useMemo(() => {
     if (!dateSelected) return null;
@@ -635,7 +644,7 @@ export default function PlanComposerV2() {
     <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.fieldError}>{fieldErrors[field]}</Text>
   ) : null;
 
-  const resetFields = () => { setValidationMode(null); resetDraftFields(); };
+  const resetFields = () => { setValidationMode(null); setSavedSchedule({}); resetDraftFields(); };
   const resetForm = () => {
     newDraft.id = null;
     newDraft.saveAttempted = false;
@@ -704,27 +713,19 @@ export default function PlanComposerV2() {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
-    if (!isValidLAWallTime(dateYear, dateMonth, dateDay, timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute))) {
+    if (!schedule.startIso) {
       setAlertInfo({ title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
       return;
     }
-    const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
-    let endTimeIso: string | null = null;
-    if (endTimeSelected) {
-      const endDt = resolveOvernightLAEnd(dateYear, dateMonth, dateDay,
-        timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute),
-        endTimeHour % 12 + (endTimePeriod === 'PM' ? 12 : 0), Number(endTimeMinute));
-      if (!endDt) {
-        setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
-        return;
-      }
-      endTimeIso = endDt.toISOString();
+    if (endTimeSelected && !schedule.endIso) {
+      setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
+      return;
     }
     const ageBounds = customAgeBounds ?? ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
-      start_time: startTime.toISOString(),
-      end_time: endTimeIso,
+      start_time: schedule.startIso,
+      end_time: schedule.endIso,
       drop_in: dropIn,
       allow_duplicate: allowDuplicate,
       location_text: location.trim() || null,
@@ -802,32 +803,21 @@ export default function PlanComposerV2() {
       setAlertInfo({ title: 'Content not allowed', message: filter.reason ?? 'Please revise your plan and try again.' });
       return;
     }
-    if (!isValidLAWallTime(dateYear, dateMonth, dateDay, timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute))) {
+    if (!schedule.startIso) {
       setAlertInfo({ title: 'Choose another time', message: 'That date or time does not exist in Los Angeles. Pick a different time.' });
       return;
     }
-    const startTime = buildDatetime(dateMonth, dateDay, dateYear, timeHour, timeMinute, timePeriod);
-    if (startTime <= new Date()) {
+    if (Date.parse(schedule.startIso) <= Date.now()) {
       setAlertInfo({ title: 'Pick a future time', message: 'That time has already passed.' });
       return;
     }
-
-    // Optional end time (legacy parity): roll an earlier clock time to the next
-    // day (overnight), require at least 30 min after start.
-    let endTimeIso: string | null = null;
-    if (endTimeSelected) {
-      const endDt = resolveOvernightLAEnd(dateYear, dateMonth, dateDay,
-        timeHour % 12 + (timePeriod === 'PM' ? 12 : 0), Number(timeMinute),
-        endTimeHour % 12 + (endTimePeriod === 'PM' ? 12 : 0), Number(endTimeMinute));
-      if (!endDt) {
-        setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
-        return;
-      }
-      if (endDt.getTime() - startTime.getTime() < 30 * 60 * 1000) {
-        setAlertInfo({ title: 'Give it a little longer', message: 'An end time should be at least 30 minutes after the start.' });
-        return;
-      }
-      endTimeIso = endDt.toISOString();
+    if (endTimeSelected && !schedule.endIso) {
+      setAlertInfo({ title: 'Choose another end time', message: 'That end time does not exist in Los Angeles. Pick a different time.' });
+      return;
+    }
+    if (schedule.endIso && Date.parse(schedule.endIso) - Date.parse(schedule.startIso) < 30 * 60 * 1000) {
+      setAlertInfo({ title: 'Give it a little longer', message: 'An end time should be at least 30 minutes after the start.' });
+      return;
     }
 
     const write = beginWrite();
@@ -836,8 +826,8 @@ export default function PlanComposerV2() {
     const ageBounds = customAgeBounds ?? ageRangesToMinMax(ageRanges);
     const row = {
       title: title.trim(),
-      start_time: startTime.toISOString(),
-      end_time: endTimeIso,
+      start_time: schedule.startIso,
+      end_time: schedule.endIso,
       drop_in: dropIn,
       allow_duplicate: allowDuplicate,
       location_text: location.trim() || null,
@@ -1138,9 +1128,9 @@ export default function PlanComposerV2() {
             onChange={(h, m, p) => { setTimeHour(h); setTimeMinute(m); setTimePeriod(p); setTimeSelected(true); }}
           />
           <View style={styles.endTimeRow}>
-            <Text style={styles.subLabel}>{appearance ? 'Ends' : 'ends'}<Text style={styles.labelOptional}> · optional</Text></Text>
+            <Text style={styles.subLabel}>{appearance ? 'Ends' : 'ends'}{schedule.endDayLabel ? ' ' + schedule.endDayLabel : ''}<Text style={styles.labelOptional}> · optional</Text></Text>
             {endTimeSelected ? (
-              <TouchableOpacity onPress={() => { hapticLight(); setEndTimeSelected(false); }} accessibilityRole="button" accessibilityLabel="Clear end time" style={appearance ? styles.clearEndAction : undefined} hitSlop={8}>
+              <TouchableOpacity onPress={() => { hapticLight(); setEndTimeSelected(false); setSavedSchedule(previous => ({ start: previous.start })); }} accessibilityRole="button" accessibilityLabel="Clear end time" style={appearance ? styles.clearEndAction : undefined} hitSlop={8}>
                 <Text style={styles.clearEndText}>{appearance ? 'Clear' : 'clear'}</Text>
               </TouchableOpacity>
             ) : null}
