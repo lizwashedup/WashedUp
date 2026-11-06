@@ -700,7 +700,7 @@ export default function PlansScreen() {
       ) : null}
 
       {/* Map view — lazy-loaded to avoid crash when react-native-maps fails (e.g. Expo Go) */}
-      {mapView ? (
+      {mapView && userId && !isError ? (
         mapLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={accent} />
@@ -713,6 +713,7 @@ export default function PlansScreen() {
               </View>
             }>
               <LazyPlansMapView
+                key={userId}
                 plans={mapPlans}
                 wishlistedSet={wishlistedSet}
                 onPlanPress={(id) => router.push(`/plan/${id}`)}
@@ -732,15 +733,20 @@ export default function PlansScreen() {
                 <Text numberOfLines={1} style={styles.retryButtonText}>{appearance ? 'Try again' : 'Try Again'}</Text>
               </TouchableOpacity>
             </View>
-          ) : !userId || isLoading || wishlistsLoading ? (
+          ) : !userId || isLoading || (!mapView && wishlistsLoading) ? (
             appearance ? <View style={styles.centered} accessibilityLiveRegion="polite"><ActivityIndicator color={accent} /><Text style={styles.errorMessage}>Finding plans…</Text></View> : <SkeletonFeed />
-          ) : isError && !showPreviousFeed ? (
+          ) : isError && (mapView || !showPreviousFeed) ? (
             <View style={styles.centered}>
               <Text style={styles.errorTitle}>Couldn't load plans</Text>
               <Text style={styles.errorMessage}>{friendlyError(error, 'Please try again to see plans.')}</Text>
               <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => refetch()}>
                 <Text numberOfLines={1} style={styles.retryButtonText}>{appearance ? 'Try again' : 'Try Again'}</Text>
               </TouchableOpacity>
+              {mapView && (
+                <TouchableOpacity accessibilityRole="button" style={styles.feedbackAction} onPress={() => setMapView(false)}>
+                  <Text style={styles.feedbackActionText}>Back to plans</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : listEmpty ? (
             <ScrollView
