@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
   BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -515,19 +516,27 @@ export default function ChatsScreen() {
       )}
 
       {chats.length === 0 && communityRows.length === 0 ? (
-        loadError || (COMMUNITIES_ENABLED && (communityLoading || communityError)) ? null : <View style={styles.emptyState}>
+        loadError || (COMMUNITIES_ENABLED && (communityLoading || communityError)) ? null : <ScrollView
+          contentContainerStyle={[styles.emptyState, { flex: undefined, flexGrow: 1 }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.terracotta} />}
+        >
           <Image source={wLogo} style={styles.emptyLogo} contentFit="contain" />
           <Text style={styles.emptyTitle}>Join a plan to start chatting</Text>
           <Text style={styles.emptySubtitle}>
             The chat opens once 2 people are going.
           </Text>
           <TouchableOpacity
-            style={styles.emptyButton}
+            accessibilityRole="button" style={styles.emptyButton}
             onPress={() => router.push('/(tabs)/plans')}
           >
             <Text style={styles.emptyButtonText}>Browse Plans</Text>
           </TouchableOpacity>
-        </View>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh chats"
+            accessibilityState={{ disabled: refreshing, busy: refreshing }} disabled={refreshing}
+            style={styles.communityRetry} onPress={handleRefresh}>
+            <Text style={styles.communityRetryText}>{refreshing ? 'Refreshing…' : 'Refresh chats'}</Text>
+          </TouchableOpacity>
+        </ScrollView>
       ) : (
         <FlatList
           decelerationRate="normal"
