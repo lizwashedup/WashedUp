@@ -65,4 +65,47 @@ BEGIN
   END IF;
 END;
 $$;
+-- Stand-in for an existing AFTER INSERT consumer. No external delivery.
+RESET ROLE;
+CREATE TABLE public.plan_insert_observations(event_id uuid);
+GRANT SELECT, INSERT ON public.plan_insert_observations TO authenticated;
+CREATE FUNCTION public.observe_plan_insert_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN INSERT INTO public.plan_insert_observations VALUES(NEW.id); RETURN NEW; END;
+$$;
+CREATE TRIGGER observe_plan_insert_fixture AFTER INSERT ON public.events
+FOR EACH ROW EXECUTE FUNCTION public.observe_plan_insert_fixture();
+ALTER TABLE public.event_members ADD CONSTRAINT refuse_fixture_plan
+  CHECK (event_id <> 'dddd0000-1111-4111-8111-111111111111');
+SET ROLE authenticated;
+DO $$
+DECLARE
+  plan uuid := gen_random_uuid();
+  legacy uuid := gen_random_uuid();
+  refused uuid := 'dddd0000-1111-4111-8111-111111111111';
+  receipt uuid := gen_random_uuid();
+BEGIN
+  BEGIN
+    INSERT INTO public.events(id,title,status,member_draft_publish_key) VALUES(refused,'Refused membership','forming',receipt);
+    RAISE EXCEPTION 'Refused membership still published the plan';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  IF EXISTS(SELECT 1 FROM public.events WHERE id=refused) THEN RAISE EXCEPTION 'Orphan plan after failure'; END IF;
+  INSERT INTO public.events(id,title,status,member_draft_publish_key) VALUES(plan,'Direct plan','forming',receipt);
+  BEGIN
+    INSERT INTO public.events(id,title,status,member_draft_publish_key) VALUES(plan,'Edited retry','forming',gen_random_uuid());
+    RAISE EXCEPTION 'Repeat insert replaced a live plan';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  IF NOT EXISTS(SELECT 1 FROM public.events WHERE id=plan AND member_draft_publish_key=receipt AND title='Direct plan')
+    OR (SELECT count(*) FROM public.event_members WHERE event_id=plan AND user_id=auth.uid() AND role='host' AND status='joined') <> 1 THEN
+    RAISE EXCEPTION 'Direct publication receipt or creator membership mismatch';
+  END IF;
+  IF (SELECT count(*) FROM public.plan_insert_observations WHERE event_id=plan) <> 1
+    OR EXISTS(SELECT 1 FROM public.plan_insert_observations WHERE event_id=refused) THEN
+    RAISE EXCEPTION 'Unexpected downstream insert event';
+  END IF;
+  INSERT INTO public.events(id,title,status) VALUES(legacy,'Older client','forming');
+  IF EXISTS(SELECT 1 FROM public.event_members WHERE event_id=legacy) THEN RAISE EXCEPTION 'Older client received automatic membership'; END IF;
+END;
+$$;
 RESET ROLE;

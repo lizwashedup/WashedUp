@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { DraftUnavailable, publishOwnedDraft, saveNewPlanDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
+import { DraftUnavailable, PlanPublishedEarlier, publishMemberPlan, saveNewPlanDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
  * Main plan composer, with optional development-gated Afterglow presentation.
@@ -206,7 +206,7 @@ export default function PlanComposerV2() {
   const mountedRef = useRef(false);
   const photoVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
-  const newDraft = useMemo(() => ({ id: null as string | null }), [
+  const newDraft = useMemo(() => ({ id: null as string | null, saveAttempted: false }), [
     composerViewer.epoch, composerViewer.viewerId, params.draftId, params.prefillTitle,
     params.prefillInvitePersonId, params.duplicatedFromEventId, params.similarPlanRequest,
   ]);
@@ -609,6 +609,7 @@ export default function PlanComposerV2() {
   const resetFields = () => { setValidationMode(null); resetDraftFields(); };
   const resetForm = () => {
     newDraft.id = null;
+    newDraft.saveAttempted = false;
     draftPublishRequest.current = null;
     resetFields();
     // Clear every prefill/duplicate param after a successful post. Otherwise a
@@ -728,6 +729,7 @@ export default function PlanComposerV2() {
         if (!ownsWrite(write)) return;
       } else {
         newDraft.id ??= randomUUID();
+        newDraft.saveAttempted = true;
         await saveNewPlanDraft(newDraft.id, user.id, row, () => ownsWrite(write));
         if (!ownsWrite(write)) return;
       }
@@ -757,7 +759,7 @@ export default function PlanComposerV2() {
     if (photoAttempt.current || loading || imageLoading || confirmVisible) return;
     // If Save may have committed, Post must use that exact draft. A late
     // response must never turn the same form into a second public plan.
-    const draftId = params.draftId ? String(params.draftId) : newDraft.id;
+    const draftId = params.draftId ? String(params.draftId) : newDraft.saveAttempted ? newDraft.id : null;
     if (!validateRequired('post')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -872,52 +874,15 @@ export default function PlanComposerV2() {
       const { data: { user }, error: identityError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!ownsWrite(write)) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
-      let insertedEvent: { id: string } | null = null;
-      if (draftId) {
-        const snapshot = JSON.stringify([user.id, draftId, row, inviteIds]);
-        if (draftPublishRequest.current?.snapshot !== snapshot) {
-          draftPublishRequest.current = { snapshot, key: randomUUID() };
-        }
-        insertedEvent = await publishOwnedDraft(draftId, user.id, row, draftPublishRequest.current.key, () => ownsWrite(write));
-        if (!ownsWrite(write)) return;
-      } else {
-        const { data: inserted, error } = await supabase
-          .from('events')
-          .insert({ ...row, creator_user_id: user.id })
-          .select('id')
-          .single();
-        if (!ownsWrite(write)) return;
-        if (error) throw error;
-        insertedEvent = inserted;
+      const planId = draftId ?? (newDraft.id ??= randomUUID());
+      const snapshot = JSON.stringify([user.id, planId, row, inviteIds]);
+      if (draftPublishRequest.current?.snapshot !== snapshot) {
+        draftPublishRequest.current = { snapshot, key: randomUUID() };
       }
-
-      if (!insertedEvent?.id) throw new Error('The saved plan could not be confirmed.');
-      if (!draftId) {
-        const { error: memberErr } = await supabase.from('event_members').insert({
-          event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
-        });
-        if (!ownsWrite(write)) return;
-        if (memberErr) {
-          await new Promise((r) => setTimeout(r, 500));
-          if (!ownsWrite(write)) return;
-          const { error: retryErr } = await supabase.from('event_members').insert({
-            event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
-          });
-          if (!ownsWrite(write)) return;
-          if (retryErr) {
-            // Best-effort rollback of the orphaned event. Error-check it: a
-            // failed delete leaves an event with no host member, so flag that
-            // case distinctly before returning to the composer.
-            const { error: rollbackErr } = await supabase.from('events').delete().eq('id', insertedEvent.id);
-            if (!ownsWrite(write)) return;
-            throw new Error(rollbackErr ? 'member_orphan' : 'member');
-          }
-        }
-      }
-      // Event + host member rows both committed: swap the optimistic card's
-      // temp id for the real one so it's tappable and routes correctly. Done
-      // only now (not right after the event insert) so an orphan rollback above
-      // still removes the card via the catch's rollback().
+      const insertedEvent = await publishMemberPlan(planId, user.id, row, draftPublishRequest.current.key,
+        draftId ? 'draft' : 'new', () => ownsWrite(write));
+      if (!ownsWrite(write)) return;
+      // The database has confirmed the plan and its creator membership.
       optimistic?.commit(insertedEvent.id);
       write.optimistic = null;
       // If this was a "Post your own" duplicate, notify the source plan's
@@ -960,7 +925,9 @@ export default function PlanComposerV2() {
       setConfirmVisible(false);
       setShareWanted(false);
       postInvitations.reset();
-      if (error instanceof DraftUnavailable) {
+      if (error instanceof PlanPublishedEarlier) {
+        setAlertInfo({ title: 'Plan already posted', message: 'Open this plan in Yours to review the version that was posted or make changes.' });
+      } else if (error instanceof DraftUnavailable) {
         setAlertInfo(params.draftId ? unavailableDraftAlert : {
           title: 'Check your draft', message: 'Check Yours for this plan. If it still needs saving, your edits are here. Tap Save draft to try again.',
         });

@@ -339,7 +339,7 @@ it('blocks confirmation exits while an actual zero-recipient plan insert is pend
   expect(mockPush).not.toHaveBeenCalled();
   expect(mockReplace).not.toHaveBeenCalled();
   expect(fixture.tree.root.findByType(SharePlanModal).props.visible).toBe(false);
-  await act(async () => { resolve({ data: { id: 'saved-plan' }, error: null }); await pending; });
+  await act(async () => { resolve({ data: { id: mockInsert.mock.calls[0][0].id }, error: null }); await pending; });
   expect(fixture.confirmation().planReady).toBe(true);
   expect(fixture.confirmation().canContinue()).toBe(true);
 });
@@ -353,7 +353,7 @@ it('returns through existing recovery when the insert yields no confirmed plan i
   expect(mockRollback).toHaveBeenCalledTimes(1);
   expect(fixture.confirmation().visible).toBe(false);
   expect(fixture.confirmation().invitationStatus).toBe('none');
-  expect(JSON.stringify(fixture.tree.toJSON())).toMatch(/that didn't go through/);
+  expect(JSON.stringify(fixture.tree.toJSON())).toMatch(/Couldn’t confirm the post/);
 });
 
 it('retries an unconfirmed invitation using the saved plan without repeating plan or membership creation', async () => {
@@ -367,10 +367,10 @@ it('retries an unconfirmed invitation using the saved plan without repeating pla
   await flush();
   expect(fixture.confirmation().invitationStatus).toBe('confirmed');
   expect(mockInsert).toHaveBeenCalledTimes(1);
-  expect(mockMember).toHaveBeenCalledTimes(1);
+  expect(mockMember).not.toHaveBeenCalled();
   expect(mockInvite.mock.calls).toEqual([
-    [{ eventId: 'saved-plan', recipientIds: ['person'] }],
-    [{ eventId: 'saved-plan', recipientIds: ['person'] }],
+    [{ eventId: mockInsert.mock.calls[0][0].id, recipientIds: ['person'] }],
+    [{ eventId: mockInsert.mock.calls[0][0].id, recipientIds: ['person'] }],
   ]);
 });
 
@@ -385,7 +385,7 @@ it('does not enter post recovery when only saving the local celebration preferen
   expect(fixture.confirmation().invitationStatus).toBe('confirmed');
   expect(mockRollback).not.toHaveBeenCalled();
   expect(mockInsert).toHaveBeenCalledTimes(1);
-  expect(mockMember).toHaveBeenCalledTimes(1);
+  expect(mockMember).not.toHaveBeenCalled();
 });
 
 function pendingResult<T = any>() {
@@ -427,21 +427,17 @@ it.each([false, true])('retires an event insert before starting creator membersh
   expect(fixture.confirmation().visible).toBe(false);
 });
 
-it('ignores a retired creator-membership completion without exposing the old confirmation or clearing the current draft', async () => {
-  const fixture = await mount(true), member = pendingResult();
-  mockMember.mockReturnValueOnce(member.promise);
+it('ignores a late publication receipt after switching accounts', async () => {
+  const fixture = await mount(true), receipt = pendingResult();
+  mockInsert.mockRejectedValueOnce(new Error('Response lost'));
+  mockPublishReceipt.mockReturnValueOnce(receipt.promise);
   let pending!: Promise<void>;
-  act(() => { pending = fixture.post(); });
-  await flush();
-  expect(mockMember).toHaveBeenCalledTimes(1);
-  await fixture.swap();
-  fixture.setTitle('CURRENT_ACCOUNT_DRAFT');
-  await act(async () => { member.resolve({ error: null }); await pending; });
-  expect(mockInvite).not.toHaveBeenCalled();
-  expect(mockCommit).not.toHaveBeenCalled();
-  expect(fixture.title()).toBe('CURRENT_ACCOUNT_DRAFT');
-  expect(fixture.confirmation().planReady).toBe(false);
-  expect(fixture.confirmation().visible).toBe(false);
+  act(() => {pending = fixture.post();}); await flush();
+  const row = mockInsert.mock.calls[0][0];
+  await fixture.swap(); fixture.setTitle('Current edits');
+  await act(async () => {receipt.resolve({data:row,error:null}); await pending;});
+  expect(mockInvite).not.toHaveBeenCalled(); expect(mockCommit).not.toHaveBeenCalled();
+  expect(fixture.title()).toBe('Current edits'); expect(fixture.confirmation().visible).toBe(false);
 });
 
 it('does not let a retired failure put the new account into recovery', async () => {
@@ -454,7 +450,7 @@ it('does not let a retired failure put the new account into recovery', async () 
   fixture.setTitle('CURRENT_ACCOUNT_DRAFT');
   await act(async () => { event.resolve({ data: null, error: new Error('old request failure') }); await pending; });
   expect(fixture.title()).toBe('CURRENT_ACCOUNT_DRAFT');
-  expect(JSON.stringify(fixture.tree.toJSON())).not.toMatch(/that didn't go through/);
+  expect(JSON.stringify(fixture.tree.toJSON())).not.toMatch(/Couldn’t confirm the post/);
   expect(fixture.confirmation().visible).toBe(false);
 });
 
@@ -520,23 +516,19 @@ it('removes only the retired temporary card and does not unlock or roll back a n
   await act(async () => { await retainedNewPost(); });
   expect(mockInsert).toHaveBeenCalledTimes(2);
   expect(mockRollback).not.toHaveBeenCalled();
-  await act(async () => { newEvent.resolve({ data: { id: 'current-plan' }, error: null }); await newPost; });
+  await act(async () => { newEvent.resolve({ data: { id: mockInsert.mock.calls[1][0].id }, error: null }); await newPost; });
   expect(mockCommit).toHaveBeenCalledTimes(1);
-  expect(mockCommit).toHaveBeenCalledWith('current-plan');
+  expect(mockCommit).toHaveBeenCalledWith(mockInsert.mock.calls[1][0].id);
 });
 
-it('does not retry creator membership after the account changes during the existing delay', async () => {
-  jest.useFakeTimers();
+it('keeps the published plan when its atomic membership receipt is lost', async () => {
   const fixture = await mount(true);
-  mockMember.mockResolvedValueOnce({ error: new Error('retryable member failure') });
-  let pending!: Promise<void>;
-  act(() => { pending = fixture.post(); });
-  await flush();
-  expect(mockMember).toHaveBeenCalledTimes(1);
-  await fixture.swap();
-  await act(async () => { jest.advanceTimersByTime(500); await pending; });
-  expect(mockMember).toHaveBeenCalledTimes(1);
-  expect(mockInvite).not.toHaveBeenCalled();
+  mockInsert.mockRejectedValueOnce(new Error('Response lost'));
+  mockPublishReceipt.mockImplementationOnce(async () => ({data:mockInsert.mock.calls[0][0],error:null}));
+  await act(async () => {await fixture.post();});
+  expect(mockMember).not.toHaveBeenCalled();
+  expect(mockCommit).toHaveBeenCalledWith(mockInsert.mock.calls[0][0].id);
+  expect(mockInvite).toHaveBeenCalledTimes(1);
 });
 
 it('keeps the confirmed cache row but ignores a retired celebration-storage completion', async () => {
@@ -547,7 +539,7 @@ it('keeps the confirmed cache row but ignores a retired celebration-storage comp
   let pending!: Promise<void>;
   act(() => { pending = fixture.post(); });
   await flush();
-  expect(mockCommit).toHaveBeenCalledWith('saved-plan');
+  expect(mockCommit).toHaveBeenCalledWith(mockInsert.mock.calls[0][0].id);
   await fixture.swap();
   fixture.setTitle('CURRENT_DRAFT');
   await act(async () => { storage.resolve(); await pending; });
@@ -607,25 +599,21 @@ it('ignores the previous account profile result when choosing audience options',
   expect(fixture.tree.root.findAll(node => node.props.children === 'Women only')).toHaveLength(0);
 });
 
-it('preserves creator-membership retry and sends the original invitations only after its success', async () => {
-  jest.useFakeTimers();
+it.each(['same','title','people'])('safely retries a direct post with %s inputs after both responses are lost', async change => {
   const fixture = await mount(true);
-  mockMember.mockResolvedValueOnce({ error: new Error('temporary failure') });
-  let pending!: Promise<void>;
-  act(() => { pending = fixture.post(); });
-  await flush();
+  mockInsert.mockRejectedValueOnce(new Error('First response lost')).mockResolvedValueOnce({data:null,error:{code:'23505'}});
+  mockPublishReceipt.mockRejectedValueOnce(new Error('Read offline')).mockImplementationOnce(async () => ({data:mockInsert.mock.calls[0][0],error:null}));
+  await act(async () => {await fixture.post();});
   expect(mockInvite).not.toHaveBeenCalled();
-  await act(async () => { jest.advanceTimersByTime(500); await pending; });
-  await flush();
-  expect(mockInsert).toHaveBeenCalledTimes(1);
-  expect(mockMember.mock.calls).toEqual([
-    [{ event_id: 'saved-plan', user_id: 'creator', role: 'host', status: 'joined' }],
-    [{ event_id: 'saved-plan', user_id: 'creator', role: 'host', status: 'joined' }],
-  ]);
-  expect(mockInvite).toHaveBeenCalledWith({ eventId: 'saved-plan', recipientIds: ['person'] });
-  expect(mockInvite.mock.invocationCallOrder[0]).toBeGreaterThan(mockMember.mock.invocationCallOrder[1]);
-  expect(fixture.confirmation().planReady).toBe(true);
-  expect(mockRollback).not.toHaveBeenCalled();
+  if(change==='title') fixture.setTitle('Edited walk');
+  if(change==='people') act(()=>fixture.tree.root.findByType(PeoplePickerSheet).props.onConfirm([{user_id:'riley',name:'Riley',photo:null}]));
+  await act(async () => {await fixture.post();});
+  const first=mockInsert.mock.calls[0][0], second=mockInsert.mock.calls[1][0];
+  expect(second.id).toBe(first.id);
+  expect(second.member_draft_publish_key===first.member_draft_publish_key).toBe(change==='same');
+  expect(mockInvite).toHaveBeenCalledTimes(change==='same'?1:0);
+  expect(fixture.confirmation().visible).toBe(change==='same');
+  if(change!=='same') expect(fixture.tree.root.findByType(BrandedAlert).props.title).toBe('Plan already posted');
 });
 
 it('keeps the default presentation and opts shared fields, alerts and completion into one staged appearance', async () => {
@@ -679,8 +667,8 @@ it('retains the staged plan payload, creator attachment and selected audience wi
     host_message: 'Come take a walk with me.', max_invites: 7, min_invites: 3,
     drop_in: true, allow_duplicate: true, image_url: null, status: 'forming', city: 'Los Angeles',
   });
-  expect(mockMember).toHaveBeenCalledWith({ event_id: 'saved-plan', user_id: 'creator', role: 'host', status: 'joined' });
-  expect(mockInvite).toHaveBeenCalledWith({ eventId: 'saved-plan', recipientIds: ['person'] });
+  expect(mockMember).not.toHaveBeenCalled();
+  expect(mockInvite).toHaveBeenCalledWith({ eventId: mockInsert.mock.calls[0][0].id, recipientIds: ['person'] });
 });
 
 it('retains the original title/day/time-only draft gate and clearly confirms a staged draft', async () => {
@@ -871,8 +859,8 @@ it.each(['see', 'share'])('requests notifications only when a confirmed post exi
   expect(mockNotificationRequest).not.toHaveBeenCalled();
   act(() => jest.advanceTimersByTime(400));
   expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
-  expect(mockNotificationRequest.mock.calls[0][0]).toEqual({ userId: 'creator', planId: 'saved-plan', reason: 'posted' });
-  expect(mockPush).toHaveBeenCalledWith('/plan/saved-plan');
+  expect(mockNotificationRequest.mock.calls[0][0]).toEqual({ userId: 'creator', planId: mockInsert.mock.calls[0][0].id, reason: 'posted' });
+  expect(mockPush).toHaveBeenCalledWith('/plan/'+mockInsert.mock.calls[0][0].id);
 });
 it('never requests notifications from a pending, failed or draft post', async () => {
   mockInsert.mockResolvedValueOnce({ data: null, error: null }); const fixture = await mount();
@@ -975,7 +963,7 @@ it('recovers a lost publication receipt without another creator membership or in
   let key: string;
   mockUpdateDraft.mockImplementationOnce(async row => { key = row.member_draft_publish_key; throw new Error('Lost response'); });
   mockPublishReceipt.mockImplementationOnce(async filters => {
-    expect(filters).toMatchObject({id:'existing', creator_user_id:'creator', member_draft_publish_key:key});
+    expect(filters).toMatchObject({id:'existing', creator_user_id:'creator'});
     return {data:{id:'existing',member_draft_publish_key:key},error:null};
   });
   const form = await mount(true, {draftId:'existing'});
@@ -988,8 +976,8 @@ it.each([false,true])('only recovers the original request after an uncertain pub
   let committed: string;
   mockUpdateDraft.mockImplementationOnce(async row => { committed=row.member_draft_publish_key; throw new Error('Lost response'); })
     .mockResolvedValueOnce({data:null,error:null});
-  mockPublishReceipt.mockRejectedValueOnce(new Error('Offline')).mockImplementationOnce(async filters => ({
-    data: filters.member_draft_publish_key === committed ? {id:'existing',member_draft_publish_key:committed} : null,error:null,
+  mockPublishReceipt.mockRejectedValueOnce(new Error('Offline')).mockImplementationOnce(async () => ({
+    data: {id:'existing',member_draft_publish_key:committed},error:null,
   }));
   const form=await mount(true,{draftId:'existing'});
   await act(async()=>{await form.post();}); expect(form.title()).toBe('Local test walk');
