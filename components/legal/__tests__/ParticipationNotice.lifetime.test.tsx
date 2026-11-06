@@ -46,7 +46,7 @@ it('immediately locks duplicate agreement, closing and checkbox changes while aw
   act(() => { void agree(); void agree(); checkbox(); f.close().props.onPress(); f.modal().props.onRequestClose(); });
   expect(onAgree).toHaveBeenCalledTimes(1); expect(f.onClose).not.toHaveBeenCalled(); expect(f.checkbox().props.accessibilityState.checked).toBe(true);
   await act(async () => pending.resolve(false));
-  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'that did not go through. give it another try.')).toBe(true);
+  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'We couldn’t confirm your agreement. Try again, or close and reopen the notice.')).toBe(true);
 });
 
 it('still delivers native dismissal while the successful assent callback waits for that dismissal', async () => {
@@ -83,13 +83,13 @@ it('a late rejected agreement cannot show an error in a reopened notice', async 
   f.update({ visible: false }); f.update({ visible: true });
   await act(async () => pending.reject(new Error('old response')));
   expect(f.checkbox().props.accessibilityState.checked).toBe(false);
-  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'that did not go through. give it another try.')).toBe(false);
+  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'We couldn’t confirm your agreement. Try again, or close and reopen the notice.')).toBe(false);
 });
 
 it('catches a current rejection using the unchanged retry copy and permits another explicit agreement', async () => {
   const onAgree = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(true), f = mount({ onAgree });
   act(() => f.checkbox().props.onPress()); await act(async () => f.agree().props.onPress());
-  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'that did not go through. give it another try.')).toBe(true);
+  expect(f.tree.root.findAllByType(Text).some(node => node.props.children === 'We couldn’t confirm your agreement. Try again, or close and reopen the notice.')).toBe(true);
   await act(async () => f.agree().props.onPress()); expect(onAgree).toHaveBeenCalledTimes(2);
 });
 

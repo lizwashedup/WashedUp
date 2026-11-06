@@ -89,7 +89,7 @@ import { Fonts, FontSizes } from '../../constants/Typography';
 import { useIsFocused } from '@react-navigation/native';
 import { useBlock } from '../../hooks/useBlock';
 import { checkContent } from '../../lib/contentFilter';
-import { getParticipationNoticeStatus } from '../../lib/participationTerms';
+import { getParticipationNoticeStatus, type ParticipationAssentContext } from '../../lib/participationTerms';
 import { ObsoletePlanParticipation, recordScopedPlanAssent } from '../../lib/planParticipationScope';
 import { supabase } from '../../lib/supabase';
 import { openUrl } from '../../lib/url';
@@ -295,7 +295,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   };
   const [pendingGreetingProblem, setPendingGreetingProblem] = useState<{ text: string; notSent: boolean } | null>(null);
   const [noticePending, setNoticePending] = useState<
-    { action: 'join'; message?: string; isCurrent: () => boolean } | { action: 'exception'; isCurrent: () => boolean } | null
+    { action: 'join'; context: ParticipationAssentContext; message?: string; isCurrent: () => boolean } | { action: 'exception'; context: ParticipationAssentContext; isCurrent: () => boolean } | null
   >(null);
   const noticePendingRef = useRef(noticePending); noticePendingRef.current = noticePending;
   const noticeAgreeLock = useRef<object | null>(null);
@@ -611,7 +611,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
     available: hasActiveException && !isClosedPlan && !planError, organizerUserId: plan?.creator_user_id ?? null,
     organizerName: plan?.creator?.first_name_display ?? 'Someone',
-    onNotice: isCurrent => setNoticePending({ action: 'exception', isCurrent }),
+    onNotice: (isCurrent, context) => setNoticePending({ action: 'exception', isCurrent, context }),
     onNoticeComplete: isCurrent => {
       const dismissal = afterPlanModalDismiss('notice', isCurrent);
       setNoticePending(value => value?.action === 'exception' && value.isCurrent === isCurrent ? null : value);
@@ -863,10 +863,14 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     }
     joiningRef.current = true; setJoinPreparing(true);
     try {
-      const { needsAssent } = await getParticipationNoticeStatus();
+      const { needsAssent, versions } = await getParticipationNoticeStatus();
       if (!joinMutation.isCurrent()) return;
       if (needsAssent) {
-        const pending = { action: 'join' as const, message, isCurrent: joinMutation.isCurrent };
+        const context: ParticipationAssentContext = {
+          listingType: 'plan', listingId: id, organizerUserId: plan.creator_user_id ?? null,
+          organizerName: noticeOrganizerName, action: 'join', versions,
+        };
+        const pending = { action: 'join' as const, context, message, isCurrent: joinMutation.isCurrent };
         if (Platform.OS === 'ios' && joinModalVisible) {
           void afterPlanModalDismiss('join', pending.isCurrent, () => setNoticePending(pending)).catch(() => {});
           setJoinModalVisible(false);
@@ -883,7 +887,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       joiningRef.current = false;
       if (identity.isCurrent() && !modalTransitionRef.current) setJoinPreparing(false);
     }
-  }, [joinMutation, plan, joinReady, identity, joinModalVisible, isClosedPlan]);
+  }, [joinMutation, plan, joinReady, identity, joinModalVisible, isClosedPlan, id, noticeOrganizerName]);
 
   const requestAcceptException = exceptionActions.requestAccept;
 
@@ -894,11 +898,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     try {
       if (pending.action === 'exception') return await exceptionActions.agree(pending.isCurrent);
       const scope = { viewerId: currentUserId, isCurrent: () => noticePendingRef.current === pending && pending.isCurrent() && joinMutation.isCurrent() };
-      const ok = await recordScopedPlanAssent({
-        listingType: 'plan', listingId: id,
-        organizerUserId: plan?.creator_user_id ?? null,
-        organizerName: noticeOrganizerName, action: 'join',
-      }, scope);
+      const ok = await recordScopedPlanAssent(pending.context, scope);
       if (!ok || !scope.isCurrent()) return false;
       const dismissal = afterPlanModalDismiss('notice', () => pending.isCurrent() && joinMutation.isCurrent(), () => joinMutation.join(pending.message));
       setNoticePending(null);
@@ -906,7 +906,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       return true;
     } catch { return false; }
     finally { if (noticeAgreeLock.current === pending) noticeAgreeLock.current = null; }
-  }, [id, currentUserId, plan?.creator_user_id, noticeOrganizerName, noticePending, joinMutation, exceptionActions]);
+  }, [id, currentUserId, noticePending, joinMutation, exceptionActions]);
 
   const closeParticipationNotice = useCallback(() => {
     const pending = noticePending;
@@ -2014,7 +2014,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       <ParticipationNotice
         visible={noticePending !== null}
-        organizerName={noticeOrganizerName}
+        organizerName={noticePending?.context.organizerName ?? noticeOrganizerName}
         onAgree={handleNoticeAgree}
         onClose={closeParticipationNotice}
         onDismiss={() => finishPlanModalDismiss('notice', modalTransition)}

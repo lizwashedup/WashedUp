@@ -5,14 +5,14 @@ import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
 import { readWaitlistInvitation, type WaitlistInvitationState } from '../lib/readWaitlistInvitation';
 import { hapticLight } from '../lib/haptics';
 import { recordScopedPlanAssent, requirePlanParticipationAccount } from '../lib/planParticipationScope';
-import { getParticipationNoticeStatus } from '../lib/participationTerms';
+import { getParticipationNoticeStatus, type ParticipationVersions } from '../lib/participationTerms';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { supabase } from '../lib/supabase';
 import { acceptWaitlistException, declineWaitlistException, waitlistAlertMessage } from '../lib/waitlistExceptions';
 
 type Scope = { userId: string | null; epoch: number; isCurrent: () => boolean };
 type Invitation = { id: string; eventId: string; userId: string };
-type Notice = { organizerUserId: string | null; organizerName: string };
+type Notice = { versions?: ParticipationVersions; organizerUserId: string | null; organizerName: string };
 type Phase = 'checking' | 'notice' | 'recording' | 'dismissing' | 'joining' | 'declining';
 type Reply = Invitation & { phase: Phase; notice?: Notice };
 const deadline = 12_000;
@@ -136,7 +136,7 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
       if (!active(reply)) return;
       if (membership.error) throw membership.error;
       if (membership.data?.user_id === reply.userId) { await decide(reply, true); return; }
-      const { needsAssent } = await requestWithDeadline(getParticipationNoticeStatus(), deadline);
+      const { needsAssent, versions } = await requestWithDeadline(getParticipationNoticeStatus(), deadline);
       if (!active(reply)) return;
       if (!needsAssent) { await decide(reply); return; }
       const event = await requestWithDeadline(supabase.from('events').select('creator_user_id').eq('id', eventId).maybeSingle(), deadline);
@@ -145,7 +145,7 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
       const person = organizerUserId ? await requestWithDeadline(supabase.from('profiles_public')
         .select('first_name_display').eq('id', organizerUserId).maybeSingle(), deadline) : null;
       if (!active(reply)) return;
-      reply.notice = { organizerUserId, organizerName: person?.data?.first_name_display ?? 'Someone' };
+      reply.notice = { versions, organizerUserId, organizerName: person?.data?.first_name_display ?? 'Someone' };
       reply.phase = 'notice';
       refresh();
     } catch {

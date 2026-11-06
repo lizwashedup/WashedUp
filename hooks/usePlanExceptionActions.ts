@@ -9,7 +9,7 @@ import { ChangedPlanParticipationAccount, ObsoletePlanParticipation, recordScope
 type Options = {
   eventId: string; viewerId: string | null; epoch: number; isCurrent: () => boolean;
   available: boolean; organizerUserId: string | null; organizerName: string;
-  onNotice: (isCurrent: () => boolean) => void;
+  onNotice: (isCurrent: () => boolean, context: ParticipationAssentContext) => void;
   onNoticeComplete: (isCurrent: () => boolean) => void | Promise<void>;
   onAccepted: () => void; onDeclined: () => void;
   onError: (error: unknown, kind: 'accept' | 'decline') => void;
@@ -89,10 +89,13 @@ export function usePlanExceptionActions(options: Options) {
     const call = start('accept'); if (!call) return;
     try {
       await requirePlanParticipationAccount(call);
-      const { needsAssent } = await getParticipationNoticeStatus();
+      const { needsAssent, versions } = await getParticipationNoticeStatus();
       requirePlanParticipationCurrent(call);
       if (needsAssent) {
-        call.stage = 'notice'; latest.current.onNotice(call.isCurrent); publish(call.entry);
+        call.context.versions = versions;
+        call.stage = 'notice';
+        latest.current.onNotice(call.isCurrent, call.context);
+        publish(call.entry);
         return;
       }
       await dispatch(call);

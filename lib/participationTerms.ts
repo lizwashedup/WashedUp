@@ -14,6 +14,7 @@
  * recorded the action does not proceed.
  */
 
+import { withDeadline } from './withTimeout';
 import { supabase } from './supabase';
 
 /** PostgREST "function does not exist" signatures: proposal 49 not applied. */
@@ -21,7 +22,9 @@ function isFunctionMissing(code: string | undefined): boolean {
   return code === 'PGRST202' || code === '42883';
 }
 
+export type ParticipationVersions = { notice: string; terms: string };
 export interface ParticipationAssentContext {
+  versions?: ParticipationVersions;
   listingType: 'plan' | 'explore_event';
   listingId: string;
   organizerUserId: string | null;
@@ -29,7 +32,7 @@ export interface ParticipationAssentContext {
   action: 'join' | 'rsvp';
 }
 
-export async function getParticipationNoticeStatus(): Promise<{ needsAssent: boolean }> {
+export async function getParticipationNoticeStatus(): Promise<{ needsAssent: boolean; versions?: ParticipationVersions }> {
   const { data, error } = await supabase.rpc('get_participation_notice_status');
   if (error) {
     if (isFunctionMissing(error.code)) return { needsAssent: false };
@@ -39,11 +42,15 @@ export async function getParticipationNoticeStatus(): Promise<{ needsAssent: boo
   // A successful transport is not an answer about this member. Only the
   // explicit false receipt (or the legacy missing RPC above) skips the notice.
   if (typeof row?.needs_assent !== 'boolean') throw new Error('Couldn’t check the participation notice. Try again.');
-  return { needsAssent: row.needs_assent };
+  const versions = typeof row.notice_version === 'string' && row.notice_version && typeof row.terms_version === 'string' && row.terms_version
+    ? { notice: row.notice_version, terms: row.terms_version } : undefined;
+  return versions ? { needsAssent: row.needs_assent, versions } : { needsAssent: row.needs_assent };
 }
 
-export async function recordParticipationAssent(ctx: ParticipationAssentContext): Promise<boolean> {
-  const { error } = await supabase.rpc('record_participation_assent', {
+export async function recordParticipationAssent(ctx: ParticipationAssentContext, viewerId: string): Promise<boolean> {
+  if (!ctx.versions || !viewerId) return false;
+  const { data, error } = await withDeadline(supabase.rpc('record_participation_assent', {
+    p_expected_user_id: viewerId, p_notice_version: ctx.versions.notice, p_terms_version: ctx.versions.terms,
     p_listing_type: ctx.listingType,
     p_listing_id: ctx.listingId,
     p_organizer_user_id: ctx.organizerUserId,
@@ -51,8 +58,8 @@ export async function recordParticipationAssent(ctx: ParticipationAssentContext)
     // truncates rather than failing the assent
     p_organizer_name: ctx.organizerName.slice(0, 200),
     p_action: ctx.action,
-  });
-  return !error;
+  }), 12_000, 'Participation receipt');
+  return error === null && typeof data === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(data);
 }
 
 export async function getMemberTermsStatus(): Promise<{ needsAcceptance: boolean }> {

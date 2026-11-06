@@ -152,6 +152,11 @@
       "file": "docs/database/review-only/20261106010000_atomic_member_draft_publish.sql",
       "reason": "Private direct plan and draft publication prerequisite. Verify event and membership policies and triggers on a schema copy and obtain separate release approval before promotion or client distribution.",
       "source": "docs/database/review-only/20261106010000_atomic_member_draft_publish.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261106020000_exact_participation_assent.sql",
+      "reason": "Private participation receipt prerequisite. Verify overload dispatch, immutable evidence, grants and server versions on a production-schema copy; separate approval required before promotion or client release.",
+      "source": "docs/database/review-only/20261106020000_exact_participation_assent.sql"
     }
   ],
   "unresolved_versions": [
