@@ -1,4 +1,5 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, create } from 'react-test-renderer';
 import { Modal, Text, TouchableOpacity } from 'react-native';
 import { ReportModal, type ReportModalProps } from '../ReportModal';
@@ -18,7 +19,8 @@ jest.mock('../../../lib/supabase', () => ({ supabase: {
   },
   from: (table: string) => {
     if (table !== 'reports') throw new Error('Unexpected table');
-    return { insert: (...args: unknown[]) => mockInsert(...args) };
+    const read = { eq: () => read, maybeSingle: () => Promise.resolve({data:null,error:null}) };
+    return { insert: (...args: unknown[]) => mockInsert(...args), select: () => read };
   },
 } }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) }));
@@ -55,7 +57,8 @@ function mount(extra: Partial<Props> = {}) {
     close: () => tree.root.findByType(Modal).props.onRequestClose(),
   };
 }
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   jest.useFakeTimers();
   jest.clearAllMocks();
   mockAuthListener = undefined;
@@ -68,7 +71,7 @@ it('submits the original report schema once and shows success after its own clos
   const f = mount();
   f.choose('No-show to plan');
   await act(async () => { await f.submit()(); });
-  expect(mockInsert).toHaveBeenCalledWith({ reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'No-show to plan', reported_event_id: 'plan-a', details: 'Reported from plan' });
+  expect(mockInsert).toHaveBeenCalledWith({ id: expect.any(String), reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'No-show to plan', reported_event_id: 'plan-a', details: 'Reported from plan' });
   expect(f.onClose).toHaveBeenCalledTimes(1);
   f.update({ visible: false });
   act(() => jest.advanceTimersByTime(350));
@@ -147,10 +150,10 @@ it('keeps legacy unscoped user-search submissions and error retry behavior', asy
   mockInsert.mockResolvedValueOnce({ error: new Error('offline') });
   const f = mount({ scope: undefined, eventId: undefined }); f.choose();
   await act(async () => { await f.submit()(); });
-  expect(f.alert()).toMatchObject({ visible: true, title: 'Could not submit report' });
+  expect(f.tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toContain('check whether we received');
   expect(f.onClose).not.toHaveBeenCalled();
   await act(async () => { await f.submit()(); });
-  expect(mockInsert).toHaveBeenLastCalledWith({ reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'Other', reported_event_id: null, details: 'Reported from user search' });
+  expect(mockInsert).toHaveBeenLastCalledWith({ id: expect.any(String), reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'Other', reported_event_id: null, details: 'Reported from user search' });
   expect(f.onClose).toHaveBeenCalledTimes(1);
 });
 
@@ -265,7 +268,7 @@ it('hides an already-visible success on a new target and ignores its retained di
   f.choose(); mockInsert.mockResolvedValueOnce({ error: new Error('offline') });
   await act(async () => { await f.submit()(); });
   act(() => oldDismiss());
-  expect(f.alert()).toMatchObject({ visible: true, title: 'Could not submit report' });
+  expect(f.tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toContain('check whether we received');
 });
 
 it('does not let a retired insert finalizer unlock a newer pending report', async () => {
