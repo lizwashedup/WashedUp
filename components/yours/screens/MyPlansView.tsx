@@ -30,6 +30,8 @@ import {
   type PlanDraft,
 } from '../../../hooks/useMyPlansData';
 import { COMMUNITIES_ENABLED } from '../../../constants/FeatureFlags';
+import { useQueryClient } from '@tanstack/react-query';
+import { planReviewDestination } from '../../../lib/planCopyReview';
 import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
 import { MemberDraftRow } from './MemberDraftRow';
 import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags';
@@ -48,6 +50,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
   const cardAppearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
   const router = useRouter();
+  const client = useQueryClient();
   const { blockUser } = useBlock();
 
   const [waitlistExpanded, setWaitlistExpanded] = useState(false);
@@ -74,15 +77,14 @@ export default function MyPlansView({ userId }: { userId: string }) {
   const openDraft = useCallback((draft: PlanDraft) => {
     if (!isCurrent()) return;
     hapticLight();
-    router.push({
-      pathname: '/(tabs)/post',
-      params: {
-        ...buildDuplicatePostParams(draft, null), draftId: draft.id, draftOwnerId: userId, draftOpenRequest: randomUUID(),
-        prefillCreatorMessage: draft.host_message ?? '', similarPlanRequest: '',
-        prefillInvitePersonId: '', prefillInvitePersonName: '', prefillInvitePersonPhoto: '',
-      },
-    } as never);
-  }, [router, owner, userId]);
+    const request = randomUUID();
+    const prefill = {
+      ...buildDuplicatePostParams(draft, null), draftId: draft.id, draftOwnerId: userId, draftOpenRequest: request,
+      prefillCreatorMessage: draft.host_message ?? '', similarPlanRequest: '',
+      prefillInvitePersonId: '', prefillInvitePersonName: '', prefillInvitePersonPhoto: '',
+    };
+    router.push(planReviewDestination(client, userId, prefill, request));
+  }, [client, router, owner, userId]);
 
   const draftsHeader = COMMUNITIES_ENABLED && planDrafts.length > 0 ? (
     <View>
