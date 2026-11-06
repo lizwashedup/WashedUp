@@ -282,7 +282,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     joinedNotification.current = null;
     if (completed) requestPlanNotificationPrompt({ userId: completed.userId, planId: completed.planId, reason: 'joined' }, completed.isCurrent);
   };
-  const [pendingGreetingProblem, setPendingGreetingProblem] = useState<string | null>(null);
+  const [pendingGreetingProblem, setPendingGreetingProblem] = useState<{ text: string; notSent: boolean } | null>(null);
   const [noticePending, setNoticePending] = useState<
     { action: 'join'; message?: string; isCurrent: () => boolean } | { action: 'exception'; isCurrent: () => boolean } | null
   >(null);
@@ -708,13 +708,13 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const joiningRef = useRef(false);
   const [joinPreparing, setJoinPreparing] = useState(false);
   const joinReady = !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
-  const showGreetingProblem = (greeting: string) => {
+  const showGreetingProblem = (greeting: { text: string; notSent: boolean }) => {
     const recovery = {};
     const isCurrent = joinMutation.isCurrent;
     greetingRecoveryRef.current = recovery;
     setBrandedAlert({
       visible: true, title: 'You’re in', scrollMessage: true,
-      message: `We couldn’t confirm your introduction in the chat. Check the conversation before sending it again.\n\nYour introduction:\n${greeting}`,
+      message: `${greeting.notSent ? "Your introduction wasn’t sent. You can share it in the plan chat." : "We couldn’t confirm your introduction in the chat. Check the conversation before sending it again."}\n\nYour introduction:\n${greeting.text}`,
       buttons: [{ text: 'Open chat', onPress: () => {
         if (greetingRecoveryRef.current !== recovery || !isCurrent()) return;
         greetingRecoveryRef.current = null;
@@ -736,7 +736,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       const finishInvitation=invitationCompletion.current;invitationCompletion.current=null;
       finishInvitation?.();
       setJoinError(null);
-      setJoinMessage(result.greetingUnconfirmed ?? '');
+      const greetingText = result.greetingNotSent ?? result.greetingUnconfirmed;
+      setJoinMessage(greetingText ?? '');
       setJoinConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ['events', 'members', id] });
       queryClient.invalidateQueries({ queryKey: ['events', 'detail', id] });
@@ -750,11 +751,12 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       // Clear local waitlist state since the trigger deleted the row
       waitlist.clearAfterJoining();
 
-      if (result.greetingUnconfirmed) {
+      if (greetingText) {
+        const recovery = { text: greetingText, notSent: !!result.greetingNotSent };
         setShareAfterJoinPending(false);
         setShareAfterJoinVisible(false);
-        if (Platform.OS === 'ios' && joinModalVisible) setPendingGreetingProblem(result.greetingUnconfirmed);
-        else showGreetingProblem(result.greetingUnconfirmed);
+        if (Platform.OS === 'ios' && joinModalVisible) setPendingGreetingProblem(recovery);
+        else showGreetingProblem(recovery);
         setJoinModalVisible(false);
         return;
       }

@@ -7,11 +7,12 @@ import { isPlanPast } from '../lib/planTime';
 import { getPlanTerminalStatus } from '../lib/planLifecycle';
 import { friendlyError } from '../lib/friendlyError';
 import { logError } from '../lib/logger';
+import { withDeadline, withTimeout } from '../lib/withTimeout';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { classifyPlanJoinReceipt, type PlanJoinRpc } from '../lib/planJoinSafety';
 import type { CirclePlanContext } from './useCirclePlanContext';
 
-export type PlanJoinResult = { greetingUnconfirmed?: string };
+export type PlanJoinResult = { greetingUnconfirmed?: string; greetingNotSent?: string };
 
 type Options = {
   eventId: string; viewerId: string | null; epoch: number; isCurrent: () => boolean;
@@ -37,6 +38,33 @@ const rejectedTransactionCodes = new Set([
   'P0001', '42501', '23502', '23503', '23505', '23514', '22P02',
   '28000', '28P01', '42883', '42703', '42P01', '40001', '40P01',
 ]);
+
+/** Membership is already confirmed. Stop waiting for optional chat receipts
+ * as a group; never retry an insert or start one after recovery is shown. */
+async function deliverJoinMessages(call: Call): Promise<PlanJoinResult> {
+  const budget = 12_000;
+  const started = performance.now();
+  const systemReceipt = async () => {
+    try {
+      const result = await supabase.from('messages').insert({ event_id: call.eventId, user_id: call.viewerId, content: 'joined the plan', message_type: 'system' });
+      if (result.error) logError(result.error, 'plan.join.system');
+    } catch (error) { logError(error, 'plan.join.system'); }
+    return true;
+  };
+  // Only wait on the individual insert. A late completion cannot continue a
+  // background sequence and send a greeting after we told the member it wasn't sent.
+  const systemSettled = await withTimeout(systemReceipt(), budget, false);
+  if (!systemSettled) logError(new Error('System message receipt timed out'), 'plan.join.system');
+  if (!call.greeting || !call.isCurrent()) return {};
+  const remaining = budget - (performance.now() - started);
+  if (!systemSettled || remaining <= 0) return { greetingNotSent: call.greeting };
+  try {
+    const result = await withDeadline(supabase.from('messages').insert({ event_id: call.eventId, user_id: call.viewerId, content: call.greeting, message_type: 'user' }), remaining, 'Introduction receipt');
+    if (result?.error === null) return {};
+    logError(result?.error ?? new Error('Missing greeting receipt'), 'plan.join.greeting');
+  } catch (error) { logError(error, 'plan.join.greeting'); }
+  return { greetingUnconfirmed: call.greeting };
+}
 
 /** Join receipts and optional greetings belong to their initiating account,
  * plan and focused visit. Unknown membership never enables a blind retry. */
@@ -108,28 +136,8 @@ export function usePlanJoin(options: Options) {
       if (receipt.kind === 'denied') throw new ConfirmedJoinRefusal(denialCopy[receipt.reason]);
       call.state.result = 'joined'; // remains locked even if this visit retired
       if (!call.isCurrent()) return false;
-      const joined: PlanJoinResult = {};
-      if (call.ownChat) {
-        // Membership is confirmed. Optional delivery cannot roll it back or
-        // enable another join. Do not replay a potentially delivered message.
-        try {
-          const result = await supabase.from('messages').insert({ event_id: call.eventId, user_id: call.viewerId, content: 'joined the plan', message_type: 'system' });
-          if (result.error) logError(result.error, 'plan.join.system');
-        } catch (error) { logError(error, 'plan.join.system'); }
-        if (call.isCurrent() && call.greeting) {
-          try {
-            const result = await supabase.from('messages').insert({ event_id: call.eventId, user_id: call.viewerId, content: call.greeting, message_type: 'user' });
-            if (result.error !== null) {
-              joined.greetingUnconfirmed = call.greeting;
-              logError(result.error ?? new Error('Missing greeting receipt'), 'plan.join.greeting');
-            }
-          } catch (error) {
-            joined.greetingUnconfirmed = call.greeting;
-            logError(error, 'plan.join.greeting');
-          }
-        }
-      }
-      return joined;
+      if (!call.ownChat) return {};
+      return deliverJoinMessages(call);
     },
     onSuccess: (joined, call) => { if (joined && call.isCurrent()) latest.current.onJoined(joined); },
     onError: (error, call) => {
