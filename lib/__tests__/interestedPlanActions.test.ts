@@ -21,21 +21,23 @@ it.each([null,{...source,id:'other'},{...source,allow_duplicate:false},{...sourc
  mockRead.mockResolvedValue({data,error:null});await expect(fetchSimilarPlanParams('plan','fresh')).rejects.toThrow('no longer available');
 });
 it('preserves read failures',async()=>{mockRead.mockResolvedValue({data:null,error:new Error('offline')});await expect(fetchSimilarPlanParams('plan','fresh')).rejects.toThrow('offline');});
+const planId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const signalId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 it('removes the current owned signal using its signal id rather than the event id',async()=>{
- mockRpc.mockResolvedValueOnce({data:[{event_id:'plan',signal_id:'own-signal'}],error:null});
- await removeInterestedPlan('plan',()=>true);expect(mockRpc.mock.calls).toEqual([['get_user_interest_signals'],['remove_interest_signal',{p_signal_id:'own-signal'}]]);
+ mockRpc.mockResolvedValueOnce({data:[{event_id:planId,signal_id:signalId}],error:null});
+ await removeInterestedPlan(planId,()=>true);expect(mockRpc.mock.calls).toEqual([['get_user_interest_signals'],['remove_interest_signal',{p_signal_id:signalId}]]);
 });
-it('treats a fresh absence as already removed and performs no write',async()=>{mockRpc.mockResolvedValue({data:[],error:null});await expect(removeInterestedPlan('plan',()=>true)).resolves.toBe(true);expect(mockRpc).toHaveBeenCalledTimes(1);});
-it('does not dispatch removal after the account or visit changes during the read',async()=>{mockRpc.mockResolvedValue({data:[{event_id:'plan',signal_id:'signal'}],error:null});await expect(removeInterestedPlan('plan',()=>false)).resolves.toBe(false);expect(mockRpc).toHaveBeenCalledTimes(1);});
-it.each([null,{},[{event_id:'plan'}]])('fails closed on a malformed active-interest response: %s',async data=>{mockRpc.mockResolvedValue({data,error:null});await expect(removeInterestedPlan('plan',()=>true)).rejects.toThrow('Could not check');expect(mockRpc).toHaveBeenCalledTimes(1);});
-it('surfaces removal failure for retry',async()=>{mockRpc.mockResolvedValueOnce({data:[{event_id:'plan',signal_id:'signal'}],error:null}).mockResolvedValueOnce({data:null,error:new Error('offline')});await expect(removeInterestedPlan('plan',()=>true)).rejects.toThrow('offline');});
+it('treats a fresh absence as already removed and performs no write',async()=>{mockRpc.mockResolvedValue({data:[],error:null});await expect(removeInterestedPlan(planId,()=>true)).resolves.toBe(true);expect(mockRpc).toHaveBeenCalledTimes(1);});
+it('does not dispatch removal after the account or visit changes during the read',async()=>{mockRpc.mockResolvedValue({data:[{event_id:planId,signal_id:signalId}],error:null});await expect(removeInterestedPlan(planId,()=>false)).resolves.toBe(false);expect(mockRpc).toHaveBeenCalledTimes(1);});
+it.each([null,{},[{}],[null],[{event_id:'bad-id'}],[{event_id:signalId},{}],[{event_id:planId}],[{event_id:planId,signal_id:'broken'}]].map(data=>({data})))('fails closed on a malformed active-interest response: %s',async ({data})=>{mockRpc.mockResolvedValue({data,error:null});await expect(removeInterestedPlan(planId,()=>true)).rejects.toThrow('Could not check');expect(mockRpc).toHaveBeenCalledTimes(1);});
+it('surfaces removal failure for retry',async()=>{mockRpc.mockResolvedValueOnce({data:[{event_id:planId,signal_id:signalId}],error:null}).mockResolvedValueOnce({data:null,error:new Error('offline')});await expect(removeInterestedPlan(planId,()=>true)).rejects.toThrow('offline');});
 it('bounds a stalled removal and retries through a new server read',async()=>{
- jest.useFakeTimers();mockRpc.mockResolvedValueOnce({data:[{event_id:'plan',signal_id:'signal'}],error:null}).mockReturnValueOnce(new Promise(()=>{}));
- const pending=expect(removeInterestedPlan('plan',()=>true)).rejects.toThrow('took too long');await Promise.resolve();await Promise.resolve();await jest.advanceTimersByTimeAsync(8000);await pending;
- mockRpc.mockResolvedValueOnce({data:[],error:null});await removeInterestedPlan('plan',()=>true);expect(mockRpc).toHaveBeenCalledTimes(3);
+ jest.useFakeTimers();mockRpc.mockResolvedValueOnce({data:[{event_id:planId,signal_id:signalId}],error:null}).mockReturnValueOnce(new Promise(()=>{}));
+ const pending=expect(removeInterestedPlan(planId,()=>true)).rejects.toThrow('took too long');await Promise.resolve();await Promise.resolve();await jest.advanceTimersByTimeAsync(8000);await pending;
+ mockRpc.mockResolvedValueOnce({data:[],error:null});await removeInterestedPlan(planId,()=>true);expect(mockRpc).toHaveBeenCalledTimes(3);
 });
 
 it('keeps a missing write receipt retryable',async()=>{
- mockRpc.mockResolvedValueOnce({data:[{event_id:'plan',signal_id:'signal'}],error:null}).mockResolvedValueOnce({});
- await expect(removeInterestedPlan('plan',()=>true)).rejects.toThrow('confirm removal');
+ mockRpc.mockResolvedValueOnce({data:[{event_id:planId,signal_id:signalId}],error:null}).mockResolvedValueOnce({});
+ await expect(removeInterestedPlan(planId,()=>true)).rejects.toThrow('confirm removal');
 });
