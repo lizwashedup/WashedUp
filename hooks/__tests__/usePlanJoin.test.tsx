@@ -114,7 +114,9 @@ it.each([
 ])('keeps a confirmed refusal separate from unknown: %p', async (result, copy, shouldLog) => {
   mockRpc.mockImplementation(async (name: string) => name === 'can_join_event_gender' ? { data: true } : result);
   const f = await mount(); f.join('Hi'); await flush();
-  expect(f.current.unconfirmed).toBe(false); expect(f.onError).toHaveBeenCalledWith(expect.stringContaining(copy));
+  expect(f.current.unconfirmed).toBe(false);
+  if (result.data) expect(f.onError).toHaveBeenCalledWith(expect.stringContaining(copy), result.data);
+  else expect(f.onError).toHaveBeenCalledWith(expect.stringContaining(copy));
   expect(f.onJoined).not.toHaveBeenCalled(); expect(mockInsert).not.toHaveBeenCalled();
   if (shouldLog) expect(logError).toHaveBeenCalledWith(expect.any(Error), 'plan.join');
   else expect(logError).not.toHaveBeenCalled();

@@ -214,3 +214,21 @@ it('connects the greeting to the keyboard bar in the same iOS modal', () => {
   expect(f.callbacks.onClose).not.toHaveBeenCalled();
   expect(f.callbacks.onJoin).not.toHaveBeenCalled();
 });
+
+it('returns to availability after the last spot goes, retiring Join and retaining the introduction', async () => {
+  const f = mount();
+  const oldJoin = f.button('Join').props.onPress;
+  f.update({ unavailable: true, error: 'This plan just filled up.', canJoin: false });
+  await act(async () => { oldJoin(); f.input().props.onChangeText('late input'); });
+  expect(f.callbacks.onJoin).not.toHaveBeenCalled();
+  expect(f.callbacks.onMessage).not.toHaveBeenCalled();
+  expect(f.button("I'm coming").props.accessibilityState.checked).toBe(true);
+  expect(f.button('Check plan')).toBeUndefined();
+  await act(async () => f.button('View plan').props.onPress());
+  expect(f.callbacks.onCheck).toHaveBeenCalledTimes(1);
+  f.update({ visible: false });
+  f.update({ visible: true, unavailable: false, canJoin: true, error: null });
+  expect(f.input().props.value).toBe('Hi everyone! Looking forward to it.');
+  await act(async () => f.button('Join').props.onPress());
+  expect(f.callbacks.onJoin).toHaveBeenCalledTimes(1);
+});

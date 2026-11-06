@@ -989,3 +989,39 @@ it('opens chat once on Android without waiting for an iOS dismissal callback', a
   expect(mockPush).toHaveBeenCalledTimes(1);
   expect(mockNotificationRequest).toHaveBeenCalledTimes(1);
 });
+
+it.each(['full', 'waitlist_priority'])('a confirmed %s refusal returns to availability without accepting or waitlisting', async reason => {
+  mockInvitation.invitation = { id: 'invite' };
+  await mount();
+  act(() => button('Join the plan').props.onPress());
+  act(() => { joinSheet().onMessage('Hello from the park'); joinSheet().onConfirmed(true); });
+  act(() => mockJoinOptions.onError('Confirmed availability change', reason));
+  expect(joinSheet().unavailable).toBe(true);
+  expect(mockJoinOptions.ready).toBe(false);
+  await act(async () => joinSheet().onJoin());
+  expect(mockJoin).not.toHaveBeenCalled();
+  await act(async () => joinSheet().onCheck());
+  expect(joinSheet().visible).toBe(false);
+  expect(mockRetryMembers).toHaveBeenCalled();
+  expect(mockWaitlistChange).not.toHaveBeenCalled();
+  expect(mockInviteComplete).not.toHaveBeenCalled();
+  act(() => button('Join the plan').props.onPress());
+  expect(mockInvitePrepare).toHaveBeenCalledTimes(2);
+  expect(joinSheet()).toMatchObject({ canJoin: true, unavailable: false, message: 'Hello from the park', confirmed: true });
+});
+
+it('reserves the ordinary claim path for a notified waitlisted viewer when capacity fills', async () => {
+  await mount();
+  act(() => button("Let's Go →").props.onPress());
+  fillOrdinaryPlan();
+  await act(async () => tree.update(<PlanDetailScreen />));
+  expect(joinSheet().unavailable).toBe(true);
+  expect(mockJoinOptions.ready).toBe(false);
+  await act(async () => joinSheet().onCheck());
+  mockWaitlist.entry = { id: 'existing-entry', notified: true };
+  await act(async () => tree.update(<PlanDetailScreen />));
+  act(() => button('Claim Your Spot').props.onPress());
+  expect(joinSheet().unavailable).toBe(false);
+  expect(mockJoinOptions.ready).toBe(true);
+  expect(mockWaitlistChange).not.toHaveBeenCalled();
+});
