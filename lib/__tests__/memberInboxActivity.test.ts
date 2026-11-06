@@ -1,4 +1,4 @@
-import { attributeCircleCardUnreads } from '../memberInboxActivity';
+import { attributeGroupUnreads } from '../memberInboxActivity';
 import { restrictGroupPreview, type ChatPreview } from '../chatPreview';
 import { supabase } from '../supabase';
 
@@ -27,7 +27,32 @@ it('checks each group’s own read position and keeps its permitted badge withou
     return q;
   });
   const dm=card('private',true);
-  const rows=await attributeCircleCardUnreads([card('group-a'),card('group-b'),dm],'viewer',blocked,read);
+  const rows=await attributeGroupUnreads('circle',[card('group-a'),card('group-b'),dm],'viewer',blocked,read);
   expect(rows.map(row=>restrictGroupPreview(row,blocked).unread_count)).toEqual([1,2,4]);
   expect(rows[2]).toBe(dm);
+});
+
+it.each(['event','circle'] as const)('recovers a permitted %s unread behind twenty blocked messages', async kind => {
+  const key = kind === 'circle' ? 'circle_id' : 'event_id';
+  const otherKey = kind === 'circle' ? 'event_id' : 'circle_id';
+  const messages = [
+    ...Array.from({length:20},()=>({[key]:'group',user_id:'blocked',created_at:'04'})),
+    {[key]:'group',user_id:'allowed',created_at:'03'}, {[key]:'group',user_id:'allowed',created_at:'02'},
+    {[key]:'group',user_id:'viewer',created_at:'03'}, {[otherKey]:'other',user_id:'allowed',created_at:'03'},
+  ];
+  jest.mocked(supabase.from).mockImplementation((table:string)=>{
+    let cap=Infinity;
+    const filters: ((r:Record<string,string>)=>boolean)[]=[];
+    const q:any={
+      select:()=>q,eq:(k:string,v:string)=>{filters.push(r=>r[k]===v);return q;},
+      in:(k:string,v:string[])=>{filters.push(r=>v.includes(r[k]));return q;},
+      neq:(k:string,v:string)=>{filters.push(r=>r[k]!==v);return q;},gt:(k:string,v:string)=>{filters.push(r=>r[k]>v);return q;},
+      not:(k:string,_op:string,v:string)=>{const ids=JSON.parse('['+v.slice(1,-1)+']');filters.push(r=>!ids.includes(r[k]));return q;},
+      order:()=>q,limit:(n:number)=>{cap=n;return q;},
+      then:(ok:Function)=>ok({data:(table==='messages'?messages:[{[key]:'group',user_id:'viewer',last_read_at:'02'}])
+        .filter(row=>filters.every(f=>f(row as Record<string,string>))).slice(0,cap),error:null})
+    };return q;
+  });
+  const [row]=await attributeGroupUnreads(kind,[{...card('group'),kind,unread_count:20,unread_by_author:{blocked:20}}],'viewer',blocked,read);
+  expect(restrictGroupPreview(row,blocked)).toMatchObject({unread_count:1,unread_by_author:{allowed:1}});
 });

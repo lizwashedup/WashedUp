@@ -1,4 +1,4 @@
-import { checkInboxActivityResponses, checkLatestMessageParents } from './inboxActivityResponse';
+import { checkInboxActivityResponses, checkLatestMessageParents, peerActivityRows, PEER_ACTIVITY_LIMIT } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { getPlanChatTiming } from './planChatExpiry';
 import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chatPreview';
@@ -64,7 +64,7 @@ export async function fetchEventChatPreviews(
     }
   }
 
-  // Run all 5 queries in parallel against allEventIds. Member-count drift
+  // Run the four queries in parallel against allEventIds. Member-count drift
   // correction (events.member_count vs real joined rows) used to be a
   // sequential pre-step before the batch; folding it in saves a round-trip.
   // The memberRows2 query also pulls first_name_display so we get sender
@@ -78,23 +78,20 @@ export async function fetchEventChatPreviews(
         .in('event_id', allEventIds)
         .eq('status', 'joined'),
       supabase.from('events')
-        .select('id, latest_message:messages!messages_event_id_fkey(event_id, content, created_at, image_url, audio_url, message_type, user_id)')
+        .select('id, latest_message:messages!messages_event_id_fkey(event_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_event_id_fkey(event_id, created_at, user_id)')
         .in('id', allEventIds)
         .order('created_at', { referencedTable: 'latest_message', ascending: false })
         .order('id', { referencedTable: 'latest_message', ascending: false })
-        .limit(1, { referencedTable: 'latest_message' }),
+        .limit(1, { referencedTable: 'latest_message' })
+        .neq('peer_activity.user_id', userId)
+        .order('created_at', { referencedTable: 'peer_activity', ascending: false })
+        .order('id', { referencedTable: 'peer_activity', ascending: false })
+        .limit(PEER_ACTIVITY_LIMIT, { referencedTable: 'peer_activity' }),
       supabase
         .from('chat_reads')
         .select('event_id, last_read_at')
         .eq('user_id', userId)
         .in('event_id', allEventIds),
-      supabase
-        .from('messages')
-        .select('event_id, created_at, user_id')
-        .in('event_id', allEventIds)
-        .neq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(allEventIds.length * 20),
       supabase
         .from('event_members')
         .select('event_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
@@ -102,7 +99,7 @@ export async function fetchEventChatPreviews(
         .eq('status', 'joined'),
     ]));
     checkInboxActivityResponses(enrichment);
-    const [{ data: memberCountRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = enrichment;
+    const [{ data: memberCountRows }, { data: messageParents }, { data: allReads }, { data: memberRows2 }] = enrichment;
 
     const realCounts: Record<string, number> = {};
     (memberCountRows ?? []).forEach((r: any) => {
@@ -148,7 +145,7 @@ export async function fetchEventChatPreviews(
 
     const unreadByAuthor: Record<string, Record<string, number>> = {};
     const unreadMap: Record<string, number> = {};
-    (otherMessages ?? []).forEach((msg: any) => {
+    peerActivityRows(messageParents).forEach((msg: any) => {
       const lastRead = readMap[msg.event_id];
       if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
         if (msg.user_id) {

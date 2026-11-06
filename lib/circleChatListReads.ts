@@ -1,4 +1,4 @@
-import { checkInboxActivityResponses, checkLatestMessageParents } from './inboxActivityResponse';
+import { checkInboxActivityResponses, checkLatestMessageParents, peerActivityRows, PEER_ACTIVITY_LIMIT } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { circleDisplay, type DisplayMember } from './circles/display';
 import { seedSender } from './chatEngine/senderCache';
@@ -46,18 +46,16 @@ export async function fetchCircleChats(
     supabase.from('circle_members').select('circle_id').in('circle_id', circleIds).eq('status', 'joined'),
     // Limit inside each parent so busy chats cannot crowd out older history.
     supabase.from('circles')
-      .select('id, latest_message:messages!messages_circle_id_fkey(circle_id, content, created_at, image_url, audio_url, message_type, user_id)')
+      .select('id, latest_message:messages!messages_circle_id_fkey(circle_id, content, created_at, image_url, audio_url, message_type, user_id), peer_activity:messages!messages_circle_id_fkey(circle_id, created_at, user_id)')
       .in('id', circleIds)
       .order('created_at', { referencedTable: 'latest_message', ascending: false })
       .order('id', { referencedTable: 'latest_message', ascending: false })
-      .limit(1, { referencedTable: 'latest_message' }),
+      .limit(1, { referencedTable: 'latest_message' })
+      .neq('peer_activity.user_id', userId)
+      .order('created_at', { referencedTable: 'peer_activity', ascending: false })
+      .order('id', { referencedTable: 'peer_activity', ascending: false })
+      .limit(PEER_ACTIVITY_LIMIT, { referencedTable: 'peer_activity' }),
     supabase.from('chat_reads').select('circle_id, last_read_at').eq('user_id', userId).in('circle_id', circleIds),
-    supabase.from('messages')
-      .select('circle_id, created_at, user_id')
-      .in('circle_id', circleIds)
-      .neq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(circleIds.length * 20),
     supabase.from('circle_members')
       .select('circle_id, user_id, profiles_public!inner(profile_photo_url, first_name_display)')
       .in('circle_id', circleIds)
@@ -65,7 +63,7 @@ export async function fetchCircleChats(
   ]);
 
   checkInboxActivityResponses(results);
-  const [{ data: countRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows }] = results;
+  const [{ data: countRows }, { data: messageParents }, { data: allReads }, { data: memberRows }] = results;
   const realCounts: Record<string, number> = {};
   (countRows ?? []).forEach((r: any) => { realCounts[r.circle_id] = (realCounts[r.circle_id] ?? 0) + 1; });
 
@@ -107,7 +105,7 @@ export async function fetchCircleChats(
 
   const unreadMap: Record<string, number> = {};
   const unreadByAuthor: Record<string, Record<string, number>> = {};
-  (otherMessages ?? []).forEach((msg: any) => {
+  peerActivityRows(messageParents).forEach((msg: any) => {
     const lastRead = readMap[msg.circle_id];
     if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
       if (msg.user_id) {

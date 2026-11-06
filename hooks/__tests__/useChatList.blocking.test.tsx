@@ -37,7 +37,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
           ? viewer === 'viewer' ? mockJoinedIds.map(mockJoined) : []
           : mockPartialRoster && columns.includes('profiles_public') ? mockMembers.slice(0,1) : mockMembers;
         if (table === 'circles' && mockPreviewError) return Promise.resolve({ data: null, error: new Error('Preview unavailable') }).then(resolve, reject);
-        if (table === 'circles') data = [{ id: 'dm', latest_message: [{ user_id: 'peer', content: 'Private preview', created_at: '2026-10-07T20:00:00Z' }] }];
+        if (table === 'circles') data = [{ id: 'dm', peer_activity: [], latest_message: [{ user_id: 'peer', content: 'Private preview', created_at: '2026-10-07T20:00:00Z' }] }];
         return Promise.resolve({ data, error: null }).then(resolve, reject);
       },
     }; return query;
