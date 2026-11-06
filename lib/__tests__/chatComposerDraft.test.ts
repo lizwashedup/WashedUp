@@ -96,3 +96,12 @@ it('recovers an older pending reply selection and attempt without changing the s
   expect(prepareChatComposer(restored)).toEqual({...draft.attempt,replyId:parent});
   expect(restored.text).toBe('Later typing');
 });
+
+it('restores an older edit of a sending bubble as an edit of the same author and original words',async()=>{
+  const edit={id:'optimistic-'+parent,content:'First note'};
+  const draft={...emptyChatComposer(),text:'Later typing',edit,attempt:{id:edit.id,text:'First note edited',replyId:null,edit}};
+  await saveChatComposer(room,owner,draft);
+  const restored=(await readChatComposer(room,owner)).draft;
+  expect(restored.edit).toEqual({id:parent,content:'First note'});
+  expect(prepareChatComposer(restored)).toEqual({...draft.attempt,id:parent,edit:restored.edit});
+});

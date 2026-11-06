@@ -79,7 +79,7 @@ import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { compareChatSequence } from '../../lib/chatPaging';
 import { PhotoSendSession } from '../../lib/photoSendSession';
 import { useChatComposerDraft } from '../../hooks/useChatComposerDraft';
-import { chatReplyTargetId, checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
+import { chatMessageTargetId, checkChatComposerAttempt, verifyChatComposerTarget, type ChatDraftAttempt } from '../../lib/chatComposerDraft';
 import { useChat, isObsoleteChatOperation, isUnconfirmedChatReaction, ChatMessage, MessageReaction, ReplyTo } from '../../hooks/useChat';
 import { friendlyError } from '../../lib/friendlyError';
 import MiniProfileCard from '../MiniProfileCard';
@@ -1301,7 +1301,7 @@ function ChatThread(props: ChatThreadProps) {
       (item): item is ChatMessage => !('type' in item) && item.id === msgId,
     );
     if (!msg) return;
-    changeDraft({ reply: { id: chatReplyTargetId(msg.id), content: msg.content, senderName: msg.user_id === currentUserId ? 'You' : msg.sender?.first_name ?? 'Someone' }, edit: null });
+    changeDraft({ reply: { id: chatMessageTargetId(msg.id), content: msg.content, senderName: msg.user_id === currentUserId ? 'You' : msg.sender?.first_name ?? 'Someone' }, edit: null });
     setActivePanel(null);
     requestAnimationFrame(() => { if (canWrite()) textInputRef.current?.focus(); });
   }, [canWrite, changeDraft, currentUserId]);
@@ -1329,11 +1329,11 @@ function ChatThread(props: ChatThreadProps) {
       const latest = currentMessage()!;
       hapticLight(); draftRevision.current++; draftContextRevision.current++;
       const mentions = readChatMentionDocument(latest.content, latest.mention_data);
-      changeDraft({ edit: { id: latest.id, content: latest.content, mentions }, reply: null, text: latest.content, mentions });
+      changeDraft({ edit: { id: chatMessageTargetId(latest.id), content: latest.content, mentions }, reply: null, text: latest.content, mentions });
       inputTextRef.current = latest.content; setActivePanel(null);
       requestAnimationFrame(() => { if (menuIsCurrent() && canWrite()) textInputRef.current?.focus(); });
     } });
-    if (own) buttons.push({ text: 'delete', style: 'destructive', onPress: () => {
+    if (own && !message.id.startsWith('optimistic-')) buttons.push({ text: 'delete', style: 'destructive', onPress: () => {
       if (!menuIsCurrent()) return;
       hapticMedium(); setAlertInfo({ title: 'Delete this message?', message: '', buttons: [
         { text: 'Cancel', style: 'cancel' },
