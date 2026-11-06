@@ -26,6 +26,7 @@ let mockBroadcasts: any[], mockMessages: any[], mockFirstMessage: any;
 let mockSaidHi: boolean | undefined, mockLedCommunities: { id: string }[];
 const mockPush = jest.fn(), mockInvalidate = jest.fn().mockResolvedValue(undefined);
 const mockQueryClient = { invalidateQueries: mockInvalidate, cancelQueries: jest.fn().mockResolvedValue(undefined) };
+const mockApplyRemoval = jest.fn();
 const mockRefresh = jest.fn().mockResolvedValue(undefined);
 const mockCurrent = () => true;
 const mockSend = jest.fn(), mockDeleteOwn = jest.fn(), mockBlock = jest.fn();
@@ -46,7 +47,7 @@ jest.mock('../../../hooks/useNetworkStatus', () => ({ useNetworkStatus: () => ({
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: mockBlock }) }));
 jest.mock('../../../lib/url', () => ({ ...jest.requireActual('../../../lib/url'), openUrl: jest.fn() }));
 jest.mock('../../../hooks/useTypingIndicator', () => ({ useTypingIndicator: () => ({ typingUsers: [], stopTyping: jest.fn(), broadcastTyping: jest.fn() }) }));
-jest.mock('../../../hooks/useTopicChat', () => ({ isObsoleteTopicOperation: () => false, useTopicChat: () => ({ isCurrent: mockCurrent, messages: mockMessages, loading: false, currentUserId: mockViewerId, currentUserName: 'Alice', refresh: mockRefresh, sendMessage: mockSend, deleteMessage: mockDeleteOwn }) }));
+jest.mock('../../../hooks/useTopicChat', () => ({ isObsoleteTopicOperation: () => false, useTopicChat: () => ({ isCurrent: mockCurrent, messages: mockMessages, loading: false, currentUserId: mockViewerId, currentUserName: 'Alice', refresh: mockRefresh, sendMessage: mockSend, deleteMessage: mockDeleteOwn, applyConfirmedRemoval: mockApplyRemoval }) }));
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => mockQueryClient,
   useInfiniteQuery: () => ({ data: { pages: [{ messages: mockBroadcasts }] }, isLoading: false, isError: false, refetch: jest.fn().mockResolvedValue(undefined) }),
@@ -199,7 +200,8 @@ it('topic photo long-press keeps reply and applies moderation only to its owning
   act(() => attachments().find(node => node.props.senderName === 'Bob')!.props.onLongPress());
   expect(menuLabels()).toContain('remove this message');
   await act(async () => { await alert().buttons.find((button: any) => button.text === 'remove this message').onPress(); });
-  expect(deleteTopicMessage).toHaveBeenCalledWith(photoIds['old-photo']);
+  expect(deleteTopicMessage).toHaveBeenCalledWith(mockRoomId, photoIds['old-photo'], 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', expect.objectContaining({userId:mockViewerId}));
+  expect(mockApplyRemoval).toHaveBeenCalledWith(photoIds['old-photo']);
   expect(mockRefresh).toHaveBeenCalledTimes(1);
   expect(mockDeleteOwn).not.toHaveBeenCalled();
   expect(mockSend).not.toHaveBeenCalled();
@@ -295,4 +297,18 @@ it.each([false, undefined])('topic keeps its viewer closed while the say-hi gate
   expect(viewer().selectedId).toBeNull();
   act(() => open());
   expect(visible()).toBeUndefined();
+});
+
+
+it('keeps a late moderation result in the original room and prevents a repeat write',async()=>{
+  mockLedCommunities=[{id:'11111111-1111-4111-8111-111111111111'}];
+  let finish!:()=>void; jest.mocked(deleteTopicMessage).mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+  await mount('topic');
+  act(()=>attachments().find(n=>n.props.senderName==='Bob')!.props.onLongPress());
+  const remove=alert().buttons.find((b:any)=>b.text==='remove this message').onPress;
+  let first!:Promise<void>;act(()=>{ first=remove(); void remove(); });
+  expect(deleteTopicMessage).toHaveBeenCalledTimes(1);
+  mockRoomId='other-topic'; await update();
+  await act(async()=>{finish();await first;});
+  expect(mockApplyRemoval).not.toHaveBeenCalled();expect(mockRefresh).not.toHaveBeenCalled();
 });

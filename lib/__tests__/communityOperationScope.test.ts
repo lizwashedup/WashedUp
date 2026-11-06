@@ -645,14 +645,32 @@ it('bounds topic moderation deletion without repeating its write', async () => {
   try {
     execute.mockReturnValueOnce(deletion.promise);
     let settled = false;
-    operation = community.deleteTopicMessage('message-one').catch(error => error).then(value => {settled=true;return value;});
+    operation = community.deleteTopicMessage('topic-a','message-one','other-author',scope()).catch(error => error).then(value => {settled=true;return value;});
     await flush(); await jest.advanceTimersByTimeAsync(12000); await flush();
     expect(settled).toBe(true);
     expect(await operation).toMatchObject({name:'RequestDeadlineError'});
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({table:'community_topic_messages',operation:'delete',filters:[['id','message-one']]});
+    expect(requests[0]).toMatchObject({table:'community_topic_messages',operation:'delete',filters:[['id','message-one'],['sender_id','other-author'],['topic_id','topic-a']]});
   } finally {
     deletion.resolve({error:null}); await operation;
     jest.useRealTimers();
   }
+});
+
+it('a moderator’s empty deletion receipt requires a read of the selected author and topic', async () => {
+  execute.mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce({data:{id:'message-one'},error:null});
+  await expect(community.deleteTopicMessage('topic-a','message-one','other-author',scope())).rejects.toThrow('still here');
+  expect(requests.map(r=>r.operation)).toEqual(['delete','select']);
+  for (const request of requests) expect(request.filters).toEqual([['id','message-one'],['sender_id','other-author'],['topic_id','topic-a']]);
+});
+it('a moderator who changes account before verification never starts the write', async () => {
+  const reading=pending();getUser.mockReturnValueOnce(reading.promise as any);
+  const result=community.deleteTopicMessage('topic-a','message-one','other-author',scope());
+  const failed=expect(result).rejects.toMatchObject(obsolete);
+  epoch++;reading.resolve(auth('account-b'));await failed;expect(requests).toHaveLength(0);
+});
+it('a moderator never repeats the write after losing its receipt, even if the status read also fails',async()=>{
+  execute.mockRejectedValueOnce(Error('lost')).mockResolvedValueOnce({data:null,error:{message:'unavailable'}});
+  await expect(community.deleteTopicMessage('topic-a','message-one','other-author',scope())).rejects.toThrow('Reopen');
+  expect(requests.map(r=>r.operation)).toEqual(['delete','select']);
 });

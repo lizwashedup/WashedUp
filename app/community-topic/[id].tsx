@@ -10,7 +10,7 @@ import { ChatMentionPicker } from '../../components/chat/ChatMentionPicker';
 import { findMentionMembers } from '../../lib/chatMentions';
 import { ChatBubbleFill } from '../../components/chat/ChatBubbleFill';
 import ProfileButton from '../../components/ProfileButton';
-import { MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../../lib/removeOwnChatMessage';
+import { MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../../lib/chatMessageRemoval';
 import { requestWithDeadline, RequestDeadlineError } from '../../lib/requestWithDeadline';
 import { MessageActionsMenu, type MessageMenu } from '../../components/chat/MessageActionsMenu';
 import { messageActionAccess, messageActionWeb } from '../../components/chat/messageActionAccess';
@@ -138,6 +138,7 @@ export default function CommunityTopicScreen() {
   const { muted, ready: muteReady, isChecking: muteChecking, toggle: toggleMute, isCurrent: muteScopeCurrent } = notifications;
   const listRef = useRef<FlatList<TopicMessage | CommunityRoomMessage>>(null);
   const coreFocused = useRef(false);
+  const moderatorVisit = useRef<object | null>(null);
   const [sending, setSending] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -212,6 +213,7 @@ export default function CommunityTopicScreen() {
     sendLocation,
     editMessage,
     deleteMessage,
+    applyConfirmedRemoval,
     toggleReaction,
     refresh: refreshTopicMessages,
     loadOlder,
@@ -370,8 +372,9 @@ export default function CommunityTopicScreen() {
   const entryIsCurrent = useCallback(() => activeEntryVisit.current === entryVisit && topicScopeCurrent() && (!introLayout || (coreFocused.current && AppState.currentState === 'active')), [entryVisit, topicScopeCurrent, !!introLayout]);
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
+    moderatorVisit.current = {};
     if (introLayout) void refreshMessages(true);
-    return () => { coreFocused.current = false; };
+    return () => { coreFocused.current = false; moderatorVisit.current = null; };
   }, [!!introLayout, refreshMessages]));
   useChatResumeRefresh(refreshMessages, entryIsCurrent, coreFocused);
   const retryIntroStatus = () => {
@@ -578,18 +581,30 @@ export default function CommunityTopicScreen() {
       : 'The requested change wasn’t confirmed. Chat options shows the current saved setting.' });
   };
 
+  const currentModerator = useRef(canModerate);
+  currentModerator.current = canModerate;
+  const moderatorRemovals = useMemo(() => new Set<string>(), [entryVisit]);
+
   const handleDeleteMessage = async (messageId: string, ownMessage = false) => {
     if (!entryIsCurrent()) return;
+    const started = moderatorVisit.current;
+    const moderatorCurrent = () => !!started && moderatorVisit.current === started && entryIsCurrent()
+      && currentModerator.current && menuContext.current.allowed;
+    if (!ownMessage && (!moderatorCurrent() || moderatorRemovals.has(messageId))) return;
     try {
       if (ownMessage) await deleteMessage(messageId);
       else {
-        await deleteTopicMessage(messageId);
-        if (!entryIsCurrent()) return;
-        await refreshMessages();
+        const sender = menuContext.current.messages.find(row => row.id === messageId)?.sender_id;
+        if (!id || !myId || !sender || sender === myId) return;
+        moderatorRemovals.add(messageId);
+        await deleteTopicMessage(id, messageId, sender, {userId: myId, isCurrent: moderatorCurrent});
+        if (!moderatorCurrent()) return;
+        applyConfirmedRemoval(messageId);
+        void refreshMessages(true).catch(() => {});
       }
       if (entryIsCurrent()) hapticLight();
     } catch (e) {
-      if (!entryIsCurrent() || isObsoleteTopicOperation(e)) return;
+      if (!entryIsCurrent() || (!ownMessage && !moderatorCurrent()) || isObsoleteTopicOperation(e)) return;
       if (e instanceof RequestDeadlineError || e instanceof UnconfirmedMessageRemovalError) {
         setAlertInfo({ title: 'Removal not confirmed', message: 'Reopen this chat to check whether the message was removed.' });
       } else if (e instanceof MessageStillVisibleError) {
@@ -597,6 +612,8 @@ export default function CommunityTopicScreen() {
       } else {
         setAlertInfo({ title: 'That did not remove', message: friendlyError(e, 'Try again in a moment.') });
       }
+    } finally {
+      if (!ownMessage) moderatorRemovals.delete(messageId);
     }
   };
 

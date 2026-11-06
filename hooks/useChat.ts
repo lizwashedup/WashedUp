@@ -5,7 +5,7 @@ import { Alert, AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
 import { checkContent } from '../lib/contentFilter';
-import { removeOwnChatMessage, MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../lib/removeOwnChatMessage';
+import { removeChatMessageFromSender, MessageStillVisibleError, UnconfirmedMessageRemovalError } from '../lib/chatMessageRemoval';
 import { RequestDeadlineError, requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 import { editOwnChatMessage, isChatEditRefused } from '../lib/chatMessageEdit';
@@ -692,7 +692,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     if (!scope || messageId.startsWith('optimistic-') || pendingDeletes.has(messageId) || !messagesRef.current.some(m => m.id === messageId && m.user_id === scope.userId)) return;
     pendingDeletes.add(messageId);
     try {
-      await removeOwnChatMessage({ kind, id: conversationId }, messageId, scope.userId, () => assertChatScope(scope));
+      await removeChatMessageFromSender({ kind, id: conversationId }, messageId, scope.userId, () => assertChatScope(scope));
       assertChatScope(scope);
       setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
     } catch (error) {

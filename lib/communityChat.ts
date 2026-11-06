@@ -18,6 +18,7 @@ import * as Crypto from 'expo-crypto';
 import { getTodayInLA } from './laDate';
 import { getBlockedWith } from './blocking';
 import { CHAT_NEWEST_PAGE_SIZE, olderChatFilter } from './chatPaging';
+import { removeChatMessageFromSender } from './chatMessageRemoval';
 import { resolveChatSendReceipt } from './chatSendReceipt';
 import { parseCommunityLocation, communityMessagePreview } from './communityLocationMessage';
 
@@ -1070,17 +1071,14 @@ export async function getCommunityChatMembers(communityId: string, scope?: Commu
   return members;
 }
 
-/**
- * Creator moderation, distinct from the existing report/block (inventory
- * C-14): remove a message from the room for everyone, not just the caller's
- * own view. RLS-gated (community_topic_messages_delete already allows the
- * message's sender OR the topic's community leader OR an admin) -- this is
- * a raw delete, same pattern as removeMember() in creatorMode.ts, no new
- * RPC needed since the policy already covers it.
- */
-export async function deleteTopicMessage(messageId: string): Promise<void> {
-  const { error } = await requestWithDeadline(supabase.from('community_topic_messages').delete().eq('id', messageId), 12_000);
-  if (error) throw error;
+/** The authenticated moderator acts under the topic’s existing row policy.
+ * Verify the selected sender and conversation again when a receipt is missing. */
+export async function deleteTopicMessage(
+  topicId: string, messageId: string, senderId: string, moderator: CommunityOperationScope,
+): Promise<void> {
+  await requestWithDeadline(communityOperationUser(moderator), 8000);
+  assertCommunityScope(moderator);
+  await removeChatMessageFromSender({kind: 'topic', id: topicId}, messageId, senderId, () => assertCommunityScope(moderator));
 }
 
 /** Joining a topic = subscribing to it (doc 09: push ON once joined). */
