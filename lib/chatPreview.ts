@@ -73,7 +73,17 @@ type PreviewMessage = { inbox_evidence?: InboxMessageEvidence; last_message: str
  * the next authoritative refresh can reconcile read receipts normally. */
 export function reconcilePreviewSnapshot<T extends PreviewMessage>(snapshot: T, live?: PreviewMessage): T {
   if (!live || comparePreviewTimes(live.last_message_at, snapshot.last_message_at) <= 0) return snapshot;
-  return { ...snapshot, inbox_evidence: { ...snapshot.inbox_evidence, ids: [...new Set([...(snapshot.inbox_evidence?.ids ?? []), ...(live.inbox_evidence?.ids ?? [])])].slice(0,64) }, last_message: live.last_message, last_message_at: live.last_message_at,
+  const fresh = snapshot.inbox_evidence;
+  const previous = live.inbox_evidence;
+  let evidence = fresh ?? previous;
+  if (fresh && previous) {
+    const ids = [...new Set([...fresh.ids, ...previous.ids])];
+    let uncertainThrough = comparePreviewTimes(fresh.uncertainThrough, previous.uncertainThrough) >= 0
+      ? fresh.uncertainThrough : previous.uncertainThrough;
+    if (ids.length > 64 && comparePreviewTimes(live.last_message_at, uncertainThrough) > 0) uncertainThrough = live.last_message_at!;
+    evidence = { ...fresh, uncertainThrough, ids: ids.slice(0,64) };
+  }
+  return { ...snapshot, ...(evidence && { inbox_evidence: evidence }), last_message: live.last_message, last_message_at: live.last_message_at,
     last_message_user_id: live.last_message_user_id,
     unread_by_author: live.unread_count >= snapshot.unread_count ? live.unread_by_author : snapshot.unread_by_author,
     unread_count: Math.max(snapshot.unread_count, live.unread_count) };
