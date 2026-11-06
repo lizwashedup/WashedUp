@@ -51,7 +51,6 @@ import {
   resolveYoursIntroVariant,
   hasSeenYoursIntro,
   markYoursIntroSeen,
-  type YoursIntroVariant,
 } from '../../lib/yours/tabsIntroSeen';
 
 /**
@@ -246,7 +245,7 @@ export default function YoursScreen() {
       setRequestsOpen(false);
       setHighlightId(null);
       setProfileTarget(null);
-      setIntroVariant(null);
+      setShownIntro(null);
     };
     clearPeopleState();
     mountedRef.current = true;
@@ -360,23 +359,33 @@ export default function YoursScreen() {
   // One-time Yours-tab education pop-up (see lib/yours/tabsIntroSeen.ts).
   // Skipped while a requests deep-link is about to auto-open its own sheet,
   // so the two bottom sheets never fight for the screen on first mount.
-  const [introVariant, setIntroVariant] = useState<YoursIntroVariant | null>(null);
-  useEffect(() => {
-    if (!uid || requestsOpen || state === 'unavailable') return;
-    const variant = resolveYoursIntroVariant(state);
-    if (!variant) return;
-    let cancelled = false;
-    hasSeenYoursIntro(variant, uid).then((seen) => {
-      if (!cancelled && !seen) setIntroVariant(variant);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [state, uid, requestsOpen]);
+  const variant = focused && uid && !requestsOpen && openRequests !== '1' && state !== 'unavailable'
+    ? resolveYoursIntroVariant(state) : null;
+  const introVisit = useMemo(() => variant ? { scope, variant } : null, [scope, variant]);
+  const [shownIntro, setShownIntro] = useState<typeof introVisit>(null);
+  const activeIntro = useRef<typeof introVisit>(null);
 
+  useLayoutEffect(() => {
+    activeIntro.current = introVisit;
+    return () => { activeIntro.current = null; };
+  }, [introVisit]);
+
+  useEffect(() => {
+    if (!introVisit) return;
+    void hasSeenYoursIntro(introVisit.variant, introVisit.scope.uid).then(seen => {
+      if (!seen && activeIntro.current === introVisit && isCurrentSection(introVisit.scope)) {
+        setShownIntro(introVisit);
+      }
+    });
+  }, [introVisit]);
+
+  const introVisible = !!introVisit && shownIntro === introVisit && viewer.isCurrent();
   const closeIntro = () => {
-    if (introVariant) markYoursIntroSeen(introVariant, uid);
-    setIntroVariant(null);
+    if (!introVisit || !introVisible || activeIntro.current !== introVisit || !isCurrentSection(introVisit.scope)) return false;
+    activeIntro.current = null;
+    setShownIntro(null);
+    void markYoursIntroSeen(introVisit.variant, introVisit.scope.uid);
+    return true;
   };
 
   // The "Your People" body for the active state. Loading is handled outside
@@ -556,13 +565,12 @@ export default function YoursScreen() {
 
       {!!uid && (
         <YoursIntroPopup
-          visible={!!introVariant}
-          variant={introVariant ?? 'newUser'}
+          visible={introVisible}
+          variant={variant ?? 'newUser'}
           circlesEnabled={GROUPS_ENABLED}
           onDismiss={closeIntro}
           onAddPeople={() => {
-            closeIntro();
-            setPathsOpen(true);
+            if (closeIntro()) openPaths();
           }}
         />
       )}
