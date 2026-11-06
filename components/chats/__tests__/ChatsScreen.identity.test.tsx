@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppState, Text, TouchableOpacity, type AppStateStatus } from 'react-native';
+import { AppState, RefreshControl, Text, TouchableOpacity, type AppStateStatus } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useFocusEffect } from '@react-navigation/native';
 import ChatsScreen from '../../../app/(tabs)/chats/index';
@@ -217,4 +217,54 @@ it('does not refresh a signed-out account on return', async () => {
   await mount(); focusInbox(); await emit(null);
   appState('background'); appState('active'); await flushResume();
   expect(mockOldRefetch).not.toHaveBeenCalled(); expect(mockRefetch).not.toHaveBeenCalled();
+});
+
+
+const pullControl = () => tree.root.findByType(RefreshControl);
+function pull() {
+  let request!: Promise<void>;
+  act(() => { request = pullControl().props.onRefresh(); });
+  return request;
+}
+
+it('shares repeated pulls until the displayed inbox finishes refreshing', async () => {
+  mockCommunities = true;
+  mockCommunityViewer = 'alice';
+  const pending = deferred(); mockOldRefetch.mockReturnValue(pending.promise);
+  await mount();
+  const first = pull(), second = pull();
+  expect(pullControl().props.refreshing).toBe(true);
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  expect(mockCommunityRefresh).toHaveBeenCalledTimes(1);
+  await act(async () => { pending.resolve(undefined); await Promise.all([first, second]); });
+  expect(pullControl().props.refreshing).toBe(false);
+});
+
+it('keeps the new account’s refresh control independent of an old request', async () => {
+  mockCommunities = true;
+  mockCommunityViewer = 'alice';
+  const old = deferred(), current = deferred();
+  mockOldRefetch.mockReturnValueOnce(old.promise);
+  mockRefetch.mockReturnValueOnce(current.promise);
+  await mount();
+  const oldOperation = pull();
+  await emit('bob');
+  expect(pullControl().props.refreshing).toBe(false);
+  const newOperation = pull();
+  await act(async () => { old.resolve(undefined); await oldOperation; });
+  expect(texts()).toContain('Plan for bob');
+  expect(pullControl().props.refreshing).toBe(true);
+  expect(mockCommunityRefresh).toHaveBeenCalledTimes(1);
+  await act(async () => { current.resolve(undefined); await newOperation; });
+  expect(pullControl().props.refreshing).toBe(false);
+});
+
+it('shares a pull with the foreground refresh while both target the same account', async () => {
+  await mount(); focusInbox();
+  const pending = deferred(); mockOldRefetch.mockReturnValueOnce(pending.promise);
+  const operation = pull();
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  await act(async () => { pending.resolve(undefined); await operation; });
+  expect(pullControl().props.refreshing).toBe(false);
 });

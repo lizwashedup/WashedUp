@@ -114,7 +114,6 @@ export default function ChatsScreen() {
   const { chats, loading: chatLoading, loadError: chatLoadError, refetch, removeChat } = useChatList(authUserId);
   const loading = chatLoading && !leaveViewer.error;
   const loadError = chatLoadError || !!leaveViewer.error;
-  const [refreshing, setRefreshing] = React.useState(false);
   // Delete chat / leave circle from the list (doc 120, CHAT_DELETE_ENABLED).
   // Cached rows and destructive actions must belong to this account.
   const leaveReady = !!leaveViewer.viewerId && leaveViewer.viewerId === authUserId && !leaveViewer.isLoading && !leaveViewer.error;
@@ -182,23 +181,26 @@ export default function ChatsScreen() {
   // Still refreshes when you open Chats, just not on rapid tab-switching.
   const lastChatsFocusFetchRef = React.useRef(0);
   const hasFocusedChatsRef = React.useRef(false);
-  const resumeOwner = useMemo(() => ({}), [authUserId, leaveViewer.epoch]);
-  const resumePending = React.useRef<{ owner: object; work: Promise<void> } | null>(null);
-  const refreshOnResume = useCallback(async () => {
-    if (!authUserId || !leaveViewer.isCurrent() || !inboxFocused.current) return;
-    if (resumePending.current?.owner === resumeOwner) return resumePending.current.work;
-    lastChatsFocusFetchRef.current = Date.now();
-    // Resume is read-only: preserve visible rows, and refresh each inbox source
-    // independently. It must not replay the tab-focus notification mutations.
+  const inboxOwner = useMemo(() => ({}), [authUserId, leaveViewer.epoch]);
+  const listRefresh = React.useRef<{ owner: object; work: Promise<void> } | null>(null);
+  const refreshLists = useCallback(async () => {
+    if (!authUserId || !leaveViewer.isCurrent()) return;
+    if (listRefresh.current?.owner === inboxOwner) return listRefresh.current.work;
     const work = Promise.allSettled([
       refetch(true),
       ...(COMMUNITIES_ENABLED && communityViewerId === authUserId ? [refreshCommunityRows()] : []),
     ]).then(() => undefined);
-    const attempt = { owner: resumeOwner, work };
-    resumePending.current = attempt;
+    const attempt = { owner: inboxOwner, work };
+    listRefresh.current = attempt;
     try { await work; }
-    finally { if (resumePending.current === attempt) resumePending.current = null; }
-  }, [authUserId, leaveViewer.isCurrent, resumeOwner, refetch, communityViewerId, refreshCommunityRows]);
+    finally { if (listRefresh.current === attempt) listRefresh.current = null; }
+  }, [authUserId, leaveViewer.isCurrent, inboxOwner, refetch, communityViewerId, refreshCommunityRows]);
+
+  const refreshOnResume = useCallback(async () => {
+    if (!inboxFocused.current || !authUserId || !leaveViewer.isCurrent()) return;
+    lastChatsFocusFetchRef.current = Date.now();
+    return refreshLists();
+  }, [authUserId, leaveViewer.isCurrent, refreshLists]);
   useChatResumeRefresh(refreshOnResume, leaveViewer.isCurrent, inboxFocused);
 
 
@@ -247,20 +249,26 @@ export default function ChatsScreen() {
     }, [refetch, queryClient, authUserId]),
   );
 
+  const manualRefresh = React.useRef<object | null>(null);
+  const [refreshingOwner, setRefreshingOwner] = React.useState<object | null>(null);
+  const refreshing = refreshingOwner === inboxOwner;
   const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    // silent: the RefreshControl spinner is the loading indicator here; the
-    // loud form would blank the list to the skeleton under the user's pull
+    if (!leaveViewer.isCurrent() || manualRefresh.current === inboxOwner) return;
+    manualRefresh.current = inboxOwner;
+    setRefreshingOwner(inboxOwner);
     try {
       if (leaveViewer.error || leaveViewer.viewerId === undefined) {
         await leaveViewer.retry();
-        // A newly resolved identity starts its own list read. Never refetch
-        // through this callback's old/unknown account after the retry.
-        if (!leaveViewer.viewerId || !leaveViewer.isCurrent()) return;
       }
-      await Promise.allSettled([refetch(true), ...(COMMUNITIES_ENABLED && communityViewerId ? [refreshCommunityRows()] : [])]);
-    } finally { setRefreshing(false); }
-  }, [refetch, refreshCommunityRows, communityViewerId, leaveViewer.error, leaveViewer.viewerId, leaveViewer.retry, leaveViewer.isCurrent]);
+      // A recovered or switched account starts its own initial read.
+      await refreshLists();
+    } finally {
+      if (manualRefresh.current === inboxOwner) {
+        manualRefresh.current = null;
+        setRefreshingOwner(null);
+      }
+    }
+  }, [inboxOwner, leaveViewer.error, leaveViewer.viewerId, leaveViewer.isCurrent, leaveViewer.retry, refreshLists]);
 
   // Keep the row until this account's request confirms the membership ended.
   // The ref blocks repeated taps before the mutation's pending render arrives.
