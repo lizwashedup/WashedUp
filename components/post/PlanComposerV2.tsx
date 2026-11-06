@@ -1432,8 +1432,8 @@ export default function PlanComposerV2() {
 
       {/* Neighborhood picker modal */}
       <Modal visible={showNeighborhoodPicker} transparent animationType="slide" onRequestClose={() => setShowNeighborhoodPicker(false)} statusBarTranslucent>
-        <Pressable style={styles.modalOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
-          <Pressable style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()}>
+        <Pressable accessible={false} style={styles.modalOverlay} onPress={() => setShowNeighborhoodPicker(false)}>
+          <Pressable accessible={false} accessibilityViewIsModal onAccessibilityEscape={() => setShowNeighborhoodPicker(false)} style={[styles.modalSheet, { paddingBottom: sheetBottomPad }]} onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>{appearance ? 'Choose neighborhood' : 'which neighborhood?'}</Text>{appearance && <TouchableOpacity style={styles.headerAction} accessibilityRole="button" accessibilityLabel="Close neighborhood picker" onPress={() => setShowNeighborhoodPicker(false)}><Text style={styles.cancel}>Close</Text></TouchableOpacity>}</View>
             <ScrollView style={styles.neighborhoodList} showsVerticalScrollIndicator={false}>
               {[...NEIGHBORHOOD_OPTIONS, NEIGHBORHOOD_OTHER].map((opt) => {

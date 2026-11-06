@@ -77,7 +77,13 @@ type Props = {
 };
 
 export default function PeoplePickerSheet(props: Props) {
-  return props.visible ? <ObservedPeoplePicker {...props} /> : null;
+  // Identity resolution resets the selection, but must not replace the native
+  // modal controller while UIKit is still presenting it.
+  return (
+    <Modal visible={props.visible} transparent animationType="slide" onRequestClose={props.onClose} statusBarTranslucent>
+      {props.visible ? <ObservedPeoplePicker {...props} /> : null}
+    </Modal>
+  );
 }
 
 function ObservedPeoplePicker(props: Props) {
@@ -115,7 +121,6 @@ function AccountPeoplePicker({ viewer, ...props }: Props & { viewer: ReturnType<
 }
 
 function PeoplePickerContents({
-  visible,
   excludeIds,
   onClose,
   onConfirm,
@@ -233,7 +238,6 @@ function PeoplePickerContents({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
       <View style={styles.backdrop}>
         <Pressable style={styles.backdropTap} onPress={close} accessibilityLabel={COPY.circlePlusCancel} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} accessibilityViewIsModal>
@@ -295,7 +299,6 @@ function PeoplePickerContents({
           )}
         </View>
       </View>
-    </Modal>
   );
 }
 
