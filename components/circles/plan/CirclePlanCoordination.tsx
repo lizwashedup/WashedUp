@@ -19,10 +19,12 @@ import { Fonts, FontSizes } from '../../../constants/Typography';
 import { CIRCLE_PLAN } from '../../../constants/YoursDesign';
 import { COPY } from '../../yours/state/constants';
 import { BrandedAlert } from '../../BrandedAlert';
-import { useSpawnPlanChat, useReleaseCirclePlan } from '../../../hooks/useCirclePlanActions';
+import { useReleaseCirclePlan } from '../../../hooks/useCirclePlanActions';
 
 interface CirclePlanCoordinationProps {
   eventId: string;
+  onStartChat: () => void;
+  startingChat: boolean;
   circleName: string;
   visibility: 'circle_only' | 'open' | null | undefined;
   hasOwnChat: boolean | undefined;
@@ -41,13 +43,13 @@ interface CirclePlanCoordinationProps {
 
 export default function CirclePlanCoordination({
   eventId,
+  onStartChat, startingChat,
   circleName,
   visibility,
   hasOwnChat,
   viewerIsMember,
   viewerIsCreator,
 }: CirclePlanCoordinationProps) {
-  const spawnChat = useSpawnPlanChat(eventId);
   const release = useReleaseCirclePlan(eventId);
   const [confirmRelease, setConfirmRelease] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -68,8 +70,9 @@ export default function CirclePlanCoordination({
       {showStartChat && (
         <Pressable
           style={styles.row}
-          onPress={() => spawnChat.mutate(undefined, { onError: () => setErrorMsg(COPY.circlePlanStartChatError) })}
-          disabled={spawnChat.isPending}
+          accessibilityRole="button"
+          onPress={onStartChat}
+          disabled={startingChat}
         >
           <MessageCircle size={CIRCLE_PLAN.memberCheck} color={Colors.terracotta} strokeWidth={2} />
           <View style={styles.rowBody}>
