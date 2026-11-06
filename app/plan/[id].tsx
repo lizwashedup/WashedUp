@@ -290,7 +290,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const noticeAgreeLock = useRef<object | null>(null);
   if (noticeAgreeLock.current && noticeAgreeLock.current !== noticePending) noticeAgreeLock.current = null;
   type DismissalTransition = {
-    source: 'join' | 'notice' | 'manage' | 'share' | 'ticket'; isCurrent: () => boolean; run: () => void;
+    source: 'join' | 'notice' | 'manage' | 'share' | 'ticket' | 'introduction'; isCurrent: () => boolean; run: () => void;
     resolve: () => void; cancel: () => void;
   };
   const [modalTransition, setModalTransition] = useState<DismissalTransition | null>(null);
@@ -383,10 +383,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     scrollMessage?: boolean;
     buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
   }>({ visible: false, title: '' });
-  const greetingRecoveryRef = useRef<object | null>(null);
+  const greetingRecoveryRef = useRef<{ isCurrent: () => boolean } | null>(null);
   const closeBrandedAlert = () => {
-    if (greetingRecoveryRef.current) finishJoinNotifications();
+    const recovery = greetingRecoveryRef.current;
     greetingRecoveryRef.current = null;
+    if (recovery) void afterPlanModalDismiss('introduction', recovery.isCurrent, finishJoinNotifications).catch(() => {});
     setBrandedAlert((alert) => ({ ...alert, visible: false }));
   };
   const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
@@ -709,8 +710,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [joinPreparing, setJoinPreparing] = useState(false);
   const joinReady = !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
   const showGreetingProblem = (greeting: { text: string; notSent: boolean }) => {
-    const recovery = {};
     const isCurrent = joinMutation.isCurrent;
+    const recovery = { isCurrent };
     greetingRecoveryRef.current = recovery;
     setBrandedAlert({
       visible: true, title: 'You’re in', scrollMessage: true,
@@ -718,9 +719,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       buttons: [{ text: 'Open chat', onPress: () => {
         if (greetingRecoveryRef.current !== recovery || !isCurrent()) return;
         greetingRecoveryRef.current = null;
+        void afterPlanModalDismiss('introduction', isCurrent, () => {
+          finishJoinNotifications();
+          router.push(planChatPath as any);
+        }).catch(() => {});
         setBrandedAlert((alert) => ({ ...alert, visible: false }));
-        finishJoinNotifications();
-        router.push(planChatPath as any);
       } }],
     });
   };
@@ -1927,6 +1930,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             scrollMessage={brandedAlert.scrollMessage}
         buttons={brandedAlert.buttons}
         onClose={closeBrandedAlert}
+        onDismiss={() => finishPlanModalDismiss('introduction', modalTransition)}
       />
 
       <MiniProfileCard
