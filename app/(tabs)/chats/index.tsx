@@ -157,7 +157,14 @@ export default function ChatsScreen() {
   useFocusEffect(useCallback(() => {
     inboxFocused.current = true;
     setNotificationsFocused(true);
-    return () => { inboxFocused.current = false; setNotificationsFocused(false); };
+    return () => {
+      inboxFocused.current = false;
+      setNotificationsFocused(false);
+      // An unanswered leave belongs to this visit. An already confirmed
+      // request still needs its receipt to update the account's inbox.
+      confirmationRef.current = null;
+      setLeaveConfirmation(null);
+    };
   }, []));
   const hubNotifications = useCommunityChatPreference(communityId ?? '', leaveViewer,
     COMMUNITY_CHAT_GROUPING_ENABLED && CREATOR_PAGES_ENABLED && notificationsFocused && !!selectedCommunity && communityViewerId === leaveViewer.viewerId);
@@ -293,7 +300,7 @@ export default function ChatsScreen() {
   // "delete chat", named circles as "leave circle" (doc 120 N1/N2). Plan
   // rows never get one (N3: no delete that quietly exits a plan).
   const handleRowLongPress = useCallback((chat: ChatPreview) => {
-    if (!CHAT_DELETE_ENABLED || chat.kind !== 'circle' || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
+    if (!CHAT_DELETE_ENABLED || !inboxFocused.current || chat.kind !== 'circle' || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
     hapticSelection();
     const confirmation = { scope: leaveScope, chat };
     confirmationRef.current = confirmation;
