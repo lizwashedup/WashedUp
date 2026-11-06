@@ -715,10 +715,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const canShowInterestButton = interestAvailable && interest.ready && !interest.entry && !interest.error && !interest.phase;
   const interestAlreadySent = !!interest.entry;
   const creatorInterestList = creatorInterestQuery.data ?? [];
-  const isHappeningNow =
-    !!plan &&
-    new Date(plan.start_time) <= new Date() &&
-    new Date(plan.start_time) > new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const isHappeningNow = !!plan && !isClosedPlan && Date.parse(plan.start_time) <= planNow;
 
   const manageGenderOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [
@@ -1290,7 +1287,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           onRetryMembers={() => void membersQuery.refetch()} onProfile={setMiniProfileUserId}
           onCalendar={() => showAddToCalendar(plan.title, plan.start_time, plan.end_time, plan.location_text ?? undefined)}
           onMap={() => plan.location_text && openDirections(plan.location_text, mapCoords)} onTickets={() => plan.tickets_url && openUrl(plan.tickets_url)}
-          sourceCancelled={sourceEventCancelled} happeningNow={isHappeningNow && !isClosedPlan} /> : <>
+          sourceCancelled={sourceEventCancelled} happeningNow={isHappeningNow} /> : <>
         <Image
           source={plan.image_url && failedHeroUrl !== plan.image_url
             ? { uri: plan.image_url }
@@ -1380,9 +1377,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               <Text style={styles.happeningNowBannerText}>
                 happening right now
               </Text>
-              <Text style={styles.happeningNowBannerInvite}>
-                still room for you
-              </Text>
+              {joinReady && !effectiveIsFull && (
+                <Text style={styles.happeningNowBannerInvite}>still room for you</Text>
+              )}
               <Text style={styles.happeningNowBannerSub}>
                 started at {formatTime(plan.start_time).toLowerCase()}
               </Text>
