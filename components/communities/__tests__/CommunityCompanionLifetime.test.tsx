@@ -53,6 +53,7 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
   let tree: ReactTestRenderer, client: QueryClient, invalidate: jest.SpyInstance;
   let epoch: number, scope: CommunityOperationScope | undefined, message: any;
   let delegatedReact: jest.Mock | undefined;
+  const releaseCover = jest.fn(), coverMain = jest.fn(() => releaseCover);
   let compactReplies = false, replyRequest: object | undefined;
   function nextScope(userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa') {
     const captured = ++epoch;
@@ -62,7 +63,7 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
     // Cast until the additive optional props land; the reproduction uses the actual components.
     const Entry = (kind === 'message' ? CommunityMessageActions : BroadcastCard) as React.ComponentType<any>;
     return <QueryClientProvider client={client}><Entry
-      compactReplies={compactReplies} replyRequest={replyRequest} message={message} broadcast={message} communityName="Sunset Club"
+      onPresentReplies={coverMain} compactReplies={compactReplies} replyRequest={replyRequest} message={message} broadcast={message} communityName="Sunset Club"
       scope={scope} onViewMember={mockViewMember} onError={mockError} onAddReaction={mockAddReaction} onReact={delegatedReact}
     /></QueryClientProvider>;
   }
@@ -131,6 +132,15 @@ describe.each(['message', 'broadcast'] as const)('%s companion lifetime', kind =
       act(()=>tree.root.findByType(Modal).props.onDismiss());
       expect(mockViewMember).toHaveBeenCalledWith(selected);
       expect(tree.root.findAllByType(CommunityRepliesPanel)).toHaveLength(0);
+    });
+    it('releases the Main read hold on close or account replacement for either entry to replies', async () => {
+      await mount(); await showReplies();
+      expect(coverMain).toHaveBeenCalledTimes(1); expect(releaseCover).not.toHaveBeenCalled();
+      act(()=>tree.root.findByType(CommunityRepliesPanel).props.onClose());
+      expect(releaseCover).toHaveBeenCalledTimes(1);
+      replyRequest={}; await update(); expect(coverMain).toHaveBeenCalledTimes(2);
+      scope=nextScope('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'); await update();
+      expect(releaseCover).toHaveBeenCalledTimes(2);
     });
     it('retains a direct entry to existing reply history',async()=>{
       compactReplies=true;message.reply_count=2;await mount();
