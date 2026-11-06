@@ -4,6 +4,7 @@ import { Modal, Platform, Text, TouchableOpacity } from 'react-native';
 import InboxModal from '../InboxModal';
 import { ParticipationNotice } from '../legal/ParticipationNotice';
 const mockTerms = jest.fn(), mockAssent = jest.fn(), mockAccept = jest.fn(), mockDecline = jest.fn();
+const mockWaitlist = jest.fn();
 const mockMembership = jest.fn(), mockAuthUser = jest.fn();
 let mockException = false;
 jest.mock('../../lib/participationTerms', () => ({ getParticipationNoticeStatus: () => mockTerms(), recordParticipationAssent: (context: unknown) => mockAssent(context) }));
@@ -27,7 +28,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: { auth: { getUser: () => mock
   const chain:any={select:()=>chain,update:()=>{writing=true;return chain;},
     neq:(...a:any[])=>{mockFilters(writing,...a);return chain;}, or:()=>chain, lte:(...a:any[])=>{mockFilters(writing,...a);return chain;},
     eq:(...args:any[])=>{mockFilters(writing,...args);return chain;},
-    maybeSingle:()=>writing?mockWrite():table==='event_members'?mockMembership():mockReadInvite(),then:(yes:any,no:any)=>(writing ? mockWrite() : mockReadInvite()).then(yes,no)};
+    maybeSingle:()=>writing?mockWrite():table==='event_members'?mockMembership():table==='event_waitlist'?mockWaitlist():mockReadInvite(),then:(yes:any,no:any)=>(writing ? mockWrite() : mockReadInvite()).then(yes,no)};
   return chain;
 } } }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn(async () => {}) }));
@@ -326,7 +327,11 @@ describe('the inbox waitlist exception invitation', () => {
     await act(async () => { pending = button('Join the plan').props.onPress(); });
     return { pending };
   }
+  const waitlistRow = {event_id:'fictional-plan', user_id:'fictional-viewer', exception_status:'invited',
+    exception_invited_at:'2025-10-01T00:00:00Z', exception_expires_at:null};
   beforeEach(() => {
+    mockDecline.mockReset().mockResolvedValue(undefined);
+    mockWaitlist.mockReset().mockResolvedValue({error:null,data:waitlistRow});
     mockException = true;
     for (const mock of [mockAuthUser, mockTerms, mockAssent, mockAccept, mockMembership]) mock.mockReset();
     mockAuthUser.mockResolvedValue({data:{user:{id:'fictional-viewer'}},error:null});
@@ -448,5 +453,47 @@ describe('the inbox waitlist exception invitation', () => {
     expect(mockAccept).toHaveBeenCalledTimes(1);
     await act(async () => { receipt.resolve(); await pending; });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('retains a confirmed decline after failed cleanup and reopening', async () => {
+    mockWrite.mockResolvedValueOnce({error:{code:'42501'}});
+    const press = button('Not this time').props.onPress;
+    await act(async () => press());
+    act(() => tree.update(renderInbox(false))); act(() => tree.update(renderInbox()));
+    expect(renderedText()).toContain('You declined this invitation.');
+    expect(button('Join the plan')).toBeUndefined();
+    await act(async () => press());
+    expect(mockDecline).toHaveBeenCalledTimes(1);
+  });
+  it.each(['declined','invited'])('checks a lost decline receipt without resending when %s', async status => {
+    mockDecline.mockRejectedValueOnce(Error('lost receipt'));
+    await act(async () => button('Not this time').props.onPress());
+    expect(renderedText()).toContain('Check invitation');
+    mockWaitlist.mockResolvedValueOnce({error:null,data:{...waitlistRow,exception_status:status}});
+    const check = button('Check invitation').props.onPress;
+    await act(async () => { await check(); await check(); });
+    expect(mockDecline).toHaveBeenCalledTimes(1);
+    expect(renderedText()).toContain(status==='declined' ? 'You declined this invitation.' : 'Not this time');
+  });
+  it.each(['declined','expired','past expiry','newer','missing','denied'])('does not decide a stale or unavailable invitation: %s',async mode=>{
+    const row={...waitlistRow,exception_status: ['newer','past expiry'].includes(mode)?'invited':mode,
+      exception_expires_at:mode==='past expiry'?'2025-10-03T00:00:00Z':null,
+      exception_invited_at:mode==='newer'?'2099-01-01T00:00:00Z':waitlistRow.exception_invited_at};
+    mockWaitlist.mockResolvedValueOnce({error:mode==='denied'?{code:'42501'}:null,data:mode==='missing'?null:row});
+    await act(async()=>button('Not this time').props.onPress());
+    expect(mockDecline).not.toHaveBeenCalled();
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(renderedText()).toContain(mode==='declined'?'You declined this invitation.':
+      ['expired','past expiry'].includes(mode)?'This invitation expired.':mode==='newer'?'This invitation is no longer active.':'Check invitation');
+  });
+  it('retires an in-flight decline status check after an account switch', async () => {
+    const held=hold<any>();
+    mockWaitlist.mockReturnValueOnce(held.promise);
+    let pending!:Promise<void>;
+    await act(async()=>{pending=button('Not this time').props.onPress();});
+    act(()=>tree.update(renderInbox(true,'new-viewer')));
+    await act(async()=>{held.resolve({data:waitlistRow,error:null});await pending;});
+    expect(mockDecline).not.toHaveBeenCalled();
+    expect(renderedText()).not.toContain('You declined this invitation.');
   });
 });
