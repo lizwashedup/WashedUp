@@ -1171,3 +1171,41 @@ it('does not consume a queued iOS notice dismissal if the plan ended after agree
   await act(async () => { participation().onDismiss(); expect(await agreement).toBe(false); });
   expect(mockJoin).not.toHaveBeenCalled();
 });
+
+describe('the live banner on plan detail', () => {
+  const hour = 3600000;
+  function times(startHours: number, endHours: number | null) {
+    mockPlan.start_time = new Date(Date.now() + startHours * hour).toISOString();
+    mockPlan.end_time = endHours === null ? null : new Date(Date.now() + endHours * hour).toISOString();
+  }
+
+  it.each(['cancelled', 'completed', 'ended'])('does not advertise a %s plan as happening now', async state => {
+    mockMemberAppearance = false;
+    times(-1, state === 'ended' ? -.5 : 1);
+    mockPlan.status = state === 'ended' ? 'active' : state;
+    await mount();
+    expect(allText()).not.toContain('happening right now');
+    expect(allText()).not.toContain('still room for you');
+    expect(button("Let's Go →")).toBeUndefined();
+  });
+
+  it.each([true, false])('uses the actual end for a long-running plan, including the styled view %s', async styled => {
+    mockMemberAppearance = styled;
+    times(-4, 1);
+    await mount();
+    if (styled) expect(tree.root.findByType(PlanDetailOverview).props.happeningNow).toBe(true);
+    else expect(allText()).toContain('happening right now');
+    expect(button("Let's Go →")).toBeDefined();
+  });
+
+  it.each(['full', 'already joined', 'unavailable', 'eligible'])('offers room only to an eligible nonmember with an available place: %s', async state => {
+    mockMemberAppearance = false;
+    times(-1, null);
+    if (state === 'full') mockPlan.max_invites = 2;
+    if (state === 'already joined') mockMembers.push({id: 'viewer',user_id:'viewer',first_name_display:'Alex'});
+    if (state === 'unavailable') mockMembersError = true;
+    await mount();
+    expect(allText()).toContain('happening right now');
+    expect(allText().includes('still room for you')).toBe(state === 'eligible');
+  });
+});
