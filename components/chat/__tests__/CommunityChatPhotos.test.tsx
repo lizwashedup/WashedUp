@@ -4,7 +4,7 @@ jest.mock('react-native-keyboard-controller', () => ({
 }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { AppState, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import CommunityThreadScreen from '../../../app/community-thread/[id]';
 import CommunityTopicScreen from '../../../app/community-topic/[id]';
@@ -18,7 +18,7 @@ import { MessageActionsMenu } from '../MessageActionsMenu';
 import { BrandedAlert } from '../../BrandedAlert';
 import { ReportModal } from '../../modals/ReportModal';
 import { BroadcastCard } from '../../communities/BroadcastCard';
-import { deleteTopicMessage } from '../../../lib/communityChat';
+import { deleteTopicMessage, markTopicRead } from '../../../lib/communityChat';
 
 type Room = 'main' | 'topic';
 let mockRoomId: string, mockViewerId: string, mockMembership: string;
@@ -311,4 +311,24 @@ it('keeps a late moderation result in the original room and prevents a repeat wr
   mockRoomId='other-topic'; await update();
   await act(async()=>{finish();await first;});
   expect(mockApplyRemoval).not.toHaveBeenCalled();expect(mockRefresh).not.toHaveBeenCalled();
+});
+
+it('acknowledges a new topic row after the reader closes the full-screen photo', async () => {
+  const previous = AppState.currentState;
+  Object.defineProperty(AppState, 'currentState', {configurable: true, value: 'active'});
+  try {
+    await mount('topic');
+    const newMessage = message('incoming', undefined, {image_url: null, created_at: '2026-09-13T11:00:00Z'});
+    act(() => attachments()[0].props.onOpen());
+    expect(visible()).toBeDefined();
+    mockMessages = [...mockMessages, newMessage];
+    await update();
+    const list = tree!.root.findAllByType(FlatList).find(node => typeof node.props.onViewableItemsChanged === 'function')!;
+    await act(async () => list.props.onViewableItemsChanged({viewableItems: [{item:newMessage, isViewable:true}]}));
+    expect(markTopicRead).not.toHaveBeenCalledWith(mockRoomId, newMessage.created_at, expect.anything());
+    await act(async () => viewer().onClose());
+    expect(markTopicRead).toHaveBeenCalledWith(mockRoomId, newMessage.created_at, expect.anything());
+  } finally {
+    Object.defineProperty(AppState, 'currentState', {configurable: true, value: previous});
+  }
 });
