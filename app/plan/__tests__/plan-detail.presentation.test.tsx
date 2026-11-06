@@ -88,7 +88,7 @@ jest.mock('../../../hooks/usePlanWaitlist',()=>({usePlanWaitlist:(options:any)=>
 jest.mock('../../../hooks/usePlanDeparture', () => ({ usePlanDeparture: (options: any) => { mockDepartureOptions = options; return mockDeparture; } }));
 jest.mock('../../../hooks/useFeedWishlist', () => ({ useFeedWishlist: () => mockWishlist }));
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
-jest.mock('../../../lib/supabase', () => ({ supabase: { auth: { getUser: async () => ({ data: { user: { id: mockAccount } }, error: null }), refreshSession:async()=>({error:null}) }, from: () => mockTable, rpc: async () => ({ data: [], error: null }) } }));
+jest.mock('../../../lib/supabase', () => ({ supabase: { auth: { onAuthStateChange: () => ({ data: { subscription: { unsubscribe: jest.fn() } } }), getUser: async () => ({ data: { user: { id: mockAccount } }, error: null }), refreshSession:async()=>({error:null}) }, from: () => mockTable, rpc: async () => ({ data: [], error: null }) } }));
 jest.mock('../../../lib/participationTerms', () => ({ getParticipationNoticeStatus: () => mockNotice(), recordParticipationAssent: () => mockAssent() }));
 jest.mock('../../../lib/logger',()=>({logError:jest.fn()}));
 jest.mock('../../../lib/haptics', () => ({ hapticLight: jest.fn(), hapticMedium: jest.fn(), hapticSuccess: jest.fn(), hapticWarning: jest.fn() }));
@@ -1023,5 +1023,24 @@ it('reserves the ordinary claim path for a notified waitlisted viewer when capac
   act(() => button('Claim Your Spot').props.onPress());
   expect(joinSheet().unavailable).toBe(false);
   expect(mockJoinOptions.ready).toBe(true);
+  expect(mockWaitlistChange).not.toHaveBeenCalled();
+});
+
+it('uses fresh duplication permission from the waitlist chooser and opens an allowed draft once after dismissal', async () => {
+  fillOrdinaryPlan(); mockPlan.allow_duplicate = true;
+  mockRead = { ...mockPlan, allow_duplicate: false };
+  await mount();
+  act(() => button('Join waitlist').props.onPress());
+  await act(async () => button('Post your own').props.onPress());
+  expect(allText()).toContain('Couldn’t open a draft.');
+  expect(mockPush).not.toHaveBeenCalled(); expect(mockWaitlistChange).not.toHaveBeenCalled();
+  const modal = tree.root.findAllByType(Modal).find(node => node.findAllByType(TouchableOpacity).some(
+    child => child.props.accessibilityLabel === 'Post your own'))!;
+  mockRead = { ...mockPlan, title: 'Updated venue', allow_duplicate: true };
+  await act(async () => button('Post your own').props.onPress());
+  expect(mockPush).not.toHaveBeenCalled();
+  act(() => { modal.props.onDismiss(); modal.props.onDismiss(); });
+  expect(mockPush).toHaveBeenCalledTimes(1);
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/(tabs)/post', params: expect.objectContaining({ prefillTitle: 'Updated venue' }) });
   expect(mockWaitlistChange).not.toHaveBeenCalled();
 });

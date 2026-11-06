@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../lib/haptics';
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import { planAgeLabel } from '../../lib/planAgeLabel';
+import { usePlanCardDuplicate } from '../../hooks/usePlanCardDuplicate';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
@@ -43,6 +44,7 @@ import {
     Pressable,
     ScrollView,
     Share,
+    StyleSheet,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -295,7 +297,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const noticeAgreeLock = useRef<object | null>(null);
   if (noticeAgreeLock.current && noticeAgreeLock.current !== noticePending) noticeAgreeLock.current = null;
   type DismissalTransition = {
-    source: 'join' | 'notice' | 'manage' | 'share' | 'ticket' | 'introduction'; isCurrent: () => boolean; run: () => void;
+    source: 'join' | 'notice' | 'manage' | 'share' | 'ticket' | 'introduction' | 'duplicate'; isCurrent: () => boolean; run: () => void;
     resolve: () => void; cancel: () => void;
   };
   const [modalTransition, setModalTransition] = useState<DismissalTransition | null>(null);
@@ -319,6 +321,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     modalTransitionRef.current?.cancel(); modalTransitionRef.current = null; setModalTransition(null); setJoinPreparing(false);
   }, []));
   const [showDuplicateSheet, setShowDuplicateSheet] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const duplicateVisit = useRef<object | null>(null);
   const closeDuplicateSheet = () => {duplicateVisit.current=null;setShowDuplicateSheet(false);};
   useFocusEffect(useCallback(()=>()=>{duplicateVisit.current=null;setShowDuplicateSheet(false);},[]));
@@ -1043,6 +1046,26 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     return waitlist.change(!isOnWaitlist);
   };
 
+  const openedDuplicateVisit = duplicateVisit.current;
+  const canCopyFromWaitlist = !!currentUserId && plan?.allow_duplicate === true && !isCirclePlan &&
+    contextReady && !planError && !isClosedPlan && !isMember && !isCreator && effectiveIsFull && effectiveIsEligible;
+  const waitlistCopy = usePlanCardDuplicate({
+    eventId: id, viewerId: currentUserId ?? undefined, enabled: showDuplicateSheet && canCopyFromWaitlist,
+    startTime: plan?.start_time ?? '', endTime: plan?.end_time, status: plan?.status,
+    onError: () => {
+      if (duplicateVisit.current === openedDuplicateVisit)
+        setDuplicateError('Couldn’t open a draft. The plan may have changed. You can try again.');
+    },
+    openDraft: params => {
+      if (!openedDuplicateVisit || duplicateVisit.current !== openedDuplicateVisit) return;
+      const isCurrent = waitlist.capture();
+      const goToPost = () => { if (isCurrent()) router.push({ pathname: '/(tabs)/post', params }); };
+      closeDuplicateSheet();
+      if (Platform.OS === 'ios') void afterPlanModalDismiss('duplicate', isCurrent, goToPost).catch(() => {});
+      else setTimeout(goToPost, 150);
+    },
+  });
+
   // ─── Share ───────────────────────────────────────────────────────────────────
 
   const handleShare = useCallback(async () => {
@@ -1633,11 +1656,11 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               style={[styles.waitlistButton,isOnWaitlist && styles.waitlistButtonActive]}
               disabled={waitlistLoading}
               onPress={()=>{
-                if(waitlistLoading)return;
+                if(waitlistLoading || modalTransitionRef.current)return;
                 if(waitlist.intent || isOnWaitlist) {void handleJoinWaitlist();return;}
                 if(!waitlist.ready){void waitlist.refresh();return;}
                 if(plan?.allow_duplicate===false){void waitlist.change(true);return;}
-                hapticLight();duplicateVisit.current={};setShowDuplicateSheet(true);
+                hapticLight();setDuplicateError(null);duplicateVisit.current={};setShowDuplicateSheet(true);
               }}>
               <Text numberOfLines={1} style={[styles.waitlistButtonText,isOnWaitlist&&styles.waitlistButtonTextActive]}>
                 {waitlistLoading ? 'Checking…' : waitlist.intent?.phase==='failed' ? 'Try again' : !waitlist.ready ? 'Try again' : isOnWaitlist ? 'Leave waitlist' : 'Join waitlist'}
@@ -1718,48 +1741,43 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         transparent
         animationType="slide"
         onRequestClose={closeDuplicateSheet}
+        onDismiss={() => finishPlanModalDismiss('duplicate', modalTransition)}
         statusBarTranslucent
       >
-        <Pressable
-          style={duplicateSheetStyles.overlay}
-          onPress={closeDuplicateSheet}
-          accessibilityRole="button"
-          accessibilityLabel="close"
-        >
-          <Pressable style={[duplicateSheetStyles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]} onPress={() => {}}>
+        <View style={duplicateSheetStyles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeDuplicateSheet}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={[duplicateSheetStyles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 20 }]}
+            onAccessibilityEscape={closeDuplicateSheet}>
             <View style={duplicateSheetStyles.handle} />
             <Text style={duplicateSheetStyles.title}>Post your own</Text>
             <Text style={duplicateSheetStyles.body}>
               Make another plan, or join the waitlist for this one.
             </Text>
+            {(duplicateError || !canCopyFromWaitlist) && <Text style={duplicateSheetStyles.body}
+              accessibilityRole="alert" accessibilityLiveRegion="polite">
+              {duplicateError ?? 'This plan is no longer available to copy.'}
+            </Text>}
             <TouchableOpacity
               style={duplicateSheetStyles.primaryBtn}
+              disabled={!canCopyFromWaitlist || waitlistCopy.busy}
+              accessibilityState={{ disabled: !canCopyFromWaitlist || waitlistCopy.busy, busy: waitlistCopy.busy }}
               onPress={() => {
-                if(!duplicateVisit.current)return;
-                hapticLight();closeDuplicateSheet();
-                // Let the modal start its slide-out before pushing the next
-                // screen — otherwise on Android with statusBarTranslucent
-                // there's a brief flash where the modal is mid-animation
-                // while the new screen pushes in.
-                const isCurrent = waitlist.capture();
-                setTimeout(() => {
-                  if (!isCurrent()) return;
-                  router.push({
-                    pathname: '/(tabs)/post',
-                    params: buildDuplicatePostParams(plan, id),
-                  });
-                }, 150);
+                if (!openedDuplicateVisit || duplicateVisit.current !== openedDuplicateVisit) return;
+                setDuplicateError(null);
+                void waitlistCopy.open();
               }}
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel="Post your own"
             >
-              <Text style={duplicateSheetStyles.primaryBtnText}>Post your own</Text>
+              <Text style={duplicateSheetStyles.primaryBtnText}>{waitlistCopy.busy ? 'Checking…' : 'Post your own'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={duplicateSheetStyles.secondaryBtn}
+              disabled={waitlistCopy.busy}
               onPress={() => {
-                if(!duplicateVisit.current)return;
+                if (!openedDuplicateVisit || duplicateVisit.current !== openedDuplicateVisit || waitlistCopy.busy) return;
                 hapticLight();closeDuplicateSheet();
                 void waitlist.change(true);
               }}
@@ -1769,8 +1787,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             >
               <Text style={duplicateSheetStyles.secondaryBtnText} numberOfLines={1}>Join waitlist</Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       <SharePlanModal
