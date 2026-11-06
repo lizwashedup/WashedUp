@@ -1,4 +1,5 @@
-import { getCreatorAccess, isAdminTierRole, type LedCommunity } from './creatorMode';
+import { canCreateLegacyCommunityEvent } from './creatorEventRoute';
+import { getCreatorAccess, type LedCommunity } from './creatorMode';
 import { CreatorPageScopeExpired, type CreatorPageScope } from './creatorPageReview';
 import { requestWithDeadline } from './requestWithDeadline';
 import { mediaUUID } from './creatorPageEventMedia';
@@ -16,11 +17,17 @@ export async function resolveLegacyEventCreate(workspace: unknown, communityId: 
     return { workspace };
   }
   const community = access.ledCommunities.find(item => item.id === communityId);
-  if (!community || !(isAdminTierRole(community.role) || community.role === 'events')) {
+  if (!community) {
     throw Error('This community is not available for event creation with your current access.');
+  }
+  if (community.role !== 'leader' && community.role !== 'co_leader') {
+    throw Error('Ask a leader or co-leader of this community to create the event.');
   }
   if (community.status === 'draft') throw Error('This community is still a draft. Publish its page from community Settings before creating an event.');
   if (community.status !== 'active') throw Error('This community is archived. Choose an active community or organization from You manage.');
+  if (!canCreateLegacyCommunityEvent(access, community)) {
+    throw Error('You need approved creator access to create events for this community.');
+  }
   return { workspace, community };
 }
 export async function prepareLegacyEventCreate(context: LegacyEventCreateContext, scope: CreatorPageScope) {

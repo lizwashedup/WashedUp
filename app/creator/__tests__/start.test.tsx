@@ -43,11 +43,18 @@ it.each(['applied', 'in_review', 'revoked'])('shows existing application status 
   expect(mockPush).toHaveBeenCalledWith('/creator/apply');
 });
 it('retains existing community identity and uses its guarded event workspace', () => {
-  mockData.access = { ...mockEmpty, ledCommunities: [{ id: 'sunset', name: 'Sunset Club', role: 'leader', status: 'active' }] }; mount();
+  mockData.access = { ...mockEmpty, hasLeaderGrant: true, ledCommunities: [{ id: 'sunset', name: 'Sunset Club', role: 'leader', status: 'active' }] }; mount();
   act(() => action('Sunset Club').props.onPress());
   expect(mockWorkspace).toHaveBeenCalledWith('community');
   expect(mockCommunity).toHaveBeenCalledWith('sunset');
   expect(mockPush).toHaveBeenCalledWith('/creator/event-form?workspace=community&communityId=sunset');
+});
+it('explains the community role requirement before offering a separate creator application', () => {
+  mockData.access = { ...mockEmpty, hasLeaderGrant: true, ledCommunities: [{ id: 'sunset', name: 'Sunset Club', role: 'events', status: 'active' }] };
+  mount();
+  expect(action('Sunset Club')).toBeUndefined();
+  expect(text()).toContain('a leader or co-leader role there');
+  expect(text()).toContain('under a separate public name or organization');
 });
 it('clears a previous community selection before opening organization tools', () => {
   mockData.access = { ...mockEmpty, hasEventHostGrant: true }; mount();

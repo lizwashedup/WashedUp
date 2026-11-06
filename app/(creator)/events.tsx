@@ -1,4 +1,4 @@
-import { newCreatorEventRoute } from '../../lib/creatorEventRoute';
+import { canCreateLegacyCommunityEvent, newCreatorEventRoute } from '../../lib/creatorEventRoute';
 import { CommunitySetupNotice } from '../../components/creator/CommunitySetupNotice';
 import {useCreatorPageScope} from '../../hooks/useCreatorPageScope';
 import {useCreatorPageRead} from '../../hooks/useCreatorPageRead';
@@ -105,7 +105,7 @@ export default function CreatorEventsScreen() {
   const { data: access } = useQuery({ queryKey: ['creator-access'], queryFn: getCreatorAccess });
   const workspace = useWorkspace(access);
   const community = useLedCommunity(access);
-  const canStartEvent = workspace === 'organization' || workspace === 'community' && community?.status === 'active';
+  const canStartEvent = workspace === 'organization' ? access?.hasEventHostGrant : workspace === 'community' && canCreateLegacyCommunityEvent(access, community);
 
   const eventsQuery = useQuery({
     queryKey: ['creator-events-tab', workspace, community?.id],
@@ -418,6 +418,9 @@ export default function CreatorEventsScreen() {
         <Text style={styles.title}>Events</Text>
         {workspace === 'community' && <CommunitySetupNotice community={community} onNavigate={route => router.push(route as never)} />}
 
+        {workspace === 'community' && community?.status === 'active' && access && !canStartEvent && (
+          <Text style={styles.empty}>A leader or co-leader with creator approval can create events for this community.</Text>
+        )}
         {canStartEvent && <TouchableOpacity
           style={styles.postBtn}
           onPress={() => router.push((workspace ? newCreatorEventRoute(workspace, workspace === 'community' ? community?.id : undefined) : '/(tabs)/friends/manage') as never)}

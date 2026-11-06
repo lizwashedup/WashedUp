@@ -16,11 +16,14 @@ it('does not grant tools to a new or revoked creator', () => {
   }
 });
 it('checks event permission separately for every community', () => {
-  const access = { ...empty, ledCommunities: [community('owner', 'leader'), community('events', 'events'), community('care', 'member_care'), community('finance', 'finance'), community('archived', 'leader', 'archived'), community('draft', 'leader', 'draft')] };
-  expect(creationDestinations('event', access).map(item => item.id)).toEqual(['owner', 'events']);
+  const access = { ...empty, hasLeaderGrant: true, ledCommunities: [community('owner', 'leader'), community('events', 'events'), community('care', 'member_care'), community('finance', 'finance'), community('archived', 'leader', 'archived'), community('draft', 'leader', 'draft')] };
+  expect(creationDestinations('event', access).map(item => item.id)).toEqual(['owner']);
+});
+it('requires creator approval even when someone leads an active community', () => {
+  expect(creationDestinations('event', { ...empty, ledCommunities: [community('club', 'leader')] })).toEqual([]);
 });
 it('sets a specific identity for organization and community events', () => {
-  const choices = creationDestinations('event', { ...empty, hasEventHostGrant: true, ledCommunities: [community('club', 'admin')] });
+  const choices = creationDestinations('event', { ...empty, hasEventHostGrant: true, ledCommunities: [community('club', 'co_leader')] });
   expect(choices).toEqual([
     expect.objectContaining({ workspace: 'organization', route: '/creator/event-form?workspace=organization' }),
     expect.objectContaining({ workspace: 'community', communityId: 'club', route: '/creator/event-form?workspace=community&communityId=club' }),

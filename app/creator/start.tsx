@@ -29,6 +29,8 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
   const unfinishedCommunities = kind === 'event' && data ? communitySetupDestinations(data.access) : [];
   const waitingForAdmin = kind === 'event' && data
     ? data.access.ledCommunities.filter(community => community.status === 'draft' && community.role === 'events') : [];
+  const explainCommunityAccess = kind === 'event' && !CREATOR_PAGES_ENABLED && destinations.length === 0
+    && data?.access.ledCommunities.some(community => community.status === 'active');
   const grant = data?.grants.find(item => item.track === (kind === 'community' ? 'community_leader' : 'event_host'));
   const pending = grant?.status === 'applied' || grant?.status === 'in_review';
   const canApply = !grant || ['withdrawn', 'declined', 'needs_more_info'].includes(grant.status);
@@ -60,6 +62,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
         })} />
         {copy(destination.description)}
       </View>)}
+      {explainCommunityAccess && copy('To create an event for a community, you need creator approval and a leader or co-leader role there.')}
       {unfinishedCommunities.length > 0 && <>
         <Text accessibilityRole="header" style={[styles.label, { fontFamily: fonts.medium }]}>Finish community setup</Text>
         {unfinishedCommunities.map(destination => <View key={destination.id} style={styles.card}>
@@ -72,7 +75,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
       </>}
       {waitingForAdmin.map(community => <View key={community.id} style={styles.card}>
         <Text style={[styles.label, { fontFamily: fonts.medium }]}>{community.name}</Text>
-        {copy('A community admin needs to finish and publish this page before you can create an event for it.')}
+        {copy('A community admin needs to finish and publish this page before its first event.')}
       </View>)}
       {CREATOR_PAGES_ENABLED ? <View style={styles.card}>
         {copy(kind === 'event' ? 'Choose another community or organization, or set up your public creator identity.' : 'Continue a community draft or start setting up your new community.')}
@@ -80,7 +83,7 @@ export function CreationStartScreen({ kind }: { kind: SceneCreationKind }) {
       </View> : <>
         {canApply && <View style={styles.card}>
           {copy(kind === 'event'
-            ? destinations.length > 0 || unfinishedCommunities.length > 0 || waitingForAdmin.length > 0
+            ? destinations.length > 0 || unfinishedCommunities.length > 0 || waitingForAdmin.length > 0 || explainCommunityAccess
               ? 'To create events under a separate public name or organization, apply for that creator identity.'
               : 'Creating events requires creator approval. Apply with your own public name or an organization. You don’t need to start a community.'
             : 'New community creators apply before setting up a public community and its group conversations.')}

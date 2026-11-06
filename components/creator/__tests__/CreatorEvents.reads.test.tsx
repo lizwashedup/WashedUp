@@ -4,7 +4,7 @@ const mockPush=jest.fn();
 const mockRefetch=jest.fn(async()=>({}));
 let mockEvents:any;
 let mockCommunityStatus = 'active', mockRole = 'leader', mockWorkspace = 'community';
-jest.mock('@tanstack/react-query',()=>({useQuery:({queryKey}:any)=>queryKey[0]==='creator-events-tab'?mockEvents:{data:queryKey[0]==='creator-access'?{}:[]},useQueryClient:()=>({invalidateQueries:jest.fn()}),useMutation:()=>({mutate:jest.fn(),isPending:false,isError:false})}));
+jest.mock('@tanstack/react-query',()=>({useQuery:({queryKey}:any)=>queryKey[0]==='creator-events-tab'?mockEvents:{data:queryKey[0]==='creator-access'?{hasLeaderGrant:true,hasEventHostGrant:true}:[]},useQueryClient:()=>({invalidateQueries:jest.fn()}),useMutation:()=>({mutate:jest.fn(),isPending:false,isError:false})}));
 jest.mock('expo-router',()=>({useLocalSearchParams:()=>({}),useFocusEffect:(fn:any)=>require('react').useEffect(fn,[fn]),useRouter:()=>({push:mockPush})}));
 jest.mock('../../../lib/creatorMode',()=>({isAdminTierRole:(role:string)=>['leader','co_leader','admin'].includes(role)}));
 jest.mock('../../../lib/creatorEvents',()=>({}));
@@ -80,4 +80,11 @@ it.each(['community','organization'])('retains new event creation for active %s 
  const createEvent=tree.root.findAll(n=>n.props.accessibilityLabel==='New event'&&typeof n.props.onPress==='function')[0];
  act(()=>createEvent.props.onPress());
  expect(mockPush).toHaveBeenCalledWith(workspace==='community'?'/creator/event-form?workspace=community&communityId=community':'/creator/event-form?workspace=organization');
+});
+
+it.each(['admin', 'events'])('keeps the events list available to %s without offering a new draft', async role => {
+  mockRole = role;
+  expect(await render()).toContain('A leader or co-leader with creator approval');
+  expect(tree.root.findAll(n => n.props.accessibilityLabel === 'New event')).toHaveLength(0);
+  expect(tree.root.findAll(n => n.props.accessibilityLabel === 'Drafts').length).toBeGreaterThan(0);
 });
