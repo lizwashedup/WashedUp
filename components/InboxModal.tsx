@@ -369,6 +369,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 if (notif.type === 'creator_page_update') return <PageUpdateInboxRow key={notif.id} notice={notif} userId={userId} visible={visible && !closing} enabled={CREATOR_PAGES_ENABLED} onClose={() => requestClose()} onNavigate={navigateAfterDismiss} onRead={() => { void refetchNotifs(); void queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY }); }} />;
                 const isWaitlist = notif.type === 'waitlist_spot';
                 const isExceptionInvite = notif.type === 'exception_invite';
+                const decision = isExceptionInvite ? exception.declineState(notif.id) : undefined;
+                const completed = decision === 'declined' || decision === 'expired' || decision === 'inactive';
                 const goesToYours = YOURS_NOTIF_TYPES.has(notif.type);
                 // Full audit against every type in app_notifications_type_check
                 // (supabase/migrations, last touched 20260706150000_mvp_batch.sql,
@@ -427,7 +429,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                 return (
                   <InboxNotificationRow key={`notif-${notif.id}`} notice={notif}
                     scope={notificationScope} visit={visit} isOpen={() => !closingRef.current && activeVisit.current === visit}
-                    showDismiss={!isWaitlist && !isExceptionInvite}
+                    showDismiss={completed || (!isWaitlist && !isExceptionInvite)}
                     onOpen={isExceptionInvite ? () => {} : hasAction
                       ? () => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
                       : isWaitlist ? () => handleNotifAction(notif.id, 'read') : undefined}>
@@ -457,12 +459,23 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                           </TouchableOpacity>
                         </View>
                       )}
-                      {isExceptionInvite && (
+                      {completed && <Text style={s.notifBody} accessibilityLiveRegion="polite">
+                        {decision === 'declined' ? 'You declined this invitation.' : decision === 'expired'
+                          ? 'This invitation expired.' : 'This invitation is no longer active.'}
+                      </Text>}
+                      {decision === 'unavailable' && <View>
+                        <Text style={s.notifBody} accessibilityLiveRegion="polite">We couldn’t confirm the invitation status.</Text>
+                        <TouchableOpacity accessibilityRole="button" style={s.cantGoBtn} disabled={!!exception.pendingId}
+                          onPress={() => exception.start(notif.id, notif.event_id, { createdAt: notif.created_at, checkOnly: true })}>
+                          <Text style={s.cantGoText}>Check invitation</Text>
+                        </TouchableOpacity>
+                      </View>}
+                      {isExceptionInvite && !decision && (
                         <View style={s.waitlistActions}>
                           <TouchableOpacity style={s.claimBtn} disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id)} activeOpacity={0.7}>
                             <Text style={s.claimText}>{exception.pendingId === notif.id ? 'Please wait…' : 'Join the plan'}</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity style={s.cantGoBtn} disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id, true)} activeOpacity={0.7}>
+                          <TouchableOpacity style={s.cantGoBtn} disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id, { createdAt: notif.created_at })} activeOpacity={0.7}>
                             <Text style={s.cantGoText}>Not this time</Text>
                           </TouchableOpacity>
                         </View>

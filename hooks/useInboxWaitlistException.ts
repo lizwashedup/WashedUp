@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { INBOX_COUNT_KEY, WAITLIST_MANAGER_KEY } from '../constants/QueryKeys';
+import { readWaitlistInvitation, type WaitlistInvitationState } from '../lib/readWaitlistInvitation';
 import { hapticLight } from '../lib/haptics';
 import { recordScopedPlanAssent, requirePlanParticipationAccount } from '../lib/planParticipationScope';
 import { getParticipationNoticeStatus } from '../lib/participationTerms';
@@ -20,6 +21,8 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
   openChat: (route: string) => void, showError: (message: string) => void) {
   const client = useQueryClient();
   const owner = useMemo(() => ({ reply: null as Reply | null }), [visit, scope.epoch, scope.userId]);
+  const declineStates = useMemo(() => new Map<string, Exclude<WaitlistInvitationState, 'invited'>>(),
+    [scope.userId, scope.epoch]);
   const writes = useRef(new Set<string>());
   const committed = useRef<typeof owner | null>(null);
   const [, render] = useState(0);
@@ -68,7 +71,16 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
       }
       writes.current.add(key);
       locked = true;
-      if (declining) await requestWithDeadline(declineWaitlistException(reply.eventId), deadline);
+      if (declining) {
+        try {
+          await requestWithDeadline(declineWaitlistException(reply.eventId), deadline);
+          declineStates.set(reply.id, 'declined');
+        } catch {
+          // A missing receipt is not permission to send the same reply again.
+          declineStates.set(reply.id, 'unavailable');
+          return;
+        }
+      }
       else if (!alreadyJoined) await requestWithDeadline(acceptWaitlistException(reply.eventId), deadline);
       if (!declining) {
         invalidate([['events', 'members', reply.eventId, reply.userId, scope.epoch],
@@ -83,17 +95,39 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
       if (active(reply)) showError(waitlistAlertMessage(error, 'We couldn’t confirm your reply. Open the invitation and try again.'));
     } finally {
       if (locked) writes.current.delete(key);
-      finish(reply);
+      if (active(reply)) finish(reply);
+      else if (declining && committed.current) refresh();
     }
   }
 
-  async function start(id: string, eventId: string | undefined, decline = false) {
+  async function start(id: string, eventId: string | undefined, decline?: { createdAt: string; checkOnly?: boolean }) {
     if (!eventId || !scope.userId || !current() || owner.reply) return;
+    const previous = declineStates.get(id);
+    if (previous && (!decline || previous !== 'unavailable')) return;
+    if (decline?.checkOnly && previous !== 'unavailable') return;
     const reply: Reply = { id, eventId, userId: scope.userId, phase: decline ? 'declining' : 'checking' };
     owner.reply = reply;
     refresh();
     hapticLight();
-    if (decline) { await decide(reply); return; }
+    if (decline) {
+      let state: WaitlistInvitationState = 'unavailable';
+      try { state = await readWaitlistInvitation(reply.userId, eventId, decline.createdAt); }
+      catch { /* Keep the invitation available for a read-only retry. */ }
+      if (!active(reply)) return;
+      if (state !== 'invited') {
+        declineStates.set(id, state);
+        finish(reply);
+        return;
+      }
+      declineStates.delete(id);
+      if (previous === 'unavailable') {
+        // Checking restores the choices. Only a new explicit tap decides.
+        finish(reply);
+        return;
+      }
+      await decide(reply);
+      return;
+    }
     try {
       // If the notification is still unread after a successful join, reopening
       // must lead to that chat without resubmitting the invitation.
@@ -142,6 +176,7 @@ export function useInboxWaitlistException(scope: Scope, visit: object, isOpen: (
   return {
     start,
     pendingId: reply?.id,
+    declineState: (id: string) => declineStates.get(id),
     notice: reply && (reply.phase === 'notice' || reply.phase === 'recording') ? reply.notice : undefined,
     agree,
     closeNotice: () => { if (reply?.phase === 'notice') finish(reply); },
