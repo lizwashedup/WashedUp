@@ -30,7 +30,6 @@ import {
     useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FilterBottomSheet } from '../../../components/FilterBottomSheet';
 import { CreatorSpaceBanner } from '../../../components/creator/CreatorSpaceBanner';
 import { MapErrorBoundary } from '../../../components/MapErrorBoundary';
@@ -55,16 +54,12 @@ import { toPlanCardPlan } from '../../../lib/creatorMarks';
 import { getLADayParts, dayKey, MONTHS } from '../../../lib/laDate';
 import { WhenCalendarSheet } from '../../../components/plans/WhenCalendarSheet';
 import { type CalendarDay } from '../../../components/calendar/WashedUpCalendar';
-import { supabase } from '../../../lib/supabase';
 import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
 import { postAuthTransitionRef } from '../../../lib/navState';
 import { useBlock } from '../../../hooks/useBlock';
 import { isPlanPast } from '../../../lib/planTime';
-import {
-  wasHandlePromptShownThisSession,
-  wasWelcomeShownThisSession,
-} from '../../../lib/promptState';
+import { usePlansProfilePrompt } from '../../../hooks/usePlansProfilePrompt';
 
 const wLogo = require('../../../assets/images/w-logo-waves.png');
 
@@ -145,7 +140,7 @@ export default function PlansScreen() {
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
-  const { userId, accountUnavailable, retry: retryAccount, showWelcome, dismissWelcome, welcomeChecked } = usePlansEntry();
+  const { userId, accountUnavailable, retry: retryAccount, showWelcome, dismissWelcome, welcomeChecked, isCurrentAccount } = usePlansEntry();
   const saveOverlayOwner = useMemo(() => ({ userId }), [userId]);
   const saveOverlayOwnerRef = useRef(saveOverlayOwner); saveOverlayOwnerRef.current = saveOverlayOwner;
   useFocusEffect(useCallback(() => {
@@ -169,68 +164,7 @@ export default function PlansScreen() {
     }
     return false;
   });
-  const [showProfileCompletePrompt, setShowProfileCompletePrompt] = useState(false);
-
-  // ── Profile-complete prompt ─────────────────────────────────────────────────
-  // Fires once ever per user when any of handle/fun_fact/neighborhood is
-  // missing and onboarding is complete. Skipped if the handle prompt or
-  // welcome modal is showing/was shown this session to avoid back-to-back.
-  React.useEffect(() => {
-    if (!userId || !welcomeChecked) return;
-    if (wasHandlePromptShownThisSession()) return;
-    if (wasWelcomeShownThisSession()) return;
-
-    let cancelled = false;
-    let delayTimer: ReturnType<typeof setTimeout> | null = null;
-    const flagKey = `has_seen_profile_complete_prompt_${userId}`;
-
-    (async () => {
-      try {
-        const seen = await AsyncStorage.getItem(flagKey);
-        if (cancelled || seen) return;
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('onboarding_status, handle, fun_fact, neighborhood')
-          .eq('id', userId)
-          .single();
-        if (cancelled || !profile) return;
-        if (profile.onboarding_status !== 'complete') return;
-
-        const hasHandle = !!(profile.handle && String(profile.handle).trim());
-        const hasFunFact = !!(profile.fun_fact && String(profile.fun_fact).trim());
-        const hasNeighborhood = !!(profile.neighborhood && String(profile.neighborhood).trim());
-        if (hasHandle && hasFunFact && hasNeighborhood) return;
-
-        delayTimer = setTimeout(() => {
-          if (cancelled) return;
-          // Final check — another prompt may have raced in during the delay.
-          if (wasHandlePromptShownThisSession()) return;
-          setShowProfileCompletePrompt(true);
-        }, 2000);
-      } catch {}
-    })();
-
-    return () => {
-      cancelled = true;
-      if (delayTimer) clearTimeout(delayTimer);
-    };
-  }, [userId, welcomeChecked]);
-
-  const dismissProfileCompletePrompt = useCallback(async () => {
-    setShowProfileCompletePrompt(false);
-    if (userId) {
-      try { await AsyncStorage.setItem(`has_seen_profile_complete_prompt_${userId}`, '1'); } catch {}
-    }
-  }, [userId]);
-
-  const confirmProfileCompletePrompt = useCallback(async () => {
-    setShowProfileCompletePrompt(false);
-    if (userId) {
-      try { await AsyncStorage.setItem(`has_seen_profile_complete_prompt_${userId}`, '1'); } catch {}
-    }
-    router.push('/(tabs)/profile?openEdit=true' as any);
-  }, [userId]);
+  const profilePrompt = usePlansProfilePrompt(userId, welcomeChecked, isCurrentAccount);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -895,20 +829,20 @@ export default function PlansScreen() {
         onClear={() => setCategoryFilter([])}
       />
 
-      {showProfileCompletePrompt && (
-      <Modal visible={showProfileCompletePrompt} transparent animationType="fade" onRequestClose={dismissProfileCompletePrompt} statusBarTranslucent>
-        <Pressable style={styles.profilePromptOverlay} onPress={dismissProfileCompletePrompt} accessible={false}>
+      {profilePrompt.presenting && (
+      <Modal visible={profilePrompt.visible} transparent animationType="fade" onRequestClose={profilePrompt.dismiss} onDismiss={profilePrompt.onDismiss} statusBarTranslucent>
+        <Pressable style={styles.profilePromptOverlay} onPress={profilePrompt.dismiss} accessible={false}>
           <Pressable style={styles.profilePromptCard} onPress={(e) => e.stopPropagation()} accessible={false}
-            accessibilityViewIsModal onAccessibilityEscape={dismissProfileCompletePrompt}>
+            accessibilityViewIsModal onAccessibilityEscape={profilePrompt.dismiss}>
             <Image source={wLogo} style={styles.profilePromptLogo} contentFit="contain" />
             <Text style={styles.profilePromptTitle}>make your profile yours</Text>
             <Text style={styles.profilePromptBody}>
               add a handle, a fun fact, and your neighborhood so people can find you and know where you're coming from.
             </Text>
-            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptPrimaryBtn} onPress={confirmProfileCompletePrompt} activeOpacity={0.9}>
+            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptPrimaryBtn} onPress={profilePrompt.openEditor} activeOpacity={0.9}>
               <Text style={styles.profilePromptPrimaryBtnText}>finish my profile</Text>
             </TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptLaterBtn} onPress={dismissProfileCompletePrompt} activeOpacity={0.7}>
+            <TouchableOpacity accessibilityRole="button" style={styles.profilePromptLaterBtn} onPress={profilePrompt.dismiss} activeOpacity={0.7}>
               <Text style={styles.profilePromptLaterText}>later</Text>
             </TouchableOpacity>
           </Pressable>
