@@ -39,11 +39,11 @@ function message(n: number, extra: Partial<ChatMessage> = {}): ChatMessage {
 }
 const result = (...rows: ChatMessage[]): ReadResult => ({ data: rows, error: null });
 
-function mount(key: ConversationKey = { kind: 'event', id: 'plan-a' }) {
+function mount(key: ConversationKey = { kind: 'event', id: 'plan-a' }, canAcknowledge = () => true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   let chat!: ReturnType<typeof useChat>;
   let renderer!: ReturnType<typeof create>;
-  function Harness({ room }: { room: ConversationKey }) { chat = useChat(room); return null; }
+  function Harness({ room }: { room: ConversationKey }) { chat = useChat(room, null, canAcknowledge); return null; }
   const tree = (room: ConversationKey) => <QueryClientProvider client={client}><Harness room={room} /></QueryClientProvider>;
   act(() => { renderer = create(tree(key)); });
   cleanup.push(() => { act(() => renderer.unmount()); client.clear(); });
@@ -606,4 +606,21 @@ it.each(['event','circle'] as const)('joins only the current %s visit after a pe
   expect(channels[0].subscribe).not.toHaveBeenCalled();expect(channels[1].subscribe).not.toHaveBeenCalled();
   expect(channels[2].subscribe).toHaveBeenCalledTimes(1);
  }finally{cleanup.splice(0).forEach(close=>close());jest.useRealTimers();}
+});
+
+it.each(['event', 'circle'] as const)('leaves %s unread when its history arrives under a different screen', async kind => {
+  let visible = true;
+  const firstRead = deferred<ReadResult>();
+  const page = result(message(1, kind === 'circle' ? { event_id: null, circle_id: 'room' } : {}));
+  readMessages.mockReturnValueOnce(firstRead.promise).mockResolvedValue(page);
+  const fixture = mount({ kind, id: 'room' }, () => visible); await flush();
+  expect(readMessages).toHaveBeenCalledTimes(1);
+  visible = false; firstRead.resolve(page); await flush();
+  expect(fixture.chat.messages[0].id).toBe(page.data![0].id);
+  expect(readReceipts).not.toHaveBeenCalled();
+  expect(clearNotifications).not.toHaveBeenCalled();
+  visible = true;
+  await act(async () => fixture.chat.refetch(true));
+  expect(readReceipts).toHaveBeenCalledTimes(1);
+  expect(clearNotifications).toHaveBeenCalledTimes(kind === 'event' ? 1 : 0);
 });

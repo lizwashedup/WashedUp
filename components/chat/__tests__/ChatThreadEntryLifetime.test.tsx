@@ -35,11 +35,13 @@ const mockCameraPermission = jest.fn(), mockCamera = jest.fn(), mockLibrary = je
 let mockViewerId = 'account-a', mockEpoch = 1, mockRoomId = 'plan-one', mockFocused = true;
 const mockFocusContext = React.createContext(true);
 const mockViewerListeners = new Set<() => void>();
+let mockCanAcknowledge: () => boolean;
 const mockChat = { messages: [], loading: false, currentUserId: 'account-a', sendMessage: mockSend, sendLocation: jest.fn(), sendAudio: jest.fn(), deleteMessage: jest.fn(), editMessage: jest.fn(), toggleReaction: jest.fn(), loadOlder: jest.fn(), refetch: mockRead };
 const mockRecorder = { status: 'idle', durationMillis: 0, meterings: [], start: jest.fn(), stop: jest.fn(), cancel: jest.fn() };
 let mockGifAvailable = true;
 
-jest.mock('../../../hooks/useChat', () => ({ ObsoleteChatOperationError: class extends Error {}, isObsoleteChatOperation: (error: any) => error?.name === 'ObsoleteChatOperationError', isUnconfirmedChatReaction: jest.requireActual('../../../hooks/useChat').isUnconfirmedChatReaction, useChat: ({ id }: { id: string }) => {
+jest.mock('../../../hooks/useChat', () => ({ ObsoleteChatOperationError: class extends Error {}, isObsoleteChatOperation: (error: any) => error?.name === 'ObsoleteChatOperationError', isUnconfirmedChatReaction: jest.requireActual('../../../hooks/useChat').isUnconfirmedChatReaction, useChat: ({ id }: { id: string }, _anchor: unknown, canAcknowledge: () => boolean) => {
+  mockCanAcknowledge = canAcknowledge;
   const React = require('react');
   const [, forceUpdate] = React.useReducer((value: number) => value + 1, 0);
   React.useEffect(() => { mockViewerListeners.add(forceUpdate); return () => { mockViewerListeners.delete(forceUpdate); }; }, []);
@@ -1029,4 +1031,16 @@ it('retires the selected member action when leaving and returning to the same ch
   mockFocused = true; await update();
   act(() => choose(1)); await flush();
   expect(mockBlock).not.toHaveBeenCalled();
+});
+
+it('refreshes on a quick return only when history was withheld behind another screen', async () => {
+  await mount(); mockRead.mockClear();
+  expect(mockCanAcknowledge()).toBe(true);
+  mockFocused = false; await update();
+  expect(mockCanAcknowledge()).toBe(false);
+  mockFocused = true; await update();
+  expect(mockRead).toHaveBeenCalledTimes(1);
+  expect(mockRead).toHaveBeenCalledWith(true);
+  mockFocused = false; await update(); mockFocused = true; await update();
+  expect(mockRead).toHaveBeenCalledTimes(1);
 });
