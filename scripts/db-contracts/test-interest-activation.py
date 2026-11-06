@@ -65,3 +65,29 @@ assert sql(claim+call)==first and n()=='2'
 assert sql("select status='active' and skip_count=0 and expired_at is null and expiry_reason is null and reactivated_at is not null from event_interest_signals where id='"+first+"'")=='t'
 assert sql(claim+call)==first and n()=='2'
 print('PASS interest activation: one active row and one local creator notification row for concurrent requests; subsequent active repeat adds none. An explicit re-raise of a removed signal keeps its ID, clears obsolete fields, stamps the reactivation and adds one new local notification row. External delivery disabled.')
+
+# The member raised their hand again today. The next sweep must not use
+# their first-ever creation time and immediately remove the renewed interest.
+base=(r/'supabase/migrations/20260504100000_event_interest_signals.sql').read_text()
+start=base.index('create or replace function public.expire_stale_interests()')
+sql(base[start:base.index('$$;',base.index('as $$',start))+3])
+sql("do $$ begin if not exists(select from pg_roles where rolname='service_role')then create role service_role;end if;end $$; revoke all on function expire_stale_interests() from public,anon,authenticated;grant execute on function expire_stale_interests() to service_role;")
+expiry_attrs=attributes.replace('send_interest_signal(uuid)','expire_stale_interests()')
+original_attrs=sql(expiry_attrs)
+sql((r/'docs/database/review-only/20261106023000_interest_expiry_after_reactivation.sql').read_text())
+assert original_attrs==sql(expiry_attrs)
+assert sql("select has_function_privilege('authenticated','expire_stale_interests()','execute'),has_function_privilege('anon','expire_stale_interests()','execute'),has_function_privilege('service_role','expire_stale_interests()','execute')")=='f|f|t'
+sweep='set role service_role;select expire_stale_interests();'
+sql("update event_interest_signals set created_at=now()-interval '95 days',reactivated_at=null")
+assert sql(sweep)=='1'
+assert sql(claim+call)==first and n()=='3'
+raised=sql('select reactivated_at from event_interest_signals')
+assert sql(sweep)=='0' and sql(claim+call)==first and sql('select reactivated_at from event_interest_signals')==raised and n()=='3'
+# Strict cutoff: 90 days exactly survives; exclusively older rows expire.
+assert sql("begin;update event_interest_signals set reactivated_at=now()-interval '90 days';"+sweep+"rollback;")=='0'
+sql("update event_interest_signals set reactivated_at=now()-interval '91 days'")
+assert sql(sweep)=='1' and sql(sweep)=='0' and n()=='3'
+assert sql("select status,expiry_reason from event_interest_signals")=='expired|time_limit'
+sql("update event_interest_signals set status='removed',expiry_reason='user_removed'")
+assert sql(sweep)=='0' and sql("select status,expiry_reason from event_interest_signals")=='removed|user_removed'
+print('PASS expiry: original, renewed, exact boundary, stale renewal and removed rows; an active repeat does not extend the clock. No notification on expiry; scheduler privileges preserved.')
