@@ -37,12 +37,19 @@ export function useInterestedPlanActions(userId: string) {
       if (!isCurrent()) return;
       if (auth.error || auth.data.user?.id !== userId) throw new Error('Please check your account and try again.');
       if (action === 'remove') {
-        await removeInterestedPlan(plan.id, isCurrent);
-        if (!isCurrent()) return;
+        const confirmed = await removeInterestedPlan(plan.id, isCurrent);
+        if (!confirmed) return;
+        const queryKey = ['plans.myInterested', userId];
+        if (!isCurrent()) {
+          // A later visit may have signalled interest again. Refresh the owner's
+          // list without removing that newer card or reading as a different user.
+          void queryClient.invalidateQueries({ queryKey, refetchType: ownerRef.current === owner ? 'active' : 'none' });
+          return;
+        }
         // Keep the card until a server response confirms removal. A rejected
         // or timed-out request leaves it in place with a retry action.
-        queryClient.setQueryData<Plan[]>(['plans.myInterested', userId], old => old?.filter(item => item.id !== plan.id));
-        void queryClient.invalidateQueries({ queryKey: ['plans.myInterested', userId] });
+        queryClient.setQueryData<Plan[]>(queryKey, old => old?.filter(item => item.id !== plan.id));
+        void queryClient.invalidateQueries({ queryKey });
       } else {
         const params = await fetchSimilarPlanParams(plan.id, `${Date.now()}-${++nextPrefill}`);
         if (!isCurrent()) return;

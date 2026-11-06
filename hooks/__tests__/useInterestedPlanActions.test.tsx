@@ -17,13 +17,13 @@ function mount(){act(()=>{tree=create(<Harness/>);});}
 function update(){act(()=>tree.update(<Harness/>));}
 function deferred(){let resolve!:(v?:any)=>void;const promise=new Promise<any>(yes=>{resolve=yes;});return {promise,resolve};}
 async function flush(){await act(async()=>{for(let i=0;i<10;i++)await Promise.resolve();});}
-beforeEach(()=>{jest.clearAllMocks();user='alice';mockFocused=true;mockAuth.mockResolvedValue({data:{user:{id:'alice'}},error:null});mockRemove.mockResolvedValue(undefined);mockSimilar.mockResolvedValue({prefillTitle:'Walk',similarPlanRequest:'new'});mockInvalidate.mockResolvedValue(undefined);});
+beforeEach(()=>{jest.clearAllMocks();user='alice';mockFocused=true;mockAuth.mockResolvedValue({data:{user:{id:'alice'}},error:null});mockRemove.mockResolvedValue(true);mockSimilar.mockResolvedValue({prefillTitle:'Walk',similarPlanRequest:'new'});mockInvalidate.mockResolvedValue(undefined);});
 afterEach(()=>{act(()=>tree?.unmount());jest.useRealTimers();});
 it('keeps the item cached until removal is confirmed and prevents same-tap duplicates',async()=>{
  const pending=deferred();mockRemove.mockReturnValue(pending.promise);mount();
  act(()=>{void value.run(plan,'remove');void value.run(plan,'remove');});await flush();
  expect(mockAuth).toHaveBeenCalledTimes(1);expect(mockRemove).toHaveBeenCalledTimes(1);expect(mockCache).not.toHaveBeenCalled();expect(value.feedback.plan.pending).toBe('remove');
- pending.resolve();await flush();expect(mockCache).toHaveBeenCalledTimes(1);
+ pending.resolve(true);await flush();expect(mockCache).toHaveBeenCalledTimes(1);
  const [key,filter]=mockCache.mock.calls[0];expect(key).toEqual(['plans.myInterested','alice']);expect(filter([plan,{id:'other'}])).toEqual([{id:'other'}]);
  expect(mockInvalidate).toHaveBeenCalledWith({queryKey:['plans.myInterested','alice']});
 });
@@ -46,7 +46,9 @@ it('does not dispatch actions under a mismatching authenticated account',async()
 });
 it.each(['remove','similar'] as const)('ignores late %s results after leaving and returning',async action=>{
  const pending=deferred();(action==='remove'?mockRemove:mockSimilar).mockReturnValue(pending.promise);mount();act(()=>{void value.run(plan,action);});await flush();
- mockFocused=false;update();mockFocused=true;update();pending.resolve({prefillTitle:'Stale'});await flush();expect(mockPush).not.toHaveBeenCalled();expect(mockCache).not.toHaveBeenCalled();expect(value.feedback).toEqual({});
+ mockFocused=false;update();mockFocused=true;update();pending.resolve(action==='remove'?true:{prefillTitle:'Stale'});await flush();
+ if(action==='remove')expect(mockInvalidate).toHaveBeenCalledWith({queryKey:['plans.myInterested','alice'],refetchType:'active'});
+ expect(mockPush).not.toHaveBeenCalled();expect(mockCache).not.toHaveBeenCalled();expect(value.feedback).toEqual({});
 });
 it('retires auth preflight across an account change even if the old account returns',async()=>{
  const auth=deferred();mockAuth.mockReturnValue(auth.promise);mount();act(()=>{void value.run(plan,'remove');});user='bob';update();user='alice';update();auth.resolve({data:{user:{id:'alice'}},error:null});await flush();expect(mockRemove).not.toHaveBeenCalled();
@@ -54,4 +56,18 @@ it('retires auth preflight across an account change even if the old account retu
 it('bounds stalled authentication and permits retry',async()=>{
  jest.useFakeTimers();mockAuth.mockReturnValueOnce(new Promise(()=>{}));mount();act(()=>{void value.run(plan,'remove');});await act(async()=>{await jest.advanceTimersByTimeAsync(8000);});expect(value.feedback.plan.pending).toBeNull();expect(mockRemove).not.toHaveBeenCalled();
  await act(async()=>{await value.run(plan,'remove');});expect(mockRemove).toHaveBeenCalledTimes(1);
+});
+
+it('marks only the originating account stale after a confirmed removal arrives in a different account', async () => {
+  const receipt = deferred(); mockRemove.mockReturnValue(receipt.promise); mount();
+  act(() => { void value.run(plan, 'remove'); }); await flush();
+  user='bob'; update(); receipt.resolve(true); await flush();
+  expect(mockInvalidate).toHaveBeenCalledWith({queryKey:['plans.myInterested','alice'],refetchType:'none'});
+  expect(mockCache).not.toHaveBeenCalled();
+  expect(value.feedback).toEqual({});
+});
+it('preserves the card when the preflight retires before dispatch',async () => {
+  mockRemove.mockResolvedValue(false); mount();
+  await act(async()=>{await value.run(plan,'remove');});
+  expect(mockCache).not.toHaveBeenCalled(); expect(mockInvalidate).not.toHaveBeenCalled();
 });

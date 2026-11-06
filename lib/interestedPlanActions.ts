@@ -52,15 +52,15 @@ export async function fetchSimilarPlanParams(eventId: string, requestId: string)
   return buildSimilarPlanParams(data, requestId);
 }
 
-export async function removeInterestedPlan(eventId: string, isCurrent: () => boolean): Promise<void> {
+export async function removeInterestedPlan(eventId: string, isCurrent: () => boolean): Promise<boolean> {
   // Read the current account's active signal rather than trusting an old card
   // or using an event id where the existing RPC requires a signal id.
   const { data, error } = await requestWithDeadline(supabase.rpc('get_user_interest_signals'), TIMEOUT_MS);
   if (error) throw error;
   if (!Array.isArray(data)) throw new Error('Could not check your interest. Please try again.');
-  if (!isCurrent()) return;
+  if (!isCurrent()) return false;
   const signal = data.find((row: any) => row.event_id === eventId);
-  if (!signal) return; // A fresh read confirms it is already inactive.
+  if (!signal) return true; // A fresh read confirms it is already inactive.
   if (typeof signal.signal_id !== 'string' || !signal.signal_id) throw new Error('Could not check your interest. Please try again.');
   const result = await requestWithDeadline(
     supabase.rpc('remove_interest_signal', { p_signal_id: signal.signal_id }),
@@ -68,5 +68,6 @@ export async function removeInterestedPlan(eventId: string, isCurrent: () => boo
   );
   // The deployed void RPC checks ownership and persists status=removed;
   // a successful response also covers an already-inactive signal on retry.
-  if (result.error) throw result.error;
+  if (result?.error !== null) throw result?.error ?? new Error('Could not confirm removal.');
+  return true;
 }
