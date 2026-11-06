@@ -29,6 +29,7 @@ import { hapticSelection } from '../../lib/haptics';
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
 import { useActiveSheetClose, type RegisterSheetClose } from '../../hooks/useActiveSheetClose';
 import { usePickerFilter } from '../../hooks/usePickerFilter';
+import { IncompleteCircleAdd, UnknownCircleAdd } from '../../lib/circles/addPeopleReceipt';
 import { useInviteToCircle, isObsoleteCircleInvite, ObsoleteCircleInviteError, type InviteToCircleScope } from '../../hooks/useInviteToCircle';
 import { supabase } from '../../lib/supabase';
 import { yoursKeys } from '../../lib/yours/keys';
@@ -143,7 +144,7 @@ function AddPeopleVisit({
   const userId = viewer.viewerId;
   const mounted = useRef(false);
   const retired = useRef(false);
-  const pending = useRef<object | null>(null);
+  const pending = useRef<{ checking: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; pending.current = null; }; }, []);
@@ -171,14 +172,16 @@ function AddPeopleVisit({
   const peopleReady = identityReady && peopleQuery.isSuccess && !peopleQuery.isFetching && !peopleQuery.error;
   const people = peopleReady ? peopleQuery.data : EMPTY_PEOPLE;
   const invite = useInviteToCircle(circleId, userId, operationScope);
+  const [confirmedIds, setConfirmedIds] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [ctaPressed, setCtaPressed] = useState(false);
 
   // Only people not already in the circle can be added.
   const addable = useMemo(() => {
-    const present = new Set(existingMemberIds);
+    const present = new Set([...existingMemberIds, ...confirmedIds]);
     return people.filter((p) => p.user_id !== userId && !present.has(p.user_id));
-  }, [people, existingMemberIds, userId]);
+  }, [people, existingMemberIds, confirmedIds, userId]);
   const addableIds = useMemo(() => new Set(addable.map(person => person.user_id)), [addable]);
   const effectiveSelected = useMemo(() => new Set([...selected].filter(id => addableIds.has(id))), [selected, addableIds]);
   const allowance = useRef({ ready: false, ids: new Set<string>(), selected: new Set<string>() });
@@ -197,7 +200,8 @@ function AddPeopleVisit({
   const visiblePeople = showSearch ? filtered : addable;
 
   const toggle = (id: string) => {
-    if (!isCurrent() || pending.current || !allowance.current.ready || !allowance.current.ids.has(id)) return;
+    if (!isCurrent() || invite.pendingIds || pending.current || !allowance.current.ready || !allowance.current.ids.has(id)) return;
+    setStatusMessage('');
     setAddError(false);
     setSelected((prev) => {
       const next = new Set(prev);
@@ -219,10 +223,15 @@ function AddPeopleVisit({
 
   const confirm = async () => {
     const current = allowance.current;
-    if (!isCurrent() || !current.ready || current.selected.size === 0 || pending.current) return;
-    const attempt = {}; pending.current = attempt; setSubmitting(true); setAddError(false);
+    if (!isCurrent() || (!invite.pendingIds && (!current.ready || current.selected.size === 0)) || pending.current) return;
+    const attempt = { checking: !!invite.pendingIds };
+    pending.current = attempt;
+    setSubmitting(true);
+    setAddError(false);
+    setStatusMessage('');
     try {
-      await invite.mutateAsync([...current.selected]);
+      if (invite.pendingIds) await invite.checkStatus(invite.pendingIds);
+      else await invite.mutateAsync([...current.selected]);
       if (isCurrent() && pending.current === attempt) {
         setSelected(new Set());
         onAdded?.();
@@ -230,7 +239,13 @@ function AddPeopleVisit({
       }
     } catch (error) {
       if (isCurrent() && pending.current === attempt && !isObsoleteCircleInvite(error)) {
-        if (appearance) setAddError(true);
+        if (error instanceof IncompleteCircleAdd) {
+          setConfirmedIds(previous => [...new Set([...previous, ...error.joined])]);
+          setSelected(new Set(error.missing));
+          setStatusMessage(error.message);
+        } else if (error instanceof UnknownCircleAdd || invite.pendingIds) {
+          setStatusMessage('Check who joined before adding anyone again.');
+        } else if (appearance) setAddError(true);
         else Alert.alert(COPY.circleAddError);
       }
     } finally {
@@ -248,8 +263,14 @@ function AddPeopleVisit({
   const retiredContext = !viewer.isLoading && !viewer.error && !!userId &&
     (!viewer.isCurrent() || scope === null || (!!scope && (scope.userId !== userId || !scope.isCurrent())));
   const count = effectiveSelected.size;
-  const actionLabel = submitting && appearance ? `Adding ${count} ${count === 1 ? 'person' : 'people'}…` :
-    appearance && addError ? 'Try again' : appearance && count === 0 ? 'Add people' : COPY.circleAddConfirm(count);
+  const checking = submitting && pending.current?.checking;
+  const canConfirm = !submitting && (!!invite.pendingIds || count > 0);
+  let actionLabel = COPY.circleAddConfirm(count);
+  if (checking) actionLabel = 'Checking who joined…';
+  else if (submitting && appearance) actionLabel = `Adding ${count} ${count === 1 ? 'person' : 'people'}…`;
+  else if (invite.pendingIds) actionLabel = 'Check status';
+  else if (appearance && addError) actionLabel = 'Try again';
+  else if (appearance && count === 0) actionLabel = 'Add people';
 
   return (
       <View style={s.backdrop}>
@@ -293,7 +314,7 @@ function AddPeopleVisit({
                   <PickRow
                     person={item}
                     selected={effectiveSelected.has(item.user_id)}
-                    disabled={submitting}
+                    disabled={submitting || !!invite.pendingIds}
                     onToggle={() => toggle(item.user_id)}
                     appearance={appearance}
                   />
@@ -313,8 +334,9 @@ function AddPeopleVisit({
             </>
           )}
 
-          {addable.length > 0 && (
+          {(addable.length > 0 || !!invite.pendingIds) && (
             <View style={appearance ? s.footer : undefined}>
+            {!submitting && (statusMessage || invite.pendingIds) && <Text style={s.failure} accessibilityLiveRegion="polite">{invite.pendingIds ? 'Check who joined before adding anyone again.' : statusMessage}</Text>}
             {appearance && addError && <Text style={s.failure} accessibilityRole="alert" accessibilityLiveRegion="polite">Couldn’t confirm the add. Your selection is still here.</Text>}
             <View style={appearance ? s.footerActions : undefined}>
             {appearance && <Text style={s.selection} accessibilityLiveRegion="polite">{count} selected</Text>}
@@ -322,19 +344,19 @@ function AddPeopleVisit({
               onPress={confirm}
               onPressIn={() => { if (isCurrent()) setCtaPressed(true); }}
               onPressOut={() => { if (isCurrent()) setCtaPressed(false); }}
-              disabled={effectiveSelected.size === 0 || submitting}
+              disabled={!canConfirm}
               style={[
                 s.cta,
-                (effectiveSelected.size === 0 || submitting) && s.ctaDisabled,
+                !canConfirm && s.ctaDisabled,
                 ctaPressed && s.pressed,
               ]}
               accessibilityRole="button"
-              accessibilityState={{ disabled: effectiveSelected.size === 0 || submitting, busy: submitting }}
-              accessibilityLabel={appearance && addError ? `Try again to add ${count} ${count === 1 ? 'person' : 'people'}` : actionLabel}
+              accessibilityState={{ disabled: !canConfirm, busy: submitting }}
+              accessibilityLabel={!invite.pendingIds && appearance && addError ? `Try again to add ${count} ${count === 1 ? 'person' : 'people'}` : actionLabel}
             >
               {submitting ? (
                 <View style={s.pendingAction}><ActivityIndicator color={appearance ? AfterglowColors.white : Colors.white} />
-                  {appearance && <Text style={s.ctaLabel} numberOfLines={1}>Adding…</Text>}
+                  {appearance && <Text style={s.ctaLabel} numberOfLines={1}>{checking ? 'Checking…' : 'Adding…'}</Text>}
                 </View>
               ) : (
                 <Text style={s.ctaLabel} numberOfLines={1}>{actionLabel}</Text>

@@ -9,12 +9,14 @@ import { AfterglowFonts } from '../../../constants/Typography';
 import { AfterglowColors } from '../../../constants/Colors';
 import { YOURS_GRID_KEYS } from '../../../lib/yours/shapeGuard';
 
+const mockStatus = jest.fn();
 const mockGrid = jest.fn(), mockAdd = jest.fn(), mockGetUser = jest.fn();
 const mockListeners = new Set<(event: string, session: { user: { id: string } } | null) => void>();
 let mockViewer: string | null = 'alice';
 jest.mock('../../../lib/supabase', () => ({ supabase: {
   rpc: (name: string, args: unknown) => {
     if (name === 'get_yours_grid') return mockGrid(args);
+    if (name === 'get_circle') return mockStatus(args);
     if (name === 'invite_to_circle') return mockAdd(args);
     throw new Error('Unexpected RPC');
   },
@@ -143,16 +145,17 @@ it('retains selected people outside a name/handle query and never filters behind
 
 it('locks immediate duplicate adds, waits for confirmation, and retains selection for current failure retry', async () => {
   const write = deferred<{ data: null; error: Error }>(); mockAdd.mockReturnValueOnce(write.promise);
+  mockStatus.mockResolvedValueOnce({data:null,error:{message:'offline'}}).mockResolvedValueOnce({data:{circle:{id:'circle-a'},members:[{user_id:'alice'},{user_id:'bob'}]},error:null});
   const f = mount(); await flush(); f.choose(); const add = f.button('Add 1 person').props.onPress;
   act(() => { void add(); void add(); }); await flush();
   expect(mockAdd).toHaveBeenCalledTimes(1); expect(f.text()).toContain('Adding…');
   expect(f.button('Adding 1 person…').props.accessibilityState).toEqual({ disabled: true, busy: true });
   expect(f.close).not.toHaveBeenCalled(); expect(f.done).not.toHaveBeenCalled();
   await act(async () => { write.resolve({ data: null, error: new Error('network interrupted') }); }); await flush();
-  expect(f.text()).toContain('Couldn’t confirm the add. Your selection is still here.');
+  expect(f.text()).toContain('Check who joined');
   expect(f.button('Bob').props.accessibilityState.checked).toBe(true); expect(Alert.alert).not.toHaveBeenCalled();
-  await act(async () => { await f.button('Try again to add 1 person').props.onPress(); }); await flush();
-  expect(mockAdd.mock.calls[0]).toEqual(mockAdd.mock.calls[1]); expect(f.done).toHaveBeenCalledTimes(1);
+  await act(async () => { await f.button('Check status').props.onPress(); }); await flush();
+  expect(mockAdd).toHaveBeenCalledTimes(1); expect(mockStatus).toHaveBeenCalledTimes(2); expect(f.done).toHaveBeenCalledTimes(1);
 });
 
 it('retires staged error feedback after closing and reopening during a request', async () => {

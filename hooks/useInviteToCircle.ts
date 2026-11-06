@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { addPeopleWithReceipt, pendingCircleAdd } from '../lib/circles/addPeopleReceipt';
 import { circleKeys } from '../lib/circles/keys';
 
 export interface InviteToCircleScope { userId: string; isCurrent: () => boolean }
@@ -14,7 +15,7 @@ export function isObsoleteCircleInvite(error: unknown): error is ObsoleteCircleI
   return error instanceof Error && error.name === 'ObsoleteCircleInviteError';
 }
 type Owner = { circleId: string; userId: string | null | undefined; scope: InviteToCircleScope | null | undefined; revision: number };
-type Attempt = { owner: Owner; ids: string[] };
+type Attempt = { owner: Owner; ids: string[]; checkOnly: boolean };
 type Options = MutateOptions<number, Error, string[]>;
 
 export function useInviteToCircle(circleId: string, userId: string | null | undefined, scope?: InviteToCircleScope | null) {
@@ -54,14 +55,8 @@ export function useInviteToCircle(circleId: string, userId: string | null | unde
         if (authError) throw authError;
         if (!user || user.id !== captured.userId) throw new ObsoleteCircleInviteError();
         if (authUser.current === undefined) authUser.current = user.id;
-        const { data, error } = await supabase.rpc('invite_to_circle', {
-          p_circle_id: captured.circleId,
-          p_user_ids: attempt.ids,
-        });
-        requireCurrent(captured);
-        if (error) throw error;
-        if (typeof data !== 'number' || !Number.isInteger(data) || data < 0) throw new Error('Could not confirm who was added. Check the circle before trying again.');
-        return data;
+        return await addPeopleWithReceipt(qc, user.id, captured.circleId, attempt.ids,
+          () => requireCurrent(captured), attempt.checkOnly);
       } catch (error) {
         requireCurrent(captured);
         throw error;
@@ -78,11 +73,11 @@ export function useInviteToCircle(circleId: string, userId: string | null | unde
 
   // Capture invocation ownership before React Query schedules mutationFn. A
   // retained mutate callback must not use a replacement render's options.
-  const begin = (ids: string[]): Attempt => {
+  const begin = (ids: string[], checkOnly = false): Attempt => {
     requireCurrent(owner);
     if (pending.current?.owner === owner) throw new Error('A circle invitation is already pending.');
     if (!ids.length) throw new Error('Choose someone to add.');
-    const attempt = { owner, ids: [...ids] };
+    const attempt = { owner, ids: [...ids], checkOnly };
     pending.current = attempt;
     return attempt;
   };
@@ -98,7 +93,9 @@ export function useInviteToCircle(circleId: string, userId: string | null | unde
   const mutateAsync = async (ids: string[], options?: Options) => mutation.mutateAsync(begin(ids), callbacks(options));
   const belongs = mutation.variables?.owner === owner && current(owner);
   return {
-    ...mutation, mutate, mutateAsync, variables: belongs ? mutation.variables?.ids : undefined,
+    ...mutation, mutate, mutateAsync,
+    pendingIds: userId ? pendingCircleAdd(qc, userId, circleId) : undefined,
+    checkStatus: (ids: string[]) => mutation.mutateAsync(begin(ids, true)), variables: belongs ? mutation.variables?.ids : undefined,
     data: belongs ? mutation.data : undefined, error: belongs ? mutation.error : null,
     failureReason: belongs ? mutation.failureReason : null, failureCount: belongs ? mutation.failureCount : 0,
     isPending: belongs && mutation.isPending, isSuccess: belongs && mutation.isSuccess,
