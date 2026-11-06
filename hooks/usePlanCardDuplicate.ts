@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { planReviewDestination } from '../lib/planCopyReview';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
@@ -10,7 +12,7 @@ type Options = {
   eventId: string; enabled: boolean; startTime: string; endTime?: string | null;
   status?: string; onError: () => void;
   viewerId?: string;
-  openDraft?: (params: Record<string, string>) => void;
+  openDraft?: (params: Record<string, string>, viewerId: string) => void;
 };
 const sourceFields = 'id, title, description, start_time, end_time, drop_in, allow_duplicate, location_text, location_lat, location_lng, image_url, primary_vibe, gender_rule, max_invites, target_age_min, target_age_max, tickets_url, neighborhood, explore_event_id, circle_id, status';
 
@@ -18,6 +20,7 @@ const sourceFields = 'id, title, description, start_time, end_time, drop_in, all
  * focused visit and account. Nothing is posted by this hook. */
 export function usePlanCardDuplicate(options: Options) {
   const router = useRouter();
+  const client = useQueryClient();
   const owner = useMemo(() => ({}), [options.eventId, options.viewerId, options.enabled, options.startTime, options.endTime, options.status]);
   const latest = useRef({ owner, options }); latest.current = { owner, options };
   const visit = useRef<object | null>(null);
@@ -60,8 +63,8 @@ export function usePlanCardDuplicate(options: Options) {
         throw new Error('Plan is no longer available to copy');
       }
       const params = buildDuplicatePostParams(data, options.eventId);
-      if (latest.current.options.openDraft) latest.current.options.openDraft(params);
-      else router.push({ pathname: '/(tabs)/post', params });
+      if (latest.current.options.openDraft) latest.current.options.openDraft(params, auth.data.user.id);
+      else router.push(planReviewDestination(client, auth.data.user.id, params));
       openedDraft = true;
     } catch {
       if (current()) latest.current.options.onError();

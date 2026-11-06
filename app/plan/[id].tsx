@@ -19,6 +19,7 @@ import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '../../l
 import { buildPlanShareContent } from '../../lib/sharePlan';
 import { planAgeLabel } from '../../lib/planAgeLabel';
 import { usePlanCardDuplicate } from '../../hooks/usePlanCardDuplicate';
+import { planReviewDestination } from '../../lib/planCopyReview';
 import { buildDuplicatePostParams } from '../../lib/duplicatePlan';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
@@ -1062,10 +1063,10 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
       if (duplicateVisit.current === openedDuplicateVisit)
         setDuplicateError('Couldn’t open a draft. The plan may have changed. You can try again.');
     },
-    openDraft: params => {
+    openDraft: (params, viewerId) => {
       if (!openedDuplicateVisit || duplicateVisit.current !== openedDuplicateVisit) return;
       const isCurrent = waitlist.capture();
-      const goToPost = () => { if (isCurrent()) router.push({ pathname: '/(tabs)/post', params }); };
+      const goToPost = () => { if (isCurrent()) router.push(planReviewDestination(queryClient, viewerId, params)); };
       closeDuplicateSheet();
       if (Platform.OS === 'ios') void afterPlanModalDismiss('duplicate', isCurrent, goToPost).catch(() => {});
       else setTimeout(goToPost, 150);
@@ -1912,12 +1913,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
             toggleEditAgeRange={toggleEditAgeRange}
             handleCancelPlan={handleCancelPlan} handleSaveEdit={handleSaveEdit}
             onDuplicate={() => {
-                    if (edit.unknown || !closeManageModal()) return;
-                    router.push({
-                      pathname: '/(tabs)/post',
-                      params: buildDuplicatePostParams(plan, id),
-                    });
-                  }}
+              if (!isCreator || !currentUserId || !identity.isCurrent() || edit.unknown || !closeManageModal()) return;
+              const params = buildDuplicatePostParams(plan, id);
+              const openReview = () => router.push(planReviewDestination(queryClient, currentUserId, params));
+              if (Platform.OS === 'ios') {
+                void afterPlanModalDismiss('manage', identity.isCurrent, openReview).catch(() => {});
+              } else {
+                openReview();
+              }
+            }}
           />
           {/* Keep the date picker inside the existing editor's native Modal. */}
           {draft.datePickerVisible && <DatePickerSheet

@@ -37,7 +37,7 @@ const mockNotice = jest.fn(async () => ({ needsAssent: false }));
 const mockAssent = jest.fn(async () => true);
 const mockCurrent = jest.fn(() => true);
 const mockQueries = new Map<string, any>();
-const mockClient = { invalidateQueries: jest.fn() };
+const mockClient = { setQueryData: jest.fn(), invalidateQueries: jest.fn() };
 const mockSave = jest.fn();
 let mockWishlist: any;
 const mockMutationCalls: any[] = [];
@@ -1041,6 +1041,9 @@ it('uses fresh duplication permission from the waitlist chooser and opens an all
   expect(mockPush).not.toHaveBeenCalled();
   act(() => { modal.props.onDismiss(); modal.props.onDismiss(); });
   expect(mockPush).toHaveBeenCalledTimes(1);
-  expect(mockPush).toHaveBeenCalledWith({ pathname: '/(tabs)/post', params: expect.objectContaining({ prefillTitle: 'Updated venue' }) });
+  const destination = mockPush.mock.calls[0][0];
+  expect(destination).toEqual({pathname: '/similar-plan', params: {reviewId: expect.any(String)}});
+  expect(mockClient.setQueryData).toHaveBeenCalledWith(['similar-plan-review',expect.any(String),destination.params.reviewId],
+    expect.objectContaining({prefillTitle:'Updated venue'}));
   expect(mockWaitlistChange).not.toHaveBeenCalled();
 });

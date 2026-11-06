@@ -255,23 +255,23 @@ it('keeps optional publish details optional when saving a draft', async () => {
   expect(mockInsert).not.toHaveBeenCalled();
 });
 
-async function mount(invite = false, params: Record<string, string> = {}) {
+async function mount(invite = false, params: Record<string, string> = {}, reviewPrefill?: Record<string, string>) {
   mockParams = { prefillTitle: 'Local test walk', prefillCategory: 'Outdoors', prefillDescription: 'A local test plan.', prefillStartTime: '2040-09-15T03:00:00.000Z', ...(invite ? { prefillInvitePersonId: 'person', prefillInvitePersonName: 'Person' } : {}), ...params };
   let tree!: ReturnType<typeof create>;
-  act(() => { tree = create(<PlanComposerV2 />); });
+  act(() => { tree = create(<PlanComposerV2 reviewPrefill={reviewPrefill} />); });
   cleanup.push(() => act(() => tree.unmount()));
   await flush();
   act(() => tree.root.findAll(node => node.props.accessibilityLabel === 'Your message, required' && typeof node.props.onChangeText === 'function')[0].props.onChangeText('Come take a walk with me.'));
   const post = () => tree.root.findAll(node => typeof node.props.onPress === 'function' && node.findAll(child => ['post the plan', 'Post plan'].includes(child.props.children)).length > 0)[0].props.onPress();
   return { tree, post,
-    focus: async (value: boolean) => { mockFocused = value; act(() => tree.update(<PlanComposerV2 />)); await flush(); },
+    focus: async (value: boolean) => { mockFocused = value; act(() => tree.update(<PlanComposerV2 reviewPrefill={reviewPrefill} />)); await flush(); },
     pick: () => pressByLabel(tree, 'Add photo'),
     confirmation: () => tree.root.findByType(PostConfirmation).props,
     postCallback: () => tree.root.findAll(node => typeof node.props.onPress === 'function' && node.findAll(child => ['post the plan', 'Post plan'].includes(child.props.children)).length > 0)[0].props.onPress,
     saveDraft: () => tree.root.findAll(node => typeof node.props.onPress === 'function' && node.findAll(child => ['save it as a draft', 'Save draft'].includes(child.props.children)).length > 0)[0].props.onPress(),
     prefillNew: async (newTitle: string) => {
       mockParams = { prefillTitle: newTitle, prefillCategory: 'Outdoors', prefillDescription: 'The current account plan.', prefillStartTime: '2040-09-15T03:00:00.000Z' };
-      act(() => tree.update(<PlanComposerV2 />));
+      act(() => tree.update(<PlanComposerV2 reviewPrefill={reviewPrefill} />));
       await flush();
       act(() => tree.root.findAll(node => node.props.accessibilityLabel === 'Your message, required' && typeof node.props.onChangeText === 'function')[0].props.onChangeText('Current account plan message.'));
     },
@@ -280,7 +280,7 @@ async function mount(invite = false, params: Record<string, string> = {}) {
     swap: async (id: string | null = 'next-account') => {
       mockViewerId = id; mockViewerEpoch++;
       jest.mocked(supabase.auth.getUser).mockResolvedValue({ data: { user: id ? { id } : null }, error: null } as any);
-      act(() => tree.update(<PlanComposerV2 />));
+      act(() => tree.update(<PlanComposerV2 reviewPrefill={reviewPrefill} />));
       await flush();
     },
   };
@@ -323,6 +323,25 @@ it('only explicit posting of the reviewed similar plan inserts an independent pl
  expect(mockInsert).toHaveBeenCalledTimes(1);
  expect(mockInsert.mock.calls[0][0]).toMatchObject({skip_explore_auto_link:true,explore_event_id:null,duplicated_from_event_id:null,tickets_url:null});
  expect(mockInvite).not.toHaveBeenCalled();
+});
+
+it('publishes ordinary copy fields only on Post, without using invitees from the underlying tab', async () => {
+  const fixture = await mount(true, {}, {
+    prefillTitle: 'Second beach walk', prefillDescription: 'A local copy.', prefillCategory: 'Outdoors',
+    prefillStartTime: '2040-09-15T03:00:00.000Z', prefillEndTime: '2040-09-15T05:00:00.000Z',
+    prefillTicketsUrl: 'https://example.test/ticket', prefillExploreEventId: 'source-event',
+    duplicatedFromEventId: 'source-plan',
+  });
+  expect(mockInsert).not.toHaveBeenCalled();
+  await act(async () => { await fixture.post(); });
+  expect(mockInsert).toHaveBeenCalledTimes(1);
+  expect(mockInsert.mock.calls[0][0]).toMatchObject({
+    title: 'Second beach walk', start_time: '2040-09-15T03:00:00.000Z',
+    end_time: '2040-09-15T05:00:00.000Z', tickets_url: 'https://example.test/ticket',
+    explore_event_id: 'source-event', duplicated_from_event_id: 'source-plan',
+  });
+  expect(mockInsert.mock.calls[0][0]).not.toHaveProperty('skip_explore_auto_link');
+  expect(mockInvite).not.toHaveBeenCalled();
 });
 
 it('blocks confirmation exits while an actual zero-recipient plan insert is pending', async () => {
