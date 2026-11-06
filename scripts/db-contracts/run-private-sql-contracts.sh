@@ -362,6 +362,19 @@ run_role_reconciliation_contract() {
   fi
 }
 
+run_participation_assent_contract() {
+  create_contract_db participation_assent_contract
+  psql_file participation_assent_contract /contracts/205_participation_assent_fixture.sql
+  docker exec -i "$CONTAINER_ID" psql -X -v ON_ERROR_STOP=1 -U postgres -d participation_assent_contract < "$REPO_ROOT/supabase/migrations/20260716233736_participation_notice_evidence_proposal_49.sql"
+  docker exec -i "$CONTAINER_ID" psql -X -v ON_ERROR_STOP=1 -U postgres -d participation_assent_contract < "$REPO_ROOT/docs/database/review-only/20261106020000_exact_participation_assent.sql"
+  psql_file participation_assent_contract /contracts/206_participation_assent_contract.sql
+}
+
+if [ "$CONTRACT_LANE" = "participation-assent" ]; then
+  run_participation_assent_contract
+  exit 0
+fi
+
 if [ "$CONTRACT_LANE" = "event-ownership" ]; then
   run_event_ownership_contract
   echo "PASS: focused Build 35 A1 event ownership database contracts"
@@ -492,6 +505,7 @@ run_consent_sync_contract
 run_delivery_scheduler_contract
 run_event_ownership_contract
 run_role_reconciliation_contract
+run_participation_assent_contract
 
 echo "PASS: account deletion, refund locking, Vault headers, future function defaults, payout batch claims, accepted-relationship DMs, Circle trust edges, bounded chat paging, pending-payout deletion block, Circle suggestions, Community join-policy preparation, technical database hardening, event member visibility, topic album metadata, identity-marks trigger safety, durable free RSVP confirmations, topic-notification body and cross-member read, audience consent sync, G0 scheduler rescue, Build 35 A1 event ownership (backfill, insert derivation, one-owner invariant, audit trail, both cascade re-homes, and a real header-comment rollback execution), and Build 35 A3 community role reconciliation (full seven-tier taxonomy mapping, fail-closed grants, and idempotent re-apply)"
 if [ "$static_status" -ne 0 ]; then

@@ -90,21 +90,21 @@ it('locks both actions synchronously across status, notice and assent; only an e
   mockRpc.mockImplementation((name: string) => name === 'get_participation_notice_status' ? status.promise : name === 'record_participation_assent' ? assent.promise : Promise.resolve({ data: null }));
   const f = mount(); f.accept(); f.decline(); f.accept(); await flush();
   expect(f.current.acceptExceptionMutation.isPending).toBe(true); expect(writes()).toHaveLength(0);
-  await act(async () => status.resolve({ data: { needs_assent: true } }));
+  await act(async () => status.resolve({ data: { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } }));
   expect(f.onNotice).toHaveBeenCalledTimes(1); f.decline(); f.accept(); await flush(); expect(writes()).toHaveLength(0);
   const guard = f.guard(); let first!: Promise<boolean>, second!: Promise<boolean>;
   act(() => { first = f.current.agree(guard); second = f.current.agree(guard); }); await flush();
   expect(await second).toBe(false); expect(records()).toHaveLength(1);
   expect(f.current.cancelNotice(guard)).toBe(false);
-  await act(async () => assent.resolve({ data: null, error: null })); expect(await first).toBe(true);
+  await act(async () => assent.resolve({ data:'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a', error:null })); expect(await first).toBe(true);
   expect(records()).toEqual([['record_participation_assent', {
-    p_listing_type: 'plan', p_listing_id: 'plan-a', p_organizer_user_id: 'creator-a', p_organizer_name: 'Amelia', p_action: 'join',
+    p_notice_version:'1.0', p_terms_version:'3.0', p_expected_user_id:'alice', p_listing_type: 'plan', p_listing_id: 'plan-a', p_organizer_user_id: 'creator-a', p_organizer_name: 'Amelia', p_action: 'join',
   }]]);
   expect(f.onNoticeComplete).toHaveBeenCalledWith(guard); expect(writes()).toHaveLength(1); expect(f.onAccepted).toHaveBeenCalledTimes(1);
 });
 
 it('captures the creator evidence shown when the exception notice opened', async () => {
-  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true } : null }));
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } : name==='record_participation_assent'?'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a':null, error:null }));
   const f = mount(); f.accept(); await flush(); const guard = f.guard();
   f.update({ organizerUserId: 'later-creator', organizerName: 'Later name' });
   await act(async () => { await f.current.agree(guard); });
@@ -112,7 +112,7 @@ it('captures the creator evidence shown when the exception notice opened', async
 });
 
 it('cancelled notice guards cannot agree or dismiss the next notice in the same focused visit', async () => {
-  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true } : null }));
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } : name==='record_participation_assent'?'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a':null, error:null }));
   const f = mount(); f.accept(); await flush(); const first = f.guard();
   act(() => { expect(f.current.cancelNotice(first)).toBe(true); }); expect(first()).toBe(false);
   f.accept(); await flush(); const second = f.guard(); expect(second).not.toBe(first);
@@ -124,12 +124,12 @@ it('cancelled notice guards cannot agree or dismiss the next notice in the same 
 it.each(['returned', 'thrown'])('a failed assent (%s) keeps the same notice retryable and never accepts', async kind => {
   let calls = 0;
   mockRpc.mockImplementation(async name => {
-    if (name === 'get_participation_notice_status') return { data: { needs_assent: true } };
+    if (name === 'get_participation_notice_status') return { data: { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } };
     if (name === 'record_participation_assent' && calls++ === 0) {
       if (kind === 'thrown') throw new Error('offline');
       return { error: { message: 'denied' } };
     }
-    return { data: null, error: null };
+    return { data:name==='record_participation_assent'?'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a':null, error:null };
   });
   const f = mount(); f.accept(); await flush(); const guard = f.guard();
   await act(async () => { expect(await f.current.agree(guard)).toBe(false); });
@@ -169,10 +169,10 @@ it('checks the account again between delayed status and accept dispatch', async 
 
 it('checks the account again after recorded assent before acceptance', async () => {
   const assent = deferred<Result>();
-  mockRpc.mockImplementation(name => name === 'get_participation_notice_status' ? Promise.resolve({ data: { needs_assent: true } }) : assent.promise);
+  mockRpc.mockImplementation(name => name === 'get_participation_notice_status' ? Promise.resolve({ data: { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } }) : assent.promise);
   const f = mount(); f.accept(); await flush(); let agreement!: Promise<boolean>;
   act(() => { agreement = f.current.agree(f.guard()); }); await flush(); mockAccount = 'bob';
-  await act(async () => assent.resolve({ data: null, error: null })); expect(await agreement).toBe(false);
+  await act(async () => assent.resolve({ data:'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a', error:null })); expect(await agreement).toBe(false);
   expect(writes()).toHaveLength(0); expect(f.onAccepted).not.toHaveBeenCalled();
   expect(f.onError).toHaveBeenCalledTimes(1); expect(f.current.acceptExceptionMutation.isPending).toBe(false);
 });
@@ -193,7 +193,7 @@ it.each(['account', 'ABA', 'target', 'blur', 'unmount'])('retires delayed auth b
 
 it.each(['status', 'assent'])('retires %s completion after blur and refocus', async stage => {
   const result = deferred<Result>();
-  mockRpc.mockImplementation(name => name === 'get_participation_notice_status' ? stage === 'status' ? result.promise : Promise.resolve({ data: { needs_assent: true } }) : result.promise);
+  mockRpc.mockImplementation(name => name === 'get_participation_notice_status' ? stage === 'status' ? result.promise : Promise.resolve({ data: { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } }) : result.promise);
   const f = mount(); f.accept(); await flush();
   if (stage === 'assent') { act(() => { void f.current.agree(f.guard()); }); await flush(); }
   act(() => { mockBlur?.(); mockBlur = mockFocus?.() || undefined; });
@@ -261,14 +261,14 @@ it('the shared ordinary-notice assent helper rejects a replaced notice before re
 
 it('the shared ordinary-notice helper rejects a late recorded response instead of authorizing a join', async () => {
   const result = deferred<Result>(); mockRpc.mockReturnValue(result.promise); let current = true;
-  const work = recordScopedPlanAssent({ listingType: 'plan', listingId: 'plan-a', organizerUserId: null, organizerName: 'Someone', action: 'join' },
+  const work = recordScopedPlanAssent({ listingType: 'plan', listingId: 'plan-a', organizerUserId: null, organizerName: 'Someone', action: 'join',versions:{notice:'1.0',terms:'3.0'} },
     { viewerId: 'alice', isCurrent: () => current });
   const check = expect(work).rejects.toBeInstanceOf(Error); await flush(); current = false; result.resolve({ data: null, error: null }); await check;
   expect(records()).toHaveLength(1);
 });
 
 it('waits for the optional native notice dismissal before dispatching exception acceptance', async () => {
-  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true } : null, error: null }));
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } : name==='record_participation_assent'?'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a':null, error: null }));
   const dismissal = deferred<void>(), f = mount({ onNoticeComplete: () => dismissal.promise });
   f.accept(); await flush(); let agreement!: Promise<boolean>;
   act(() => { agreement = f.current.agree(f.guard()); }); await flush();
@@ -277,7 +277,7 @@ it('waits for the optional native notice dismissal before dispatching exception 
 });
 
 it('a retired exception cannot dispatch after its notice finally dismisses', async () => {
-  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true } : null, error: null }));
+  mockRpc.mockImplementation(async name => ({ data: name === 'get_participation_notice_status' ? { needs_assent: true, notice_version:'1.0', terms_version:'3.0' } : name==='record_participation_assent'?'b4ccba19-bd63-46da-b7c0-a9ed8d29cb7a':null, error: null }));
   const dismissal = deferred<void>(), f = mount({ onNoticeComplete: () => dismissal.promise });
   f.accept(); await flush(); let agreement!: Promise<boolean>;
   act(() => { agreement = f.current.agree(f.guard()); }); await flush(); act(() => mockBlur?.());

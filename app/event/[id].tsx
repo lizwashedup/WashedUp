@@ -60,7 +60,7 @@ import { buildPlanPrefillFromEvent, canFindPeopleForEvent, getOpenLinkedPlans } 
 import {readEventLinkedPlans, type LinkedEventPlan as LinkedPlan} from '../../lib/eventLinkedPlans';
 import { getLeaderCards } from '../../lib/communityLeader';
 import { ParticipationNotice } from '../../components/legal/ParticipationNotice';
-import { getParticipationNoticeStatus } from '../../lib/participationTerms';
+import { getParticipationNoticeStatus, type ParticipationAssentContext } from '../../lib/participationTerms';
 import { type DescriptionBlock } from '../../lib/eventContent';
 import { EventBodyBlocks } from '../../components/events/EventBodyBlocks';
 import { EventAction, EventSurface } from '../../constants/EventDesign';
@@ -678,7 +678,7 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
 
   const rsvpOwner = React.useMemo<RsvpOwner | null>(() => !previewMode && pageContext.scope?.userId
     ? { userId: pageContext.scope.userId, isCurrent: pageContext.scope.isCurrent } : null, [pageContext.scope, previewMode]);
-  const noticeOwner = React.useRef<RsvpOwner | null>(null);
+  const noticeOwner = React.useRef<{ owner: RsvpOwner; context: ParticipationAssentContext } | null>(null);
   const attendanceEntry = React.useRef<RsvpOwner | null>(null);
   useEffect(() => { noticeOwner.current = null; setNoticeVisible(false); setRsvpBusy(false); }, [rsvpOwner]);
 
@@ -832,10 +832,14 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
     attendanceEntry.current = rsvpOwner;
     setRsvpBusy(true);
     try {
-      const { needsAssent } = await getParticipationNoticeStatus();
+      const { needsAssent, versions } = await getParticipationNoticeStatus();
       if (!rsvpOwner.isCurrent()) return;
       if (needsAssent) {
-        noticeOwner.current = rsvpOwner;
+        noticeOwner.current = {
+          owner: rsvpOwner,
+          context: { listingType: 'explore_event', listingId: id, organizerUserId: event?.host_user_id ?? null,
+            organizerName: noticeOrganizerName, action: 'rsvp', versions },
+        };
         setNoticeVisible(true);
         return;
       }
@@ -846,17 +850,17 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
       if (attendanceEntry.current === rsvpOwner) attendanceEntry.current = null;
       if (rsvpOwner.isCurrent()) setRsvpBusy(false);
     }
-  }, [id, rsvpOwner, rsvpBusy, rsvpReadUnresolved, rsvpRecovery.blocked, rsvpRecovery.change, myRsvp, proceedWithRsvp]);
+  }, [id, rsvpOwner, rsvpBusy, rsvpReadUnresolved, rsvpRecovery.blocked, rsvpRecovery.change, myRsvp, proceedWithRsvp, event?.host_user_id, noticeOrganizerName]);
 
   const handleNoticeAgree = useCallback(async () => {
-    const owner = noticeOwner.current;
-    if (!id || !owner?.isCurrent() || owner !== rsvpOwner) return false;
+    const notice = noticeOwner.current;
+    const owner = notice?.owner;
+    if (!id || !notice || !owner?.isCurrent() || owner !== rsvpOwner) return false;
     try {
-      const ok = await recordScopedPlanAssent({
-        listingType: 'explore_event', listingId: id,
-        organizerUserId: event?.host_user_id ?? null, organizerName: noticeOrganizerName, action: 'rsvp',
-      }, { viewerId: owner.userId, isCurrent: owner.isCurrent });
-      if (!ok || !owner.isCurrent()) return false;
+      const isCurrent = () => owner.isCurrent() && noticeOwner.current === notice;
+      const ok = await recordScopedPlanAssent(notice.context, { viewerId: owner.userId, isCurrent });
+      if (!ok || !isCurrent()) return false;
+      noticeOwner.current = null;
       setNoticeVisible(false);
       await proceedWithRsvp();
       return true;
@@ -1756,9 +1760,9 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
 
       <ParticipationNotice
         visible={noticeVisible}
-        organizerName={noticeOrganizerName}
+        organizerName={noticeOwner.current?.context.organizerName ?? noticeOrganizerName}
         onAgree={handleNoticeAgree}
-        onClose={() => setNoticeVisible(false)}
+        onClose={() => { noticeOwner.current = null; setNoticeVisible(false); }}
       />
 
       <TicketCheckoutSheet

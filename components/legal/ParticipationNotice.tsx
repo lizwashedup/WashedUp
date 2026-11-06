@@ -86,7 +86,7 @@ function ParticipationNoticeVisit(props: ParticipationNoticeProps & { isCurrent:
     setBusy(false);
     if (!ok && active()) {
       // LIZ COPY
-      setProblem('that did not go through. give it another try.');
+      setProblem('We couldn’t confirm your agreement. Try again, or close and reopen the notice.');
     }
   };
 
