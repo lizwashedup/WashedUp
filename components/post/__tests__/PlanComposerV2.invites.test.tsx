@@ -69,7 +69,8 @@ jest.mock('../../../lib/supabase', () => ({ supabase: {
       const query: any = { eq: (key: string, value: string) => { filters[key] = value; return query; },
         select: () => query, maybeSingle: run, single: run, then: (yes: any, no: any) => run().then(yes, no) };
       return query;
-    }, insert: (row: unknown) => ({ select: () => ({ single: () => mockInsert(row) }), then: (resolve: (result: unknown) => void, reject: (error: unknown) => void) => mockInsert(row).then(resolve, reject) }) };
+    }, upsert: (row: unknown, conflict: unknown) => ({select: () => ({maybeSingle: () => mockInsert(row, conflict)})}),
+    insert: (row: unknown) => ({ select: () => ({ single: () => mockInsert(row) }), then: (resolve: (result: unknown) => void, reject: (error: unknown) => void) => mockInsert(row).then(resolve, reject) }) };
     if (table === 'event_members') return { insert: (row: unknown) => mockMember(row) };
     throw new Error(`Unexpected table ${table}`);
   },
@@ -288,7 +289,7 @@ beforeEach(() => { jest.clearAllMocks(); mockPublishReceipt.mockReset().mockReso
   mockChoosePhoto.mockReset().mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///chosen.jpg' }] });
   mockPreparePhoto.mockReset().mockResolvedValue({ uri: 'file:///prepared.jpg', base64: 'prepared-base64' });
   mockUpload.mockReset().mockResolvedValue('https://test.invalid/creator-photo.jpg');
-  jest.mocked(supabase.auth.refreshSession).mockReset().mockResolvedValue({ error: null } as any); mockViewerId = 'creator'; mockViewerEpoch = 1; mockViewerLoading = false; mockViewerError = null; jest.mocked(supabase.auth.getUser).mockReset().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null } as any); mockProfile.mockReset().mockResolvedValue({ data: { gender: 'woman' }, error: null }); mockInsert.mockReset().mockResolvedValue({ data: { id: 'saved-plan' }, error: null }); mockMember.mockReset().mockResolvedValue({ error: null }); mockInvite.mockReset().mockResolvedValue(1); });
+  jest.mocked(supabase.auth.refreshSession).mockReset().mockResolvedValue({ error: null } as any); mockViewerId = 'creator'; mockViewerEpoch = 1; mockViewerLoading = false; mockViewerError = null; jest.mocked(supabase.auth.getUser).mockReset().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null } as any); mockProfile.mockReset().mockResolvedValue({ data: { gender: 'woman' }, error: null }); mockInsert.mockReset().mockImplementation(async row => ({ data: { id: row.id ?? 'saved-plan' }, error: null })); mockMember.mockReset().mockResolvedValue({ error: null }); mockInvite.mockReset().mockResolvedValue(1); });
 afterEach(() => { cleanup.splice(0).forEach(close => close()); jest.useRealTimers(); });
 
 it('starts a similar plan with fresh dates, people and associations in an already mounted composer', async () => {
@@ -996,4 +997,47 @@ it.each([false,true])('only recovers the original request after an uncertain pub
   await act(async()=>{await form.post();});
   expect(form.confirmation().visible).toBe(!changed); expect(mockMember).not.toHaveBeenCalled();
   expect(mockInvite).toHaveBeenCalledTimes(changed?0:1); expect(mockInsert).not.toHaveBeenCalled();
+});
+
+
+it('reuses the same new draft after a lost save, including edits made before retry', async () => {
+  let saved: any;
+  mockInsert.mockImplementation(async row => {
+    if (saved?.id && row.id === saved.id) return {data:null, error:null};
+    saved={...row}; throw new Error('Lost save receipt');
+  });
+  mockUpdateDraft.mockImplementation(async (row, filters) => {
+    expect(filters).toEqual({id:saved.id,creator_user_id:'creator',status:'draft'});
+    Object.assign(saved,row); return {data:{id:saved.id},error:null};
+  });
+  const form=await mount();
+  await act(async()=>{await form.saveDraft();});
+  expect(form.title()).toBe('Local test walk');
+  form.setTitle('Updated walk');
+  await act(async()=>{await form.saveDraft();});
+  expect(mockInsert.mock.calls[0][0].id).toBeTruthy();
+  expect(mockInsert.mock.calls[1][0].id).toBe(mockInsert.mock.calls[0][0].id);
+  expect(saved.title).toBe('Updated walk'); expect(form.title()).toBe('');
+  expect(mockMember).not.toHaveBeenCalled(); expect(mockInvite).not.toHaveBeenCalled();
+});
+
+it('keeps an unresolved new draft from being posted as a second plan', async () => {
+  mockInsert.mockRejectedValueOnce(new Error('Lost save receipt'));
+  mockUpdateDraft.mockResolvedValueOnce({data:null,error:null});
+  const form=await mount();
+  await act(async()=>{await form.saveDraft();});
+  await act(async()=>{await form.post();});
+  expect(mockInsert).toHaveBeenCalledTimes(1); expect(mockMember).not.toHaveBeenCalled();
+  expect(form.title()).toBe('Local test walk');
+});
+
+it('publishes the same confirmed row when Post follows a lost new-draft save response', async () => {
+  mockInsert.mockRejectedValueOnce(new Error('Lost save receipt'));
+  const form=await mount();
+  await act(async()=>{await form.saveDraft();});
+  const id=mockInsert.mock.calls[0][0].id;
+  mockUpdateDraft.mockResolvedValueOnce({data:{id},error:null});
+  await act(async()=>{await form.post();});
+  expect(mockUpdateDraft.mock.calls[0][1]).toEqual({id,creator_user_id:'creator',status:'draft'});
+  expect(mockCommit).toHaveBeenCalledWith(id); expect(mockInsert).toHaveBeenCalledTimes(1);
 });

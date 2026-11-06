@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { DraftUnavailable, publishOwnedDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
+import { DraftUnavailable, publishOwnedDraft, saveNewPlanDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
  * Main plan composer, with optional development-gated Afterglow presentation.
@@ -197,9 +197,6 @@ export default function PlanComposerV2() {
   const [confirmMeta, setConfirmMeta] = useState('');
   const [shareWanted, setShareWanted] = useState(false);
   const [recoveryNudge, setRecoveryNudge] = useState(false);
-  const recoveryText = params.draftId ? 'Couldn’t confirm the post. Your edits are here. Tap Post to try again.'
-    : appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.'
-    : "that didn't go through. your plan is here. tap post to try again.";
   const neverPostedRef = useRef(false);
   // Synchronous lock against a real double-tap: `loading` state alone has a
   // render-commit lag a fast second tap can beat (closure on the button's
@@ -209,6 +206,13 @@ export default function PlanComposerV2() {
   const mountedRef = useRef(false);
   const photoVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
+  const newDraft = useMemo(() => ({ id: null as string | null }), [
+    composerViewer.epoch, composerViewer.viewerId, params.draftId, params.prefillTitle,
+    params.prefillInvitePersonId, params.duplicatedFromEventId, params.similarPlanRequest,
+  ]);
+  const recoveryText = (params.draftId || newDraft.id) ? 'Couldn’t confirm the post. Your edits are here. Tap Post to try again.'
+    : appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.'
+    : "that didn't go through. your plan is here. tap post to try again.";
   const draftPublishRequest = useRef<{ snapshot: string; key: string } | null>(null);
   const writeRef = useRef<ComposerWrite | null>(null);
   // Retirement removes only this attempt's temporary card. Restoring its old
@@ -604,6 +608,7 @@ export default function PlanComposerV2() {
 
   const resetFields = () => { setValidationMode(null); resetDraftFields(); };
   const resetForm = () => {
+    newDraft.id = null;
     draftPublishRequest.current = null;
     resetFields();
     // Clear every prefill/duplicate param after a successful post. Otherwise a
@@ -722,11 +727,9 @@ export default function PlanComposerV2() {
         await updateOwnedDraft(String(params.draftId), user.id, row);
         if (!ownsWrite(write)) return;
       } else {
-        const { error } = await supabase
-          .from('events')
-          .insert({ ...row, creator_user_id: user.id });
+        newDraft.id ??= randomUUID();
+        await saveNewPlanDraft(newDraft.id, user.id, row, () => ownsWrite(write));
         if (!ownsWrite(write)) return;
-        if (error) throw error;
       }
       hapticSuccess();
       queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
@@ -752,6 +755,9 @@ export default function PlanComposerV2() {
   const handleSubmit = async () => {
     if (!isComposerCurrent() || submittingRef.current) return;
     if (photoAttempt.current || loading || imageLoading || confirmVisible) return;
+    // If Save may have committed, Post must use that exact draft. A late
+    // response must never turn the same form into a second public plan.
+    const draftId = params.draftId ? String(params.draftId) : newDraft.id;
     if (!validateRequired('post')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -867,8 +873,7 @@ export default function PlanComposerV2() {
       if (!ownsWrite(write)) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       let insertedEvent: { id: string } | null = null;
-      if (params.draftId) {
-        const draftId = String(params.draftId);
+      if (draftId) {
         const snapshot = JSON.stringify([user.id, draftId, row, inviteIds]);
         if (draftPublishRequest.current?.snapshot !== snapshot) {
           draftPublishRequest.current = { snapshot, key: randomUUID() };
@@ -887,7 +892,7 @@ export default function PlanComposerV2() {
       }
 
       if (!insertedEvent?.id) throw new Error('The saved plan could not be confirmed.');
-      if (!params.draftId) {
+      if (!draftId) {
         const { error: memberErr } = await supabase.from('event_members').insert({
           event_id: insertedEvent.id, user_id: user.id, role: 'host', status: 'joined',
         });
@@ -955,8 +960,11 @@ export default function PlanComposerV2() {
       setConfirmVisible(false);
       setShareWanted(false);
       postInvitations.reset();
-      if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
-      else setRecoveryNudge(true);
+      if (error instanceof DraftUnavailable) {
+        setAlertInfo(params.draftId ? unavailableDraftAlert : {
+          title: 'Check your draft', message: 'Check Yours for this plan. If it still needs saving, your edits are here. Tap Save draft to try again.',
+        });
+      } else setRecoveryNudge(true);
     } finally {
       if (ownsWrite(write)) {
         writeRef.current = null;
