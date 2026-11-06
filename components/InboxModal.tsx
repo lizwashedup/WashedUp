@@ -1,4 +1,5 @@
 import { InboxPlanInviteActions } from './InboxPlanInviteActions';
+import { useInboxClearAll } from '../hooks/useInboxClearAll';
 import { useInboxNotificationScope } from '../hooks/useInboxNotificationScope';
 import { CommunityJoinInboxRow } from './notifications/CommunityJoinInboxRow';
 import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
@@ -257,25 +258,10 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [refetchNotifs, queryClient, userId, navigateAfterDismiss, notificationScope]);
 
-  const handleClearAll = useCallback(async () => {
-    if (!userId || appNotifications.length === 0) return;
-    hapticLight();
-    try {
-      // Mark every visible app_notification as read in one query.
-      // Mirrors the query filter above so we never touch invites or chat pings.
-      await supabase
-        .from('app_notifications')
-        .update({ status: 'read' })
-        .eq('user_id', userId)
-        .eq('status', 'unread')
-        .neq('type', 'plan_invite')
-        .neq('type', 'new_message');
-      refetchNotifs();
-      queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-    } catch {
-      setAlertInfo({ title: 'Something went wrong', message: 'Please try again.' });
-    }
-  }, [userId, appNotifications.length, refetchNotifs, queryClient]);
+  const clearAll = useInboxClearAll(notificationScope, visit, () => !closingRef.current && activeVisit.current === visit);
+  const clearBusy = clearAll.phase === 'clearing' || clearAll.phase === 'checking';
+  const clearLabel = { idle: 'Clear all', clearing: 'Clearing…', retry: 'Retry clear',
+    unknown: 'Check notifications', checking: 'Checking…' }[clearAll.phase];
 
   // exception_invite inline Accept. Mirrors the waitlist_spot Claim flow:
   // act on the RPC, mark the notification consumed, then route to the chat
@@ -412,18 +398,24 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
               <X size={22} color={Colors.asphalt} />
             </TouchableOpacity>
             <Text style={s.title}>Notifications</Text>
-            {appNotifications.length > 0 && (
+            {(appNotifications.length > 0 || clearAll.phase !== 'idle') && (
               <TouchableOpacity
-                onPress={handleClearAll}
+                disabled={clearBusy}
+                onPress={() => clearAll.press(appNotifications)}
                 accessibilityRole="button"
-                accessibilityLabel="Clear all notifications"
+                accessibilityLabel={clearAll.phase === 'idle' ? 'Clear all notifications' : clearLabel}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={s.clearAllBtn}
               >
-                <Text style={s.clearAllText}>Clear all</Text>
+                <Text style={s.clearAllText}>{clearLabel}</Text>
               </TouchableOpacity>
             )}
           </View>
+          {(clearAll.phase === 'retry' || clearAll.phase === 'unknown') && (
+            <Text accessibilityLiveRegion="polite" style={[s.meta, { paddingHorizontal: 16, paddingVertical: 8 }]}>
+              {clearAll.phase === 'retry' ? 'Some notifications still need clearing.' : 'Couldn’t confirm whether your notifications cleared.'}
+            </Text>
+          )}
           {readFailed && (
             <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
               <Text accessibilityLiveRegion="polite" style={s.meta}>
