@@ -113,3 +113,25 @@ it.each(['mine', 'suggestions', 'members'] as const)('%s preserves legacy no-sco
 it.each(['mine', 'suggestions', 'members'] as const)('%s stays disabled without an account', async which => {
   kind = which; userId = null; await mount(); expect(mockRpc).not.toHaveBeenCalled(); expect(mockMembers).not.toHaveBeenCalled(); expect(mockGetUser).not.toHaveBeenCalled();
 });
+
+
+it.each([
+  { data: null }, { data: {} }, { data: [null] }, { data: [{ name: 'Missing ID', member_count: 3 }] },
+  { data: [{ id: 'private-pair', name: null }] }, { data: [{ id: 'invalid', name: 7, member_count: 3 }] },
+])('offers recovery for an unconfirmed joined directory without storing a false empty result (%j)', async ({ data }) => {
+  mockRpc.mockResolvedValueOnce({ data, error: null });
+  await mount();
+  expect(current.isError).toBe(true);
+  expect(client.getQueryData(key('alice', 1))).toBeUndefined();
+  await act(async () => { await current.refetch(); }); await flush();
+  expect(ids()).toEqual(['circle-a']);
+});
+
+it('preserves a confirmed empty array and permits a legitimately unnamed joined circle', async () => {
+  mockRpc.mockResolvedValueOnce({ data: [], error: null });
+  await mount();
+  expect(current.data).toEqual([]); expect(current.isError).toBe(false);
+  mockRpc.mockResolvedValueOnce({ data: [{ ...circle(), name: null }], error: null });
+  await act(async () => { await current.refetch(); }); await flush();
+  expect(ids()).toEqual(['circle-a']);
+});

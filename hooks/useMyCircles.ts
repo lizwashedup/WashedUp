@@ -36,7 +36,14 @@ export function useMyCircles(userId: string | null | undefined, scope?: CirclePl
       const { data, error } = await readCircleRequest(scope ? request.abortSignal(signal) : request);
       requireCurrent();
       if (error) throw error;
-      const circles = (data ?? []) as MyCircle[];
+      // get_my_circles returns [] for a confirmed empty directory. A missing
+      // list or unusable row cannot establish which circles this member has.
+      if (!Array.isArray(data) || data.some(row => !row || typeof row.id !== 'string'
+        || !row.id.trim() || (row.name !== null && typeof row.name !== 'string')
+        || !Number.isInteger(row.member_count) || row.member_count < 1)) {
+        throw new Error('Could not confirm your circles.');
+      }
+      const circles = data as MyCircle[];
 
       // Unnamed circles (a DM grown to 3+ people) have no stored name. Resolve a
       // member-name title client-side so the directory never shows a blank row.
