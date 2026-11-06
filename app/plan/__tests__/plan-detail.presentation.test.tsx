@@ -39,7 +39,7 @@ const mockNotice = jest.fn(async () => ({ needsAssent: false }));
 const mockAssent = jest.fn(async () => true);
 const mockCurrent = jest.fn(() => true);
 const mockQueries = new Map<string, any>();
-const mockClient = { setQueryData: jest.fn(), invalidateQueries: jest.fn() };
+const mockClient = { resetQueries: jest.fn(), setQueryData: jest.fn(), invalidateQueries: jest.fn() };
 const mockSave = jest.fn();
 let mockWishlist: any;
 const mockMutationCalls: any[] = [];
@@ -1070,4 +1070,23 @@ it('retires the original creator block after leaving the detail and returning', 
   expect(scope.isCurrent()).toBe(false);
   act(selectBlock());
   expect(mockBlock.mock.calls[1][3].isCurrent()).toBe(true);
+});
+
+it('retires a withdrawn plan even if the last good detail is still cached', async () => {
+  mockCanGoBack = true;
+  await mount();
+  act(() => button("Let's Go →").props.onPress());
+  act(() => mockJoinOptions.onError('This plan is no longer available.', 'not_found'));
+  expect(allText()).toContain('This plan is no longer available.');
+  expect(button('Try again')).toBeUndefined();
+  expect(button("Let's Go →")).toBeUndefined();
+  expect(mockJoinOptions.ready).toBe(false);
+  expect(mockClient.resetQueries).toHaveBeenCalledWith({queryKey:['events','detail',mockPlan.id,'viewer',1], exact:true});
+  act(() => button('Go back').props.onPress());
+  expect(mockBack).toHaveBeenCalledTimes(1);
+  expect(mockJoin).not.toHaveBeenCalled();
+  expect(mockInviteComplete).not.toHaveBeenCalled();
+  mockAccount = 'another-viewer'; mockEpoch++;
+  await act(async () => tree.update(<PlanDetailScreen />));
+  expect(button("Let's Go →")).toBeDefined();
 });

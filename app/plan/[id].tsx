@@ -281,6 +281,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [joinMessage, setJoinMessage] = useState('');
   const [joinConfirmed, setJoinConfirmed] = useState(false);
   const [joinError, setJoinError] = useState<{ message: string; reason?: PlanJoinDenial } | null>(null);
+  const [withdrawnAtJoin, setWithdrawnAtJoin] = useState(false);
   function openJoinSheet() {
     setJoinError(null);
     setJoinModalVisible(true);
@@ -740,7 +741,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const [joinPreparing, setJoinPreparing] = useState(false);
   const noSpotAvailable = contextReady && membersQuery.isSuccess && effectiveIsFull && (isCirclePlan || !waitlistNotified);
   const refusedSpot = joinModalVisible && (joinError?.reason === 'full' || joinError?.reason === 'waitlist_priority');
-  const joinReady = !noSpotAvailable && !refusedSpot && !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
+  const joinReady = !withdrawnAtJoin && !noSpotAvailable && !refusedSpot && !invitation.busy && invitation.attempt?.phase !== 'unknown' && !waitlist.busy && waitlist.intent?.phase !== 'unknown' && !isClosedPlan && !planError && contextReady && viewerQuery.isSuccess && membersQuery.isSuccess && !!currentUserId && !isMember && !isCreator && effectiveIsEligible && !(isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember);
   const showGreetingProblem = (greeting: { text: string; notSent: boolean }) => {
     const isCurrent = joinMutation.isCurrent;
     const recovery = { isCurrent };
@@ -808,6 +809,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
     },
     onError: (message, reason) => {
+      if (reason === 'not_found') {
+        // The join service confirmed this plan is unavailable to this viewer.
+        // Don't let a cached detail or a failed background read offer Join again.
+        invitationCompletion.current = null;
+        setWithdrawnAtJoin(true);
+        setJoinModalVisible(false);
+        void queryClient.resetQueries({ queryKey: ['events', 'detail', id, currentUserId, identity.epoch], exact: true });
+        return;
+      }
       if (joinErrorSurface(joinModalVisible) === 'inline') setJoinError({ message, reason });
       else {
         invitationCompletion.current = null;
@@ -1132,7 +1142,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
   // ─── Loading / Error ─────────────────────────────────────────────────────────
 
-  if (planLoading) {
+  if (planLoading && !withdrawnAtJoin) {
     return (
       <SafeAreaView style={styles.container} edges={appearance ? ['top'] : ['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
@@ -1144,15 +1154,15 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     );
   }
 
-  if (!plan) {
+  if (!plan || withdrawnAtJoin) {
     return (
       <SafeAreaView style={styles.container} edges={appearance ? ['top'] : ['top', 'bottom']}>
         <Stack.Screen options={{ headerShown: false, gestureEnabled: true }} />
         <View style={[styles.header, { paddingTop: 8 }]}><TouchableOpacity onPress={goBack} accessibilityRole="button" accessibilityLabel={router.canGoBack() ? "Go back" : "Go back to plans"} style={styles.headerIconButton}><ArrowLeft size={20} color={ink}/></TouchableOpacity><ProfileButton compact/></View>
         <View style={styles.centered}>
-          <Text style={styles.errorText}>Couldn’t load this plan.</Text>
-          <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => void planQuery.refetch()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity>
-          <TouchableOpacity onPress={goBack} style={{ marginTop: 12 }}>
+          <Text accessibilityRole="alert" style={styles.errorText}>{withdrawnAtJoin ? 'This plan is no longer available.' : 'Couldn’t load this plan.'}</Text>
+          {!withdrawnAtJoin && <TouchableOpacity style={{ minHeight: 44, justifyContent: 'center' }} onPress={() => void planQuery.refetch()}><Text style={styles.linkText}>Try again</Text></TouchableOpacity>}
+          <TouchableOpacity accessibilityRole="button" onPress={goBack} style={{ marginTop: 12, minHeight: 44, justifyContent: 'center' }}>
             <Text style={styles.linkText}>Go back</Text>
           </TouchableOpacity>
         </View>
