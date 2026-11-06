@@ -703,3 +703,26 @@ it('never updates a read position after the member leaves during the insert resp
   await flush(); epoch++; write.resolve({data: [], error: null}); await done;
   expect(requests).toHaveLength(1);
 });
+
+
+describe('community chat inbox responses', () => {
+  const card = { community_id: 'community-a', name: 'Fictional neighbors', topics: [{ id: 'topic-a', joined: true }] };
+  const attendee = { id: 'event-topic', community_id: 'community-b' };
+  it.each([null, {}, { cards: [] }, { attendee_topics: [] }, { cards: null, attendee_topics: [] },
+    { cards: [null], attendee_topics: [] }, { cards: [{ ...card, topics: null }], attendee_topics: [] },
+    { cards: [{ ...card, topics: [{ id: 'topic-a', joined: 'false' }] }], attendee_topics: [] },
+    { cards: [], attendee_topics: [{ ...attendee, community_id: '' }] }])(
+    'treats an unconfirmed directory as a failed read (%j)', async data => {
+      rpc.mockResolvedValueOnce({ data, error: null } as any);
+      await expect(community.getCommunityChatPayload()).rejects.toThrow('confirm your community chats');
+    });
+  it.each([
+    { data: [card], cards: [card], attendee_topics: [] },
+    { data: [], cards: [], attendee_topics: [] },
+    { data: { cards: [], attendee_topics: [attendee] }, cards: [], attendee_topics: [attendee] },
+    { data: { cards: [card], attendee_topics: [attendee] }, cards: [card], attendee_topics: [attendee] },
+  ])('preserves supported membership lists (%j)', async ({ data, cards, attendee_topics }) => {
+    rpc.mockResolvedValueOnce({ data, error: null } as any);
+    await expect(community.getCommunityChatPayload()).resolves.toEqual({ cards, attendee_topics });
+  });
+});

@@ -130,6 +130,10 @@ export async function getEventTopicId(eventId: string, strict = false): Promise<
   return (data?.id as string | undefined) ?? null;
 }
 
+function usableChatId(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 export async function getCommunityChatPayload(
   scopeOrQueryContext?: CommunityOperationScope | { queryKey: readonly unknown[] },
 ): Promise<CommunityChatPayload> {
@@ -139,11 +143,18 @@ export async function getCommunityChatPayload(
   const { data, error } = await scopedCommunityRequest(scope, () => supabase.rpc('get_my_community_chat_cards'));
   assertCommunityScope(scope);
   if (error) throw error;
-  const payload = (data ?? {}) as Partial<CommunityChatPayload>;
-  return {
-    cards: payload.cards ?? [],
-    attendee_topics: payload.attendee_topics ?? [],
-  };
+  // The original RPC returned just the cards array. The newer response
+  // includes a separate list of event rooms joined through attendance.
+  const payload = Array.isArray(data) ? { cards: data, attendee_topics: [] } : data;
+  if (!Array.isArray(payload?.cards) || !Array.isArray(payload.attendee_topics)
+    || payload.cards.some((card: CommunityChatCard | null) =>
+      !card || !usableChatId(card.community_id) || !Array.isArray(card.topics)
+      || card.topics.some(topic => !topic || !usableChatId(topic.id) || typeof topic.joined !== 'boolean'))
+    || payload.attendee_topics.some((topic: AttendeeTopic | null) =>
+      !topic || !usableChatId(topic.id) || !usableChatId(topic.community_id))) {
+    throw new Error('Could not confirm your community chats.');
+  }
+  return { cards: payload.cards, attendee_topics: payload.attendee_topics };
 }
 
 // -- the chats-list rows (revised doc 09: no hub screen, chats are just chats) --
