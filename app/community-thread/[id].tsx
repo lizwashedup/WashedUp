@@ -139,6 +139,11 @@ export default function CommunityThreadScreen() {
   const { atBottomRef, followingLatest, setFollowingLatest, captureScrollIntent } = scrollFollow;
   const [reactionDetails, setReactionDetails] = useState<ReactionDetailsRequest | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null);
+  const [openReplyPanels, setOpenReplyPanels] = useState(0);
+  const coverMainWithReplies = useCallback(() => {
+    setOpenReplyPanels(count => count + 1);
+    return () => setOpenReplyPanels(count => count - 1);
+  }, []);
   const [replyRequest, setReplyRequest] = useState<{ messageId: string } | null>(null);
   const [alertInfo, setAlertInfo] = React.useState<{ title: string; message?: string; buttons?: BrandedAlertButton[] } | null>(null);
   const [sending, setSending] = useState(false);
@@ -427,7 +432,7 @@ export default function CommunityThreadScreen() {
   // Only server history is eligible; the delivery list also has local sends.
   const ordinaryRead = useVisibleCommunityRead('main', id ?? '', readAcknowledgementScope, broadcasts,
     !!id && admissionVisit.allowed && !coreLayout && !anchor,
-    !isLoading && broadcasts.length > 0 && !profileUserId && !replyRequest && !reactionDetails
+    !isLoading && broadcasts.length > 0 && !profileUserId && openReplyPanels === 0 && !reactionDetails
       && !reactionPickerMsgId && !messageMenu && !alertInfo && !showReport && !photoPreviewOpen && !locationPickerOpen && !photoSelection.selectedId);
   const visibleRead = useRef<(items: ViewToken<CommunityBroadcast>[]) => void>(() => {});
   visibleRead.current = items => {
@@ -983,7 +988,7 @@ export default function CommunityThreadScreen() {
                         <Text style={[styles.editedText, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn, { alignSelf: 'flex-end', marginTop: 2 }]}>{localDelivery === 'sending' ? 'Sending…' : localDelivery === 'unconfirmed' ? 'Not confirmed · retry below' : localDelivery === 'sent' ? 'Sent' : formatChatTime(item.created_at)}</Text>
                       {!!item.edited_at && <Text style={[styles.editedText, mine && styles.messageTextMine, messageAppearance?.metadata, mine && messageAppearance?.metadataOwn]}>edited</Text>}
                       </TouchableOpacity>
-                      {detailsReady && <CommunityMessageActions onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={{ fonts: conversationFonts }} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />}
+                      {detailsReady && <CommunityMessageActions onPresentReplies={coverMainWithReplies} onViewMember={userId => { if (admissionIsCurrent()) setProfileUserId(userId); }} compactReplies replyRequest={replyRequest?.messageId === item.id ? replyRequest : undefined} onRepliesClose={currentAction(() => setReplyRequest(current => current?.messageId === item.id ? null : current))} onViewReactions={() => openReactionDetails(item.id)} appearance={{ fonts: conversationFonts }} message={item} scope={operationScope} onError={showError} onReact={emoji => handleSelectReaction(item.id, emoji)} onAddReaction={currentAction(() => setReactionPickerMsgId(item.id))} />}
                     </View>
                   </View>
                 ) : item.metadata_pending ? (

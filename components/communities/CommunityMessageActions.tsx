@@ -28,6 +28,8 @@ interface Props {
   onViewReactions?: () => void;
   replyRequest?: object;
   onRepliesClose?: () => void;
+  /** Suspend ordinary Main read receipts for the actual lifetime of the reply sheet. */
+  onPresentReplies?: () => () => void;
   compactReplies?: boolean;
   message: CommunityBroadcast;
   appearance?: { fonts: AfterglowFontFamilies };
@@ -203,11 +205,12 @@ export function useCommunityMessageInteractions(
  * Reactions attach to messages; the existing long-press menu opens the picker.
  * The reply link preserves access to the existing nested reply history.
  */
-export function CommunityMessageActions({ message, onError, onAddReaction, scope, onReact, appearance, onViewReactions, replyRequest, onRepliesClose, onViewMember, compactReplies = false }: Props) {
+export function CommunityMessageActions({ message, onError, onAddReaction, scope, onReact, appearance, onViewReactions, replyRequest, onRepliesClose, onPresentReplies, onViewMember, compactReplies = false }: Props) {
   const { showReplies, draft, sending, replies, repliesLoading, repliesError, replyComposer, repliesHaveOlder, repliesLoadingOlder, loadOlderReplies,
     changeDraft, send, react, toggleReplies, retryReplies, currentAction, openReplies, closeReplies,
   } = useCommunityMessageInteractions(message, onError, scope, 'single', onReact);
 
+  useLayoutEffect(() => showReplies ? onPresentReplies?.() : undefined, [showReplies, onPresentReplies]);
   const consumedRequest = useRef<object | undefined>(undefined);
   useEffect(() => {
     if (replyRequest && consumedRequest.current !== replyRequest) {
