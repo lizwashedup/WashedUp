@@ -16,7 +16,7 @@ import {
 import { getCommunityMessageAnchorWindow, CommunityMessageUnavailableError, type CommunityMessageAnchor } from '../lib/communityMessageAnchor';
 import { getCommunityRoomHistory, type CommunityRoomCursor } from '../lib/communityRoomHistory';
 import { chronologicalCommunityRoomItems, replaceCommunitySourceWindow } from '../lib/communityRoomWindow';
-import { removeOwnChatMessage } from '../lib/removeOwnChatMessage';
+import { removeChatMessageFromSender } from '../lib/chatMessageRemoval';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { logError } from '../lib/logger';
 import { mergeTopicMessagesWithPending } from '../lib/topicPendingMessages';
@@ -731,6 +731,11 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     }
   }, [viewerId, isCurrentRoom, topicId]);
 
+  const applyConfirmedRemoval = useCallback((messageId: string) => {
+    if (!isCurrentRoom()) return;
+    setMessages(current => isCurrentRoom() ? current.filter(row => row.id !== messageId) : current);
+    invalidateLists();
+  }, [isCurrentRoom, invalidateLists]);
   const pendingDeletes = useMemo(() => new Set<string>(), [roomGeneration]);
   const deleteMessage = useCallback(async (messageId: string) => {
     const checkVisit = () => { if (!isCurrentRoom()) throw new ObsoleteTopicOperationError(); };
@@ -740,14 +745,13 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     if (!message || message.sender_id !== viewerId || message.delivery_state === 'sending') return;
     pendingDeletes.add(messageId);
     try {
-      await removeOwnChatMessage({ kind: 'topic', id: topicId }, messageId, viewerId, checkVisit);
+      await removeChatMessageFromSender({ kind: 'topic', id: topicId }, messageId, viewerId, checkVisit);
       checkVisit();
-      setMessages(current => isCurrentRoom() ? current.filter(row => row.id !== messageId) : current);
-      invalidateLists();
+      applyConfirmedRemoval(messageId);
     } finally {
       pendingDeletes.delete(messageId);
     }
-  }, [invalidateLists, viewerId, topicId, isCurrentRoom, pendingDeletes]);
+  }, [applyConfirmedRemoval, viewerId, topicId, isCurrentRoom, pendingDeletes]);
 
   const toggleReaction = useCallback(async function changeReaction(messageId: string, reaction: string, expectedIntent?: ReactionIntent): Promise<void> {
     if (!isCurrentRoom()) throw new ObsoleteTopicOperationError();
@@ -848,6 +852,7 @@ export function useTopicChat(topicId: string | undefined, context?: TopicRoomCon
     sendLocation,
     editMessage,
     deleteMessage,
+    applyConfirmedRemoval,
     toggleReaction,
     refresh,
     loadOlder,

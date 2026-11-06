@@ -2,7 +2,7 @@ import { requestWithDeadline, RequestDeadlineError } from './requestWithDeadline
 import { supabase } from './supabase';
 
 export class MessageStillVisibleError extends Error {
-  constructor() { super('Your message is still here. You can try deleting it again.'); }
+  constructor() { super('The message is still here. You can try removing it again.'); }
 }
 
 export class UnconfirmedMessageRemovalError extends Error {
@@ -11,9 +11,9 @@ export class UnconfirmedMessageRemovalError extends Error {
 
 type Conversation = { kind: 'event' | 'circle' | 'topic'; id: string };
 
-/** Author removal only. Community moderation has separate permissions and UI. */
-export async function removeOwnChatMessage(
-  conversation: Conversation, messageId: string, userId: string, assertCurrent: () => void,
+/** Match the original row. Callers supply the author; database policies determine who may remove it. */
+export async function removeChatMessageFromSender(
+  conversation: Conversation, messageId: string, senderId: string, assertCurrent: () => void,
 ): Promise<void> {
   const topic = conversation.kind === 'topic';
   const table = topic ? 'community_topic_messages' : 'messages';
@@ -22,7 +22,7 @@ export async function removeOwnChatMessage(
 
   assertCurrent();
   const write = await requestWithDeadline(supabase.from(table).delete()
-    .eq('id', messageId).eq(author, userId).eq(parent, conversation.id).select('id').maybeSingle(), 12_000)
+    .eq('id', messageId).eq(author, senderId).eq(parent, conversation.id).select('id').maybeSingle(), 12_000)
     .catch((error: unknown) => {
       assertCurrent();
       if (error instanceof RequestDeadlineError) throw error;
@@ -35,7 +35,7 @@ export async function removeOwnChatMessage(
   // An empty DELETE response can also mean the write affected zero rows.
   // Only an authorized, successful read establishes absence from this chat.
   const read = await requestWithDeadline(supabase.from(table).select('id')
-    .eq('id', messageId).eq(author, userId).eq(parent, conversation.id).maybeSingle(), 8_000)
+    .eq('id', messageId).eq(author, senderId).eq(parent, conversation.id).maybeSingle(), 8_000)
     .catch(() => null);
   assertCurrent();
   if (!read || read.error || read.data !== null && read.data?.id !== messageId) throw new UnconfirmedMessageRemovalError();
