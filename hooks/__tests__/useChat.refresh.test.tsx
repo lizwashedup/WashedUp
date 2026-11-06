@@ -687,3 +687,15 @@ it('prevents an older history page in flight from restoring a newly blocked auth
   await act(async()=>{page.resolve(result(message(0)));await pending;});
   expect(fixture.chat.messages).toHaveLength(60);expect(fixture.chat.messages.every(row=>row.user_id==='allowed')).toBe(true);
 });
+
+it.each([null, {}, {blocked_users:'invalid'}, {blocked_users:[null]}])('does not show first-load messages with an unconfirmed block list: %j',async profile=>{
+  readBlocked.mockResolvedValueOnce({data:profile,error:null}).mockResolvedValue({data:{blocked_users:['other']},error:null});
+  readMessages.mockResolvedValue(result(message(1),message(2,{user_id:'allowed'})));
+  const fixture=mount();await flush();
+  expect(fixture.chat.loadError).toBe(true);expect(fixture.chat.messages).toEqual([]);expect(readReceipts).not.toHaveBeenCalled();
+  await act(async()=>fixture.chat.refetch());expect(fixture.chat.messages.map(row=>row.id)).toEqual([message(2).id]);
+});
+it.each([null,[]])('accepts a confirmed profile with an empty or legacy null block list: %j',async list=>{
+  readBlocked.mockResolvedValueOnce({data:{blocked_users:list},error:null});readMessages.mockResolvedValue(result(message(1)));
+  const fixture=mount();await flush();expect(fixture.chat.loadError).toBe(false);expect(fixture.chat.messages).toHaveLength(1);
+});
