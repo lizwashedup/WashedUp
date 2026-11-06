@@ -3,6 +3,9 @@ import { act, create } from 'react-test-renderer';
 import { usePlanExceptionActions } from '../usePlanExceptionActions';
 import { recordScopedPlanAssent } from '../../lib/planParticipationScope';
 
+let mockClient: object;
+const mockStatusRead = jest.fn();
+jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient }));
 const mockGetUser = jest.fn(), mockRpc = jest.fn(), mockUpdate = jest.fn();
 let mockAccount: string | null = 'alice', mockEpoch = 1;
 let mockFocus: (() => void | (() => void)) | undefined, mockBlur: (() => void) | undefined;
@@ -14,7 +17,12 @@ jest.mock('expo-router', () => ({ useFocusEffect: (callback: () => void | (() =>
 } }));
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: () => mockGetUser() }, rpc: (...args: unknown[]) => mockRpc(...args),
-  from: (table: string) => ({ update: (values: unknown) => {
+  from: (table: string) => ({ select: (fields: string) => {
+    const filters: unknown[] = [];
+    const query = { eq: (...filter: unknown[]) => { filters.push(filter); return query; },
+      maybeSingle: () => mockStatusRead(table, fields, filters) };
+    return query;
+  }, update: (values: unknown) => {
     const filters: unknown[] = [];
     const query = { eq: (...args: unknown[]) => { filters.push(args); return query; },
       then: (yes: (value: unknown) => unknown, no: (error: unknown) => unknown) => Promise.resolve(mockUpdate(table, values, filters)).then(yes, no) };
@@ -41,7 +49,7 @@ function mount(overrides: Partial<Options> = {}) {
   function Harness() {
     const epoch = mockEpoch;
     current = usePlanExceptionActions({ eventId: 'plan-a', viewerId: mockAccount, epoch, isCurrent: () => epoch === mockEpoch,
-      available: true, organizerUserId: 'creator-a', organizerName: 'Amelia',
+      grant: {rowId:'row-a',invitedAt:'2026-11-03T18:00:00Z'}, refreshInvitation: jest.fn().mockResolvedValue(undefined), available: true, organizerUserId: 'creator-a', organizerName: 'Amelia',
       onAccepted, onDeclined, onNotice, onNoticeComplete, onError, refreshInbox, ...props });
     return null;
   }
@@ -59,7 +67,7 @@ function mount(overrides: Partial<Options> = {}) {
   };
 }
 beforeEach(() => {
-  jest.clearAllMocks(); mockAccount = 'alice'; mockEpoch = 1;
+  jest.clearAllMocks(); mockClient = {}; mockStatusRead.mockReset().mockResolvedValue({data:null,error:null}); mockAccount = 'alice'; mockEpoch = 1;
   mockGetUser.mockImplementation(async () => ({ data: { user: mockAccount ? { id: mockAccount } : null }, error: null }));
   mockRpc.mockImplementation(async (name: string) => ({ data: name === 'get_participation_notice_status' ? { needs_assent: false } : null, error: null }));
   mockUpdate.mockResolvedValue({ error: null });
@@ -295,4 +303,55 @@ it('a retired exception cannot dispatch after its notice finally dismisses', asy
   f.accept(); await flush(); let agreement!: Promise<boolean>;
   act(() => { agreement = f.current.agree(f.guard()); }); await flush(); act(() => mockBlur?.());
   await act(async () => dismissal.resolve()); expect(await agreement).toBe(false); expect(writes()).toHaveLength(0); expect(f.onError).not.toHaveBeenCalled();
+});
+
+const lost = {data:null,error:{code:'',message:'Lost response'}};
+const grantRow = {id:'row-a',event_id:'plan-a',user_id:'alice',exception_invited_at:'2026-11-03T18:00:00Z'};
+function loseDecision() {
+  mockRpc.mockImplementation(async name => name==='get_participation_notice_status'
+    ? {data:{needs_assent:false},error:null} : lost);
+}
+it.each(['accept','decline'] as const)('confirms a lost %s receipt from the member’s own state',async kind=>{
+  loseDecision();
+  mockStatusRead.mockResolvedValue({data:kind==='accept'?{event_id:'plan-a',user_id:'alice',status:'joined'}:
+    {...grantRow,exception_status:'declined'},error:null});
+  const f=mount(); f[kind](); await flush();
+  expect(kind==='accept'?f.onAccepted:f.onDeclined).toHaveBeenCalledTimes(1);
+  expect(f.onError).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
+  expect(mockUpdate.mock.calls[0][2]).toContainEqual(['created_at',grantRow.exception_invited_at]);
+});
+it.each(['accept','decline'] as const)('checks an uncertain %s across route visits without sending it again',async kind=>{
+  loseDecision();mockStatusRead.mockResolvedValue({data:null,error:{message:'Offline'}});
+  const a=mount();a[kind]();await flush();expect(a.current.needsCheck).toBe(true);a.unmount();
+  const b=mount();expect(b.current.needsCheck).toBe(true);
+  b.accept();b.decline();await flush();expect(writes()).toHaveLength(1);
+  mockStatusRead.mockResolvedValue({data:kind==='accept'?{event_id:'plan-a',user_id:'alice',status:'joined'}:
+    {...grantRow,exception_status:'declined'},error:null});
+  await act(async()=>{await b.current.check();});
+  expect(kind==='accept'?b.onAccepted:b.onDeclined).toHaveBeenCalledTimes(1);expect(writes()).toHaveLength(1);
+});
+it('cannot credit a second grant’s decline or release the old reply when its detail refresh fails',async()=>{
+  const refreshInvitation=jest.fn().mockResolvedValue(undefined);loseDecision();
+  mockStatusRead.mockResolvedValue({data:{...grantRow,exception_invited_at:'later',exception_status:'declined'},error:null});
+  const f=mount({refreshInvitation});f.decline();await flush();
+  expect(f.onDeclined).not.toHaveBeenCalled();expect(refreshInvitation).toHaveBeenCalled();
+  f.decline();await flush();expect(writes()).toHaveLength(1);expect(f.current.needsCheck).toBe(true);
+  f.update({grant:{rowId:'row-a',invitedAt:'later'}});expect(f.current.needsCheck).toBe(false);
+});
+it('ignores a delayed receipt lookup after the member leaves',async()=>{
+  const reply=deferred<Result>();loseDecision();mockStatusRead.mockReturnValue(reply.promise);
+  const f=mount();f.accept();await flush();act(()=>mockBlur?.());
+  await act(async()=>reply.resolve({data:{event_id:'plan-a',user_id:'alice',status:'joined'},error:null}));
+  expect(f.onAccepted).not.toHaveBeenCalled();expect(mockUpdate).not.toHaveBeenCalled();
+});
+
+it('abandons a delayed notice if the original grant was withdrawn',async()=>{
+  const status=deferred<Result>();mockRpc.mockReturnValue(status.promise);
+  const f=mount();f.accept();await flush();f.update({grant:null,available:false});
+  await act(async()=>status.resolve({data:{needs_assent:true},error:null}));
+  expect(f.onNotice).not.toHaveBeenCalled();expect(writes()).toHaveLength(0);
+});
+it('treats uncertain statement completion as a read-only check',async()=>{
+  mockRpc.mockResolvedValue({data:null,error:{code:'40003'}});const f=mount();f.decline();await flush();
+  expect(f.current.needsCheck).toBe(true); f.decline();await flush();expect(writes()).toHaveLength(1);
 });

@@ -609,6 +609,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
   const exceptionActions = usePlanExceptionActions({
     eventId: id, viewerId: currentUserId, epoch: identity.epoch, isCurrent: identity.isCurrent,
+    grant: waitlist.entry ? { rowId: waitlist.entry.id, invitedAt: waitlist.entry.exception_invited_at ?? null } : null,
+    refreshInvitation: waitlist.refresh,
     available: hasActiveException && !isClosedPlan && !planError, organizerUserId: plan?.creator_user_id ?? null,
     organizerName: plan?.creator?.first_name_display ?? 'Someone',
     onNotice: (isCurrent, context) => setNoticePending({ action: 'exception', isCurrent, context }),
@@ -1622,6 +1624,14 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               style={styles.waitlistButton} disabled={waitlistLoading}
               onPress={()=>{void waitlist.refresh();}}>
               <Text numberOfLines={1} style={styles.waitlistButtonText}>{waitlistLoading ? 'Checking…' : 'Check waitlist'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : hasActiveException && exceptionActions.needsCheck ? (
+          <View>
+            <Text style={styles.exceptionBannerBody}>We couldn’t confirm your reply yet.</Text>
+            <TouchableOpacity accessibilityRole="button" disabled={exceptionActions.checking}
+              style={styles.exceptionAcceptBtn} onPress={() => { void exceptionActions.check(); }}>
+              <Text style={styles.exceptionAcceptText}>{exceptionActions.checking ? 'Checking…' : 'Check invitation'}</Text>
             </TouchableOpacity>
           </View>
         ) : hasActiveException ? (

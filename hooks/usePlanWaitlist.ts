@@ -13,7 +13,7 @@ import { waitlistChangeReceipts, type WaitlistEntry as Entry } from '../lib/wait
 type Intent = { desired: boolean; phase: 'pending' | 'failed' | 'unknown' };
 type State = { originalId?: string; entry: Entry | null; ready: boolean; loading: boolean; error: string | null; intent: Intent | null; pending: object | null; revision: number; visit: object | null };
 type Options = { eventId: string; viewerId: string | null; epoch: number; isCurrent: () => boolean; canChange: () => boolean };
-const fields = 'id,event_id,user_id,notified,exception_status,exception_expires_at';
+const fields = 'id,event_id,user_id,notified,exception_status,exception_expires_at,exception_invited_at';
 const rejected = new Set(['P0001','42501','23502','23503','23505','23514','22P02','28000','28P01','42883','42703','42P01','40001','40P01']);
 function ownEntry(data: unknown, eventId: string, viewerId: string): data is Entry {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
