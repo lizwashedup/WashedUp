@@ -19,8 +19,9 @@ jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient, us
 jest.mock('../../lib/supabase', () => ({ supabase: { from: () => {
   let writing=false;
   const chain:any={select:()=>chain,update:()=>{writing=true;return chain;},
+    neq:(...a:any[])=>{mockFilters(writing,...a);return chain;}, or:()=>chain, lte:(...a:any[])=>{mockFilters(writing,...a);return chain;},
     eq:(...args:any[])=>{mockFilters(writing,...args);return chain;},
-    maybeSingle:()=>writing?mockWrite():mockReadInvite(),then:(yes:any,no:any)=>mockWrite().then(yes,no)};
+    maybeSingle:()=>writing?mockWrite():mockReadInvite(),then:(yes:any,no:any)=>(writing ? mockWrite() : mockReadInvite()).then(yes,no)};
   return chain;
 } } }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn(async () => {}) }));
@@ -221,4 +222,53 @@ it('removes a locally expired notice while the inbox stays open',async()=>{
     await act(async()=>{await jest.advanceTimersByTimeAsync(801);});
     expect(renderedText()).not.toContain('Fictional reminder');
   } finally {jest.useRealTimers();}
+});
+
+const clearButton = () => tree.root.findByProps({accessibilityLabel:'Clear all notifications'});
+it('offers a retry when the server rejects Clear all', async()=>{
+  mockWrite.mockResolvedValueOnce({data:null,error:{code:'42501'}});
+  await act(async()=>clearButton().props.onPress());
+  expect(renderedText()).toContain('Retry clear');
+  expect(renderedText()).toContain('Fictional reminder');
+});
+it('submits Clear all once for two quick taps',async()=>{
+  const press=clearButton().props.onPress;
+  await act(async()=>{await Promise.all([press(),press()]);});
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+});
+
+it('checks an uncertain Clear all without another write and preserves new arrivals',async()=>{
+  mockWrite.mockResolvedValueOnce({error:null,count:null});
+  await act(async()=>clearButton().props.onPress());
+  expect(renderedText()).toContain('Check notifications');
+  expect(mockClient.setQueryData).not.toHaveBeenCalled();
+  mockReadInvite.mockResolvedValueOnce({error:null,count:0});
+  await act(async()=>inviteButton('Check notifications').props.onPress());
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  const [key, remove]=mockClient.setQueryData.mock.calls[0];
+  expect(key).toEqual(['app-notifications','fictional-viewer',1]);
+  expect(remove([{id:'fictional-notice'},{id:'new-arrival'}])).toEqual([{id:'new-arrival'}]);
+  expect(mockClient.invalidateQueries).toHaveBeenCalledWith({queryKey:['inbox-count','fictional-viewer']});
+});
+it('requires an explicit retry and reuses the original cutoff after an unresolved write',async()=>{
+  mockWrite.mockRejectedValueOnce(Error('lost connection'));
+  await act(async()=>clearButton().props.onPress());
+  const cutoff=mockFilters.mock.calls.find(([writing,key])=>writing && key==='created_at')![2];
+  mockReadInvite.mockResolvedValueOnce({count:1,error:null});
+  await act(async()=>inviteButton('Check notifications').props.onPress());
+  expect(mockWrite).toHaveBeenCalledTimes(1);
+  mockWrite.mockResolvedValueOnce({count:1,error:null});
+  await act(async()=>inviteButton('Retry clear').props.onPress());
+  expect(mockFilters.mock.calls.filter(([writing,key])=>writing && key==='created_at').map(row=>row[2])).toEqual([cutoff,cutoff]);
+  expect(mockFilters).toHaveBeenCalledWith(true,'user_id','fictional-viewer');
+  expect(mockFilters).toHaveBeenCalledWith(true,'type','new_message');
+  expect(mockFilters).toHaveBeenCalledWith(true,'type','plan_invite');
+});
+it.each(['close/reopen','account change'])('retires a failed clear and retained tap across %s',async change=>{
+  let finish!:(r:any)=>void;mockWrite.mockReturnValueOnce(new Promise(r=>{finish=r;}));
+  const press=clearButton().props.onPress;let pending!:Promise<void>;act(()=>{pending=press();});
+  if(change==='close/reopen'){act(()=>tree.update(renderInbox(false)));act(()=>tree.update(renderInbox(true)));}
+  else {mockCurrent=false;act(()=>tree.update(renderInbox(true,'other')));}
+  await act(async()=>{finish({error:{code:'42501'}});await pending;await press();});
+  expect(mockWrite).toHaveBeenCalledTimes(1);expect(renderedText()).not.toContain('Retry clear');
 });
