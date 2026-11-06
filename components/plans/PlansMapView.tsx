@@ -175,7 +175,7 @@ function PlanMarker({ plan, isSelected, pinBg, happeningNow, onPress }: PlanMark
 
 export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClose, onWishlist }: PlansMapViewProps) {
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [heartFilter, setHeartFilter] = useState(false);
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
   const [whenFilter, setWhenFilter] = useState<string[]>([]);
@@ -205,15 +205,19 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
     return true;
   });
 
+  // Keep the ID, never an independent copy of potentially withdrawn details.
+  const selectedPlan = filteredPlans.find(plan => plan.id === selectedId);
+  useEffect(() => {
+    if (selectedId && !selectedPlan) setSelectedId(null);
+  }, [selectedId, selectedPlan]);
+
   const handleMarkerPress = useCallback((plan: Plan) => {
     hapticLight();
-    setSelectedPlan((prev) => {
-      if (prev?.id === plan.id) {
-        setTimeout(() => onPlanPress(plan.id), 0);
-        return prev;
-      }
-      return plan;
-    });
+    if (selectedId === plan.id) {
+      onPlanPress(plan.id);
+      return;
+    }
+    setSelectedId(plan.id);
     if (plan.location_lat != null && plan.location_lng != null && mapRef.current) {
       mapRef.current.animateToRegion({
         latitude: plan.location_lat - 0.02,
@@ -222,10 +226,10 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         longitudeDelta: 0.08,
       }, 300);
     }
-  }, [onPlanPress]);
+  }, [onPlanPress, selectedId]);
 
   const handleMapPress = useCallback(() => {
-    setSelectedPlan(null);
+    setSelectedId(null);
   }, []);
 
   const going = selectedPlan ? capDisplayCount(selectedPlan.member_count) : 0;
@@ -298,7 +302,7 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
             onPress={() => {
               hapticSelection();
               setHeartFilter(prev => !prev);
-              setSelectedPlan(null);
+              setSelectedId(null);
             }}
             activeOpacity={0.8}
           >
@@ -313,7 +317,9 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
 
       {filteredPlans.length === 0 && <View style={styles.emptyCard} accessibilityLiveRegion="polite">
         <Text style={styles.cardTitle}>No plans to show on the map</Text>
-        <Text style={styles.cardMetaText}>{plans.some(p => p.location_lat != null && p.location_lng != null)
+        <Text style={styles.cardMetaText}>{plans.length === 0
+          ? 'There are no plans in this list right now.'
+          : plans.some(p => p.location_lat != null && p.location_lng != null)
           ? 'Try changing your filters, or return to the list.'
           : 'These plans don’t have map locations yet. You can still browse them in the list.'}</Text>
         <TouchableOpacity style={styles.emptyAction} onPress={onClose} accessibilityRole="button"><Text style={styles.categoryPillText}>Back to plans</Text></TouchableOpacity>
@@ -395,12 +401,12 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         selected={whenFilter}
         onToggle={(key) => {
           setWhenFilter(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
-          setSelectedPlan(null);
+          setSelectedId(null);
         }}
         onClose={() => setWhenSheetOpen(false)}
         onClear={() => {
           setWhenFilter([]);
-          setSelectedPlan(null);
+          setSelectedId(null);
         }}
       />
 
@@ -411,12 +417,12 @@ export default function PlansMapView({ plans, wishlistedSet, onPlanPress, onClos
         selected={selectedFilter ? [selectedFilter] : []}
         onToggle={(key) => {
           setSelectedFilter(prev => prev === key ? null : key);
-          setSelectedPlan(null);
+          setSelectedId(null);
         }}
         onClose={() => setCategorySheetOpen(false)}
         onClear={() => {
           setSelectedFilter(null);
-          setSelectedPlan(null);
+          setSelectedId(null);
         }}
       />
     </View>
