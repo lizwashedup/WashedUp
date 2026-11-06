@@ -3,7 +3,7 @@ import { WelcomeLoading } from '../../../components/plans/PlansWelcomeLoading';
 import { baseStyles, afterglowStyles } from '../../../components/plans/plansDiscoveryStyles';
 import { getSectionDefs, groupIntoFeedItems, filterIntoSections, type FeedItem } from '../../../lib/plansDiscoverySections';
 import { fetchFeaturedPlans, type FeaturedPlan } from '../../../lib/fetchFeaturedPlans';
-import { plansOutsideFeatured } from '../../../lib/feedPresentation';
+import { getFeedEmptyCopy, plansOutsideFeatured } from '../../../lib/feedPresentation';
 import { SunsetWordmark } from '../../../components/SunsetWordmark';
 import { CreatorActionFill } from '../../../components/creator/CreatorActionFill';
 import { MEMBER_REDESIGN_APPEARANCE_ENABLED } from '../../../constants/MemberAppearance';
@@ -548,20 +548,11 @@ export default function PlansScreen() {
   // The overlay treats "watchdog fired" the same as "data ready": stop
   // capturing touches and begin its exit. Data keeps loading underneath.
   const overlayReady = dataReady || welcomeWatchdogFired;
-  const emptyMessage = appearance
-    ? nearMeActive ? 'Make a plan nearby.' : allPlans.length > 0 ? 'Try another day or activity.' : 'What would you like to do?'
-    : nearMeActive
-    ? 'Nothing quite that close yet.'
-    : allPlans.length > 0
-      ? 'No plans match your filters.'
-      : 'No plans yet.';
-  // Near-me empty is a proximity gap on a young feed, not a dead end. Reframe it
-  // warmly: name the growth, hand back agency (post + share), no plea.
-  const emptySubText = appearance
-    ? nearMeActive ? 'Try a wider distance, or post something close to you.' : allPlans.length > 0 ? 'Clear your filters to see more plans, or post one of your own.' : 'Post a plan and give someone a reason to join you.'
-    : nearMeActive
-    ? "We're still growing in LA. Post your own and share it around. That's how the map fills in."
-    : null;
+  const hasFilters = whenActive || categoryActive || nearMeActive;
+  const emptyCopy = getFeedEmptyCopy({
+    hasFeatured: featuredPlans.length > 0, whenOrCategory: whenActive || categoryActive,
+    nearMe: nearMeActive, redesigned: !!appearance,
+  });
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -762,9 +753,9 @@ export default function PlansScreen() {
             >
               {listHeader}
               <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>{emptyMessage}</Text>
-                {emptySubText && <Text style={styles.emptySubText}>{emptySubText}</Text>}
-                {appearance && (whenActive || categoryActive || nearMeActive) && (
+                {emptyCopy && <Text style={styles.emptyText}>{emptyCopy.title}</Text>}
+                {emptyCopy?.detail && <Text style={styles.emptySubText}>{emptyCopy.detail}</Text>}
+                {hasFilters && (
                   <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => { setWhenFilter([]); setDayFilter(null); setCategoryFilter([]); clearNearMe(); }}>
                     <Text numberOfLines={1} style={styles.retryButtonText}>Clear filters</Text>
                   </TouchableOpacity>
