@@ -1109,3 +1109,18 @@ it('waits for the chat to return if the photo closes behind another screen', asy
   mockFocused = true; await update();
   expect(mockRead).toHaveBeenCalledTimes(1);
 });
+
+it.each(['location', 'photos'] as const)('keeps arrivals unread behind the %s preview until the chat is visible again', async kind => {
+  await mount();
+  const open = async () => { const select = attach(); act(() => select(kind)); await flush(); };
+  const close = () => act(() => kind === 'location' ? locationControls().onClose() : preview().onCancel());
+
+  await open(); close(); // No arrival: closing alone does not refresh history.
+  expect(mockRead).not.toHaveBeenCalled();
+  await open();
+  expect(mockCanAcknowledge()).toBe(false);
+  expect(mockCanAcknowledge()).toBe(false);
+  close();
+  expect(mockRead).toHaveBeenCalledTimes(1);
+  expect(mockCanAcknowledge()).toBe(true);
+});

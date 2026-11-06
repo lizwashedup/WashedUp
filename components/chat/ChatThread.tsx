@@ -224,12 +224,12 @@ function ChatThread(props: ChatThreadProps) {
   const clearAnchor = useCallback(() => setDismissedAnchor(anchorRequestKey), [anchorRequestKey]);
   const chatFocusedRef = useRef(false);
   const deferredReceipt = useRef(false);
-  const photoCover = useRef<{ entry: object | null; visible: boolean }>({ entry: null, visible: false });
+  const historyCover = useRef<{ entry: object | null; visible: boolean }>({ entry: null, visible: false });
   const visibleRows = useRef(new Set<string>());
   const viewportReady = useRef(false);
   const isRowVisible = useCallback((messageId: string) => viewportReady.current && visibleRows.current.has(messageId), []);
   const mayMarkHistoryRead = useCallback(() => {
-    const visible = chatFocusedRef.current && !photoCover.current.visible;
+    const visible = chatFocusedRef.current && !historyCover.current.visible;
     deferredReceipt.current = !visible;
     return visible;
   }, []);
@@ -282,16 +282,19 @@ function ChatThread(props: ChatThreadProps) {
     .slice().sort(compareChatSequence)
     .map(message => ({ id: message.id, uri: message.image_url!, senderName: message.sender?.first_name, caption: message.content })), [messages]);
   const photoSelection = useChatPhotoSelection(`${props.kind}:${id}:${currentUserId}:${entry.serial}`, photos);
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   const photoVisible = COMMUNITY_CHAT_GROUPING_ENABLED ? !!photoSelection.selectedId : !!photoViewUrl;
+  const historyCovered = photoVisible || locationPickerOpen || photoPreviewOpen;
   useLayoutEffect(() => {
-    const previous = photoCover.current;
-    photoCover.current = { entry, visible: photoVisible };
-    if (previous.entry === entry && previous.visible && !photoVisible &&
+    const previous = historyCover.current;
+    historyCover.current = { entry, visible: historyCovered };
+    if (previous.entry === entry && previous.visible && !historyCovered &&
         chatFocusedRef.current && deferredReceipt.current && isCurrentEntry() && !anchorId) {
       deferredReceipt.current = false;
       void refetch(true);
     }
-  }, [entry, photoVisible, isCurrentEntry, anchorId, refetch]);
+  }, [entry, historyCovered, isCurrentEntry, anchorId, refetch]);
   const openMessagePhoto = useCallback((url: string, messageId: string) => {
     if (COMMUNITY_CHAT_GROUPING_ENABLED) photoSelection.onSelect(messageId);
     else setPhotoViewUrl(url);
@@ -317,9 +320,7 @@ function ChatThread(props: ChatThreadProps) {
   const [activePanel, setActivePanel] = useState<'attach' | 'emoji' | 'gif' | null>(null);
   const attachmentShowsKeyboard = activePanel === 'attach' || (useSystemEmoji && activePanel === 'gif');
   const panelOpen = activePanel !== null;
-  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [pendingPhotos, setPendingPhotos] = useState<ImagePicker.ImagePickerAsset[]>([]);
-  const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
   const photoCaptionSentRef = useRef(false);
   const photoSendingRef = useRef<object | null>(null);
   const photoPickerAttempt = useRef<object | null>(null);
