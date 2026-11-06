@@ -139,3 +139,24 @@ it('keeps metadata, membership and companion reads in the current account cache'
     const keys = mockQueryKeys.filter(key => key[0] === prefix); expect(keys.length).toBeGreaterThan(0); expect(keys.every(key => key.at(-2) === 'attendee-a' && key.at(-1) === 1)).toBe(true);
   }
 });
+
+it('keeps event history behind the introduction when only direct topic details are available', async () => {
+  mockMapping = null; mockTopic = null; mockMeta.explore_event_id = 'event-a'; mockSaidHi = false;
+  mount();
+  expect(copy()).toContain('say hi first');
+  expect(tree.root.findAllByType(FlatList)).toHaveLength(0);
+  expect(mockLegacyMark).not.toHaveBeenCalled();
+  mockSaidHi = true; act(() => tree.update(<CommunityTopicScreen />));
+  expect(tree.root.findByType(FlatList).props.data).toEqual([mockItems[1].message]);
+});
+
+it('offers a room check while both sources are missing, then uses confirmed ordinary history', () => {
+  mockMapping = null; mockTopic = null; mockMeta = null;
+  mount();
+  expect(button('Retry checking chat access')).toBeDefined();
+  expect(tree.root.findAllByType(FlatList)).toHaveLength(0);
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  mockMeta = { id: 'topic-a', community_id: 'page-a', explore_event_id: null };
+  act(() => tree.update(<CommunityTopicScreen />));
+  expect(tree.root.findByType(FlatList).props.data).toEqual([mockItems[1].message]);
+});
