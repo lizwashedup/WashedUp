@@ -39,3 +39,48 @@ it('rechecks current route eligibility after asynchronous reads', async () => { 
 it('does not dispatch after account retirement during preflight', async () => { const h = await mount(), p = deferred(); mockAuth.mockReturnValueOnce(p.promise); let work!: Promise<void>; act(() => { work = h.current.send(); }); h.retire(); await act(async () => { p.resolve(auth()); await work; }); expect(mockSend).not.toHaveBeenCalled(); });
 it('does not replace a new account generation with an old receipt', async () => { const h = await mount(), p = deferred(); mockSend.mockReturnValueOnce(p.promise); let work!: Promise<void>; await act(async () => { work = h.current.send(); }); await h.replace(); await act(async () => { p.resolve(ok(id)); await work; }); expect(h.current.entry).toBeNull(); });
 it('refreshes after returning during a dispatched write', async () => { const h = await mount(), p = deferred(); mockSend.mockReturnValueOnce(p.promise); let work!: Promise<void>; await act(async () => { work = h.current.send(); }); h.blur(); await h.focus(); mockRead.mockResolvedValue(ok(entry)); await act(async () => { p.resolve(ok(null)); await work; }); expect(h.current.entry).toEqual(entry); expect(h.current.phase).toBeNull(); expect(mockSend).toHaveBeenCalledTimes(1); });
+
+
+it.each(['account', 'interest'])('recovers a stalled initial %s read without accepting a late result', async stage => {
+    jest.useFakeTimers(); const wait = deferred(); (stage === 'account' ? mockAuth : mockRead).mockReturnValueOnce(wait.promise);
+    try {
+        const h = await mount(); expect(h.current.loading).toBe(true);
+        await act(async () => { await jest.advanceTimersByTimeAsync(12001); });
+        expect(h.current.loading).toBe(false); expect(h.current.ready).toBe(false); expect(h.current.error).toContain('check');
+        await act(async () => { wait.resolve(stage === 'account' ? auth() : ok(entry)); await jest.advanceTimersByTimeAsync(1); });
+        expect(h.current.entry).toBeNull(); expect(h.current.ready).toBe(false); expect(mockSend).not.toHaveBeenCalled();
+        await act(async () => h.current.refresh()); expect(h.current.ready).toBe(true);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+it.each(['account', 'interest', 'plan', 'membership', 'circle'])('recovers stalled %s preflight without a late interest write', async stage => {
+    const h = await mount(), wait = deferred();
+    const stages = { account: mockAuth, interest: mockRead, plan: mockPlan, membership: mockMember, circle: mockCircle };
+    const values = { account: auth(), interest: ok(null), plan: ok(plan), membership: ok(null), circle: ok({ ...circle, viewer_is_member: true }) };
+    if (stage === 'circle') { mockPlan.mockResolvedValue(ok({ ...plan, circle_id: circleId })); mockCircle.mockResolvedValue(values.circle); }
+    stages[stage as keyof typeof stages].mockReturnValueOnce(wait.promise); jest.useFakeTimers();
+    try {
+        act(() => { void h.current.send(); });
+        await act(async () => { await jest.advanceTimersByTimeAsync(12001); });
+        expect(h.current.busy).toBe(false); expect(h.current.phase).toBe('failed'); expect(mockSend).not.toHaveBeenCalled();
+        await act(async () => { wait.resolve(values[stage as keyof typeof values]); await jest.advanceTimersByTimeAsync(1); });
+        expect(mockSend).not.toHaveBeenCalled();
+        await act(async () => h.current.retry()); expect(mockSend).toHaveBeenCalledTimes(1); expect(h.current.entry).toEqual(entry);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+it('does not turn a dispatched interest signal into a retryable failure on a clock', async () => {
+    const h = await mount(), wait = deferred(); mockSend.mockReturnValueOnce(wait.promise); jest.useFakeTimers();
+    try {
+        act(() => { void h.current.send(); }); await act(async () => { await jest.advanceTimersByTimeAsync(45000); });
+        expect(h.current.busy).toBe(true); expect(h.current.phase).toBe('pending'); expect(mockSend).toHaveBeenCalledTimes(1);
+        await act(async () => { wait.resolve(ok(id)); await jest.advanceTimersByTimeAsync(1); }); expect(h.current.entry).toEqual(entry);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});
+it('preserves an uncertain interest signal when its recovery read stalls', async () => {
+    mockSend.mockRejectedValueOnce(new Error('lost receipt')); const h = await mount(); await act(async () => h.current.send());
+    mockRead.mockReturnValueOnce(new Promise(() => {})); jest.useFakeTimers();
+    try {
+        act(() => { void h.current.refresh(); }); await act(async () => { await jest.advanceTimersByTimeAsync(12001); });
+        expect(h.current.loading).toBe(false); expect(h.current.ready).toBe(false); expect(h.current.phase).toBe('unknown');
+        await act(async () => h.current.send()); expect(mockSend).toHaveBeenCalledTimes(1);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
+});

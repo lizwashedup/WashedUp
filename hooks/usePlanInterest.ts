@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { getPlanLifecycle } from '../lib/planLifecycle';
 import { parseCirclePlanContextReceipt } from './useCirclePlanContext';
 import { logError } from '../lib/logger';
@@ -46,11 +47,11 @@ export function usePlanInterest(options: Options) {
     const capture = () => { const visit = state.visit; return () => !!visit && state.visit === visit && owner.current === state && options.isCurrent(); };
     const invalidate = () => { for (const queryKey of [['events', 'my-interest', options.eventId, options.viewerId], ['events', 'creator-interest', options.eventId]])
         void Promise.resolve(client.invalidateQueries({ queryKey })).catch(e => logError(e, 'plan.interest.refresh')); };
-    const authenticate = async (valid: () => boolean) => { const r = await supabase.auth.getUser(); if (!valid())
+    const authenticate = async (valid: () => boolean) => { const r = await requestWithDeadline(supabase.auth.getUser(), 12_000); if (!valid())
         return false; if (r.error || !options.viewerId || r.data.user?.id !== options.viewerId)
         throw new Error('Account unavailable'); return true; };
     const read = async (valid: () => boolean): Promise<Entry | null | undefined> => {
-        const r = await supabase.from('event_interest_signals').select(fields).eq('event_id', options.eventId).eq('interested_user_id', options.viewerId!).eq('status', 'active').maybeSingle();
+        const r = await requestWithDeadline(supabase.from('event_interest_signals').select(fields).eq('event_id', options.eventId).eq('interested_user_id', options.viewerId!).eq('status', 'active').maybeSingle(), 12_000);
         if (!valid())
             return undefined;
         if (r.error !== null)
@@ -127,7 +128,7 @@ export function usePlanInterest(options: Options) {
                 invalidate();
                 return;
             }
-            const r = await supabase.from('events').select('id,creator_user_id,status,start_time,end_time,circle_id').eq('id', options.eventId).maybeSingle();
+            const r = await requestWithDeadline(supabase.from('events').select('id,creator_user_id,status,start_time,end_time,circle_id').eq('id', options.eventId).maybeSingle(), 12_000);
             if (!valid())
                 return;
             const p = r.data;
@@ -135,13 +136,13 @@ export function usePlanInterest(options: Options) {
                 throw new Error('Plan unavailable');
             if (p.creator_user_id === options.viewerId || getPlanLifecycle({ status: p.status, startTime: p.start_time, endTime: p.end_time }).isClosed)
                 throw new Error('Interest unavailable');
-            const membership = await supabase.from('event_members').select('event_id,user_id,status').eq('event_id', options.eventId).eq('user_id', options.viewerId).eq('status', 'joined').maybeSingle();
+            const membership = await requestWithDeadline(supabase.from('event_members').select('event_id,user_id,status').eq('event_id', options.eventId).eq('user_id', options.viewerId).eq('status', 'joined').maybeSingle(), 12_000);
             if (!valid())
                 return;
             if (membership.error !== null || membership.data !== null)
                 throw new Error('Interest unavailable');
             if (p.circle_id !== null) {
-                const context = await supabase.rpc('get_circle_plan_context', { p_event_id: options.eventId });
+                const context = await requestWithDeadline(supabase.rpc('get_circle_plan_context', { p_event_id: options.eventId }), 12_000);
                 if (!valid())
                     return;
                 if (context.error !== null)
