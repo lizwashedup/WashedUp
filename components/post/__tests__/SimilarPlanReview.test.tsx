@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import SimilarPlanReview from '../../../app/similar-plan';
-import { similarPlanReviewKey } from '../../../lib/interestedPlanActions';
+import { planReviewKey } from '../../../lib/planCopyReview';
 import PlanComposerV2 from '../PlanComposerV2';
 import { Redirect } from 'expo-router';
 
@@ -18,7 +18,7 @@ jest.mock('../PlanComposerV2', () => ({__esModule:true,default:()=>null}));
 
 it('uses only the checked prefill, consumes it, and retires the review on an account switch', () => {
   const client = new QueryClient();
-  const key = similarPlanReviewKey(mockOwner,'request');
+  const key = planReviewKey(mockOwner,'request');
   const checked = {prefillTitle:'Fictional picnic',similarPlanRequest:'request'};
   client.setQueryData(key,checked);
   const screen = () => <QueryClientProvider client={client}><SimilarPlanReview/></QueryClientProvider>;

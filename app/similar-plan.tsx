@@ -4,16 +4,16 @@ import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import PlanComposerV2 from '../components/post/PlanComposerV2';
 import { useObservedUser } from '../hooks/useObservedUser';
-import { similarPlanReviewKey } from '../lib/interestedPlanActions';
+import { planReviewKey } from '../lib/planCopyReview';
 
 function CheckedReview({ viewerId, reviewId }: {viewerId: string; reviewId: string}) {
   const client = useQueryClient();
-  // Yours already checked this source. Consume the handoff once. A copied
+  // The originating screen already checked this source. Consume the handoff once. A copied
   // route cannot supply fields or reopen the review after it has ended.
   const [prefill] = useState(() =>
-    client.getQueryData<Record<string, string>>(similarPlanReviewKey(viewerId, reviewId)));
+    client.getQueryData<Record<string, string>>(planReviewKey(viewerId, reviewId)));
   useEffect(() => {
-    client.removeQueries({queryKey: similarPlanReviewKey(viewerId, reviewId), exact: true});
+    client.removeQueries({queryKey: planReviewKey(viewerId, reviewId), exact: true});
   }, [client, viewerId, reviewId]);
   return prefill ? <PlanComposerV2 reviewPrefill={prefill} /> : <Redirect href="/(tabs)/friends" />;
 }

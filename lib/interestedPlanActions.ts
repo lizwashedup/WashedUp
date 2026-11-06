@@ -3,8 +3,6 @@ import { buildDuplicatePostParams, type DuplicateSourceEvent } from './duplicate
 import { requestWithDeadline } from './requestWithDeadline';
 
 const TIMEOUT_MS = 8000;
-export const similarPlanReviewKey = (userId: string, reviewId: string) =>
-  ['similar-plan-review', userId, reviewId] as const;
 
 type SimilarPlanSource = DuplicateSourceEvent & {
   id: string;

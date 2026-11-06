@@ -1,3 +1,4 @@
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import React from 'react';
 import { Text, StyleSheet, TouchableOpacity, Share, Platform } from 'react-native';
 import { act, create, ReactTestInstance } from 'react-test-renderer';
@@ -6,6 +7,11 @@ import { toPlanCardPlan } from '../../../lib/creatorMarks';
 import type { Plan } from '../../../lib/fetchPlans';
 import { AfterglowFonts, Fonts } from '../../../constants/Typography';
 import Colors, { AfterglowColors } from '../../../constants/Colors';
+
+function CardWithClient(props: React.ComponentProps<typeof PlanCard>) {
+  const [client] = React.useState(() => new QueryClient());
+  return <QueryClientProvider client={client}><PlanCard {...props} /></QueryClientProvider>;
+}
 
 const mockPush = jest.fn();
 beforeEach(() => jest.useFakeTimers());
@@ -28,7 +34,7 @@ describe('staged plan card appearance preserves the established card', () => {
   const mounted: ReturnType<typeof create>[] = [];
   const mount = (props: Partial<React.ComponentProps<typeof PlanCard>> = {}) => {
     let card!: ReturnType<typeof create>;
-    act(() => { card = create(<PlanCard plan={plan} {...props} />); });
+    act(() => { card = create(<CardWithClient plan={plan} {...props} />); });
     mounted.push(card);
     return card;
   };
@@ -167,9 +173,9 @@ describe('staged plan card appearance preserves the established card', () => {
   it('updates a mounted card after joining or leaving without retaining the previous participation state', () => {
     const card = mount({ appearance });
     expect(renderedText(card.root)).toContain("Let's Go →");
-    act(() => card.update(<PlanCard plan={plan} appearance={appearance} isMember />));
+    act(() => card.update(<CardWithClient plan={plan} appearance={appearance} isMember />));
     expect(renderedText(card.root)).toContain('Going ✓');
-    act(() => card.update(<PlanCard plan={plan} appearance={appearance} isMember={false} />));
+    act(() => card.update(<CardWithClient plan={plan} appearance={appearance} isMember={false} />));
     expect(renderedText(card.root)).not.toContain('Going ✓');
     expect(renderedText(card.root)).toContain("Let's Go →");
   });
@@ -225,7 +231,7 @@ describe('PlanCard layout experiment', () => {
   it('uses the approved title-first layout by default and retains creator identity', () => {
     let card: ReturnType<typeof create>;
     act(() => {
-      card = create(<PlanCard plan={plan} />);
+      card = create(<CardWithClient plan={plan} />);
     });
 
     const text = renderedText(card!.root);
@@ -237,7 +243,7 @@ describe('PlanCard layout experiment', () => {
   it('leads with the activity and hides the creator name only in activity-first mode', () => {
     let card: ReturnType<typeof create>;
     act(() => {
-      card = create(<PlanCard plan={plan} layout="activity-first" onCreatorPress={jest.fn()} />);
+      card = create(<CardWithClient plan={plan} layout="activity-first" onCreatorPress={jest.fn()} />);
     });
 
     const text = renderedText(card!.root);
@@ -260,7 +266,7 @@ describe('eligible feed source through toPlanCardPlan into the actual card', () 
   const mountMapped = (row: Plan, props: Partial<React.ComponentProps<typeof PlanCard>> = {}) => {
     let card!: ReturnType<typeof create>;
     const mapped = toPlanCardPlan(row);
-    act(() => { card = create(<PlanCard plan={mapped} appearance={{ fonts: AfterglowFonts }} {...props} />); });
+    act(() => { card = create(<CardWithClient plan={mapped} appearance={{ fonts: AfterglowFonts }} {...props} />); });
     mounted.push(card);
     return { card, mapped, text: renderedText(card.root) };
   };
@@ -361,7 +367,7 @@ describe('card lifecycle follows real timestamps and terminal status', () => {
   const now = Date.parse('2030-09-14T20:00:00Z');
   const mount = (changes: any = {}, props: any = {}) => {
     jest.setSystemTime(now);
-    act(() => { tree = create(<PlanCard plan={{ ...plan, start_time: new Date(now - 3600000).toISOString(), ...changes }} appearance={{ fonts: AfterglowFonts }} {...props} />); });
+    act(() => { tree = create(<CardWithClient plan={{ ...plan, start_time: new Date(now - 3600000).toISOString(), ...changes }} appearance={{ fonts: AfterglowFonts }} {...props} />); });
     return () => renderedText(tree.root);
   };
   afterEach(() => { if (tree) act(() => tree.unmount()); });

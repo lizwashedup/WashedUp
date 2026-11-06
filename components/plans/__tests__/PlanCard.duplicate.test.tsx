@@ -1,3 +1,5 @@
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {planReviewKey} from '../../../lib/planCopyReview';
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { PlanCard } from '../PlanCard';
@@ -29,7 +31,8 @@ const plan = { id: 'plan-one', title: 'Picnic', host_message: null, start_time: 
   allow_duplicate: true, creator: { id: 'creator', first_name_display: 'Alex', profile_photo_url: null } };
 const source = { ...plan, circle_id: null, description: 'Bring a blanket', tickets_url: 'https://example.invalid/tickets' };
 let tree: ReturnType<typeof create>, props: React.ComponentProps<typeof PlanCard>;
-const render = () => <PlanCard {...props} plan={{ ...props.plan }} />;
+const client = new QueryClient();
+const render = () => <QueryClientProvider client={client}><PlanCard {...props} plan={{ ...props.plan }} /></QueryClientProvider>;
 const update = () => act(() => tree.update(render()));
 const button = () => tree.root.findAll(node => node.props.accessibilityLabel === 'Post your own' && typeof node.props.onPress === 'function')[0];
 const alert = () => tree.root.findAllByType(BrandedAlert)[0];
@@ -71,10 +74,12 @@ it('shows a retryable read error rather than silently ignoring the tap', async (
 });
 it('retains the established duplicate prefill for an eligible source', async () => {
   await act(async () => { await button().props.onPress(); });
-  expect(mockPush).toHaveBeenCalledWith({ pathname: '/(tabs)/post', params: expect.objectContaining({
+  const route = mockPush.mock.calls[0][0];
+  expect(route).toEqual({ pathname: '/similar-plan', params: {reviewId: expect.any(String)} });
+  expect(client.getQueryData(planReviewKey('alice',route.params.reviewId))).toMatchObject({
     prefillTitle: 'Picnic', prefillDescription: 'Bring a blanket', duplicatedFromEventId: 'plan-one',
     prefillStartTime: source.start_time, prefillTicketsUrl: source.tickets_url,
-  }) });
+  });
 });
 it('retires a source read across an account round trip', async () => {
   const wait = deferred(); mockRead.mockReturnValue(wait.promise); act(() => { void button().props.onPress(); }); await flush();
