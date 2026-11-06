@@ -80,6 +80,7 @@ export default function MyPlansView({ userId }: { userId: string }) {
     const request = randomUUID();
     const prefill = {
       ...buildDuplicatePostParams(draft, null), draftId: draft.id, draftOwnerId: userId, draftOpenRequest: request,
+      ...(draft.updated_at !== undefined ? {draftVersion: draft.updated_at ?? ''} : {}),
       prefillCreatorMessage: draft.host_message ?? '', similarPlanRequest: '',
       prefillInvitePersonId: '', prefillInvitePersonName: '', prefillInvitePersonPhoto: '',
     };

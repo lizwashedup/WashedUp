@@ -1051,14 +1051,19 @@ it('publishes the same confirmed row when Post follows a lost new-draft save res
 });
 
 it('preserves edits made after tapping Save draft and can save those edits', async () => {
-  const form=await mount(false,{draftId:'existing'}), receipt=pendingResult();
-  mockUpdateDraft.mockReturnValueOnce(receipt.promise).mockResolvedValueOnce({data:{id:'existing'},error:null});
+  const form=await mount(false,{draftId:'existing',draftVersion:'2040-01-01T00:00:00.000001Z'}), receipt=pendingResult();
+  mockUpdateDraft.mockReturnValueOnce(receipt.promise).mockResolvedValueOnce({data:{id:'existing',updated_at:'2040-01-01T00:00:00.000003Z'},error:null});
   let saving!:Promise<void>; act(()=>{saving=form.saveDraft();}); await flush();
   form.setTitle('Newer title');
-  await act(async()=>{receipt.resolve({data:{id:'existing'},error:null}); await saving;});
+  await act(async()=>{receipt.resolve({data:{id:'existing',updated_at:'2040-01-01T00:00:00.000002Z'},error:null}); await saving;});
   expect(form.title()).toBe('Newer title');
   await act(async()=>{await form.saveDraft();});
   expect(mockUpdateDraft.mock.calls[1][0].title).toBe('Newer title');
+  expect(mockUpdateDraft.mock.calls.map(call=>call[1].updated_at)).toEqual([
+    '2040-01-01T00:00:00.000001Z','2040-01-01T00:00:00.000002Z',
+  ]);
+  expect(mockUpdateDraft.mock.calls[1][0]).not.toHaveProperty('min_invites');
+  expect(mockUpdateDraft.mock.calls[1][0]).not.toHaveProperty('city');
   expect(form.title()).toBe('');
 });
 

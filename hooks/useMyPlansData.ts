@@ -28,6 +28,7 @@ function circleFields(event: any): Pick<Plan, 'circle_id' | 'circle_visibility' 
 
 /** The creator's saved plan drafts (status 'draft': composer-only, never on the feed). */
 export interface PlanDraft {
+  updated_at?: string | null;
   id: string;
   title: string;
   start_time: string;
@@ -57,7 +58,7 @@ export function useMyPlanDrafts(userId: string | null | undefined) {
       if (!userId) return [];
       const { data, error } = await supabase
         .from('events')
-        .select('id, title, start_time, end_time, description, host_message, location_text, location_lat, location_lng, neighborhood, primary_vibe, image_url, gender_rule, target_age_min, target_age_max, max_invites, tickets_url, drop_in, allow_duplicate, explore_event_id')
+        .select('id, updated_at, title, start_time, end_time, description, host_message, location_text, location_lat, location_lng, neighborhood, primary_vibe, image_url, gender_rule, target_age_min, target_age_max, max_invites, tickets_url, drop_in, allow_duplicate, explore_event_id')
         .eq('creator_user_id', userId)
         .eq('status', 'draft')
         .order('start_time', { ascending: true });

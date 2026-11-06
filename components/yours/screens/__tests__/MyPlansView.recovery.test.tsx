@@ -153,13 +153,13 @@ it('shows a retry on the affected Yours card and offers sharing only after confi
 });
 
 it('opens the selected saved draft in its own account-owned form', () => {
- mockQueries.drafts.data=[{id:'draft-one',title:'Saved walk',host_message:'Come along'}];
+ mockQueries.drafts.data=[{id:'draft-one',title:'Saved walk',host_message:'Come along',updated_at:'2040-01-01T00:00:00.000001Z'}];
  mount();
  const row=tree.root.findAll(n=>n.props.accessibilityLabel==='Open draft: Saved walk' && typeof n.props.onPress==='function')[0];
  act(()=>row.props.onPress());
  const route=mockPush.mock.calls[0][0];
  expect(route).toEqual({pathname:'/similar-plan',params:{reviewId:'draft-review'}});
  expect(mockStoreDraft).toHaveBeenCalledWith(['similar-plan-review','alice','draft-review'],expect.objectContaining({
-   draftId:'draft-one',draftOwnerId:'alice',prefillTitle:'Saved walk',prefillCreatorMessage:'Come along',prefillInvitePersonId:'',
+   draftId:'draft-one',draftOwnerId:'alice',draftVersion:'2040-01-01T00:00:00.000001Z',prefillTitle:'Saved walk',prefillCreatorMessage:'Come along',prefillInvitePersonId:'',
  }));
 });
