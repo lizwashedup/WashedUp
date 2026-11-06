@@ -6,7 +6,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors, { AfterglowColors } from '../../constants/Colors';
 import { AfterglowType, Fonts, FontSizes, LineHeights, type AfterglowFontFamilies } from '../../constants/Typography';
-import { KEYBOARD_DONE_ACCESSORY_ID } from '../keyboard/KeyboardDoneBar';
+import { KeyboardDoneBar } from '../keyboard/KeyboardDoneBar';
+
+const JOIN_KEYBOARD_ACCESSORY_ID = 'planJoinKeyboardDone';
 
 export interface PlanJoinSheetProps {
   visible: boolean;
@@ -137,7 +139,7 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
             value={props.message} onChangeText={value => {
               if (blocked() || uncertain.current) return;
               setCallbackError(null); latest.current.onMessage(value);
-            }} editable={editable} multiline maxLength={200} inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID} />
+            }} editable={editable} multiline maxLength={200} inputAccessoryViewID={JOIN_KEYBOARD_ACCESSORY_ID} />
           <View style={styles.hintRow}>
             <Text style={styles.hint}>This will be posted to the chat when you join.</Text>
             {!!fonts && <Text style={styles.count} accessibilityLabel={`${props.message.length} of 200 characters`}>{props.message.length}/200</Text>}
@@ -165,6 +167,7 @@ function PlanJoinVisit(props: PlanJoinSheetProps & { isCurrent: () => boolean })
           </TouchableOpacity>
         </View>
       </View>
+      <KeyboardDoneBar nativeID={JOIN_KEYBOARD_ACCESSORY_ID} />
     </KeyboardAvoidingView>
   </Modal>;
 }
