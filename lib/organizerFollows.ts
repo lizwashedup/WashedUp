@@ -18,7 +18,7 @@
  * applies, the table and the count RPC do not exist and every follow
  * surface stays dormant (today's behavior, byte for byte); the moment 68
  * lands the surfaces wake with no client deploy. Reads fail OPEN (a
- * failed read never hides content and never claims "following"); writes
+ * failed read never hides content or supplies a guessed follow state); writes
  * fail CLOSED (no follow state without a landed row).
  */
 
@@ -46,7 +46,7 @@ export async function getFollowState(target: FollowTarget, userId: string): Prom
     .maybeSingle();
   if (error) {
     if (isMissingSchema(error.code)) return { available: false, following: false };
-    return { available: true, following: false };
+    throw error;
   }
   return { available: true, following: !!data };
 }

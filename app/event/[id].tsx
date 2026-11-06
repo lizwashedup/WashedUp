@@ -1,4 +1,6 @@
 import ProfileButton from '../../components/ProfileButton';
+import { useOrganizerFollowState } from '../../hooks/useOrganizerFollowState';
+import { FollowReadRecovery } from '../../components/scene/FollowReadRecovery';
 import { GoldSurfaceFill } from '../../components/creator/GoldSurfaceFill';
 import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { AttendeeMessageLanding } from '../../components/notifications/AttendeeMessageLanding';
@@ -48,7 +50,6 @@ import { eventStartIso, formatEventDateLA, getTodayInLA } from '../../lib/laDate
 import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { getOrganizerProfiles } from '../../lib/organizerProfile';
 import {
-  getFollowState,
   getFollowerCount,
   recordFollow,
   removeFollow,
@@ -533,12 +534,8 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
   // Scoped to followTarget (organizer-only, Scene handoff §16) rather than
   // frontingTarget: a community event must never fetch follow state or a
   // follower count in the first place, not just hide it after the fact.
-  const { data: followState } = useQuery({
-    queryKey: ['organizer-follow', followTarget?.kind, followTarget?.id, userId],
-    queryFn: () => getFollowState(followTarget!, userId!),
-    enabled: COMMUNITIES_ENABLED && !!followTarget && !!userId,
-    staleTime: 30_000,
-  });
+  const followRead = useOrganizerFollowState(followTarget, userId, COMMUNITIES_ENABLED, pageContext.account.epoch);
+  const followState = followRead.data;
   const { data: followerCount = null } = useQuery({
     queryKey: ['follower-count', followTarget?.kind, followTarget?.id],
     queryFn: () => getFollowerCount(followTarget!),
@@ -599,7 +596,7 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
 
   const followMutation = useMutation({
     mutationFn: async () => {
-      if (!followTarget || !userId || !followState) throw new Error('not ready');
+      if (!followTarget || !userId || !followState || followRead.error || followRead.isFetching) throw new Error('not ready');
       const ok = followState.following
         ? await removeFollow(followTarget, userId)
         : await recordFollow(followTarget, userId);
@@ -1308,6 +1305,8 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
                   member/pending/join here comes entirely from
                   viewerMembershipStatus. */}
               <View style={styles.entityCardActions}>
+                {!!followTarget && !!userId && !!followRead.error && <FollowReadRecovery pending={followRead.isFetching}
+                  retry={() => { void followRead.refetch(); }} />}
                 {viewerIsMemberHere ? (
                   <View>
                     <Text style={styles.memberStatus}>You’re a member</Text>
@@ -1320,7 +1319,7 @@ function EventDetailScreen({ previewPage }: { previewPage?: CreatorPageEventCont
                       hapticLight();
                       followMutation.mutate();
                     }}
-                    disabled={followMutation.isPending}
+                    disabled={followMutation.isPending || !!followRead.error || followRead.isFetching}
                     activeOpacity={0.85}
                   >
                     {/* copy to the taste gate (doc 69 Q5) */}

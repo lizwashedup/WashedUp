@@ -48,7 +48,6 @@ import { formatTicketPrice, normalizeTicketPrice } from '../../lib/ticketPrice';
 import { MEMBER_COUNT_THRESHOLD } from '../../lib/socialProof';
 import { getOrganizationPage, type OrganizationPageEvent } from '../../lib/organizerProfile';
 import {
-  getFollowState,
   getFollowerCount,
   recordFollow,
   removeFollow,
@@ -57,6 +56,8 @@ import {
 import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import { ChatSizedText } from '../../components/chat/ChatSizedText';
+import { useOrganizerFollowState } from '../../hooks/useOrganizerFollowState';
+import { FollowReadRecovery } from '../../components/scene/FollowReadRecovery';
 
 const AVATAR_SIZE = 88;
 const ROW_THUMB_SIZE = 56;
@@ -130,12 +131,8 @@ function LegacyOrganizationProfileScreen() {
   const followTarget: FollowTarget | null = id ? { kind: 'organizer', id } : null;
   const isOwnPage = !!userId && !!id && userId === id;
 
-  const { data: followState } = useQuery({
-    queryKey: ['organizer-follow', 'organizer', id, userId, epoch],
-    queryFn: () => getFollowState(followTarget!, userId!),
-    enabled: !!followTarget && !!userId && !isOwnPage,
-    staleTime: 30_000,
-  });
+  const followRead = useOrganizerFollowState(followTarget, userId, !isOwnPage, epoch);
+  const followState = followRead.data;
   const { data: followerCount = null } = useQuery({
     queryKey: ['follower-count', 'organizer', id],
     queryFn: () => getFollowerCount(followTarget!),
@@ -145,7 +142,7 @@ function LegacyOrganizationProfileScreen() {
 
   const followMutation = useMutation({
     mutationFn: async () => {
-      if (!followTarget || !userId || !followState) throw new Error('not ready');
+      if (!followTarget || !userId || !followState || followRead.error || followRead.isFetching) throw new Error('not ready');
       const ok = followState.following
         ? await removeFollow(followTarget, userId)
         : await recordFollow(followTarget, userId);
@@ -235,6 +232,9 @@ function LegacyOrganizationProfileScreen() {
 
         {!!profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
 
+        {!!userId && !isOwnPage && !!followRead.error && <FollowReadRecovery pending={followRead.isFetching}
+          retry={() => { void followRead.refetch(); }} />}
+
         {isOwnPage ? (
           // LIZ COPY
           <OrganizationManageLink organizationId={id} />
@@ -246,7 +246,7 @@ function LegacyOrganizationProfileScreen() {
                 hapticLight();
                 followMutation.mutate();
               }}
-              disabled={followMutation.isPending}
+              disabled={followMutation.isPending || !!followRead.error || followRead.isFetching}
               activeOpacity={0.85}
             >
               <Text style={[styles.followPillText, followState.following && styles.followPillTextOn]}>
