@@ -35,8 +35,11 @@ export async function getParticipationNoticeStatus(): Promise<{ needsAssent: boo
     if (isFunctionMissing(error.code)) return { needsAssent: false };
     return { needsAssent: true };
   }
-  const row = Array.isArray(data) ? data[0] : data;
-  return { needsAssent: !!row?.needs_assent };
+  const row = Array.isArray(data) ? (data.length === 1 ? data[0] : null) : data;
+  // A successful transport is not an answer about this member. Only the
+  // explicit false receipt (or the legacy missing RPC above) skips the notice.
+  if (typeof row?.needs_assent !== 'boolean') throw new Error('Couldn’t check the participation notice. Try again.');
+  return { needsAssent: row.needs_assent };
 }
 
 export async function recordParticipationAssent(ctx: ParticipationAssentContext): Promise<boolean> {
