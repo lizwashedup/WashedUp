@@ -39,7 +39,24 @@ it('removes no-longer-accepted selections before submit',()=>{const f=render();p
 it('a repeated old Next press advances only one step',()=>{const f=render();identity(f);act(()=>f.button('Back').props.onPress());const press=f.button('Next').props.onPress;act(()=>{press();press();});expect(f.identity()).toBeDefined();});
 it('locks create immediately before hook pending can rerender',async()=>{const gate=deferred<any>();mockCreate.mockReturnValueOnce(gate.promise);const f=render();permissions(f);const press=f.button('Create circle').props.onPress;act(()=>{press();press();});expect(mockCreate).toHaveBeenCalledTimes(1);expect(f.button('Creating circle…').props.disabled).toBe(true);gate.resolve(complete);await flush();expect(mockReplace).toHaveBeenCalledTimes(1);expect(mockReplace).toHaveBeenCalledWith(`/circle/${complete.circleId}`);});
 it('a definite create failure preserves the draft for a retry',async()=>{mockCreate.mockRejectedValueOnce(new Error('rejected'));const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();expect(f.text()).toContain("Couldn't make the circle");expect(f.permissions().circleName).toBe('Saturday friends');act(()=>f.button('Create circle').props.onPress());await flush();expect(mockCreate).toHaveBeenCalledTimes(2);expect(mockCreate.mock.calls[1][0]).toEqual(mockCreate.mock.calls[0][0]);});
-it('unconfirmed creation offers View circles without another create attempt',async()=>{mockCreate.mockRejectedValueOnce({unconfirmed:true});const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();expect(f.text()).toContain('Check your circles');expect(f.button('Create circle')).toBeUndefined();act(()=>f.button('View circles').props.onPress());expect(mockBack).toHaveBeenCalledTimes(1);expect(mockCreate).toHaveBeenCalledTimes(1);});
+it('opens the Circles directory once after a lost create response from People',async()=>{
+  mockParams={seed:'bea'};
+  mockCreate.mockRejectedValueOnce({unconfirmed:true});
+  const f=render();select(f,['cam']);act(()=>f.button('Next').props.onPress());
+  act(()=>f.identity().onName('Saturday friends'));act(()=>f.button('Next').props.onPress());
+  act(()=>f.button('Create circle').props.onPress());await flush();
+  expect(f.text()).toContain('Check your circles');expect(f.button('Create circle')).toBeUndefined();
+  const view=f.button('View circles').props.onPress;act(()=>{view();view();});
+  expect(mockReplace).toHaveBeenCalledTimes(1);
+  expect(mockReplace).toHaveBeenCalledWith('/(tabs)/friends?tab=circles');
+  expect(mockBack).not.toHaveBeenCalled();expect(mockCreate).toHaveBeenCalledTimes(1);
+});
+it('keeps Close as Back and ignores a retained directory button after closing',async()=>{
+  mockCreate.mockRejectedValueOnce({unconfirmed:true});
+  const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();
+  const view=f.button('View circles').props.onPress;act(()=>f.button('Close circle creation').props.onPress());
+  act(()=>view());expect(mockBack).toHaveBeenCalledTimes(1);expect(mockReplace).not.toHaveBeenCalled();
+});
 it('partial setup retains the ID and retries only setup',async()=>{mockCreate.mockResolvedValueOnce({...complete,policyApplied:false,coverApplied:false});const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();expect(f.text()).toContain('Circle created');expect(f.text()).toContain('Who can add people');expect(f.text()).toContain('Cover photo');expect(mockReplace).not.toHaveBeenCalled();act(()=>f.button('Try again').props.onPress());await flush();expect(mockRetrySetup).toHaveBeenCalledWith(complete.circleId);expect(mockCreate).toHaveBeenCalledTimes(1);expect(mockReplace).toHaveBeenCalledWith(`/circle/${complete.circleId}`);});
 it('partial setup can open its existing circle without retrying',async()=>{mockCreate.mockResolvedValueOnce({...complete,coverApplied:false});const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();act(()=>f.button('View circle').props.onPress());expect(mockReplace).toHaveBeenCalledWith(`/circle/${complete.circleId}`);expect(mockRetrySetup).not.toHaveBeenCalled();});
 it('seed conversion happens only after confirmed create and does not turn failure into create failure',async()=>{mockParams={seed:'bea,cam',suggestion:'s1'};const gate=deferred<any>();mockCreate.mockReturnValueOnce(gate.promise);mockConvert.mockRejectedValueOnce(new Error('offline'));const f=render();act(()=>f.button('Next').props.onPress());act(()=>f.identity().onName('Friends'));act(()=>f.button('Next').props.onPress());act(()=>f.button('Create circle').props.onPress());expect(mockConvert).not.toHaveBeenCalled();gate.resolve(complete);await flush();expect(mockConvert.mock.calls[0][0]).toEqual({id:'s1',status:'converted'});expect(mockReplace).toHaveBeenCalledWith(`/circle/${complete.circleId}`);});

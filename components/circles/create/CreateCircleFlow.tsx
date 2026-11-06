@@ -77,6 +77,11 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   const draftEditable = () => current() && !pending.current && !latest.current.receipt && !latest.current.unconfirmed;
   const move = (next: number) => { pageRevision.current++; setStep(next); setFailure(null); };
   const exit = () => { if (!live.current || visitRef.current !== visit || visit.retired) return; visit.retired = true; router.back(); };
+  const viewCircles = () => {
+    if (!current() || !latest.current.unconfirmed) return;
+    visit.retired = true;
+    router.replace('/(tabs)/friends?tab=circles');
+  };
   const back = () => {
     if (!live.current || visitRef.current !== visit || visit.retired) return;
     if (step === 1 || receipt || unconfirmed || working === 'creating' || working === 'setup') exit();
@@ -178,7 +183,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   const renderBody = () => {
     if (viewer.isLoading) return loading('Checking your account…');
     if (!ready) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text style={styled.body}>Couldn’t check your account.</Text>{button('Try again', () => { if (live.current) void viewer.retry(); }, true)}</ScrollView>;
-    if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Check your circles</Text><Text style={styled.body}>We couldn’t confirm whether your circle was created. Check your circles before starting again.</Text>{button('View circles', exit)}</ScrollView>;
+    if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Check your circles</Text><Text style={styled.body}>We couldn’t confirm whether your circle was created. Check your circles before starting again.</Text>{button('View circles', viewCircles)}</ScrollView>;
     if (receipt) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Circle created</Text><Text style={styled.body}>{receipt.policyApplied && receipt.coverApplied ? 'Your circle is ready.' : 'Your circle is there. We couldn’t finish saving these details:'}</Text>
       {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}{!receipt.coverApplied && <Text style={styled.detail}>Cover photo</Text>}
       {failure && <Text accessibilityRole="alert" style={styled.error}>{failure}</Text>}
