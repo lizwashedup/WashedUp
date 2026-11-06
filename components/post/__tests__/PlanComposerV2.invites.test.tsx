@@ -20,6 +20,7 @@ import InvitePeopleSection from '../InvitePeopleSection';
 import { BrandedAlert } from '../../BrandedAlert';
 import { buildSimilarPlanParams } from '../../../lib/interestedPlanActions';
 
+const mockUpdateDraft = jest.fn();
 const mockInvite = jest.fn(), mockInsert = jest.fn(), mockMember = jest.fn();
 const mockProfile = jest.fn();
 const mockRollback = jest.fn(), mockCommit = jest.fn();
@@ -57,7 +58,13 @@ jest.mock('../../../lib/supabase', () => ({ supabase: {
   auth: { getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'creator' } }, error: null }), refreshSession: jest.fn().mockResolvedValue({ error: null }) },
   from: (table: string) => {
     if (table === 'profiles') return { select: () => ({ eq: (_field: string, id: string) => ({ single: () => mockProfile(id) }) }) };
-    if (table === 'events') return { insert: (row: unknown) => ({ select: () => ({ single: () => mockInsert(row) }), then: (resolve: (result: unknown) => void, reject: (error: unknown) => void) => mockInsert(row).then(resolve, reject) }) };
+    if (table === 'events') return { update: (row: any) => {
+      const filters: Record<string,string> = {};
+      const run = () => mockUpdateDraft(row, filters);
+      const query: any = { eq: (key: string, value: string) => { filters[key] = value; return query; },
+        select: () => query, maybeSingle: run, single: run, then: (yes: any, no: any) => run().then(yes, no) };
+      return query;
+    }, insert: (row: unknown) => ({ select: () => ({ single: () => mockInsert(row) }), then: (resolve: (result: unknown) => void, reject: (error: unknown) => void) => mockInsert(row).then(resolve, reject) }) };
     if (table === 'event_members') return { insert: (row: unknown) => mockMember(row) };
     throw new Error(`Unexpected table ${table}`);
   },
@@ -927,4 +934,32 @@ it.each(['post', 'draft'] as const)('recovers a stalled %s account check before 
   const membershipWrites = mockMember.mock.calls.length;
   await act(async () => { stalled.resolve({ data: { user: { id: 'creator' } }, error: null }); }); await flush();
   expect(mockInsert).toHaveBeenCalledTimes(1); expect(mockMember).toHaveBeenCalledTimes(membershipWrites);
+});
+
+
+it.each(['deleted', 'already posted'])('keeps edits when an existing draft was %s elsewhere', async () => {
+  mockUpdateDraft.mockResolvedValue({ data: null, error: null });
+  const form = await mount(false, {draftId:'existing'});
+  await act(async () => { await form.saveDraft(); });
+  expect(form.title()).toBe('Local test walk');
+  expect(JSON.stringify(form.tree.toJSON())).not.toContain('Find your draft');
+  expect(mockInsert).not.toHaveBeenCalled();
+});
+
+it('only publishes an existing draft while it is still a draft', async () => {
+  mockUpdateDraft.mockImplementation(async (_row, filters) => ({ data: filters.status === 'draft' ? null : {id:'existing'}, error:null }));
+  const form = await mount(true, {draftId:'existing'});
+  await act(async () => { await form.post(); });
+  expect(form.title()).toBe('Local test walk');
+  expect(form.confirmation().visible).toBe(false);
+  expect(mockMember).not.toHaveBeenCalled(); expect(mockInvite).not.toHaveBeenCalled();
+  expect(mockUpdateDraft.mock.calls[0][1]).toEqual({id:'existing',creator_user_id:'creator',status:'draft'});
+});
+
+it('retries a lost draft save receipt against the same owned draft', async () => {
+  mockUpdateDraft.mockRejectedValueOnce(new Error('Lost receipt')).mockResolvedValueOnce({data:{id:'existing',creator_user_id:'creator',status:'draft'},error:null});
+  const form = await mount(false, {draftId:'existing'});
+  await act(async () => { await form.saveDraft(); }); expect(form.title()).toBe('Local test walk');
+  await act(async () => { await form.saveDraft(); }); expect(form.title()).toBe('');
+  expect(mockUpdateDraft).toHaveBeenCalledTimes(2); expect(mockInsert).not.toHaveBeenCalled();
 });

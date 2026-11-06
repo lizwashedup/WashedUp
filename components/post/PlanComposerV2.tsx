@@ -80,6 +80,22 @@ import PeoplePickerSheet, { type PickedPerson } from '../../components/post/Peop
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 type RequiredField = 'title' | 'category' | 'message' | 'description' | 'when';
+class DraftUnavailable extends Error {}
+const unavailableDraftAlert = {
+  title: 'Draft unavailable',
+  message: 'This draft may have been posted or deleted. Your edits are still here. Check Yours for the latest plan.',
+};
+
+async function updateOwnedDraft(id: string, viewerId: string, changes: Record<string, unknown>) {
+  const { data, error } = await supabase.from('events').update(changes)
+    .eq('id', id).eq('creator_user_id', viewerId).eq('status', 'draft')
+    .select('id').maybeSingle();
+  if (error) throw error;
+  if (data === null) throw new DraftUnavailable();
+  if (data?.id !== id) throw new Error('Could not confirm the draft update.');
+  return { id };
+}
+
 type ValidationMode = 'post' | 'draft';
 type ComposerWrite = {
   userId: string;
@@ -699,19 +715,15 @@ export default function PlanComposerV2() {
     };
     const write = beginWrite();
     if (!write) return;
+    let dispatched = false;
     try {
       const { data: { user }, error: identityError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!ownsWrite(write)) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
+      dispatched = true;
       if (params.draftId) {
-        const { error } = await supabase
-          .from('events')
-          .update(row)
-          .eq('id', String(params.draftId))
-          .eq('creator_user_id', user.id)
-          .eq('status', 'draft');
+        await updateOwnedDraft(String(params.draftId), user.id, row);
         if (!ownsWrite(write)) return;
-        if (error) throw error;
       } else {
         const { error } = await supabase
           .from('events')
@@ -724,9 +736,11 @@ export default function PlanComposerV2() {
       resetForm();
       // LIZ COPY
       setAlertInfo({ title: appearance ? 'Draft saved' : 'saved', message: appearance ? 'Find your draft in Yours under Plans. Finish it whenever you’re ready.' : 'your draft lives in yours, under plans. finish it whenever.' });
-    } catch {
+    } catch (error) {
       if (!ownsWrite(write)) return;
-      setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
+      if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
+      else if (dispatched) setAlertInfo({ title: 'Couldn’t confirm the save', message: 'Your edits are still here. Check Yours for the draft before trying again.' });
+      else setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
     } finally {
       if (ownsWrite(write)) {
         writeRef.current = null;
@@ -857,18 +871,8 @@ export default function PlanComposerV2() {
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       let insertedEvent: { id: string } | null = null;
       if (params.draftId) {
-        // finishing a draft: the row exists, flip it to forming with the
-        // final fields; the host member row lands below like any new plan
-        const { data: updated, error: updateErr } = await supabase
-          .from('events')
-          .update(row)
-          .eq('id', String(params.draftId))
-          .eq('creator_user_id', user.id)
-          .select('id')
-          .single();
+        insertedEvent = await updateOwnedDraft(String(params.draftId), user.id, row);
         if (!ownsWrite(write)) return;
-        if (updateErr) throw updateErr;
-        insertedEvent = updated;
       } else {
         const { data: inserted, error } = await supabase
           .from('events')
@@ -942,7 +946,7 @@ export default function PlanComposerV2() {
         neverPostedRef.current = false;
       }
       resetForm();
-    } catch {
+    } catch (error) {
       if (!ownsWrite(write)) return;
       // Remove the optimistic card from feed + my-plans (restores the exact prior
       // snapshot) before the recovery UX runs.
@@ -953,7 +957,8 @@ export default function PlanComposerV2() {
       setConfirmVisible(false);
       setShareWanted(false);
       postInvitations.reset();
-      setRecoveryNudge(true);
+      if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
+      else setRecoveryNudge(true);
     } finally {
       if (ownsWrite(write)) {
         writeRef.current = null;
