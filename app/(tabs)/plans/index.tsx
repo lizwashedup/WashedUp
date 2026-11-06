@@ -58,7 +58,7 @@ import { type CalendarDay } from '../../../components/calendar/WashedUpCalendar'
 import { withTimeout, withDeadline } from '../../../lib/withTimeout';
 import { friendlyError } from '../../../lib/friendlyError';
 import { postAuthTransitionRef } from '../../../lib/navState';
-import { useBlock } from '../../../hooks/useBlock';
+import { usePlanFeedModeration } from '../../../hooks/usePlanFeedModeration';
 import { isPlanPast } from '../../../lib/planTime';
 import { usePlansProfilePrompt } from '../../../hooks/usePlansProfilePrompt';
 
@@ -137,8 +137,6 @@ export default function PlansScreen() {
   // with the coarse whenFilter buckets (selecting one clears the other).
   const [dayFilter, setDayFilter] = useState<CalendarDay | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryOption[]>([]);
-  const [reportTarget, setReportTarget] = useState<{ userId: string; userName: string; eventId: string } | null>(null);
-  const [miniProfileUserId, setMiniProfileUserId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ planId: string; planTitle: string } | null>(null);
   const [shareSheet, setShareSheet] = useState<{ planId: string; planTitle: string; slug: string | null } | null>(null);
 
@@ -319,25 +317,9 @@ export default function PlansScreen() {
     [styles],
   );
 
-  const { blockUser } = useBlock();
-
-  const handleReport = useCallback((planId: string) => {
-    const plan = allPlans.find((p) => p.id === planId);
-    if (plan?.creator?.id) {
-      setReportTarget({
-        userId: plan.creator.id,
-        userName: plan.creator.first_name_display ?? 'User',
-        eventId: planId,
-      });
-    }
-  }, [allPlans]);
-
-  const handleBlock = useCallback((planId: string) => {
-    const plan = allPlans.find((p) => p.id === planId);
-    if (plan?.creator?.id) {
-      blockUser(plan.creator.id, plan.creator.first_name_display ?? 'User');
-    }
-  }, [allPlans, blockUser]);
+  const { handleReport, handleBlock, reportPerson, blockPerson, reportTarget, closeReport, scope: feedVisit } = usePlanFeedModeration(
+    userId, isCurrentAccount, allPlans, featuredPlans,
+  );
 
   // Keep card callbacks stable so typing, saving, and other feed state changes
   // do not defeat PlanCard's memoization and redraw every visible card.
@@ -353,9 +335,11 @@ export default function PlansScreen() {
   const handleFeaturedWishlist = useCallback((id: string, _current: boolean) => {
     wishlistToggleRef.current(id, '', false);
   }, []);
+  const [miniProfile, setMiniProfile] = useState<{ id: string; visit: NonNullable<typeof feedVisit> } | null>(null);
+  const miniProfileUserId = miniProfile?.visit === feedVisit && feedVisit?.isCurrent() ? miniProfile.id : null;
   const handleCreatorPress = useCallback((creatorId: string) => {
-    setMiniProfileUserId(creatorId);
-  }, []);
+    if (feedVisit?.isCurrent()) setMiniProfile({ id: creatorId, visit: feedVisit });
+  }, [feedVisit]);
 
   const renderItem = useCallback(
     ({ item }: { item: Plan }) => (
@@ -868,7 +852,8 @@ export default function PlansScreen() {
       {reportTarget && (
         <ReportModal
           visible
-          onClose={() => setReportTarget(null)}
+          onClose={closeReport}
+          scope={reportTarget.scope}
           reportedUserId={reportTarget.userId}
           reportedUserName={reportTarget.userName}
           eventId={reportTarget.eventId}
@@ -878,15 +863,9 @@ export default function PlansScreen() {
       <MiniProfileCard
         visible={!!miniProfileUserId}
         userId={miniProfileUserId}
-        onClose={() => setMiniProfileUserId(null)}
-        onReport={(uid, uname) => {
-          setMiniProfileUserId(null);
-          setReportTarget({ userId: uid, userName: uname, eventId: '' });
-        }}
-        onBlock={(uid, uname) => {
-          setMiniProfileUserId(null);
-          blockUser(uid, uname);
-        }}
+        onClose={() => setMiniProfile(current => current === miniProfile ? null : current)}
+        onReport={reportPerson}
+        onBlock={blockPerson}
       />
 
       <SaveSnackbar
