@@ -1,3 +1,4 @@
+import { InboxPlanInviteActions } from './InboxPlanInviteActions';
 import { useInboxNotificationScope } from '../hooks/useInboxNotificationScope';
 import { CommunityJoinInboxRow } from './notifications/CommunityJoinInboxRow';
 import { isCommunityJoinNotice } from '../lib/communityJoinNotification';
@@ -118,7 +119,7 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
     }
   }, [visible]);
 
-  const { data: pendingInvites = [], refetch: refetchInvites, isLoading: loadingInvites } = useQuery({
+  const { data: pendingInvites = [], isLoading: loadingInvites } = useQuery({
     queryKey: ['pending-invites', userId],
     queryFn: async () => {
       if (!userId) return [];
@@ -515,35 +516,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                         )}
                       </View>
                     </View>
-                    <View style={s.inviteActions}>
-                      <TouchableOpacity
-                        style={s.letsGoBtn}
-                        activeOpacity={0.85}
-                        onPress={() => {
-                          if (!notificationScope.isCurrent() || closingRef.current) return;
-                          hapticLight();
-                          // Viewing an invitation is not joining. Plan detail acknowledges
-                          // acceptance only after it confirms the recipient's membership.
-                          navigateAfterDismiss(`/plan/${inv.event_id}`);
-                        }}
-                      >
-                        <Text style={s.letsGoBtnText}>{`Let's Go \u2192`}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={s.notThisTimeBtn}
-                        activeOpacity={0.7}
-                        onPress={async () => {
-                          hapticLight();
-                          try {
-                            await supabase.from('plan_invites').update({ status: 'declined' }).eq('id', inv.id);
-                            refetchInvites();
-                            queryClient.invalidateQueries({ queryKey: INBOX_COUNT_KEY });
-                          } catch {}
-                        }}
-                      >
-                        <Text style={s.notThisTimeBtnText}>Not This Time</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <InboxPlanInviteActions id={inv.id} eventId={inv.event_id} scope={notificationScope} visit={visit}
+                      isOpen={() => activeVisit.current === visit && !closingRef.current}
+                      onOpen={() => navigateAfterDismiss(`/plan/${inv.event_id}`)} />
                   </View>
                 );
               })}
@@ -727,9 +702,4 @@ const s = StyleSheet.create({
   peopleAccent: { width: 3, alignSelf: 'stretch', backgroundColor: Colors.goldenAmber, borderRadius: 2, marginRight: 8 },
   notifBody: { fontSize: 13, color: '#78695C', marginTop: 1, lineHeight: 18 },
   dismissText: { fontSize: 12, color: '#A09385', marginLeft: 8 },
-  inviteActions: { flexDirection: 'row' as const, gap: 10, paddingBottom: 12, justifyContent: 'center' as const },
-  letsGoBtn: { backgroundColor: Colors.terracotta, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 999 },
-  letsGoBtnText: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.white },
-  notThisTimeBtn: { paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center' as const },
-  notThisTimeBtnText: { fontFamily: Fonts.sansMedium, fontSize: FontSizes.bodyMD, color: Colors.textLight },
 });

@@ -6,3 +6,5 @@ export const UNREAD_CHATS_KEY = ['unread-chats-count'] as const;
 // "Waitlist (N)" count so they share one cache entry.
 export const WAITLIST_MANAGER_KEY = (eventId: string) =>
   ['waitlist', 'manager', eventId] as const;
+
+export const PENDING_INVITES_BADGE_KEY = ['pending-invites-badge'] as const;
