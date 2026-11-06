@@ -685,32 +685,49 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
     }
   }, [captureOperation]);
 
+  const pendingDeletes = useMemo(() => new Set<string>(), [roomGeneration]);
   const deleteMessage = useCallback(async (messageId: string, entryScope?: ChatOperationScope) => {
     const scope = captureOperation(entryScope);
-    if (!scope) return;
-    const userId = scope.userId;
-    const original = messagesRef.current.find(message => message.id === messageId);
-    const changes = messageChangesRef.current;
-    const attempt = {};
-    changes.set(messageId, attempt);
-    setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
+    if (!scope || pendingDeletes.has(messageId) || !messagesRef.current.some(m => m.id === messageId && m.user_id === scope.userId)) return;
+    pendingDeletes.add(messageId);
     try {
-      const { error } = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').delete()
-        .eq('id', messageId).eq('user_id', userId), 12_000));
-      assertChatScope(scope);
-      if (error) throw error;
+      let confirmed = false;
+      try {
+        const write = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').delete()
+          .eq('id', messageId).eq('user_id', scope.userId).eq(parentCol, conversationId).select('id').maybeSingle(), 12_000));
+        assertChatScope(scope);
+        if (write.error?.code === '42501') {
+          logError(write.error, 'useChat.deleteMessage');
+          Alert.alert('Could not delete', 'Something went wrong. Please try again.');
+          return;
+        }
+        confirmed = !write.error && write.data?.id === messageId;
+      } catch (error) {
+        assertChatScope(scope);
+        if (error instanceof RequestDeadlineError) throw error;
+        // A transport failure may follow a committed deletion.
+      }
+      if (!confirmed) {
+        // A zero-row delete is not a receipt. An already-absent message can
+        // leave this thread, but a still-readable one must remain retryable.
+        const read = await scopedChatRequest(scope, () => requestWithDeadline(supabase.from('messages').select('id')
+          .eq('id', messageId).eq('user_id', scope.userId).eq(parentCol, conversationId).maybeSingle(), 8_000));
+        assertChatScope(scope);
+        if (read.error) throw read.error;
+        if (read.data) {
+          Alert.alert('Message still here', 'It wasn’t removed. You can try deleting it again.');
+          return;
+        }
+      }
+      setMessages(prev => scope.isCurrent() ? prev.filter(m => m.id !== messageId) : prev);
     } catch (error) {
       assertChatScope(scope);
       logError(error, 'useChat.deleteMessage');
-      // Restore only the deleted row if this attempt still owns its absence.
-      // A failed delete must not replace a newer history/realtime snapshot.
-      if (original) setMessages(prev => scope.isCurrent() && changes.get(messageId) === attempt && !prev.some(m => m.id === messageId)
-        ? mergeChatBurst(prev, [original]) : prev);
-      if (error instanceof RequestDeadlineError) {
-        Alert.alert('Removal not confirmed', 'The connection took too long. Reopen this chat to check whether the message was removed.');
-      } else Alert.alert('Could not delete', 'Something went wrong. Please try again.');
+      Alert.alert('Removal not confirmed', 'Reopen this chat to check whether the message was removed.');
+    } finally {
+      pendingDeletes.delete(messageId);
     }
-  }, [captureOperation]);
+  }, [captureOperation, pendingDeletes, parentCol, conversationId]);
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string, replyToId?: string, sendIdOverride?: string, entryScope?: ChatOperationScope, mentions?: ChatMentionDocument | null) => {
     const scope = captureOperation(entryScope);
