@@ -92,19 +92,20 @@ export function useChatList(knownUserId: string | null | undefined) {
       setLoading(sorted.length === 0 && (pending.event || pending.circle));
     };
 
+    // A failed secondary read can keep prior previews only for confirmed memberships.
+    const retainJoined = (kind: ChatPreview['kind'], joined: ReadonlySet<string>) => {
+      if (!current()) return;
+      const rows = (chatListMemoryCache.get(userId) ?? latest).filter(row => row.kind === kind);
+      const retained = rows.filter(row => joined.has(row.conversationId));
+      if (retained.length !== rows.length) publish(kind, retained, false);
+    };
+
     const loadEvents = async () => {
       try {
         const eventPreviews = await fetchEventChatPreviews(userId, names, read, silent ? undefined : {
           cachedRows: () => latest,
           publish: rows => publish('event', rows, false),
-        }, joined => {
-          // Once membership is known, later preview failures may only retain
-          // conversations still present in that response.
-          if (!current()) return;
-          const events = (chatListMemoryCache.get(userId) ?? latest).filter(row => row.kind === 'event');
-          const retained = events.filter(row => joined.has(row.conversationId));
-          if (retained.length !== events.length) publish('event', retained, false);
-        });
+        }, joined => retainJoined('event', joined));
         publish('event', eventPreviews, true);
       } catch {
         publish('event', null, true, true);
@@ -112,17 +113,28 @@ export function useChatList(knownUserId: string | null | undefined) {
     };
     const loadCircles = async () => {
       if (!GROUPS_ENABLED) return;
+      const readCircles = async (fetch: typeof fetchCircleChats) => {
+        let active = true;
+        try {
+          return await read(fetch(userId, names, joined => {
+            if (active) retainJoined('circle', joined);
+          }));
+        } finally {
+          // A timed-out cards request must not trim the fallback's newer rows.
+          active = false;
+        }
+      };
       try {
         let rows: ChatPreview[];
         if (CHAT_ENGINE_ENABLED) {
           try {
-            rows = await read(fetchCircleChatsViaCards(userId, names));
+            rows = await readCircles(fetchCircleChatsViaCards);
           } catch {
             if (!current()) return;
-            rows = await read(fetchCircleChats(userId, names));
+            rows = await readCircles(fetchCircleChats);
           }
         } else {
-          rows = await read(fetchCircleChats(userId, names));
+          rows = await readCircles(fetchCircleChats);
         }
         publish('circle', rows, true);
       } catch {
