@@ -100,14 +100,14 @@ it.each(['left', 'not_member'])('keeps %s as confirmed scalar success with the o
 
 it.each([null, undefined, false, 0, [], {}, ['left'], { status: 'left' }, 'joined', 'LEFT', ' left '])(
   'rejects an unconfirmed result (%p) without success or cache effects', async value => {
-    mockRpc.mockResolvedValue({ data: value, error: null }); mount(); const feedback = callbacks();
+    mockRpc.mockResolvedValueOnce({ data: value, error: null }).mockResolvedValueOnce({data:null,error:null}); mount(); const feedback = callbacks();
     await act(async () => {
-      await expect(current.mutateAsync('circle-one', feedback)).rejects.toThrow('Could not confirm you left');
+      await expect(current.mutateAsync('circle-one', feedback)).rejects.toThrow('Couldn’t confirm the change');
     }); await flush();
     expectNoEffects(); expect(feedback.onSuccess).not.toHaveBeenCalled();
     expect(feedback.onError).toHaveBeenCalledTimes(1); expect(feedback.onSettled).toHaveBeenCalledTimes(1);
     expect(current.isError).toBe(true); expect(current.isPending).toBe(false);
-    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockRpc.mock.calls.map(call=>call[0])).toEqual(['leave_circle','is_circle_member']);
   },
 );
 
@@ -132,38 +132,43 @@ it.each(['account-b', null])('does not adopt an account returned by preflight (%
   expect(mockRpc).not.toHaveBeenCalled(); expectNoEffects(feedback);
 });
 
-it.each(['response', 'throw'])('keeps a current auth %s error visible and retryable', async mode => {
-  const failure = new Error('Temporary account check failure');
-  if (mode === 'response') mockGetUser.mockResolvedValueOnce({ data: { user: null }, error: failure });
-  else mockGetUser.mockRejectedValueOnce(failure);
-  mount(); const feedback = callbacks();
-  await act(async () => { await expect(current.mutateAsync('circle-one', feedback)).rejects.toBe(failure); }); await flush();
-  expect(mockRpc).not.toHaveBeenCalled(); expectNoEffects(); expect(feedback.onError).toHaveBeenCalledTimes(1);
-  expect(current.error).toBe(failure);
-  await act(async () => { expect(await current.mutateAsync('circle-one')).toBe('left'); });
-  expect(mockGetUser).toHaveBeenCalledTimes(2); expect(mockRpc).toHaveBeenCalledTimes(1);
-});
-
-it.each(['response', 'throw'])('keeps a current RPC %s error visible without automatic retry', async mode => {
-  const failure = new Error('Could not reach the circle');
-  if (mode === 'response') mockRpc.mockResolvedValueOnce({ data: 'left', error: failure });
+it.each(['response', 'throw'])('recovers a committed leave after a lost %s without repeating it', async mode => {
+  const failure = Error('Response lost');
+  if (mode === 'response') mockRpc.mockResolvedValueOnce({data:null,error:failure});
   else mockRpc.mockRejectedValueOnce(failure);
-  mount(); const feedback = callbacks();
-  await act(async () => { await expect(current.mutateAsync('circle-one', feedback)).rejects.toBe(failure); }); await flush();
-  expectNoEffects(); expect(feedback.onSuccess).not.toHaveBeenCalled();
-  expect(feedback.onError.mock.calls[0].slice(0, 2)).toEqual([failure, 'circle-one']);
-  expect(current.error).toBe(failure); expect(mockRpc).toHaveBeenCalledTimes(1);
-  await act(async () => { expect(await current.mutateAsync('circle-one')).toBe('left'); });
-  expect(mockRpc).toHaveBeenCalledTimes(2); expect(consumeChatListDirty()).toBe(true);
+  mockRpc.mockResolvedValueOnce(response(false));
+  mount(); await act(async()=>{expect(await current.mutateAsync('circle-one')).toBe('not_member');});
+  expect(mockRpc.mock.calls).toEqual([
+    ['leave_circle',{p_circle_id:'circle-one'}],
+    ['is_circle_member',{p_circle_id:'circle-one',p_user_id:'account-a'}],
+  ]);
 });
 
-it('allows a deliberate retry after an unknown receipt', async () => {
-  mockRpc.mockResolvedValueOnce(response(null)); mount();
-  await act(async () => { await current.mutateAsync('circle-one').catch(() => {}); });
-  await act(async () => { expect(await current.mutateAsync('circle-one')).toBe('left'); });
-  expect(mockRpc).toHaveBeenCalledTimes(2);
+it('rechecks an uncertain leave after remount without writing, and requires a fresh decision if still joined', async () => {
+  mockRpc.mockResolvedValueOnce(response(null)).mockRejectedValueOnce(Error('offline'));
+  mount(); await act(async()=>{await expect(current.mutateAsync('circle-one')).rejects.toThrow('Check your status');});
+  await act(async()=>tree!.unmount()); mount();
+  mockRpc.mockResolvedValueOnce(response(true));
+  await act(async()=>{await expect(current.checkStatusAsync('circle-one')).rejects.toThrow('still active');});
+  mockRpc.mockResolvedValueOnce(response('left'));
+  await act(async()=>{expect(await current.mutateAsync('circle-one')).toBe('left');});
+  expect(mockRpc.mock.calls.map(call=>call[0])).toEqual(['leave_circle','is_circle_member','is_circle_member','leave_circle']);
 });
 
+it('returns a confirmed refusal without reading membership or changing the inbox', async () => {
+  const refused={code:'42501',message:'Not permitted'};mockRpc.mockResolvedValueOnce({data:null,error:refused});
+  mount();await act(async()=>{await expect(current.mutateAsync('circle-one')).rejects.toBe(refused);});expectNoEffects();
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+it('does not deliver a lost receipt check after switching account', async () => {
+  const checked=deferred<ReturnType<typeof response>>();mockRpc.mockResolvedValueOnce(response(null)).mockReturnValueOnce(checked.promise);mount();
+  const feedback=callbacks();let work!:Promise<unknown>;
+  act(()=>{work=current.mutateAsync('circle-one',feedback).catch(e=>e.name);});await flush();
+  change('account-b',true);
+  await act(async()=>{checked.resolve(response(false));expect(await work).toBe('ObsoleteCircleLeaveError');});
+  expectNoEffects(feedback);
+});
 it('captures the account before React Query schedules the mutation function', async () => {
   mount(); const feedback = callbacks();
   act(() => { current.mutate('circle-one', feedback); change('account-b', true); }); await flush();
@@ -323,4 +328,11 @@ it('preserves a pending leave across ordinary rerenders with the same caller sco
   act(() => tree!.update(render()));
   await act(async () => { write.resolve(response()); expect(await work).toBe('left'); });
   expect(invalidate).toHaveBeenCalledTimes(2); expect(consumeChatListDirty()).toBe(true);
+});
+
+it('a status button captured before another recovery is read-only even with no unresolved receipt', async () => {
+  mount();mockRpc.mockResolvedValueOnce(response(true));
+  await act(async()=>{await expect(current.checkStatusAsync('circle-one')).rejects.toThrow('still active');});
+  expect(mockRpc.mock.calls.map(call=>call[0])).toEqual(['is_circle_member']);
+  expectNoEffects();
 });

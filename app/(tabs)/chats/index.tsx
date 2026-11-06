@@ -34,6 +34,7 @@ import {
 } from '../../../constants/FeatureFlags';
 import { COPY } from '../../../components/yours/state/constants';
 import { hapticSelection } from '../../../lib/haptics';
+import { CircleLeaveUnconfirmed } from '../../../lib/circles/leaveReceipt';
 import { isObsoleteCircleLeave, useLeaveCircle } from '../../../hooks/useLeaveCircle';
 import { useCommunityChatPreference } from '../../../hooks/useCommunityChatPreference';
 import { useObservedUser } from '../../../hooks/useObservedUser';
@@ -124,7 +125,8 @@ export default function ChatsScreen() {
   const [leaveConfirmation, setLeaveConfirmation] = React.useState<LeaveConfirmation | null>(null);
   const confirmationRef = React.useRef<LeaveConfirmation | null>(null);
   const leaveAttempt = React.useRef<LeaveConfirmation | null>(null);
-  const [leaveFailure, setLeaveFailure] = React.useState<{ scope: typeof leaveScope; message: string } | null>(null);
+  const [leaveFailure, setLeaveFailure] = React.useState<{ scope: typeof leaveScope; message: string; check?: LeaveConfirmation } | null>(null);
+  const visibleLeaveFailure = React.useRef(leaveFailure); visibleLeaveFailure.current = leaveFailure;
   const isCurrentLeave = useCallback(() => activeLeaveScope.current === leaveScope && leaveReady && leaveViewer.isCurrent(), [leaveScope, leaveReady, leaveViewer.isCurrent]);
   React.useLayoutEffect(() => {
     activeLeaveScope.current = leaveScope;
@@ -160,6 +162,7 @@ export default function ChatsScreen() {
     return () => {
       inboxFocused.current = false;
       setNotificationsFocused(false);
+      visibleLeaveFailure.current = null; setLeaveFailure(null);
       // An unanswered leave belongs to this visit. An already confirmed
       // request still needs its receipt to update the account's inbox.
       confirmationRef.current = null;
@@ -273,26 +276,31 @@ export default function ChatsScreen() {
 
   // Keep the row until this account's request confirms the membership ended.
   // The ref blocks repeated taps before the mutation's pending render arrives.
-  const confirmLeave = useCallback(async () => {
-    const confirmation = leaveConfirmation;
-    if (!confirmation || confirmationRef.current !== confirmation || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
-    confirmationRef.current = null;
+  const runLeave = useCallback(async (confirmation: LeaveConfirmation, checkOnly: boolean) => {
+    if (confirmation.scope !== leaveScope || !isCurrentLeave() || leaveAttempt.current || leaveCircle.isPending) return;
     leaveAttempt.current = confirmation;
     setLeaveConfirmation(null);
     setLeaveFailure(null);
     const current = () => isCurrentLeave() && leaveAttempt.current === confirmation;
     try {
-      const result = await leaveCircle.mutateAsync(confirmation.chat.conversationId);
+      const result = await (checkOnly ? leaveCircle.checkStatusAsync(confirmation.chat.conversationId) : leaveCircle.mutateAsync(confirmation.chat.conversationId));
       if (!current()) return;
       if (result !== 'left' && result !== 'not_member') throw new Error('Could not confirm the leave.');
       removeChat(confirmation.chat.conversationId);
     } catch (error) {
-      if (!current() || isObsoleteCircleLeave(error)) return;
-      setLeaveFailure({ scope: leaveScope, message: confirmation.chat.is_dm ? COPY.dmDeleteError : COPY.circleLeaveError });
+      if (!current() || !inboxFocused.current || isObsoleteCircleLeave(error)) return;
+      setLeaveFailure(error instanceof CircleLeaveUnconfirmed
+        ? { scope: leaveScope, message: error.message, check: confirmation }
+        : { scope: leaveScope, message: confirmation.chat.is_dm ? COPY.dmDeleteError : COPY.circleLeaveError });
     } finally {
       if (leaveAttempt.current === confirmation) leaveAttempt.current = null;
     }
-  }, [leaveConfirmation, isCurrentLeave, leaveCircle, removeChat, leaveScope]);
+  }, [isCurrentLeave, leaveCircle, removeChat, leaveScope]);
+  const confirmLeave = useCallback(() => {
+    if (!leaveConfirmation || confirmationRef.current !== leaveConfirmation || !isCurrentLeave()) return;
+    confirmationRef.current = null;
+    return runLeave(leaveConfirmation, false);
+  }, [leaveConfirmation, isCurrentLeave, runLeave]);
 
   const closeLeaveConfirmation = useCallback(() => {
     const confirmation = leaveConfirmation;
@@ -640,6 +648,11 @@ export default function ChatsScreen() {
       <BrandedAlert
         visible={leaveError != null}
         title={leaveError ?? ''}
+        buttons={leaveFailure?.check ? [{ text: 'Close', style: 'cancel' }, { text: 'Check status', onPress: () => {
+          if (!inboxFocused.current || visibleLeaveFailure.current !== leaveFailure || !leaveFailure.check) return;
+          visibleLeaveFailure.current = null;
+          void runLeave(leaveFailure.check, true);
+        } }] : undefined}
         onClose={() => { if (isCurrentLeave()) setLeaveFailure(previous => previous === leaveFailure ? null : previous); }}
       />
     </SafeAreaView>
