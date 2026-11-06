@@ -18,6 +18,7 @@ import { supabase } from '../../../lib/supabase';
 import EditorialTitleField from '../../composer/EditorialTitleField';
 import InvitePeopleSection from '../InvitePeopleSection';
 import { BrandedAlert } from '../../BrandedAlert';
+import { buildDuplicatePostParams } from '../../../lib/duplicatePlan';
 import { buildSimilarPlanParams } from '../../../lib/interestedPlanActions';
 
 const mockUpdateDraft = jest.fn(), mockPublishReceipt = jest.fn();
@@ -1095,3 +1096,23 @@ it('starts a duplicate review without the previous draft’s message or invitati
   expect(form.tree.root.findByType(InvitePeopleSection).props.invited).toEqual([]);
   expect(mockInvite).not.toHaveBeenCalled();
 });
+
+it.each([
+  [24, 38, 'save'], [null, 47, 'save'], [32, null, 'post'], [24, 38, 'post'],
+] as const)('preserves an untouched saved audience of %s to %s on %s', async (min, max, action) => {
+  const params = buildDuplicatePostParams({ title: 'Hosted walk', start_time: '2040-09-15T03:00:00.000Z',
+    primary_vibe: 'Outdoors', description: 'A local walk.', target_age_min: min, target_age_max: max }, null);
+  const form = await mount(false, { ...params, draftId: 'existing', draftOwnerId: 'creator' });
+  expect(byLabel(form.tree, 'All Ages').props.accessibilityState.checked).toBe(false);
+  await act(async () => { await (action === 'post' ? form.post() : form.saveDraft()); });
+  expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({ target_age_min: min, target_age_max: max });
+});
+
+it.each([['30s', 30, 39], ['All Ages', null, null]] as const)(
+  'replaces custom bounds only when a preset is selected (%s)', async (label, min, max) => {
+    const params = buildDuplicatePostParams({ title: 'Hosted walk', start_time: '2040-09-15T03:00:00.000Z', target_age_min: 24, target_age_max: 38 }, null);
+    const form = await mount(false, { ...params, draftId: 'existing', draftOwnerId: 'creator' });
+    act(() => pressByLabel(form.tree, label));
+    await act(async () => { await form.saveDraft(); });
+    expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({ target_age_min: min, target_age_max: max });
+  });
