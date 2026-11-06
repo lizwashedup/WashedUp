@@ -407,3 +407,30 @@ it('does not apply an earlier account’s delayed block preferences to the activ
   await act(async()=>hold.resolve(new Set(['synthetic-peer'])));
   expect(value.chats[0].last_message).toContain('Account B');
 });
+
+it.each(['events','circles'])('retains verified %s snippets and badges on a missing activity response and recovers on retry',async table=>{
+  mockCircles=async()=>circleMembership();useDetailedEnrichment();
+  await mount('missing-activity-'+table);
+  const eligible=value.chats.map(row=>({title:row.title,text:row.last_message,count:row.unread_count}));
+  const normal=mockEnrichment;mockEnrichment=async(t,cols,viewer)=>t===table?{data:null,error:null}:normal(t,cols,viewer);
+  await act(async()=>{await value.refetch(true);});
+  expect(value.chats.map(row=>({title:row.title,text:row.last_message,count:row.unread_count}))).toEqual(eligible);
+  expect(value.loadError).toBe(true);
+  // PostgREST represents a valid parent with no messages as an empty child array.
+  mockEnrichment=async(t,cols,viewer)=>t===table?{data:[{id:table==='events'?event.id:'circle-independent',latest_message:[]}],error:null}:normal(t,cols,viewer);
+  await act(async()=>{await value.refetch(true);});
+  expect(value.loadError).toBe(false);
+  expect(value.chats.find(row=>row.kind===(table==='events'?'event':'circle'))?.last_message).toBeNull();
+  expect(value.chats.find(row=>row.kind!==(table==='events'?'event':'circle'))?.last_message).toContain('preview');
+});
+
+it('keeps a first-visit plan reachable without labelling unknown history as empty', async () => {
+  mockEnrichment = async table => table === 'events' ? {data:null,error:null} : undefined;
+  await mount('missing-first-activity');
+  expect(value.loadError).toBe(true);
+  expect(value.chats[0]).toMatchObject({title:event.title, last_message:null, preview_unavailable:true});
+  useDetailedEnrichment();
+  await act(async()=>{await value.refetch(true);});
+  expect(value.loadError).toBe(false);
+  expect(value.chats[0].last_message).toContain('Plan preview');
+});
