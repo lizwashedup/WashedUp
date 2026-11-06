@@ -1034,7 +1034,7 @@ it('retires the selected member action when leaving and returning to the same ch
 });
 
 it('refreshes on a quick return only when history was withheld behind another screen', async () => {
-  await mount(); mockRead.mockClear();
+  await mount(); expect(mockRead).not.toHaveBeenCalled();
   expect(mockCanAcknowledge()).toBe(true);
   mockFocused = false; await update();
   expect(mockCanAcknowledge()).toBe(false);
@@ -1043,4 +1043,19 @@ it('refreshes on a quick return only when history was withheld behind another sc
   expect(mockRead).toHaveBeenCalledWith(true);
   mockFocused = false; await update(); mockFocused = true; await update();
   expect(mockRead).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the ordinary refocus throttle when no receipt was deferred', async () => {
+  let now = Date.now();
+  const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await mount();
+    expect(mockRead).not.toHaveBeenCalled();
+    mockFocused = false; await update(); now += 14_000;
+    mockFocused = true; await update();
+    expect(mockRead).not.toHaveBeenCalled();
+    mockFocused = false; await update(); now += 2_000;
+    mockFocused = true; await update();
+    expect(mockRead).toHaveBeenCalledTimes(1);
+  } finally { clock.mockRestore(); }
 });
