@@ -72,6 +72,7 @@ import { pushRegistrationFeedback } from '../components/notifications/pushRegist
 import { handleReferralUrl, consumePendingReferral } from '../lib/yours/referralLink';
 import { pendingTransferRoute } from '../lib/ticketTransfer';
 import { clearPendingDestination, consumePendingDestination, peekPendingCheckout, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
+import { subscribeAppLinks } from '../lib/subscribeAppLinks';
 import { getOrder } from '../lib/ticketing';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import PostPlanSurvey, { SurveyPlan, SurveyMember, isPostPlanSurveyHandled } from '../components/PostPlanSurvey';
@@ -752,7 +753,10 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
     // OneSignal click handler. Buffers cold-start taps until a listener
     // attaches, so this catches both warm-foreground taps and taps that
     // launched the app from terminated state.
+    let cancelled = false;
     const onClick = (event: any) => {
+      // Removing a listener does not invalidate a callback already queued by the SDK.
+      if (cancelled) return;
       const data = (event?.notification?.additionalData ?? {}) as Record<string, any>;
       const type = data?.type as string | undefined;
       if (type === 'operator_grant') { safePush('/creator/apply'); return; }
@@ -872,7 +876,6 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
     };
 
-    let cancelled = false;
     let attached: ((event: any) => void) | null = null;
     const stopExpoResponses = subscribeExpoNotificationResponses(data => {
       if (!cancelled) onClick({ notification: { additionalData: data } });
@@ -960,21 +963,11 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       stashPendingDestination(dest);
       safePush(dest);
     };
-    Linking.getInitialURL()
-      .then((url) => {
-        if (!url) return;
-        parseSessionFromUrl(url);
-        if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
-        captureDestination(url);
-      })
-      .catch((e) => logError(e, 'layout.getInitialURL'));
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      if (!url) return;
+    return subscribeAppLinks(Linking, url => {
       parseSessionFromUrl(url);
       if (YOURS_PAGE_ENABLED) handleReferralUrl(url);
       captureDestination(url);
-    });
-    return () => sub.remove();
+    }, error => logError(error, 'layout.getInitialURL'));
   }, []);
 
   useEffect(() => {
