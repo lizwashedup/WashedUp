@@ -97,7 +97,7 @@ type ComposerWrite = {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function PlanComposerV2() {
+export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Record<string, string> } = {}) {
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
   const appearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
   const styles = useMemo(() => appearance ? { ...legacyStyles, ...composerAppearance(appearance.fonts) } : legacyStyles, [appearance]);
@@ -112,7 +112,7 @@ export default function PlanComposerV2() {
   const sectionPositions = useRef<Partial<Record<RequiredField, number>>>({});
   const [savedSchedule, setSavedSchedule] = useState<{ start?: string; end?: string }>({});
   const [validationMode, setValidationMode] = useState<ValidationMode | null>(null);
-  const params = useLocalSearchParams<{
+  const routeParams = useLocalSearchParams<{
     prefillTitle?: string;
     prefillInvitePersonId?: string;
     prefillInvitePersonName?: string;
@@ -149,6 +149,10 @@ export default function PlanComposerV2() {
     prefillCreatorMessage?: string;
     similarPlanRequest?: string;
   }>();
+  const [reviewCleared, setReviewCleared] = useState(false);
+  const params: typeof routeParams = reviewPrefill
+    ? (reviewCleared ? {} : reviewPrefill)
+    : routeParams;
 
   const composerViewer = useObservedUser();
   const composerUserId = !composerViewer.error && !composerViewer.isLoading ? composerViewer.viewerId : undefined;
@@ -654,6 +658,10 @@ export default function PlanComposerV2() {
     // "Post your own" leaves duplicatedFromEventId (and the rest) in route state,
     // and the NEXT plan posted from this same screen is mis-tagged a duplicate -
     // firing notify_waitlist_duplicate_plan at the previous plan's waitlist.
+    if (reviewPrefill) {
+      setReviewCleared(true);
+      return;
+    }
     router.setParams({
       prefillTitle: undefined, prefillInvitePersonId: undefined,
       prefillInvitePersonName: undefined, prefillInvitePersonPhoto: undefined,
