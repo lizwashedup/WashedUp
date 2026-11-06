@@ -1,8 +1,11 @@
-// Older installed apps can receive JS updates without the native clipboard module.
+import { requireOptionalNativeModule } from 'expo';
+import { Platform } from 'react-native';
+
 export function getClipboardWriter(): typeof import('expo-clipboard').setStringAsync | null {
-  try {
-    return (require('expo-clipboard') as typeof import('expo-clipboard')).setStringAsync ?? null;
-  } catch {
+  // Check the native capability before importing its JS wrapper. Metro can
+  // report a fatal module initialization error even inside a require try/catch.
+  if (Platform.OS !== 'web' && !requireOptionalNativeModule<{ setStringAsync?: unknown }>('ExpoClipboard')?.setStringAsync) {
     return null;
   }
+  return (require('expo-clipboard') as typeof import('expo-clipboard')).setStringAsync;
 }
