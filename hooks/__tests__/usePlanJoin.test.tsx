@@ -356,3 +356,42 @@ it('keeps a dispatched membership write locked beyond the read deadlines', async
     expect(f.onJoined).toHaveBeenCalledTimes(1); expect(f.current.isPending).toBe(false);
   } finally { jest.useRealTimers(); }
 });
+
+it.each(['system', 'greeting', 'system without greeting'])('finishes a confirmed join when the %s receipt stalls, without replaying either write', async stage => {
+  const stalled = deferred<{ error: null }>();
+  mockInsert.mockImplementation((_table, row) => (stage === 'greeting' ? row.message_type === 'user' : row.message_type === 'system') ? stalled.promise : Promise.resolve({ error: null }));
+  const f = await mount();
+  jest.useFakeTimers();
+  try {
+    f.join(stage === 'system without greeting' ? undefined : 'Hi there');
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+    expect(joins()).toHaveLength(1);
+    expect(mockInsert).toHaveBeenCalledTimes(stage === 'greeting' ? 2 : 1);
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_001); });
+    const result = stage === 'system without greeting' ? {} : stage === 'greeting' ? { greetingUnconfirmed: 'Hi there' } : { greetingNotSent: 'Hi there' };
+    expect(f.onJoined).toHaveBeenCalledWith(result);
+    expect(f.current.isPending).toBe(false);
+    f.join('Try again');
+    await act(async () => { stalled.resolve({ error: null }); await jest.advanceTimersByTimeAsync(100); });
+    expect(joins()).toHaveLength(1);
+    expect(mockInsert).toHaveBeenCalledTimes(stage === 'greeting' ? 2 : 1);
+    expect(f.onJoined).toHaveBeenCalledTimes(1); expect(f.onError).not.toHaveBeenCalled();
+  } finally { jest.useRealTimers(); }
+});
+
+it('shares the time budget between the system message and introduction and ignores late confirmation', async () => {
+  const system = deferred<{error: null}>(), greeting = deferred<{error: null}>();
+  mockInsert.mockImplementation((_table, row) => row.message_type === 'system' ? system.promise : greeting.promise);
+  const f = await mount(); jest.useFakeTimers();
+  try {
+    f.join('Hi');
+    await act(async () => { await jest.advanceTimersByTimeAsync(10_000); system.resolve({error:null}); });
+    expect(mockInsert).toHaveBeenCalledTimes(2);
+    expect(f.onJoined).not.toHaveBeenCalled();
+    await act(async () => { await jest.advanceTimersByTimeAsync(2_010); });
+    expect(f.onJoined).toHaveBeenCalledWith({greetingUnconfirmed:'Hi'});
+    await act(async () => { greeting.resolve({error:null}); });
+    expect(f.onJoined).toHaveBeenCalledTimes(1);
+    expect(mockInsert).toHaveBeenCalledTimes(2);
+  } finally { jest.useRealTimers(); }
+});

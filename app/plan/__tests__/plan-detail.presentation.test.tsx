@@ -950,3 +950,18 @@ it('releases a stalled save to Check changes, preserving the draft without a dup
     expect(tree.root.findAllByType(Modal).some(n => n.props.visible && n.props.animationType === 'slide')).toBe(false);
   } finally { jest.useRealTimers(); }
 });
+
+it('distinguishes an introduction never sent from one awaiting a receipt, and only opens chat on request', async () => {
+  await mount(); act(() => button("Let's Go →").props.onPress());
+  act(() => mockJoinOptions.onJoined({ greetingNotSent: 'See you at salsa!' }));
+  const sheet = tree.root.findByType(require('../../../components/plans/PlanJoinSheet').PlanJoinSheet);
+  expect(sheet.props.message).toBe('See you at salsa!');
+  expect(mockPush).not.toHaveBeenCalled();
+  act(() => sheet.props.onDismiss());
+  const alert = tree.root.findAllByType(require('../../../components/BrandedAlert').BrandedAlert).find(n => n.props.title === 'You’re in')!;
+  expect(alert.props.message).toContain('Your introduction wasn’t sent');
+  expect(alert.props.message).toContain('See you at salsa!');
+  act(() => alert.props.buttons[0].onPress());
+  expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/plan-1');
+  expect(mockJoin).not.toHaveBeenCalled();
+});
