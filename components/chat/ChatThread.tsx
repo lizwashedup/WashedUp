@@ -220,9 +220,11 @@ function ChatThread(props: ChatThreadProps) {
   const clearAnchor = useCallback(() => setDismissedAnchor(anchorRequestKey), [anchorRequestKey]);
   const chatFocusedRef = useRef(false);
   const deferredReceipt = useRef(false);
+  const photoCover = useRef<{ entry: object | null; visible: boolean }>({ entry: null, visible: false });
   const mayMarkHistoryRead = useCallback(() => {
-    deferredReceipt.current = !chatFocusedRef.current;
-    return chatFocusedRef.current;
+    const visible = chatFocusedRef.current && !photoCover.current.visible;
+    deferredReceipt.current = !visible;
+    return visible;
   }, []);
   const { messages, loading, loadError, olderLoadError, anchorUnavailable, currentUserId, operationScope, sendMessage, sendLocation, sendAudio, deleteMessage, editMessage, toggleReaction, loadOlder, refetch } = useChat({ kind: props.kind, id }, anchorId, mayMarkHistoryRead);
   // A room/account return is a new entry, even when its IDs repeat. The
@@ -273,6 +275,16 @@ function ChatThread(props: ChatThreadProps) {
     .slice().sort(compareChatSequence)
     .map(message => ({ id: message.id, uri: message.image_url!, senderName: message.sender?.first_name, caption: message.content })), [messages]);
   const photoSelection = useChatPhotoSelection(`${props.kind}:${id}:${currentUserId}:${entry.serial}`, photos);
+  const photoVisible = COMMUNITY_CHAT_GROUPING_ENABLED ? !!photoSelection.selectedId : !!photoViewUrl;
+  useLayoutEffect(() => {
+    const previous = photoCover.current;
+    photoCover.current = { entry, visible: photoVisible };
+    if (previous.entry === entry && previous.visible && !photoVisible &&
+        chatFocusedRef.current && deferredReceipt.current && isCurrentEntry() && !anchorId) {
+      deferredReceipt.current = false;
+      void refetch(true);
+    }
+  }, [entry, photoVisible, isCurrentEntry, anchorId, refetch]);
   const openMessagePhoto = useCallback((url: string, messageId: string) => {
     if (COMMUNITY_CHAT_GROUPING_ENABLED) photoSelection.onSelect(messageId);
     else setPhotoViewUrl(url);
