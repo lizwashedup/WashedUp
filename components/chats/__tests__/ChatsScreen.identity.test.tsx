@@ -61,7 +61,7 @@ jest.mock('../ChatInboxRow', () => ({ ChatInboxRow: ({ title }: { title: string 
 jest.mock('../ChatInboxHeading', () => ({ ChatInboxHeading: ({ children }: { children: React.ReactNode }) => children, ChatInboxFilters: () => null }));
 
 const planFor = (viewer: string): ChatPreview => ({ kind: 'event', conversationId: `plan-${viewer}`,
-  title: `Plan for ${viewer}`, category: null, image_url: null, start_time: '2026-09-25T20:00:00Z',
+  title: `Plan for ${viewer}`, category: null, image_url: null, start_time: new Date(Date.now() + 86400000).toISOString(),
   member_count: 2, last_message: 'Synthetic chat preview', last_message_at: null, unread_count: 0,
   is_past: false, ticket_url: null, member_avatars: [],
 });

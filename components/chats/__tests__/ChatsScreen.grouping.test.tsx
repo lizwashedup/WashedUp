@@ -100,7 +100,7 @@ it('offers retry for an initial community load error', () => {
 
 const plan: ChatPreview = {
   kind: 'event', conversationId: 'plan-a', title: 'An afternoon at the beach',
-  category: null, image_url: 'https://example.test/beach.jpg', start_time: '2026-09-19T21:00:00Z',
+  category: null, image_url: 'https://example.test/beach.jpg', start_time: new Date(Date.now() + 86400000).toISOString(),
   member_count: 4, last_message: 'Riley: See you there!', last_message_at: null,
   unread_count: 1, is_past: false, ticket_url: null, member_avatars: [],
 };
@@ -222,4 +222,26 @@ it('keeps a missing timestamp below a dated row without changing unread counts',
   const items = tree.root.findByType(FlatList).props.data;
   expect(items.map((item: any) => item.t)).toEqual(['community', 'chat']);
   expect(items[0].row.unread).toBe(event.unread); expect(items[1].chat.unread_count).toBe(plan.unread_count);
+});
+
+it('moves an expired plan under Past Plans while the inbox stays open and preserves its unread count', () => {
+  jest.useFakeTimers();
+  try {
+    const end = Date.now() + 1100 - 48 * 3600000;
+    const row = { ...plan, kind: 'event', conversationId: 'timed', start_time: new Date(end-3600000).toISOString(),
+      end_time: new Date(end).toISOString(), is_past: false, unread_count: 3 };
+    const persistent = { ...row, kind: 'circle', conversationId: 'circle' };
+    const refetch = jest.fn();
+    (useChatList as jest.Mock).mockReturnValue({chats:[row,persistent], loading:false, refetch, removeChat:jest.fn()});
+    mount();
+    const data = () => tree.root.findByType(FlatList).props.data;
+    expect(data().filter((i:any)=>i.t==='chat')).toHaveLength(2);
+    const reads = refetch.mock.calls.length;
+    act(() => jest.advanceTimersByTime(1100));
+    expect(data().filter((i:any)=>i.t==='chat').map((i:any)=>i.chat.conversationId)).toEqual(['circle']);
+    const header=tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Past Plans (1)');
+    act(()=>header!.props.onPress());
+    expect(data().find((i:any)=>i.chat?.conversationId==='timed').chat).toMatchObject({unread_count:3,is_past:true});
+    expect(refetch).toHaveBeenCalledTimes(reads);
+  } finally { jest.useRealTimers(); }
 });
