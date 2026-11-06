@@ -26,11 +26,15 @@
  * by our own code against real native routes.
  */
 
+import { rootHandlesForegroundLink } from '../lib/subscribeAppLinks';
+
 /** Path shapes that have a real native screen (see app/e, app/plans, app/r). */
 const NATIVE_PATH = /^\/(e|plans|r)\/[^/]+\/?$/;
 
-export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
+export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   try {
+    // The mounted listener also preserves the destination through sign-in.
+    if (!initial && rootHandlesForegroundLink(path)) return null;
     if (!path.startsWith('http')) return path;
     const url = new URL(path);
     if (!/(^|\.)washedup\.app$/i.test(url.hostname)) return path;

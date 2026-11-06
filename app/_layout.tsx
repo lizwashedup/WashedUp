@@ -882,7 +882,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         isCurrent: () => active && attempt === linkAttempt && authIdentityRef.current === identity && !isRecoveryRef.current,
       });
       captureDestination(url);
-    }, error => logError(error, 'layout.getInitialURL'));
+    }, error => logError(error, 'layout.getInitialURL'), url => parseAppDestination(url) !== null);
     return () => {
       active = false;
       recoveryAttempt += 1;
