@@ -463,7 +463,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                         </TouchableOpacity>
                       </View>
                     ) : undefined}
-                    onOpen={isExceptionInvite ? () => {} : hasAction
+                    hasOwnActions={isExceptionInvite}
+                    onOpen={hasAction
                       ? () => handleNotifAction(notif.id, 'acted', notif.event_id, notif.type, notif.actor_user_id)
                       : undefined}>
                     {(notif.type === 'people_request' || notif.type === 'people_request_accepted') && (
@@ -488,17 +489,17 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
                       </Text>}
                       {decision === 'unavailable' && <View>
                         <Text style={s.notifBody} accessibilityLiveRegion="polite">We couldn’t confirm the invitation status.</Text>
-                        <TouchableOpacity accessibilityRole="button" style={s.cantGoBtn} disabled={!!exception.pendingId}
+                        <TouchableOpacity accessibilityRole="button" style={s.cantGoBtn} accessibilityLabel="Check invitation" disabled={!!exception.pendingId}
                           onPress={() => exception.start(notif.id, notif.event_id, { createdAt: notif.created_at, checkOnly: true })}>
                           <Text style={s.cantGoText}>Check invitation</Text>
                         </TouchableOpacity>
                       </View>}
                       {isExceptionInvite && !decision && (
                         <View style={s.waitlistActions}>
-                          <TouchableOpacity style={s.claimBtn} disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id)} activeOpacity={0.7}>
+                          <TouchableOpacity style={s.claimBtn} accessibilityRole="button" accessibilityLabel="Join the plan" disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id)} activeOpacity={0.7}>
                             <Text style={s.claimText}>{exception.pendingId === notif.id ? 'Please wait…' : 'Join the plan'}</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity style={s.cantGoBtn} disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id, { createdAt: notif.created_at })} activeOpacity={0.7}>
+                          <TouchableOpacity style={s.cantGoBtn} accessibilityRole="button" accessibilityLabel="Not this time" disabled={!!exception.pendingId} onPress={() => exception.start(notif.id, notif.event_id, { createdAt: notif.created_at })} activeOpacity={0.7}>
                             <Text style={s.cantGoText}>Not this time</Text>
                           </TouchableOpacity>
                         </View>

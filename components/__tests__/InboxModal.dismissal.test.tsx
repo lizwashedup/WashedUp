@@ -552,3 +552,23 @@ it('keeps Pass retryable for an open spot and checks uncertain dismissal without
   expect(mockDecline).not.toHaveBeenCalled();
   expect(mockAccept).not.toHaveBeenCalled();
 });
+
+it('keeps the notice opener separate from Dismiss and reserved-spot decisions', async () => {
+  const nestedAction = (button: ReturnType<typeof row>) => {
+    for (let parent = button.parent; parent; parent = parent.parent) {
+      if (parent.type === TouchableOpacity) return true;
+    }
+    return false;
+  };
+  const dismiss = tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === 'Dismiss: Fictional reminder')!;
+  expect(nestedAction(dismiss)).toBe(false);
+  mockException = true;
+  try {
+    await act(async () => tree.update(renderInbox()));
+    for (const name of ['Join the plan', 'Not this time']) {
+      const button=tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel===name);
+      expect(button).toBeDefined();
+      expect(nestedAction(button!)).toBe(false);
+    }
+  } finally { mockException = false; }
+});
