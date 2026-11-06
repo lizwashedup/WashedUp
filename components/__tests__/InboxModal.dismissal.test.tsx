@@ -2,6 +2,12 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { Modal, Platform, Text, TouchableOpacity } from 'react-native';
 import InboxModal from '../InboxModal';
+import { ParticipationNotice } from '../legal/ParticipationNotice';
+const mockTerms = jest.fn(), mockAssent = jest.fn(), mockAccept = jest.fn(), mockDecline = jest.fn();
+const mockMembership = jest.fn(), mockAuthUser = jest.fn();
+let mockException = false;
+jest.mock('../../lib/participationTerms', () => ({ getParticipationNoticeStatus: () => mockTerms(), recordParticipationAssent: (context: unknown) => mockAssent(context) }));
+jest.mock('../../lib/waitlistExceptions', () => ({ ...jest.requireActual('../../lib/waitlistExceptions'), acceptWaitlistException: (id: string) => mockAccept(id), declineWaitlistException: (id: string) => mockDecline(id) }));
 const mockPush = jest.fn(), mockClose = jest.fn(), mockWrite = jest.fn();
 let mockCurrent = true;
 let mockInvites: any[] = [];
@@ -14,14 +20,14 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
 jest.mock('../../hooks/useInboxNotificationScope', () => ({ useInboxNotificationScope: () => ({ ready: true, epoch: 1, userId: 'fictional-viewer', isCurrent: () => mockCurrent }) }));
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => mockClient, useQuery: ({queryKey}: any) => ({
   isError: queryKey[0] === 'app-notifications' && mockNoticeError,
-  data: queryKey[0] === 'app-notifications' ? mockNoticeError ? undefined : [{id:'fictional-notice',type:'member_joined',title:'Fictional reminder',expires_at:mockExpiresAt,event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: queryKey[0] === 'app-notifications' ? mockRetryNotices : jest.fn(), isLoading: false,
+  data: queryKey[0] === 'app-notifications' ? mockNoticeError ? undefined : [{id:'fictional-notice',type:mockException ? 'exception_invite' : 'member_joined',title:'Fictional reminder',expires_at:mockExpiresAt,event_id:'fictional-plan',created_at:new Date().toISOString()}] : queryKey[0] === 'pending-invites' ? mockInvites : [], refetch: queryKey[0] === 'app-notifications' ? mockRetryNotices : jest.fn(), isLoading: false,
 }) }));
-jest.mock('../../lib/supabase', () => ({ supabase: { from: () => {
+jest.mock('../../lib/supabase', () => ({ supabase: { auth: { getUser: () => mockAuthUser() }, from: (table: string) => {
   let writing=false;
   const chain:any={select:()=>chain,update:()=>{writing=true;return chain;},
     neq:(...a:any[])=>{mockFilters(writing,...a);return chain;}, or:()=>chain, lte:(...a:any[])=>{mockFilters(writing,...a);return chain;},
     eq:(...args:any[])=>{mockFilters(writing,...args);return chain;},
-    maybeSingle:()=>writing?mockWrite():mockReadInvite(),then:(yes:any,no:any)=>(writing ? mockWrite() : mockReadInvite()).then(yes,no)};
+    maybeSingle:()=>writing?mockWrite():table==='event_members'?mockMembership():mockReadInvite(),then:(yes:any,no:any)=>(writing ? mockWrite() : mockReadInvite()).then(yes,no)};
   return chain;
 } } }));
 jest.mock('expo-notifications', () => ({ setBadgeCountAsync: jest.fn(async () => {}) }));
@@ -304,4 +310,143 @@ it('ignores an old individual dismiss callback on reopening',async()=>{
   act(()=>tree.update(renderInbox(false)));act(()=>tree.update(renderInbox(true)));
   await act(async()=>press());
   expect(mockWrite).not.toHaveBeenCalled();
+});
+
+describe('the inbox waitlist exception invitation', () => {
+  const button = (label: string) => tree.root.findAllByType(TouchableOpacity)
+    .find(n => n.props.children?.props?.children === label)!;
+  const notice = () => tree.root.findByType(ParticipationNotice).props;
+  function hold<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(done => { resolve = done; });
+    return { resolve, promise };
+  }
+  async function startJoin() {
+    let pending!: Promise<void>;
+    await act(async () => { pending = button('Join the plan').props.onPress(); });
+    return { pending };
+  }
+  beforeEach(() => {
+    mockException = true;
+    for (const mock of [mockAuthUser, mockTerms, mockAssent, mockAccept, mockMembership]) mock.mockReset();
+    mockAuthUser.mockResolvedValue({data:{user:{id:'fictional-viewer'}},error:null});
+    mockTerms.mockResolvedValue({needsAssent:false});
+    mockAssent.mockResolvedValue(true);
+    mockAccept.mockResolvedValue(undefined);
+    mockMembership.mockResolvedValue({data:null,error:null});
+    mockReadInvite.mockResolvedValue({data:null,error:null});
+    act(() => tree.update(renderInbox()));
+  });
+  afterEach(() => { mockException = false; });
+  it.each(['close', 'new account', 'close and reopen'])('retires the preflight on %s', async change => {
+    const status = hold<{needsAssent:boolean}>();
+    mockTerms.mockReturnValueOnce(status.promise);
+    const { pending } = await startJoin();
+    if (change === 'new account') act(() => tree.update(renderInbox(true,'second-viewer')));
+    else if (change === 'close') act(() => tree.root.findByType(Modal).props.onRequestClose());
+    else { act(() => tree.update(renderInbox(false))); act(() => tree.update(renderInbox())); }
+    await act(async () => { status.resolve({needsAssent:false}); await pending; });
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(mockWrite).not.toHaveBeenCalled();
+  });
+  it('does not reopen a late participation notice', async () => {
+    const status = hold<{needsAssent:boolean}>();
+    mockTerms.mockReturnValueOnce(status.promise);
+    const { pending } = await startJoin();
+    act(() => tree.update(renderInbox(false)));
+    await act(async () => { status.resolve({needsAssent:true}); await pending; });
+    act(() => tree.update(renderInbox()));
+    expect(notice().visible).toBe(false);
+  });
+  it('retires an outstanding assent on an account change', async () => {
+    mockTerms.mockResolvedValueOnce({needsAssent:true});
+    const receipt = hold<boolean>();
+    mockAssent.mockReturnValueOnce(receipt.promise);
+    await act(async () => button('Join the plan').props.onPress());
+    expect(notice().visible).toBe(true);
+    let agreeing!: Promise<boolean>;
+    await act(async () => { agreeing = notice().onAgree(); });
+    expect(mockAssent).toHaveBeenCalledTimes(1);
+    act(() => tree.update(renderInbox(true,'second-viewer')));
+    await act(async () => { receipt.resolve(true); await agreeing; });
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(notice().visible).toBe(false);
+  });
+  it('starts one join for two taps and opens chat despite a failed notification update', async () => {
+    mockWrite.mockRejectedValueOnce(Error('notification acknowledgment unavailable'));
+    const press = button('Join the plan').props.onPress;
+    await act(async () => { await Promise.all([press(),press()]); });
+    expect(mockTerms).toHaveBeenCalledTimes(1);
+    expect(mockAccept).toHaveBeenCalledTimes(1);
+    act(() => tree.root.findByType(Modal).props.onDismiss());
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/fictional-plan');
+  });
+
+  it('keeps the notice after failed assent and joins only after the accepted notice dismisses', async () => {
+    mockTerms.mockResolvedValueOnce({needsAssent:true});
+    mockAssent.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await act(async () => button('Join the plan').props.onPress());
+    await act(async () => { expect(await notice().onAgree()).toBe(false); });
+    expect(notice().visible).toBe(true);
+    expect(mockAccept).not.toHaveBeenCalled();
+    await act(async () => { expect(await notice().onAgree()).toBe(true); });
+    expect(mockAccept).not.toHaveBeenCalled();
+    await act(async () => { notice().onDismiss(); notice().onDismiss(); });
+    expect(mockAccept).toHaveBeenCalledTimes(1);
+    expect(mockAssent).toHaveBeenCalledWith({listingType:'plan',listingId:'fictional-plan',action:'join',organizerName:'Someone',organizerUserId:null});
+    act(() => tree.root.findByType(Modal).props.onDismiss());
+    expect(mockPush).toHaveBeenCalledTimes(1);
+  });
+  it('opens an already joined plan without repeating assent or the exception join', async () => {
+    mockMembership.mockResolvedValueOnce({data:{user_id:'fictional-viewer'},error:null});
+    await act(async () => button('Join the plan').props.onPress());
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(mockTerms).not.toHaveBeenCalled();
+    act(() => tree.root.findByType(Modal).props.onDismiss());
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/chats/fictional-plan');
+  });
+  it('only invalidates the original membership when a dispatched join finishes after switching', async () => {
+    const receipt = hold<void>();
+    mockAccept.mockReturnValueOnce(receipt.promise);
+    const { pending } = await startJoin();
+    expect(mockAccept).toHaveBeenCalledTimes(1);
+    act(() => tree.update(renderInbox(true,'second-viewer')));
+    await act(async () => { receipt.resolve(); await pending; });
+    expect(mockWrite).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockClient.invalidateQueries).toHaveBeenCalledWith({queryKey:['my-plans','fictional-viewer']});
+    expect(mockClient.invalidateQueries).not.toHaveBeenCalledWith({queryKey:['my-plans','second-viewer']});
+  });
+  it('keeps an uncertain membership check retryable and does not join or record assent', async () => {
+    mockMembership.mockResolvedValueOnce({data:null,error:{code:'42501'}});
+    await act(async () => button('Join the plan').props.onPress());
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(mockAssent).not.toHaveBeenCalled();
+    expect(button('Join the plan').props.disabled).toBe(false);
+  });
+  it('declines once even when tapped twice without starting assent or opening chat', async () => {
+    const press = button('Not this time').props.onPress;
+    await act(async () => { await Promise.all([press(),press()]); });
+    expect(mockDecline).toHaveBeenCalledTimes(1);
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(mockTerms).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch when the authenticated account changed before its observer updated', async () => {
+    mockAuthUser.mockResolvedValueOnce({data:{user:{id:'new-viewer'}},error:null});
+    await act(async () => button('Join the plan').props.onPress());
+    expect(mockAccept).not.toHaveBeenCalled();
+    expect(mockWrite).not.toHaveBeenCalled();
+  });
+  it('does not replay a dispatched join when the same account reopens before it settles', async () => {
+    const receipt = hold<void>();
+    mockAccept.mockReturnValueOnce(receipt.promise);
+    const {pending} = await startJoin();
+    act(() => tree.update(renderInbox(false))); act(() => tree.update(renderInbox()));
+    await act(async () => button('Join the plan').props.onPress());
+    expect(mockAccept).toHaveBeenCalledTimes(1);
+    await act(async () => { receipt.resolve(); await pending; });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 });
