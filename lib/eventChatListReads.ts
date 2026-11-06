@@ -1,3 +1,4 @@
+import { checkInboxActivityResponses, checkLatestMessageParents } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { getPlanChatTiming } from './planChatExpiry';
 import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chatPreview';
@@ -100,8 +101,7 @@ export async function fetchEventChatPreviews(
         .in('event_id', allEventIds)
         .eq('status', 'joined'),
     ]));
-    const failedRead = enrichment.find(result => result.error);
-    if (failedRead?.error) throw failedRead.error;
+    checkInboxActivityResponses(enrichment);
     const [{ data: memberCountRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows2 }] = enrichment;
 
     const realCounts: Record<string, number> = {};
@@ -110,6 +110,7 @@ export async function fetchEventChatPreviews(
     });
 
     const lastMsgMap: Record<string, { content: string; created_at: string; image_url: string | null; audio_url: string | null; message_type: string | null; user_id: string }> = {};
+    checkLatestMessageParents(messageParents);
     (messageParents ?? []).forEach((parent: any) => {
       const message = parent.latest_message?.[0];
       if (message) lastMsgMap[parent.id] = message;

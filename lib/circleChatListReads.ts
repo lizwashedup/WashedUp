@@ -1,3 +1,4 @@
+import { checkInboxActivityResponses, checkLatestMessageParents } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { circleDisplay, type DisplayMember } from './circles/display';
 import { seedSender } from './chatEngine/senderCache';
@@ -53,13 +54,13 @@ export async function fetchCircleChats(
       .eq('status', 'joined'),
   ]);
 
-  const failed = results.find(result => result.error);
-  if (failed?.error) throw failed.error;
+  checkInboxActivityResponses(results);
   const [{ data: countRows }, { data: messageParents }, { data: allReads }, { data: otherMessages }, { data: memberRows }] = results;
   const realCounts: Record<string, number> = {};
   (countRows ?? []).forEach((r: any) => { realCounts[r.circle_id] = (realCounts[r.circle_id] ?? 0) + 1; });
 
   const lastMsgMap: Record<string, any> = {};
+  checkLatestMessageParents(messageParents);
   (messageParents ?? []).forEach((parent: any) => {
     const message = parent.latest_message?.[0];
     if (message) lastMsgMap[parent.id] = message;

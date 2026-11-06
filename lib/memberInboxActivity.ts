@@ -1,3 +1,4 @@
+import { checkLatestMessageParents } from './inboxActivityResponse';
 import { supabase } from './supabase';
 import { formatChatPreview, type ChatPreview } from './chatPreview';
 type ActivityMessage = {
@@ -40,6 +41,7 @@ export async function replaceBlockedGroupActivity(kind: 'event' | 'circle', rows
       .order('id', {referencedTable:'latest_message', ascending:false})
       .limit(1, {referencedTable:'latest_message'}));
     if (error) throw error;
+    checkLatestMessageParents(data);
     const parents = new Map((data ?? []).map(parent => [parent.id, parent.latest_message?.[0]]));
     for (const row of batch) {
       const msg = parents.get(row.conversationId);
