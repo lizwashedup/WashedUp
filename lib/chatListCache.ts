@@ -1,4 +1,4 @@
-import { restrictPlanPreview, type ChatPreview } from './chatPreview';
+import { restrictGroupPreview, type ChatPreview } from './chatPreview';
 import { markChatListDirty } from './chatListSignal';
 
 // Process-only previews, partitioned by account. Block confirmation must clear
@@ -29,7 +29,7 @@ export function removeBlockedPrivateChatPreviews(viewerId: string, blockedId: st
   if (previous) {
     const blocked = new Set([blockedId]);
     chatListMemoryCache.set(viewerId, previous.filter(row => !(row.is_dm && row.dm_user_id === blockedId))
-      .map(row => restrictPlanPreview(row, blocked)));
+      .map(row => restrictGroupPreview(row, blocked)));
   }
   notifyInbox(viewerId, blockedId);
   for (const listener of listeners) listener(viewerId, blockedId);

@@ -49,9 +49,9 @@ export function copyPreviewActivity(row: ChatPreview, activity: ChatPreview): Ch
     unread_by_author: activity.unread_by_author, preview_unavailable: activity.preview_unavailable };
 }
 
-// Keep the joined plan itself available while its message visibility is checked.
-export function restrictPlanPreview(row: ChatPreview, blocked: ReadonlySet<string> | null): ChatPreview {
-  if (row.kind !== 'event' || blocked?.size === 0) return row;
+// Keep the joined group itself available while its message visibility is checked.
+export function restrictGroupPreview(row: ChatPreview, blocked: ReadonlySet<string> | null): ChatPreview {
+  if (row.is_dm || blocked?.size === 0) return row;
   const hideText = !blocked || !row.last_message_user_id || blocked.has(row.last_message_user_id);
   const counts = Object.entries(row.unread_by_author ?? {}).filter(([id]) => blocked && !blocked.has(id));
   const unread = counts.reduce((total, [, count]) => total + count, 0);

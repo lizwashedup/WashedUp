@@ -42,7 +42,7 @@ export async function fetchCircleChats(
       .limit(1, { referencedTable: 'latest_message' }),
     supabase.from('chat_reads').select('circle_id, last_read_at').eq('user_id', userId).in('circle_id', circleIds),
     supabase.from('messages')
-      .select('circle_id, created_at')
+      .select('circle_id, created_at, user_id')
       .in('circle_id', circleIds)
       .neq('user_id', userId)
       .order('created_at', { ascending: false })
@@ -95,9 +95,14 @@ export async function fetchCircleChats(
   (allReads ?? []).forEach((r: any) => { readMap[r.circle_id] = r.last_read_at; });
 
   const unreadMap: Record<string, number> = {};
+  const unreadByAuthor: Record<string, Record<string, number>> = {};
   (otherMessages ?? []).forEach((msg: any) => {
     const lastRead = readMap[msg.circle_id];
     if (!lastRead || comparePreviewTimes(msg.created_at, lastRead) > 0) {
+      if (msg.user_id) {
+        const counts = unreadByAuthor[msg.circle_id] ??= {};
+        counts[msg.user_id] = (counts[msg.user_id] ?? 0) + 1;
+      }
       unreadMap[msg.circle_id] = (unreadMap[msg.circle_id] ?? 0) + 1;
     }
   });
@@ -127,6 +132,8 @@ export async function fetchCircleChats(
               return formatChatPreview(lastMsg, senderName);
             })()
           : null,
+        last_message_user_id: lastMsg?.user_id ?? null,
+        unread_by_author: unreadByAuthor[circle.id] ?? {},
         last_message_at: lastMsg?.created_at ?? null,
         unread_count: unreadMap[circle.id] ?? 0,
         is_past: false,
@@ -189,6 +196,7 @@ export async function fetchCircleChatsViaCards(
       member_count: card.member_count ?? 0,
       ticket_url: null,
       last_message: preview,
+      last_message_user_id: lastMsg?.user_id ?? null,
       last_message_at: lastMsg?.created_at ?? null,
       unread_count: card.unread_count ?? 0,
       is_past: false,

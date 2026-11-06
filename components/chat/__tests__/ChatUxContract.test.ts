@@ -45,7 +45,8 @@ describe('chat and event-form UX contracts', () => {
     expect(list).toContain('await Promise.all([loadEvents(), loadCircles()]);');
     expect(list).toContain("publish: rows => publish('event', rows, false)");
     expect(eventReads).toContain('firstPaint.publish(initialRows.map(chat => {');
-    expect(list).toContain("publish('circle', rows, true);");
+    // Independent Circle first paint and privacy gating are exercised together
+    // in useChatList.loading.test.tsx with the plan read still pending.
     expect(list).not.toContain('supabase.auth.getUser');
   });
 
