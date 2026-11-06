@@ -351,8 +351,14 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
               .eq('id', operationScope.userId)
               .maybeSingle());
             if (profileError) throw profileError;
+            // A legacy null column is a known empty list. A missing profile
+            // or malformed field does not authorize showing unfiltered chat.
+            const ids = profile?.blocked_users;
+            if (!profile || (ids !== null && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string' && id.length > 0)))) {
+              throw new Error('Could not verify chat privacy settings.');
+            }
             const lookup: Record<string, boolean> = {};
-            (profile?.blocked_users ?? []).forEach((uid: string) => { lookup[uid] = true; });
+            (ids ?? []).forEach((uid: string) => { lookup[uid] = true; });
             return lookup;
           },
         });
