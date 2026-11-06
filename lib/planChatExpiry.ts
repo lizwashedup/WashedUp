@@ -16,3 +16,18 @@ export function getPlanChatTiming(startTime: string, endTime?: string | null, st
     ? Math.ceil((expiresAt.getTime() - now) / (60 * 60 * 1000)) : null;
   return { expiresAt, isPast, remainingHours };
 }
+
+
+/** Schedule the next change to a start label, hours left, or write access. */
+export function nextPlanChatChange(start: number, expiry: number, now: number): number {
+  if (!Number.isFinite(start) || !Number.isFinite(expiry) || now >= expiry) return Infinity;
+  const hour = 3600000;
+  if (now < start) {
+    const untilStart = start - now;
+    const unit = untilStart >= 24 * hour ? 24 * hour : hour;
+    // The pinned card rounds down. Its label drops just after a whole day or hour.
+    return Math.min(start, start - Math.floor(untilStart / unit) * unit + 1);
+  }
+  // The open chat rounds time remaining up. Its last change is the exact archive time.
+  return expiry - (Math.ceil((expiry - now) / hour) - 1) * hour;
+}

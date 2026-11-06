@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AppState, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
@@ -8,7 +8,8 @@ import { supabase } from '../../../lib/supabase';
 import { showAddToCalendar } from '../../../lib/addToCalendar';
 import { openUrl } from '../../../lib/url';
 import { planChatAccessKey, readPlanChatMembership } from '../../../lib/planChatAccess';
-import { getPlanChatExpiry } from '../../../lib/planChatExpiry';
+import { useBoundaryClock } from '../../../hooks/usePlanClock';
+import { getPlanChatExpiry, nextPlanChatChange } from '../../../lib/planChatExpiry';
 import { capDisplayCount } from '../../../constants/GroupLimits';
 import Colors from '../../../constants/Colors';
 import { Fonts, FontSizes } from '../../../constants/Typography';
@@ -123,16 +124,6 @@ export default function PlanChatScreen() {
   const viewer = useObservedUser();
   const focused = useIsFocused();
   const readOwner = useMemo(() => ({ userId: viewer.viewerId, epoch: viewer.epoch, isCurrent: viewer.isCurrent }), [viewer.viewerId, viewer.epoch, viewer.isCurrent]);
-  const [clockNow, setClockNow] = useState(Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => setClockNow(Date.now()), 30_000);
-    const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active') setClockNow(Date.now());
-    });
-    return () => { clearInterval(timer); subscription.remove(); };
-  }, []);
-
   const { data: event, isError: eventError, isLoading: eventLoading, isFetching: eventFetching, refetch: refetchEvent } = useQuery({
     queryKey: ['event-info', id, readOwner.userId, readOwner.epoch],
     queryFn: () => currentChatRead(() => fetchEventInfo(id), readOwner.isCurrent),
@@ -176,9 +167,12 @@ export default function PlanChatScreen() {
   });
 
   const expiry = event ? getPlanChatExpiry(event.start_time, event.end_time) : null;
+  const startsAt = event ? Date.parse(event.start_time) : NaN;
+  const clockNow = useBoundaryClock(now => event?.status === 'cancelled' || !expiry
+    ? Infinity : nextPlanChatChange(startsAt, expiry.getTime(), now));
   const isPast = event ? event.status === 'cancelled' || (!!expiry && clockNow >= expiry.getTime()) : false;
   const hoursLeft = expiry ? Math.ceil((expiry.getTime() - clockNow) / (1000 * 60 * 60)) : 0;
-  const showCountdown = !isPast && !!event && new Date(event.start_time).getTime() < clockNow && hoursLeft > 0;
+  const showCountdown = !isPast && !!event && startsAt <= clockNow && hoursLeft > 0;
 
   // Error / not-found gate lives here (not inside ChatThread) so the shared
   // component never conditionally skips its hook list.
@@ -277,10 +271,10 @@ export default function PlanChatScreen() {
             </Text>
           </View>
           {!isPast && (() => {
-            const diff = new Date(event.start_time).getTime() - Date.now();
+            const diff = startsAt - clockNow;
             const hours = Math.floor(diff / 3600000);
             const days = Math.floor(diff / 86400000);
-            if (diff < 0) return null;
+            if (diff <= 0) return null;
             const label = hours < 1 ? 'Starting soon!'
               : hours < 24 ? `Starts at ${new Date(event.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
               : days === 1 ? 'Tomorrow!'

@@ -35,3 +35,14 @@ describe('Plan chat expiry', () => {
     expect(getPlanChatTiming(start,end,'forming',Date.parse('2026-09-18T18:00:00Z'))).toMatchObject({isPast:false,remainingHours:null});
   });
 });
+
+it('schedules the current label and expiry without rounding past the final instant', () => {
+  const {nextPlanChatChange} = require('../planChatExpiry');
+  const hour = 3600000, start = 72 * hour, expiry = start + 48 * hour;
+  expect(nextPlanChatChange(start, expiry, start - 49 * hour)).toBe(start - 48 * hour + 1);
+  expect(nextPlanChatChange(start, expiry, start - 2 * hour)).toBe(start - 2 * hour + 1);
+  expect(nextPlanChatChange(start, expiry, start - 500)).toBe(start);
+  expect(nextPlanChatChange(start, expiry, start)).toBe(start + hour);
+  expect(nextPlanChatChange(start, expiry, expiry - 1)).toBe(expiry);
+  expect(nextPlanChatChange(start, expiry, expiry)).toBe(Infinity);
+});
