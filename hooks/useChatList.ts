@@ -138,7 +138,12 @@ export function useChatList(knownUserId: string | null | undefined) {
     // the shared cache too: a faster Plan response must not republish the DM.
     const previous = knownUserId ? chatListMemoryCache.get(knownUserId) : undefined;
     const safeWarmRows = previous?.filter(chat => !chat.is_dm);
-    if (knownUserId && safeWarmRows) chatListMemoryCache.set(knownUserId, safeWarmRows);
+    if (knownUserId && previous?.some(chat => chat.is_dm)) {
+      if (safeWarmRows?.length) chatListMemoryCache.set(knownUserId, safeWarmRows);
+      // With only unverified private rows we have no confirmed inbox snapshot.
+      // Removing the entry also keeps an immediate second remount in loading.
+      else chatListMemoryCache.delete(knownUserId);
+    }
     showChats(safeWarmRows ?? []);
     if (knownUserId === undefined) { setLoading(true); return; }
     if (knownUserId === null) {

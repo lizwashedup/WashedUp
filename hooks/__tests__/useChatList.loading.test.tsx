@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { chatListMemoryCache } from '../../lib/chatListCache';
 import { useChatList } from '../useChatList';
 
 let mockIncoming: (payload: any) => Promise<void>;
@@ -311,4 +312,24 @@ it('uses a caught-up read without double-counting the live arrival', async () =>
   await act(async () => { await mockIncoming({ new: { event_id: event.id, user_id: 'synthetic-peer', content: 'New arrival', created_at: '2026-09-20T22:00:00Z' } }); });
   await act(async () => { pending.resolve({ data: [{ id: event.id, latest_message: [{ content: 'New arrival', user_id: 'synthetic-peer', created_at: '2026-09-20T22:00:00Z' }] }], error: null }); await refresh; });
   expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Aster: New arrival', unread_count: 1 }));
+});
+
+it('keeps loading when a private preview needs a fresh privacy check on return', async () => {
+  const viewer = 'private-only-reentry';
+  chatListMemoryCache.set(viewer, [{
+    kind: 'circle', conversationId: 'dm', title: 'Private conversation', is_dm: true,
+    category: null, image_url: null, start_time: '', member_count: 2, last_message: 'Private preview',
+    last_message_at: null, unread_count: 0, is_past: false, ticket_url: null, member_avatars: [],
+  }]);
+  const plans = deferred();
+  const circles = deferred();
+  mockMembership = () => plans.promise;
+  mockCircles = () => circles.promise;
+  await mount(viewer);
+  expect(value.chats).toEqual([]);
+  expect(value.loading).toBe(true);
+  await act(async () => { plans.resolve(membership()); });
+  expect(value.loading).toBe(false);
+  expect(value.chats.map(chat => chat.title)).toEqual([event.title]);
+  await act(async () => { circles.resolve({ data: [], error: null }); });
 });
