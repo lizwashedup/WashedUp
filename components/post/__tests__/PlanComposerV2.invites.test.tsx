@@ -1029,3 +1029,35 @@ it('publishes the same confirmed row when Post follows a lost new-draft save res
   expect(mockUpdateDraft.mock.calls[0][1]).toEqual({id,creator_user_id:'creator',status:'draft'});
   expect(mockCommit).toHaveBeenCalledWith(id); expect(mockInsert).toHaveBeenCalledTimes(1);
 });
+
+it('preserves edits made after tapping Save draft and can save those edits', async () => {
+  const form=await mount(false,{draftId:'existing'}), receipt=pendingResult();
+  mockUpdateDraft.mockReturnValueOnce(receipt.promise).mockResolvedValueOnce({data:{id:'existing'},error:null});
+  let saving!:Promise<void>; act(()=>{saving=form.saveDraft();}); await flush();
+  form.setTitle('Newer title');
+  await act(async()=>{receipt.resolve({data:{id:'existing'},error:null}); await saving;});
+  expect(form.title()).toBe('Newer title');
+  await act(async()=>{await form.saveDraft();});
+  expect(mockUpdateDraft.mock.calls[1][0].title).toBe('Newer title');
+  expect(form.title()).toBe('');
+});
+
+it.each(['away','returned'])('keeps late draft feedback out of a retired visit (%s)', async mode => {
+  const form=await mount(false,{draftId:'existing'}), receipt=pendingResult();
+  mockUpdateDraft.mockReturnValueOnce(receipt.promise);
+  let saving!:Promise<void>; act(()=>{saving=form.saveDraft();}); await flush();
+  await form.focus(false); if(mode==='returned') await form.focus(true);
+  await act(async()=>{receipt.resolve({data:{id:'existing'},error:null}); await saving;});
+  expect(form.title()).toBe('Local test walk');
+  expect(form.tree.root.findByType(BrandedAlert).props.visible).toBe(false);
+  expect(mockClient.invalidateQueries).toHaveBeenCalledWith(expect.objectContaining({queryKey:['my-plan-drafts','creator']}));
+});
+
+it('does not start a draft write after Cancel during the account check',async()=>{
+  const form=await mount(false,{draftId:'existing'}), identity=pendingResult();
+  jest.mocked(supabase.auth.getUser).mockReturnValueOnce(identity.promise as any);
+  let saving!:Promise<void>;act(()=>{saving=form.saveDraft();});await flush();
+  act(()=>pressByLabel(form.tree,'Cancel'));
+  await act(async()=>{identity.resolve({data:{user:{id:'creator'}},error:null});await saving;});
+  expect(mockUpdateDraft).not.toHaveBeenCalled();
+});

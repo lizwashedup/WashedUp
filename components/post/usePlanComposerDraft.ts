@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { getTodayInLA } from '../../lib/laDate';
 import type { PlanCategory } from '../../constants/Categories';
 import type { InviteChip } from './InvitePeopleSection';
@@ -49,6 +49,15 @@ export function usePlanComposerDraft() {
   const [description, setDescription] = useState('');
   const [invited, setInvited] = useState<InviteChip[]>([]);
 
+  // Changes made after Save belong to the next save, including date, photo
+  // and people selections even when the title happens to stay the same.
+  const revision = useMemo(() => ({}), [
+    title, exploreEventId, category, imageUrl, creatorMessage, location, locationLat, locationLng, neighborhood,
+    dateMonth, dateDay, dateYear, dateSelected, timeSelected, timeHour, timeMinute, timePeriod,
+    endTimeHour, endTimeMinute, endTimePeriod, endTimeSelected, groupSize, genderPref, ageRanges,
+    ticketUrl, dropIn, allowDuplicate, description, invited,
+  ]);
+
   const resetFields = () => {
     setTitle(''); setExploreEventId(null); setCategory(null); setImageUrl(null); setCreatorMessage('');
     setLocation(''); setLocationLat(null); setLocationLng(null); setNeighborhood('');
@@ -71,6 +80,6 @@ export function usePlanComposerDraft() {
     groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges,
     ticketUrl, setTicketUrl, dropIn, setDropIn, allowDuplicate, setAllowDuplicate,
     description, setDescription, invited, setInvited,
-    resetFields,
+    revision, resetFields,
   };
 }

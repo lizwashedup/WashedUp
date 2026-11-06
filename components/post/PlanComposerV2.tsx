@@ -170,7 +170,7 @@ export default function PlanComposerV2() {
     groupSize, setGroupSize, genderPref, setGenderPref, ageRanges, setAgeRanges,
     ticketUrl, setTicketUrl, dropIn, setDropIn, allowDuplicate, setAllowDuplicate,
     description, setDescription, invited, setInvited,
-    resetFields: resetDraftFields,
+    revision: draftRevision, resetFields: resetDraftFields,
   } = usePlanComposerDraft();
   const [imageLoading, setImageLoading] = useState(false);
   const [showNeighborhoodPicker, setShowNeighborhoodPicker] = useState(false);
@@ -204,12 +204,14 @@ export default function PlanComposerV2() {
   // ref updates instantly, before React re-renders.
   const submittingRef = useRef(false);
   const mountedRef = useRef(false);
-  const photoVisit = useRef<object | null>(null);
+  const composerVisit = useRef<object | null>(null);
   const photoAttempt = useRef<object | null>(null);
   const newDraft = useMemo(() => ({ id: null as string | null, saveAttempted: false }), [
     composerViewer.epoch, composerViewer.viewerId, params.draftId, params.prefillTitle,
     params.prefillInvitePersonId, params.duplicatedFromEventId, params.similarPlanRequest,
   ]);
+  const latestDraft = useRef({ form: newDraft, revision: draftRevision });
+  useLayoutEffect(() => { latestDraft.current = { form: newDraft, revision: draftRevision }; }, [newDraft, draftRevision]);
   const recoveryText = (params.draftId || newDraft.id) ? 'Couldn’t confirm the post. Your edits are here. Tap Post to try again.'
     : appearance ? 'That didn’t go through. Your plan is still here. Tap Post to try again.'
     : "that didn't go through. your plan is here. tap post to try again.";
@@ -234,13 +236,13 @@ export default function PlanComposerV2() {
   }, [queryClient]);
   useLayoutEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; photoVisit.current = null; photoAttempt.current = null; retireWrite(); };
+    return () => { mountedRef.current = false; composerVisit.current = null; photoAttempt.current = null; retireWrite(); };
   }, [retireWrite]);
   useFocusEffect(useCallback(() => {
-    const visit = {}; photoVisit.current = visit;
+    const visit = {}; composerVisit.current = visit;
     return () => {
-      if (photoVisit.current !== visit) return;
-      photoVisit.current = null;
+      if (composerVisit.current !== visit) return;
+      composerVisit.current = null;
       if (photoAttempt.current) {
         photoAttempt.current = null;
         setImageLoading(false);
@@ -252,7 +254,7 @@ export default function PlanComposerV2() {
   const cancelComposer = () => {
     if (!isComposerCurrent()) return;
     hapticLight();
-    photoVisit.current = null; photoAttempt.current = null;
+    composerVisit.current = null; photoAttempt.current = null;
     setImageLoading(false); setImageUrl(current => current?.startsWith('http') ? current : null);
     if (params.similarPlanRequest) resetForm();
     if (router.canGoBack()) router.back();
@@ -472,12 +474,12 @@ export default function PlanComposerV2() {
 
   // ── Photo ──
   const pickImage = async () => {
-    if (!isComposerCurrent() || !composerUserId || !photoVisit.current || photoAttempt.current || submittingRef.current) return;
-    const attempt = {}, visit = photoVisit.current, userId = composerUserId;
+    if (!isComposerCurrent() || !composerUserId || !composerVisit.current || photoAttempt.current || submittingRef.current) return;
+    const attempt = {}, visit = composerVisit.current, userId = composerUserId;
     const isCurrentViewer = composerViewer.isCurrent;
     photoAttempt.current = attempt;
     setImageLoading(true);
-    const isCurrent = () => mountedRef.current && isCurrentViewer() && photoVisit.current === visit && photoAttempt.current === attempt;
+    const isCurrent = () => mountedRef.current && isCurrentViewer() && composerVisit.current === visit && photoAttempt.current === attempt;
     let stage: 'choose' | 'prepare' | 'upload' = 'choose';
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 10], quality: 1 });
@@ -508,7 +510,7 @@ export default function PlanComposerV2() {
           ? { title: 'Upload failed', message: 'Could not upload photo. Try again.' }
           : { title: 'Invalid image', message: PHOTO_FORMAT_ERROR_MESSAGE });
     } finally {
-      if (photoAttempt.current === attempt) { photoAttempt.current = null; if (mountedRef.current && isCurrentViewer() && photoVisit.current === visit) setImageLoading(false); }
+      if (photoAttempt.current === attempt) { photoAttempt.current = null; if (mountedRef.current && isCurrentViewer() && composerVisit.current === visit) setImageLoading(false); }
     }
   };
 
@@ -640,7 +642,7 @@ export default function PlanComposerV2() {
     // transition owns a fresh form and retires every prior write, even A→B→A.
     if (previous.viewerId !== undefined && previous.epoch !== composerViewer.epoch) {
       retireWrite();
-      photoVisit.current = null; photoAttempt.current = null; setImageLoading(false);
+      composerVisit.current = null; photoAttempt.current = null; setImageLoading(false);
       resetForm();
       postInvitations.reset();
       setLoading(false);
@@ -666,7 +668,8 @@ export default function PlanComposerV2() {
   // sits at status 'draft', visible only in Yours until it posts. ──
   const canSaveDraft = title.trim().length > 0 && dateSelected && timeSelected && !loading && !imageLoading;
   const handleSaveDraft = async () => {
-    if (!isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
+    const visit = composerVisit.current;
+    if (!visit || !isComposerCurrent() || submittingRef.current || photoAttempt.current || loading || imageLoading || confirmVisible) return;
     if (!validateRequired('draft')) return;
     const fieldsToCheck = [title, description, creatorMessage, location].filter(Boolean).join(' ');
     const filter = checkContent(fieldsToCheck);
@@ -718,28 +721,33 @@ export default function PlanComposerV2() {
     };
     const write = beginWrite();
     if (!write) return;
+    const currentForm = () => ownsWrite(write) && composerVisit.current === visit && latestDraft.current.form === newDraft;
     let dispatched = false;
     try {
       const { data: { user }, error: identityError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
-      if (!ownsWrite(write)) return;
+      if (!currentForm()) return;
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       dispatched = true;
       if (params.draftId) {
         await updateOwnedDraft(String(params.draftId), user.id, row);
-        if (!ownsWrite(write)) return;
       } else {
         newDraft.id ??= randomUUID();
         newDraft.saveAttempted = true;
-        await saveNewPlanDraft(newDraft.id, user.id, row, () => ownsWrite(write));
-        if (!ownsWrite(write)) return;
+        if (!await saveNewPlanDraft(newDraft.id, user.id, row, currentForm)) return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ['my-plan-drafts', write.userId],
+        refetchType: write.isCurrentViewer() ? 'active' : 'none' });
+      if (!currentForm()) return;
+      if (latestDraft.current.revision !== draftRevision) {
+        setAlertInfo({title: 'Earlier edits saved', message: 'Tap Save draft again to include your latest changes.'});
+        return;
       }
       hapticSuccess();
-      queryClient.invalidateQueries({ queryKey: ['my-plan-drafts'] });
       resetForm();
       // LIZ COPY
       setAlertInfo({ title: appearance ? 'Draft saved' : 'saved', message: appearance ? 'Find your draft in Yours under Plans. Finish it whenever you’re ready.' : 'your draft lives in yours, under plans. finish it whenever.' });
     } catch (error) {
-      if (!ownsWrite(write)) return;
+      if (!currentForm()) return;
       if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
       else if (dispatched) setAlertInfo({ title: 'Couldn’t confirm the save', message: 'Your edits are still here. Check Yours for the draft before trying again.' });
       else setAlertInfo({ title: 'That did not save', message: 'Try again in a moment.' });
