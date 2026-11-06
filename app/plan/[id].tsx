@@ -61,6 +61,7 @@ import { ReportModal } from '../../components/modals/ReportModal';
 import { SharePlanModal } from '../../components/modals/SharePlanModal';
 import { COMMUNITIES_ENABLED, YOURS_PAGE_ENABLED, GROUPS_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../constants/FeatureFlags';
 import { usePlanInvitation } from '../../hooks/usePlanInvitation';
+import { usePlanClock } from '../../hooks/usePlanClock';
 import { usePlanWaitlist } from '../../hooks/usePlanWaitlist';
 import { usePlanEdit } from '../../hooks/usePlanEdit';
 import { useCirclePlanCoordination } from '../../hooks/useCirclePlanCoordination';
@@ -448,7 +449,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     queryFn: () => fetchPlanDetail(id!), enabled: !!id, staleTime: 60_000,
   });
   const { data: plan, isLoading: planLoading, error: planError } = planQuery;
-  const lifecycle = plan ? getPlanLifecycle({ status: plan.status, startTime: plan.start_time, endTime: plan.end_time }) : null;
+  const planNow = usePlanClock(plan ? [plan] : []);
+  const lifecycle = plan ? getPlanLifecycle({ status: plan.status, startTime: plan.start_time, endTime: plan.end_time }, planNow) : null;
   const isClosedPlan = lifecycle?.isClosed ?? true;
   const terminalStatus = lifecycle?.terminalStatus ?? null;
   const membersQuery = useQuery({
@@ -833,6 +835,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
     },
   });
 
+  const closedJoinMessage = isClosedPlan ? (terminalStatus === 'cancelled' ? 'This plan was cancelled.' : 'This plan ended.') : null;
   const joinedWhileSheetOpen = joinModalVisible && isMember && membersQuery.isSuccess && !membersQuery.isFetching && !joinMutation.isPending;
   useFocusEffect(useCallback(() => () => {
     invitationCompletion.current=null;
@@ -1770,8 +1773,8 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
 
       <PlanJoinSheet visible={joinModalVisible} planId={id} appearance={appearance}
         planTitle={plan.title} dateLabel={`${formatFullDate(plan.start_time)} at ${formatTime(plan.start_time)}`}
-        message={joinMessage} confirmed={joinConfirmed} error={joinError?.message ?? (noSpotAvailable ? 'This plan just filled up.' : null)}
-        membershipConfirmed={joinedWhileSheetOpen} unavailable={noSpotAvailable || refusedSpot} unconfirmed={!joinedWhileSheetOpen && joinMutation.unconfirmed}
+        message={joinMessage} confirmed={joinConfirmed} error={closedJoinMessage ?? joinError?.message ?? (noSpotAvailable ? 'This plan just filled up.' : null)}
+        membershipConfirmed={joinedWhileSheetOpen} unavailable={isClosedPlan || noSpotAvailable || refusedSpot} unconfirmed={!joinedWhileSheetOpen && joinMutation.unconfirmed}
         busy={joinPreparing || joinMutation.isPending} canJoin={joinReady}
         onMessage={(value) => { setJoinMessage(value); setJoinError(null); }} onConfirmed={setJoinConfirmed}
         onJoin={() => requestJoin(joinMessage)} onClose={() => {invitationCompletion.current=null;setJoinModalVisible(false);}}
