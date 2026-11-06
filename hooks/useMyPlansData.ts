@@ -93,6 +93,7 @@ export function useMyPlans(userId: string | null | undefined) {
         .eq('status', 'joined');
 
       if (memError) throw memError;
+      if (!Array.isArray(memberships)) throw new Error('Could not confirm your joined plans.');
 
       const { data: created, error: createdError } = await supabase
         .from('events')
@@ -101,6 +102,7 @@ export function useMyPlans(userId: string | null | undefined) {
         .in('status', ['forming', 'active', 'full', 'completed']);
 
       if (createdError) throw createdError;
+      if (!Array.isArray(created)) throw new Error('Could not confirm your hosted plans.');
 
       // Fetch event_ids the user has explicitly LEFT. The joined branch above
       // already filters status='joined', but the created branch pulls events
@@ -113,15 +115,20 @@ export function useMyPlans(userId: string | null | undefined) {
         .eq('user_id', userId)
         .eq('status', 'left');
       if (leftError) throw leftError;
-      const leftEventIds = new Set((leftRows ?? []).map((r: any) => r.event_id as string));
+      // A missing departure list cannot authorize adding every hosted event back.
+      // React Query keeps the last confirmed list and Yours offers an explicit retry.
+      if (!Array.isArray(leftRows) || !leftRows.every(row => validPlanId(row?.event_id))) {
+        throw new Error('Could not confirm which plans you left.');
+      }
+      const leftEventIds = new Set(leftRows.map(row => row.event_id));
 
-      const joinedEvents = (memberships ?? [])
+      const joinedEvents = memberships
         .map((m: any) => m.events)
         .filter((e: any) => e && ['forming', 'active', 'full', 'completed'].includes(e.status));
 
       const seen: Record<string, boolean> = {};
       const allEvents: any[] = [];
-      [...joinedEvents, ...(created ?? [])].forEach((e: any) => {
+      [...joinedEvents, ...created].forEach((e: any) => {
         if (e && !seen[e.id] && !leftEventIds.has(e.id)) {
           seen[e.id] = true;
           allEvents.push(e);

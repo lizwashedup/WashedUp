@@ -117,3 +117,19 @@ describe('the Waitlisted section', () => {
   finish({data:[],error:null});await jest.advanceTimersByTimeAsync(0);expect(ctx.client.getQueryData(key)).toEqual([Coffee,Sunday]);
  });
 });
+
+describe('personal plan membership reads', () => {
+ it.each([['joined',null],['created',null],['left',null],['left',[{}]]])('does not replace Yours with a partial result when %s is incomplete',async (source,data)=>{
+  const normal=mockRead.getMockImplementation()!;
+  mockRead.mockImplementation((table,fields,filters) => (
+   table==='event_members' && filters.status===source || table==='events' && source==='created'
+  ) ? {data,error:null} : normal(table,fields,filters));
+  useMyPlans('viewer');await expect(mockQuery.mock.calls[0][0].queryFn(context())).rejects.toThrow();
+ });
+ it('allows a legitimately empty left list and a hidden joined relation',async()=>{
+  const normal=mockRead.getMockImplementation()!;
+  mockRead.mockImplementation((table,fields,filters) => table==='event_members' && filters.status==='joined'
+   ? {data:[{event_id:'hidden',events:null}],error:null} : normal(table,fields,filters));
+  useMyPlans('viewer');expect(await mockQuery.mock.calls[0][0].queryFn(context())).toEqual([expect.objectContaining({id:'plan'})]);
+ });
+});
