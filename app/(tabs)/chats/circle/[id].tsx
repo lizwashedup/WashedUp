@@ -161,7 +161,7 @@ function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSou
 
   if (isError || !data || !myUserId) {
     return <ChatEntryState state={isError ? 'error' : isLoading || myUserId === undefined ? 'loading' : 'unavailable'}
-      retrying={isFetching || isLoading} onRetry={isError ? () => { void refetch(); } : undefined} onBack={() => router.back()} />;
+      retrying={isFetching || isLoading} onRetry={isError ? () => { void refetch(); } : undefined} onBack={() => router.navigate('/(tabs)/chats')} />;
   }
 
   return (

@@ -13,9 +13,9 @@ let mockAnchor: string | undefined;
 let mockRoomId = 'circle-one', mockViewerId: string | null = 'account-a', mockEpoch = 1;
 let mockError = false, mockNamed = false, mockLoading = false, mockUnavailable = false;
 const mockRefetch = jest.fn();
-const mockPush = jest.fn(), mockBack = jest.fn();
+const mockPush = jest.fn(), mockBack = jest.fn(), mockNavigate = jest.fn();
 const mockMember = (id: string, name: string) => ({ user_id: id, first_name_display: name, profile_photo_url: null });
-jest.mock('expo-router', () => ({ Redirect: () => null, useLocalSearchParams: () => ({ id: mockRoomId, reactionMessageId: mockAnchor, reactionMessageSource: mockAnchor ? 'chat' : undefined }), useRouter: () => ({ push: mockPush, back: mockBack }) }));
+jest.mock('expo-router', () => ({ Redirect: () => null, useLocalSearchParams: () => ({ id: mockRoomId, reactionMessageId: mockAnchor, reactionMessageSource: mockAnchor ? 'chat' : undefined }), useRouter: () => ({ push: mockPush, back: mockBack, navigate: mockNavigate }) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ GROUPS_ENABLED: true }));
 jest.mock('../../yours/state/useAuthUserId', () => ({ useAuthUserId: () => ({ data: mockViewerId }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
@@ -215,4 +215,14 @@ it('removes a newly blocked conversation and rejects its retained profile and pl
   act(() => { closed(); viewPerson(); }); expect(mockPush).not.toHaveBeenCalled();
   expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
   expect(tree!.root.findAllByType(CirclePlanComposer)).toHaveLength(0);
+});
+
+it.each([true, false])('returns to Chats while a named Circle (%s) or direct chat is loading', async named => {
+  mockNamed = named;
+  mockLoading = true;
+  await mount();
+  const back = tree!.root.findByProps({ accessibilityLabel: 'Back to Chats' });
+  act(() => back.props.onPress());
+  expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/chats');
+  expect(mockBack).not.toHaveBeenCalled();
 });

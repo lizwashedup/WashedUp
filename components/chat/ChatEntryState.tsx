@@ -1,6 +1,6 @@
 import ProfileButton from '../ProfileButton';
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, MessageCircle } from 'lucide-react-native';
 import Colors from '../../constants/Colors';
@@ -18,9 +18,11 @@ export function ChatEntryState({ state, retrying = false, onRetry, onBack }: {
       <ChevronLeft size={22} color={Colors.asphalt}/><Text style={styles.backText}>Chats</Text>
     </TouchableOpacity><ProfileButton compact/></View>
     <View style={styles.card}>
-      <View style={styles.icon}>{loading ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading chat"/> : <MessageCircle size={26} color={Colors.terracotta}/>}</View>
-      <Text style={styles.title} accessibilityRole={loading ? 'header' : 'alert'}>{loading ? 'Opening your chat' : state === 'error' ? 'Chat couldn’t load' : 'Chat unavailable'}</Text>
-      <Text style={styles.body}>{loading ? 'Getting your conversation ready…' : state === 'error' ? 'Check your connection and try again.' : 'Return to Chats to see your available conversations.'}</Text>
+      <ScrollView style={styles.details} contentContainerStyle={styles.detailsContent} bounces={false}>
+        <View style={styles.icon}>{loading ? <ActivityIndicator color={Colors.terracotta} accessibilityLabel="Loading chat"/> : <MessageCircle size={26} color={Colors.terracotta}/>}</View>
+        <Text style={styles.title} accessibilityRole={loading ? 'header' : 'alert'}>{loading ? 'Opening your chat' : state === 'error' ? 'Chat couldn’t load' : 'Chat unavailable'}</Text>
+        <Text style={styles.body}>{loading ? 'Getting your conversation ready…' : state === 'error' ? 'Check your connection and try again.' : 'Return to Chats to see your available conversations.'}</Text>
+      </ScrollView>
       {!loading && onRetry && <TouchableOpacity style={styles.retry} accessibilityRole="button" accessibilityLabel="Retry opening chat" accessibilityState={{disabled:retrying,busy:retrying}} disabled={retrying} onPress={onRetry}>
         <CreatorActionFill/><Text style={styles.retryText} numberOfLines={1}>{retrying ? 'Trying…' : 'Try again'}</Text>
       </TouchableOpacity>}
@@ -32,7 +34,9 @@ const styles = StyleSheet.create({
   header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingRight:12},
   back:{minHeight:48,alignSelf:'flex-start',paddingHorizontal:16,flexDirection:'row',alignItems:'center',gap:6},
   backText:{fontFamily:Fonts.sansMedium,fontSize:FontSizes.bodyLG,color:Colors.asphalt},
-  card:{margin:20,padding:24,borderRadius:24,borderWidth:1,borderColor:Colors.border,backgroundColor:Colors.cardBg,gap:12,alignItems:'flex-start'},
+  card:{flexShrink:1,margin:20,padding:24,borderRadius:24,borderWidth:1,borderColor:Colors.border,backgroundColor:Colors.cardBg,gap:12,alignItems:'flex-start'},
+  details:{alignSelf:'stretch',flexGrow:0,flexShrink:1},
+  detailsContent:{alignItems:'flex-start',gap:12},
   icon:{height:48,width:48,borderRadius:24,backgroundColor:Colors.accentSubtle,alignItems:'center',justifyContent:'center',marginBottom:4},
   title:{fontFamily:Fonts.sansBold,fontSize:FontSizes.bodyLG,color:Colors.asphalt},
   body:{fontFamily:Fonts.sans,fontSize:FontSizes.bodyMD,color:Colors.secondary},

@@ -170,7 +170,7 @@ export default function PlanChatScreen() {
   if (!id || viewer.isLoading || viewer.error || !readOwner.userId || !event) {
     const failed = !!viewer.error || eventError;
     return <ChatEntryState state={!id ? 'unavailable' : viewer.isLoading ? 'loading' : failed ? 'error' : eventLoading ? 'loading' : 'unavailable'}
-      retrying={viewer.isLoading || eventFetching} onRetry={id && failed ? () => { if (viewer.error) void viewer.retry(); else void refetchEvent(); } : undefined} onBack={() => router.back()} />;
+      retrying={viewer.isLoading || eventFetching} onRetry={id && failed ? () => { if (viewer.error) void viewer.retry(); else void refetchEvent(); } : undefined} onBack={() => router.navigate('/(tabs)/chats')} />;
   }
 
   return (

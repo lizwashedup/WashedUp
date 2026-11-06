@@ -1,6 +1,16 @@
 # Event draft recovery — November 5
 
-**Prepared and locally verified; not deployed. This is a new production proposal, separate from the approved community joining, discovery and description repairs. No OTA or native build is included.**
+**Liz approved this upgrade on November 5. The backend is deployed and isolated live QA passed on project `upstjumasqblszevlgik`. The mobile changes are in private [PR 168](https://github.com/lizwashedup/WashedUp/pull/168).**
+
+## Verified production outcome
+
+The Supabase CLI applied the reviewed deployment from commit `64f574f` after all 95 live catalog entries matched the reviewed export. The installed definitions and grants matched all five expected routines. The receipt table has row-level security and only its owner has direct privileges.
+
+The approved QA transaction created a draft under the existing leader’s authority, confirmed its free RSVP and capacity of 24, and recovered the same event when the original request was retried. Reusing a request with different details was rejected. Sealing an unsaved request prevented a delayed create. The test also verified account isolation and private receipt access. After rollback, the QA community was archived and hidden, with one active member, zero events and zero chats. The complete community and membership fingerprints and the fingerprint of all existing events matched their preflight values. The QA event and receipts were absent.
+
+The App Review test account read capability version 1 and looked up a fresh request over the authenticated HTTPS API. Anonymous access was denied. The integrated iPhone 13 simulator also recovered the same pending request across real process restarts with simulated server responses. Live HTTP writes through the integrated phone UI remain a release check. All 427 integrated tests, 87 isolated PostgreSQL checks and the [full regression run](https://github.com/lizwashedup/WashedUp/actions/runs/42138892091) passed.
+
+The deployment, independent verification, rollback baseline and HTTP evidence are recorded in `/Users/liz/Desktop/WashedUp/Implementation/creator-daily-workflow-20261105/draft-live-rollout-result.json`. The original review and rollback instructions follow for reference.
 
 ## What changes for a creator
 

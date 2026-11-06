@@ -2,7 +2,7 @@ jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => null 
 jest.mock('../../creator/CreatorActionFill', () => ({ CreatorActionFill: () => null }));
 
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaInsetsContext, SafeAreaView, type EdgeInsets } from 'react-native-safe-area-context';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { ChatEntryState } from '../ChatEntryState';
@@ -68,4 +68,13 @@ it('retains explicit back/retry callbacks and retry busy state without triggerin
   act(() => tree!.update(entry({ state: 'loading', onRetry: retry })));
   expect(buttons().map(button => button.props.accessibilityLabel)).toEqual(['Back to Chats']);
   expect(retry).toHaveBeenCalledTimes(1);
+});
+
+
+it('keeps Back and Retry available while a long recovery explanation scrolls', () => {
+  act(() => { tree = create(entry({ state: 'error', onRetry: retry })); });
+  const explanation = tree!.root.findByType(ScrollView);
+  expect(explanation.findAllByType(Text).some(node => node.props.children === 'Check your connection and try again.')).toBe(true);
+  expect(explanation.findAllByType(TouchableOpacity)).toHaveLength(0);
+  expect(buttons().map(button => button.props.accessibilityLabel)).toEqual(['Back to Chats', 'Retry opening chat']);
 });

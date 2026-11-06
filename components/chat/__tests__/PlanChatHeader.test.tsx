@@ -16,12 +16,12 @@ jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
   const isCurrent = require('react').useCallback(() => viewerId === mockViewerId && epoch === mockEpoch, [viewerId, epoch]);
   return { viewerId, epoch, isCurrent, isLoading: mockIdentityLoading, error: mockIdentityError, retry: mockIdentityRetry };
 } }));
-const mockPush = jest.fn(), mockBack = jest.fn();
+const mockPush = jest.fn(), mockBack = jest.fn(), mockNavigate = jest.fn();
 jest.mock('../ChatThread', () => ({ __esModule: true, default: (props: any) => {
   mockThreadProps = props;
   return require('react').createElement(require('react-native').View, null, props.renderHeaderBanner?.());
 } }));
-jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: 'plan-a', reactionMessageId: mockAnchor, reactionMessageSource: mockAnchor ? 'chat' : undefined }), useRouter: () => ({ push: mockPush, back: mockBack }) }));
+jest.mock('expo-router', () => ({ useLocalSearchParams: () => ({ id: 'plan-a', reactionMessageId: mockAnchor, reactionMessageSource: mockAnchor ? 'chat' : undefined }), useRouter: () => ({ push: mockPush, back: mockBack, navigate: mockNavigate }) }));
 jest.mock('@tanstack/react-query', () => ({ useQuery: jest.fn() }));
 jest.mock('../../../lib/supabase', () => ({ supabase: {} }));
 jest.mock('../../../lib/addToCalendar', () => ({ showAddToCalendar: jest.fn() }));
@@ -79,7 +79,8 @@ it('shows a recoverable loading entrance instead of an unfinished conversation',
   expect(mockThreadProps).toBeUndefined();
   expect(tree.root.findAllByType(Text).map(text => text.props.children)).toContain('Opening your chat');
   act(() => tree.root.findAllByType(TouchableOpacity).find(button => button.props.accessibilityLabel === 'Back to Chats')!.props.onPress());
-  expect(mockBack).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/chats');
+  expect(mockBack).not.toHaveBeenCalled();
 });
 it('retries the same Plan metadata read after an entrance error', () => {
   const retry = jest.fn();
