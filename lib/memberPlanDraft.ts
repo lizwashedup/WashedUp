@@ -1,3 +1,4 @@
+import { compareChatTimestamps } from './chatTimestamp';
 import { supabase } from './supabase';
 import { requestWithDeadline } from './requestWithDeadline';
 
@@ -12,6 +13,35 @@ export async function updateOwnedDraft(id: string, viewerId: string, changes: Re
   if (data === null) throw new DraftUnavailable();
   if (data?.id !== id) throw new Error('Could not confirm the draft update.');
   return { id };
+}
+
+/** A lost response is ambiguous. Confirm the intended field values on the
+ * same owned draft without submitting the edit again. Publishing has a
+ * separate receipt that checks its request key and resulting status. */
+export async function saveExistingPlanDraft(id: string, viewerId: string, fields: Record<string, unknown>,
+  isCurrent: () => boolean): Promise<void> {
+  try {
+    await updateOwnedDraft(id, viewerId, fields);
+  } catch (error) {
+    if (!isCurrent() || error instanceof DraftUnavailable) throw error;
+    const code = (error as {code?: string} | null)?.code;
+    if (code && ['42501', 'P0001', '23514', '23503', '22P02'].includes(code)) throw error;
+    const columns = [...new Set(['id', 'creator_user_id', 'status', ...Object.keys(fields)])].join(',');
+    const result = await requestWithDeadline(supabase.from('events').select(columns)
+      .eq('id', id).eq('creator_user_id', viewerId).eq('status', 'draft').maybeSingle(), 8000);
+    if (!isCurrent() || result.error) throw error;
+    const row = result.data as Record<string, unknown> | null;
+    if (!row || row.id !== id || row.creator_user_id !== viewerId || row.status !== 'draft') throw error;
+    const matches = Object.entries(fields).every(([key, expected]) => {
+      const actual = row[key];
+      if (actual === expected) return true;
+      if ((key === 'start_time' || key === 'end_time') && typeof expected === 'string' && typeof actual === 'string') {
+        return Number.isFinite(Date.parse(expected)) && compareChatTimestamps(actual, expected) === 0;
+      }
+      return false;
+    });
+    if (!matches) throw error;
+  }
 }
 
 // The same new form keeps its client-generated primary key across retries.
