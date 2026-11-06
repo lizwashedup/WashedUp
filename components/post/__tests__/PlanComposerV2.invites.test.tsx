@@ -1116,3 +1116,19 @@ it.each([['30s', 30, 39], ['All Ages', null, null]] as const)(
     await act(async () => { await form.saveDraft(); });
     expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({ target_age_min: min, target_age_max: max });
   });
+
+it.each(['save', 'post'])('retains the exact start and end on a title-only draft %s', async mode => {
+  const start = '2040-11-04T09:30:17.123456Z', end = '2040-11-06T17:45:29.456789Z';
+  const form = await mount(false, { draftId: 'existing', prefillStartTime: start, prefillEndTime: end });
+  form.setTitle('Title edit only');
+  await act(async () => { await (mode === 'save' ? form.saveDraft() : form.post()); });
+  expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({ start_time: start, end_time: end });
+});
+
+it('clears a multi-day end and allows the user to enter an ordinary overnight end', async () => {
+  const form = await mount(false, { draftId: 'existing', prefillStartTime: '2040-11-04T09:30:17.123Z', prefillEndTime: '2040-11-06T17:45:29.456Z' });
+  act(() => pressByLabel(form.tree, 'Clear end time'));
+  act(() => form.tree.root.findAllByType(TimePicker)[1].props.onChange(12, '30', 'AM'));
+  await act(async () => { await form.saveDraft(); });
+  expect(mockUpdateDraft.mock.calls[0][0]).toMatchObject({ start_time: '2040-11-04T09:30:17.123Z', end_time: '2040-11-05T08:30:00.000Z' });
+});
