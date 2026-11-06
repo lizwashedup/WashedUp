@@ -7,6 +7,16 @@ import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chat
 
 type MembershipObserver = (joined: ReadonlySet<string>) => void;
 
+// A missing peer must not turn a potential DM into a group and bypass its
+// mutual-block check. A complete two-person roster can be checked as a DM
+// even on an older card that omitted the separate count.
+function canClassifyRoom(name: unknown, count: number | null | undefined, ids: readonly unknown[], viewer: string) {
+  if (typeof name === 'string' && name.trim()) return true;
+  const members = new Set(ids);
+  if (!members.has(viewer) || members.size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) return false;
+  return count == null ? members.size === 2 : members.size === count;
+}
+
 async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Promise<ChatPreview[]> {
   const blocked = await getBlockedWith(userId, previews.filter(chat => chat.is_dm).map(chat => chat.dm_user_id));
   return previews.filter(chat => !chat.is_dm || (!!chat.dm_user_id && !blocked.has(chat.dm_user_id)));
@@ -18,7 +28,7 @@ async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Pro
  * while allowing plan conversations to load independently.
  */
 export async function fetchCircleChats(
-  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver,
+  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver, onIncomplete?: () => void,
 ): Promise<ChatPreview[]> {
   const { data: memberships, error: membershipError } = await supabase
     .from('circle_members')
@@ -111,6 +121,12 @@ export async function fetchCircleChats(
   const previews = (memberships ?? [])
     .map((m: any) => m.circles)
     .filter(Boolean)
+    .filter((circle: any) => {
+      const ids = (membersByCircle[circle.id] ?? []).map(member => member.user_id);
+      const complete = canClassifyRoom(circle.name, realCounts[circle.id] ?? 0, ids, userId);
+      if (!complete) onIncomplete?.();
+      return complete;
+    })
     .map((circle: any): ChatPreview => {
       const lastMsg = lastMsgMap[circle.id];
       const disp = circleDisplay(circle.name, membersByCircle[circle.id] ?? [], userId);
@@ -152,15 +168,19 @@ export async function fetchCircleChats(
  * Card shapes are defined in SQL-100-circle-chat-cards-proposal.sql.
  */
 export async function fetchCircleChatsViaCards(
-  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver,
+  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver, onIncomplete?: () => void,
 ): Promise<ChatPreview[]> {
   const { data, error } = await supabase.rpc('get_my_circle_chat_cards');
   if (error) throw error;
 
   if (!Array.isArray(data)) throw new Error('Circle cards unavailable');
-  onMembership?.(new Set<string>(data.map(card => card.circle_id)));
+  const classified = data.filter(card => canClassifyRoom(card.name, card.member_count,
+    Array.isArray(card.members) ? card.members.map((member: {user_id?: string} | null) => member?.user_id) : [], userId));
+  onMembership?.(new Set<string>(classified.map(card => card.circle_id)));
+  if (classified.length !== data.length) onIncomplete?.();
 
-  const previews = data.map((card: any): ChatPreview => {
+
+  const previews = classified.map((card: any): ChatPreview => {
     const members: DisplayMember[] = (card.members ?? []).map((m: any) => ({
       user_id: m.user_id,
       name: m.first_name ?? null,

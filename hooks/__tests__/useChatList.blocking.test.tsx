@@ -7,6 +7,7 @@ import { chatListMemoryCache, removeBlockedPrivateChatPreviews } from '../../lib
 let mockEngine = false, mockOffline = false;
 let mockJoinedIds: string[] = ['dm'];
 let mockPreviewError = false;
+let mockPartialRoster = false;
 const mockCardsRead = jest.fn();
 const mockJoined = (id: string) => ({ circles: { id, name: id === 'dm' ? '' : 'Coffee circle', created_at: '2026-10-01T20:00:00Z' } });
 let mockIncoming: (payload: any) => Promise<void>;
@@ -34,7 +35,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
         let data: any[] = [];
         if (table === 'circle_members') data = columns.includes('circles (')
           ? viewer === 'viewer' ? mockJoinedIds.map(mockJoined) : []
-          : mockMembers;
+          : mockPartialRoster && columns.includes('profiles_public') ? mockMembers.slice(0,1) : mockMembers;
         if (table === 'circles' && mockPreviewError) return Promise.resolve({ data: null, error: new Error('Preview unavailable') }).then(resolve, reject);
         if (table === 'circles') data = [{ id: 'dm', latest_message: [{ user_id: 'peer', content: 'Private preview', created_at: '2026-10-07T20:00:00Z' }] }];
         return Promise.resolve({ data, error: null }).then(resolve, reject);
@@ -49,7 +50,7 @@ function Probe({ viewer = 'viewer' }) { value = useChatList(viewer); return null
 async function mount() { await act(async () => { tree = create(<Probe/>); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => {
-  mockEngine = false; mockOffline = false; mockJoinedIds = ['dm']; mockPreviewError = false; mockCardsRead.mockReset(); chatListMemoryCache.clear();
+  mockEngine = false; mockOffline = false; mockJoinedIds = ['dm']; mockPreviewError = false; mockPartialRoster = false; mockCardsRead.mockReset(); chatListMemoryCache.clear();
   mockPrivacy.mockReset().mockResolvedValue({ data: false, error: null });
   mockProfile.mockReset().mockResolvedValue({ data: { first_name_display: 'Late sender' }, error: null });
 });
@@ -227,4 +228,22 @@ it('ignores a late cards membership response after the fallback confirms current
     await act(async () => { old.resolve({data:[],error:null}); });
     expect(value.chats.map(c => c.conversationId)).toEqual(['coffee']);
   } finally { jest.useRealTimers(); }
+});
+
+
+it.each([false,true])('withholds only the unverified unnamed row and retries its actual mutual check (cards: %s)',async cards=>{
+  mockEngine=cards;mockPartialRoster=true;mockJoinedIds=['dm','group'];
+  mockCardsRead.mockResolvedValue({data:[
+    {circle_id:'dm',name:'',member_count:2,members:[{user_id:'viewer'}],last_message:{user_id:'viewer',content:'Private postcard'}},
+    {circle_id:'group',name:'Coffee circle',member_count:3,members:[]}
+  ],error:null});
+  await mount();
+  expect(value.chats.map(c=>c.conversationId)).toEqual(['group']);expect(value.loadError).toBe(true);
+  mockPartialRoster=false;mockPrivacy.mockResolvedValue({data:true,error:null});
+  await act(async()=>{await value.refetch(true);});
+  expect(mockPrivacy).toHaveBeenCalledWith({p_a:'viewer',p_b:'peer'});
+  expect(value.chats.map(c=>c.conversationId)).toEqual(['group']);expect(value.loadError).toBe(false);
+  mockPrivacy.mockResolvedValue({data:false,error:null});
+  await act(async()=>{await value.refetch(true);});
+  expect(value.chats.find(c=>c.conversationId==='dm')).toMatchObject({is_dm:true,dm_user_id:'peer'});
 });

@@ -130,8 +130,8 @@ export function useChatList(knownUserId: string | null | undefined) {
 
     if (latest.some(row => !row.is_dm)) void checkPrivacy();
 
-    const publishGroupActivity = async (kind: 'event' | 'circle', rows: ChatPreview[]) => {
-      if (!rows.some(row => !row.is_dm)) { publish(kind, rows, true); return; }
+    const publishGroupActivity = async (kind: 'event' | 'circle', rows: ChatPreview[], partial = false) => {
+      if (!rows.some(row => !row.is_dm)) { publish(kind, rows, true, partial); return; }
       checkPrivacy();
       if (!await privacy) {
         // Only this visit's confirmed activity can survive an offline read.
@@ -145,11 +145,11 @@ export function useChatList(knownUserId: string | null | undefined) {
       }
       if (!current()) return;
       const blocked = groupBlocks.current;
-      if (!blocked?.size) { publish(kind, rows, true); return; }
+      if (!blocked?.size) { publish(kind, rows, true, partial); return; }
       try {
         const counted = kind === 'circle' ? await attributeCircleCardUnreads(rows, userId, blocked, read) : rows;
         const visible = await replaceBlockedGroupActivity(kind, counted, userId, blocked, names, read);
-        publish(kind, visible, true);
+        publish(kind, visible, true, partial);
       } catch {
         publish(kind, rows, true, true);
       }
@@ -171,12 +171,17 @@ export function useChatList(knownUserId: string | null | undefined) {
     };
     const loadCircles = async () => {
       if (!GROUPS_ENABLED) return;
+      let incomplete = false;
+      let confirmedMemberships: ReadonlySet<string> | undefined;
       const readCircles = async (fetch: typeof fetchCircleChats) => {
         let active = true;
         try {
           return await read(fetch(userId, names, joined => {
-            if (active) retainJoined('circle', joined);
-          }));
+            if (active) {
+              confirmedMemberships = joined;
+              retainJoined('circle', joined);
+            }
+          }, () => { if (active) incomplete = true; }));
         } finally {
           // A timed-out cards request must not trim the fallback's newer rows.
           active = false;
@@ -187,6 +192,17 @@ export function useChatList(knownUserId: string | null | undefined) {
         if (CHAT_ENGINE_ENABLED) {
           try {
             rows = await readCircles(fetchCircleChatsViaCards);
+            if (incomplete && current()) {
+              incomplete = false;
+              try {
+                rows = await readCircles(fetchCircleChats);
+              } catch {
+                // Keep separately verified group cards, within the latest
+                // membership evidence. Private rows need a successful check.
+                incomplete = true;
+                rows = rows.filter(row => !row.is_dm && confirmedMemberships?.has(row.conversationId));
+              }
+            }
           } catch {
             if (!current()) return;
             rows = await readCircles(fetchCircleChats);
@@ -194,7 +210,7 @@ export function useChatList(knownUserId: string | null | undefined) {
         } else {
           rows = await readCircles(fetchCircleChats);
         }
-        await publishGroupActivity('circle', rows);
+        await publishGroupActivity('circle', rows, incomplete);
       } catch {
         publish('circle', null, true, true);
       }
