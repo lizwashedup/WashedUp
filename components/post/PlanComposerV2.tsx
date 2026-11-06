@@ -53,6 +53,7 @@ import { COMMUNITIES_ENABLED, COMMUNITY_CHAT_GROUPING_ENABLED } from '../../cons
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
 import { COPY } from '../yours/state/constants';
 import { useObservedUser } from '../../hooks/useObservedUser';
+import ComposerKeyboardInset from './ComposerKeyboardInset';
 import type { MyFace } from '../../hooks/useMyFace';
 import {
   buildOptimisticPlan,
@@ -1072,7 +1073,7 @@ export default function PlanComposerV2() {
   const sheetBottomPad = Platform.OS === 'ios' ? 40 : Math.max(insets.bottom, 16) + 16;
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <SafeAreaView style={styles.screen} edges={['top']}>
       <StatusBar style="dark" />
 
@@ -1525,6 +1526,7 @@ export default function PlanComposerV2() {
         onClose={() => setAlertInfo(null)}
       />
     </SafeAreaView>
+    <ComposerKeyboardInset />
     </KeyboardAvoidingView>
   );
 }
