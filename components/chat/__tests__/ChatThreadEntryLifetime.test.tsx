@@ -1071,3 +1071,18 @@ it('keeps the ordinary refocus throttle when no receipt was deferred', async () 
     expect(mockRead).toHaveBeenCalledTimes(1);
   } finally { clock.mockRestore(); }
 });
+
+it('edits a sending bubble by its eventual database ID and offers deletion after confirmation',async()=>{
+  const target='52000000-0000-4000-8000-000000000001', local='optimistic-'+target;
+  mockChat.messages=[fixtureMessage(local,'First note')] as any;
+  await mount();
+  const controls=messageControls(local);act(()=>controls.onMessageLongPress(controls.message,true));
+  const menu=()=>tree!.root.findByType(MessageActionsMenu).props.menu!;
+  expect(menu().buttons.map((b:any)=>b.text)).not.toContain('delete');
+  act(()=>menu().buttons.find((b:any)=>b.text==='edit')!.onPress!());
+  mockChat.messages=[fixtureMessage(target,'First note')] as any;await update();
+  type('First note edited');act(()=>sendTap()({},true));await flush();
+  expect(mockChat.editMessage.mock.calls[0].slice(0,2)).toEqual([target,'First note edited']);
+  const confirmed=messageControls(target);act(()=>confirmed.onMessageLongPress(confirmed.message,true));
+  expect(menu().buttons.map((b:any)=>b.text)).toContain('delete');
+});

@@ -689,7 +689,7 @@ export function useChat(key: ConversationKey, anchorId: string | null = null, ma
   const pendingDeletes = useMemo(() => new Set<string>(), [roomGeneration]);
   const deleteMessage = useCallback(async (messageId: string, entryScope?: ChatOperationScope) => {
     const scope = captureOperation(entryScope);
-    if (!scope || pendingDeletes.has(messageId) || !messagesRef.current.some(m => m.id === messageId && m.user_id === scope.userId)) return;
+    if (!scope || messageId.startsWith('optimistic-') || pendingDeletes.has(messageId) || !messagesRef.current.some(m => m.id === messageId && m.user_id === scope.userId)) return;
     pendingDeletes.add(messageId);
     try {
       await removeOwnChatMessage({ kind, id: conversationId }, messageId, scope.userId, () => assertChatScope(scope));
