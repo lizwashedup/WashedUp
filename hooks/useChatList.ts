@@ -97,6 +97,13 @@ export function useChatList(knownUserId: string | null | undefined) {
         const eventPreviews = await fetchEventChatPreviews(userId, names, read, silent ? undefined : {
           cachedRows: () => latest,
           publish: rows => publish('event', rows, false),
+        }, joined => {
+          // Once membership is known, later preview failures may only retain
+          // conversations still present in that response.
+          if (!current()) return;
+          const events = (chatListMemoryCache.get(userId) ?? latest).filter(row => row.kind === 'event');
+          const retained = events.filter(row => joined.has(row.conversationId));
+          if (retained.length !== events.length) publish('event', retained, false);
         });
         publish('event', eventPreviews, true);
       } catch {

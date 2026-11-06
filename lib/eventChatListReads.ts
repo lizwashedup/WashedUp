@@ -7,7 +7,10 @@ type FirstPaint = { cachedRows: () => ChatPreview[]; publish: (rows: ChatPreview
 
 /** Keep database reads and preview mapping independent of React ownership.
  * The caller supplies its existing scoped/deadline read and optional first paint. */
-export async function fetchEventChatPreviews(userId: string, names: Map<string, string>, read: ScopedRead, firstPaint?: FirstPaint): Promise<ChatPreview[]> {
+export async function fetchEventChatPreviews(
+  userId: string, names: Map<string, string>, read: ScopedRead, firstPaint?: FirstPaint,
+  onMembership?: (joined: ReadonlySet<string>) => void,
+): Promise<ChatPreview[]> {
   const { data: memberships, error: membershipsError } = await read(supabase
     .from('event_members')
     .select(`
@@ -22,6 +25,8 @@ export async function fetchEventChatPreviews(userId: string, names: Map<string, 
   if (membershipsError || !memberships) throw membershipsError ?? new Error('Chats could not load');
 
   const allEventIds = memberships.map((m: any) => m.events?.id).filter(Boolean);
+
+  onMembership?.(new Set<string>(allEventIds));
 
   // The membership response already contains enough event information for
   // a useful first paint. Show those rows before message previews, unread

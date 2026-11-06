@@ -368,10 +368,14 @@ export default function ChatsScreen() {
     ] : []),
   ], [listItems, pastChats, pastExpanded]);
 
+  const currentRows = React.useRef(visibleItems);
+  React.useLayoutEffect(() => { currentRows.current = visibleItems; }, [visibleItems]);
   const isCurrentAccount = leaveViewer.isCurrent;
   const openChat = useCallback((chat: ChatPreview) => {
     // A tap already queued by native can arrive after the inbox or account changes.
     if (!authUserId || !inboxFocused.current || !isCurrentAccount()) return;
+    if (!currentRows.current.some(item => item.t === 'chat' &&
+      item.chat.kind === chat.kind && item.chat.conversationId === chat.conversationId)) return;
     router.push(chatHref(chat) as any);
   }, [authUserId, isCurrentAccount, router]);
 
