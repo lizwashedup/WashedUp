@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { DraftUnavailable, PlanPublishedEarlier, publishMemberPlan, saveNewPlanDraft, updateOwnedDraft } from '../../lib/memberPlanDraft';
+import { DraftUnavailable, PlanPublishedEarlier, publishMemberPlan, saveNewPlanDraft, saveExistingPlanDraft } from '../../lib/memberPlanDraft';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
 /**
  * Main plan composer, with optional development-gated Afterglow presentation.
@@ -765,7 +765,7 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
       if (identityError || !user || user.id !== write.userId) throw new Error('auth');
       dispatched = true;
       if (params.draftId) {
-        await updateOwnedDraft(String(params.draftId), user.id, row);
+        await saveExistingPlanDraft(String(params.draftId), user.id, row, currentForm);
       } else {
         newDraft.id ??= randomUUID();
         newDraft.saveAttempted = true;
@@ -783,6 +783,12 @@ export default function PlanComposerV2({ reviewPrefill }: { reviewPrefill?: Reco
       // LIZ COPY
       setAlertInfo({ title: appearance ? 'Draft saved' : 'saved', message: appearance ? 'Find your draft in Yours under Plans. Finish it whenever you’re ready.' : 'your draft lives in yours, under plans. finish it whenever.' });
     } catch (error) {
+      if (params.draftId && dispatched) {
+        // Yours is the recovery destination even if the server response or
+        // status read went missing. Retire only the initiating account’s list.
+        void queryClient.invalidateQueries({queryKey: ['my-plan-drafts', write.userId],
+          refetchType: write.isCurrentViewer() ? 'active' : 'none'});
+      }
       if (!currentForm()) return;
       if (error instanceof DraftUnavailable) setAlertInfo(unavailableDraftAlert);
       else if (dispatched) setAlertInfo({ title: 'Couldn’t confirm the save', message: 'Your edits are still here. Check Yours for the draft before trying again.' });
