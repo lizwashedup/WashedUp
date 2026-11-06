@@ -56,16 +56,17 @@ import {
 } from '../../lib/organizerFollows';
 import { useAuthUserId } from '../../components/yours/state/useAuthUserId';
 import { requestWithDeadline } from '../../lib/requestWithDeadline';
+import { ChatSizedText } from '../../components/chat/ChatSizedText';
 
 const AVATAR_SIZE = 88;
 const ROW_THUMB_SIZE = 56;
 
 function PageReadRecovery({ retry, pending }: { retry: () => void; pending: boolean }) {
   return <View>
-    <Text style={styles.emptyText} accessibilityRole="alert">Couldn't load the latest details.</Text>
+    <ChatSizedText style={styles.emptyText} accessibilityRole="alert">Couldn't load the latest details.</ChatSizedText>
     <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry organization page"
       accessibilityState={{ disabled: pending }} disabled={pending} onPress={retry} style={styles.goBackBtn}>
-      <Text style={styles.goBackText} numberOfLines={1} adjustsFontSizeToFit>{pending ? 'checking' : 'try again'}</Text>
+      <ChatSizedText style={styles.goBackText} numberOfLines={1} adjustsFontSizeToFit>{pending ? 'checking' : 'try again'}</ChatSizedText>
     </TouchableOpacity>
   </View>;
 }
