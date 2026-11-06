@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import VoicePlayer from '../VoicePlayer';
+import { NavigationContext } from '@react-navigation/native';
 import { AfterglowFallbackFonts, AfterglowType } from '../../../constants/Typography';
 
 let mockPlayer: ReturnType<typeof makePlayer>, mockStatus: any;
@@ -263,4 +264,30 @@ it('prevents an old pending replay from interrupting the next voice message', as
   await act(async () => { seek.resolve(); await replay; });
   expect(second.play).toHaveBeenCalledTimes(1);
   expect(first.play).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('retires a pending replay when its conversation loses focus (returned: %s)', async returned => {
+  let focused = true;
+  const blur = new Set<() => void>();
+  const navigation = {
+    isFocused: () => focused,
+    addListener: (name: string, callback: () => void) => {
+      if (name === 'blur') blur.add(callback);
+      return () => blur.delete(callback);
+    },
+  };
+  const seek = deferred();
+  mockPlayer.seekTo.mockReturnValueOnce(seek.promise);
+  mockStatus = {...ready,currentTime:8};
+  await act(async () => { tree = create(<NavigationContext.Provider value={navigation as any}>{screen()}</NavigationContext.Provider>); });
+  let replay!: Promise<void>;
+  act(() => { replay = control('Play voice message').props.onPress(); });
+  act(() => { focused = false; blur.forEach(listener => listener()); });
+  focused = returned;
+  await act(async () => { seek.resolve(); await replay; });
+  expect(mockPlayer.play).not.toHaveBeenCalled();
+  expect(blur.size).toBe(0);
+  focused = true;
+  await act(async () => control('Play voice message').props.onPress());
+  expect(mockPlayer.play).toHaveBeenCalledTimes(1);
 });
