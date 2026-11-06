@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { circleKeys } from '../lib/circles/keys';
 
 export interface InviteToCircleScope { userId: string; isCurrent: () => boolean }
@@ -48,7 +49,7 @@ export function useInviteToCircle(circleId: string, userId: string | null | unde
       const captured = attempt.owner;
       try {
         requireCurrent(captured);
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        const { data: { user }, error: authError } = await requestWithDeadline(supabase.auth.getUser(), 12_000);
         requireCurrent(captured);
         if (authError) throw authError;
         if (!user || user.id !== captured.userId) throw new ObsoleteCircleInviteError();
