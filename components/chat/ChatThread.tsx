@@ -1236,7 +1236,7 @@ function ChatThread(props: ChatThreadProps) {
   }, [messages]);
 
   const anchorScroll = useChatAnchorScroll(listRef, anchorId ? `${props.kind}:${id}:${anchorId}` : null,
-    anchorId ? enrichedItems.findIndex(item => item.id === anchorId) : -1);
+    anchorId ? enrichedItems.findIndex(item => item.id === anchorId) : -1, entry);
 
   // Stable callbacks for MessageBubble's memo to actually work -- inline lambdas
   // at the call site would create new function refs every render and break it,

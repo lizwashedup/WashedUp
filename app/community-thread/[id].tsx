@@ -384,7 +384,8 @@ export default function CommunityThreadScreen() {
   // Inverted rendering keeps the visible chronology oldest above newest.
   const delivery = useCommunityLocalDelivery(operationScope, broadcasts, composerDraft.draft.attempt, sending);
   const thread: CommunityDeliveryRow[] = admissionVisit.allowed && !anchor ? delivery.messages : broadcasts;
-  const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? thread.findIndex(message => message.id === anchor.id) : -1);
+  const messageListKey = JSON.stringify(messageQueryKey);
+  const anchorScroll = useChatAnchorScroll(listRef, anchorKey, anchor ? thread.findIndex(message => message.id === anchor.id) : -1, messageListKey);
   const photos = useMemo(() => broadcasts.slice().reverse().flatMap(message =>
     message.kind === 'message' && message.image_url
       ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [broadcasts]);
@@ -827,7 +828,7 @@ export default function CommunityThreadScreen() {
         <FlatList
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-          key={JSON.stringify(messageQueryKey)}
+          key={messageListKey}
           ref={listRef}
           data={thread}
           inverted
