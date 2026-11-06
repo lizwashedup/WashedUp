@@ -4,6 +4,10 @@ import { useChatList } from '../useChatList';
 import { chatListMemoryCache, removeBlockedPrivateChatPreviews } from '../../lib/chatListCache';
 
 let mockEngine = false, mockOffline = false;
+let mockJoinedIds: string[] = ['dm'];
+let mockPreviewError = false;
+const mockCardsRead = jest.fn();
+const mockJoined = (id: string) => ({ circles: { id, name: id === 'dm' ? '' : 'Coffee circle', created_at: '2026-10-01T20:00:00Z' } });
 let mockIncoming: (payload: any) => Promise<void>;
 const mockPrivacy = jest.fn(), mockProfile = jest.fn();
 jest.mock('../../constants/FeatureFlags', () => ({ GROUPS_ENABLED: true, get CHAT_ENGINE_ENABLED() { return mockEngine; } }));
@@ -13,7 +17,7 @@ const mockMembers = [
   { circle_id: 'dm', user_id: 'peer', profiles_public: { first_name_display: 'Synthetic person', profile_photo_url: 'https://example.test/peer.jpg' } },
 ];
 jest.mock('../../lib/supabase', () => ({ supabase: {
-  rpc: (name: string, args: any) => name === 'yours_is_blocked_between' ? mockPrivacy(args) : Promise.resolve({ data: [{
+  rpc: (name: string, args: any) => name === 'yours_is_blocked_between' ? mockPrivacy(args) : mockCardsRead() ?? Promise.resolve({ data: [{
     circle_id: 'dm', name: '', created_at: '2026-10-01T20:00:00Z', member_count: 2,
     members: mockMembers.map(member => ({ user_id: member.user_id, first_name: member.profiles_public.first_name_display, avatar_url: member.profiles_public.profile_photo_url })),
     last_message: { user_id: 'peer', content: 'Private preview', created_at: '2026-10-07T20:00:00Z' },
@@ -28,8 +32,9 @@ jest.mock('../../lib/supabase', () => ({ supabase: {
         if (mockOffline) return Promise.resolve({ data: null, error: new Error('Offline') }).then(resolve, reject);
         let data: any[] = [];
         if (table === 'circle_members') data = columns.includes('circles (')
-          ? viewer === 'viewer' ? [{ circles: { id: 'dm', name: '', created_at: '2026-10-01T20:00:00Z' } }] : []
+          ? viewer === 'viewer' ? mockJoinedIds.map(mockJoined) : []
           : mockMembers;
+        if (table === 'circles' && mockPreviewError) return Promise.resolve({ data: null, error: new Error('Preview unavailable') }).then(resolve, reject);
         if (table === 'circles') data = [{ id: 'dm', latest_message: [{ user_id: 'peer', content: 'Private preview', created_at: '2026-10-07T20:00:00Z' }] }];
         return Promise.resolve({ data, error: null }).then(resolve, reject);
       },
@@ -43,7 +48,7 @@ function Probe({ viewer = 'viewer' }) { value = useChatList(viewer); return null
 async function mount() { await act(async () => { tree = create(<Probe/>); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => {
-  mockEngine = false; mockOffline = false; chatListMemoryCache.clear();
+  mockEngine = false; mockOffline = false; mockJoinedIds = ['dm']; mockPreviewError = false; mockCardsRead.mockReset(); chatListMemoryCache.clear();
   mockPrivacy.mockReset().mockResolvedValue({ data: false, error: null });
   mockProfile.mockReset().mockResolvedValue({ data: { first_name_display: 'Late sender' }, error: null });
 });
@@ -178,4 +183,47 @@ it('does not count an own message as unread even when a newer preview is already
   await act(async () => { await mockIncoming({ new: { circle_id: 'dm', user_id: 'peer', content: 'Latest', created_at: '2026-10-07T21:01:00Z' } }); });
   await act(async () => { await mockIncoming({ new: { circle_id: 'dm', user_id: 'viewer', content: 'My earlier message', created_at: '2026-10-07T21:00:00Z' } }); });
   expect(value.chats[0]).toEqual(expect.objectContaining({ last_message: 'Synthetic person: Latest', unread_count: 1 }));
+});
+
+
+it.each(['legacy', 'fallback'])('hides a departed DM before an unrelated %s circle preview failure', async path => {
+  mockEngine = path === 'fallback';
+  mockCardsRead.mockResolvedValue({ data: null, error: new Error('RPC unavailable') });
+  mockJoinedIds = ['dm', 'coffee'];
+  await mount();
+  expect(value.chats.find(c => c.conversationId === 'dm')?.last_message).toContain('Private preview');
+  mockJoinedIds = ['coffee']; mockPreviewError = true;
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats.map(c => c.conversationId)).toEqual(['coffee']);
+  expect(chatListMemoryCache.get('viewer')?.map(c => c.conversationId)).toEqual(['coffee']);
+  expect(value.loadError).toBe(true);
+  mockPreviewError = false;
+  await act(async () => { await value.refetch(true); });
+  expect(value.chats.map(c => c.conversationId)).toEqual(['coffee']);
+  expect(value.loadError).toBe(false);
+});
+
+it('retires a withdrawn card while a different DM awaits its block check', async () => {
+  mockEngine = true; await mount(); expect(value.chats[0].conversationId).toBe('dm');
+  mockCardsRead.mockResolvedValue({ data: [{ circle_id: 'new-dm', members: [{user_id:'viewer'}, {user_id:'other',first_name:'New person'}] }], error: null });
+  const privacy = deferred<any>(); mockPrivacy.mockReturnValue(privacy.promise);
+  let work!: Promise<void>;
+  await act(async () => { work = value.refetch(true); });
+  expect(value.chats).toEqual([]);
+  await act(async () => { privacy.resolve({data:true,error:null}); await work; });
+  expect(value.chats).toEqual([]);
+});
+
+it('ignores a late cards membership response after the fallback confirms current rows', async () => {
+  jest.useFakeTimers();
+  try {
+    mockEngine = true; await mount();
+    const old = deferred<any>(); mockCardsRead.mockReturnValueOnce(old.promise);
+    mockJoinedIds = ['coffee'];
+    let work!: Promise<void>; act(() => { work = value.refetch(true); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_001); await work; });
+    expect(value.chats.map(c => c.conversationId)).toEqual(['coffee']);
+    await act(async () => { old.resolve({data:[],error:null}); });
+    expect(value.chats.map(c => c.conversationId)).toEqual(['coffee']);
+  } finally { jest.useRealTimers(); }
 });

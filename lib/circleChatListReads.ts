@@ -4,6 +4,8 @@ import { seedSender } from './chatEngine/senderCache';
 import { getBlockedWith } from './blocking';
 import { formatChatPreview, comparePreviewTimes, type ChatPreview } from './chatPreview';
 
+type MembershipObserver = (joined: ReadonlySet<string>) => void;
+
 async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Promise<ChatPreview[]> {
   const blocked = await getBlockedWith(userId, previews.filter(chat => chat.is_dm).map(chat => chat.dm_user_id));
   return previews.filter(chat => !chat.is_dm || (!!chat.dm_user_id && !blocked.has(chat.dm_user_id)));
@@ -14,7 +16,9 @@ async function visiblePrivateChats(userId: string, previews: ChatPreview[]): Pro
  * GROUPS_ENABLED. The caller retains this branch's cached rows on failure
  * while allowing plan conversations to load independently.
  */
-export async function fetchCircleChats(userId: string, senderCache?: Map<string, string>): Promise<ChatPreview[]> {
+export async function fetchCircleChats(
+  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver,
+): Promise<ChatPreview[]> {
   const { data: memberships, error: membershipError } = await supabase
     .from('circle_members')
     .select('circle_id, circles ( id, name, cover_upload_id, status, created_at )')
@@ -22,7 +26,9 @@ export async function fetchCircleChats(userId: string, senderCache?: Map<string,
     .eq('status', 'joined');
 
   if (membershipError) throw membershipError;
-  const circleIds = (memberships ?? []).map((m: any) => m.circles?.id).filter(Boolean);
+  if (!Array.isArray(memberships)) throw new Error('Circle membership unavailable');
+  const circleIds = memberships.map((m: any) => m.circles?.id).filter(Boolean);
+  onMembership?.(new Set<string>(circleIds));
   if (circleIds.length === 0) return [];
 
   const results = await Promise.all([
@@ -137,11 +143,16 @@ export async function fetchCircleChats(userId: string, senderCache?: Map<string,
  * prod) falls back to the legacy path, so this ships dark until apply + flag.
  * Card shapes are defined in SQL-100-circle-chat-cards-proposal.sql.
  */
-export async function fetchCircleChatsViaCards(userId: string, senderCache?: Map<string, string>): Promise<ChatPreview[]> {
+export async function fetchCircleChatsViaCards(
+  userId: string, senderCache?: Map<string, string>, onMembership?: MembershipObserver,
+): Promise<ChatPreview[]> {
   const { data, error } = await supabase.rpc('get_my_circle_chat_cards');
   if (error) throw error;
 
-  const previews = ((data ?? []) as any[]).map((card: any): ChatPreview => {
+  if (!Array.isArray(data)) throw new Error('Circle cards unavailable');
+  onMembership?.(new Set<string>(data.map(card => card.circle_id)));
+
+  const previews = data.map((card: any): ChatPreview => {
     const members: DisplayMember[] = (card.members ?? []).map((m: any) => ({
       user_id: m.user_id,
       name: m.first_name ?? null,
