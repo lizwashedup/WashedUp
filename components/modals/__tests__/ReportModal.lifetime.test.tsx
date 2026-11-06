@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, create } from 'react-test-renderer';
 import { Modal, Text, TouchableOpacity } from 'react-native';
 import { ReportModal, type ReportModalProps } from '../ReportModal';
-import { BrandedAlert } from '../../BrandedAlert';
 
 const mockGetUser = jest.fn();
 const mockInsert = jest.fn();
@@ -25,7 +24,6 @@ jest.mock('../../../lib/supabase', () => ({ supabase: {
 } }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('../../BrandedAlert', () => ({ BrandedAlert: jest.fn(() => null) }));
 
 type Props = ReportModalProps;
 const Component = ReportModal;
@@ -53,7 +51,8 @@ function mount(extra: Partial<Props> = {}) {
     submit: () => button('Submit Report').props.onPress as () => Promise<void>,
     submitDisabled: () => button('Submit Report').props.disabled,
     chooseCallback: (reason = 'Other') => button(reason).props.onPress as () => void,
-    alert: () => tree.root.findByType(BrandedAlert).props,
+    alert: () => ({ visible: !!button('Done'), onClose: button('Done')?.props.onPress }),
+    done: () => act(() => button('Done').props.onPress()),
     close: () => tree.root.findByType(Modal).props.onRequestClose(),
   };
 }
@@ -67,15 +66,14 @@ beforeEach(async () => {
 });
 afterEach(() => { cleanup.splice(0).forEach(fn => fn()); jest.clearAllTimers(); jest.restoreAllMocks(); jest.useRealTimers(); });
 
-it('submits the original report schema once and shows success after its own close', async () => {
+it('submits the original report schema once and shows acknowledgement before closing', async () => {
   const f = mount();
   f.choose('No-show to plan');
   await act(async () => { await f.submit()(); });
   expect(mockInsert).toHaveBeenCalledWith({ id: expect.any(String), reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'No-show to plan', reported_event_id: 'plan-a', details: 'Reported from plan' });
-  expect(f.onClose).toHaveBeenCalledTimes(1);
-  f.update({ visible: false });
-  act(() => jest.advanceTimersByTime(350));
-  expect(f.alert()).toMatchObject({ visible: true, title: 'Report submitted' });
+  expect(f.onClose).not.toHaveBeenCalled();
+  expect(f.alert().visible).toBe(true);
+  f.done();expect(f.onClose).toHaveBeenCalledTimes(1);
 });
 
 it('locks duplicate submit and lets Back cancel before the account check finishes', async () => {
@@ -125,7 +123,7 @@ it('ignores a late insert failure after a new target opens', async () => {
   expect(f.submitDisabled()).toBe(false);
 });
 
-it('cancels the delayed success when the same target is reopened', async () => {
+it('clears the prior receipt when the same target is reopened', async () => {
   const f = mount(); f.choose();
   await act(async () => { await f.submit()(); });
   f.update({ visible: false }); f.update({ visible: true }); f.choose();
@@ -154,7 +152,7 @@ it('keeps legacy unscoped user-search submissions and error retry behavior', asy
   expect(f.onClose).not.toHaveBeenCalled();
   await act(async () => { await f.submit()(); });
   expect(mockInsert).toHaveBeenLastCalledWith({ id: expect.any(String), reporter_user_id: 'alice', reported_user_id: 'target-a', reason: 'Other', reported_event_id: null, details: 'Reported from user search' });
-  expect(f.onClose).toHaveBeenCalledTimes(1);
+  expect(f.alert().visible).toBe(true);
 });
 
 it('allows dismissal with an explicitly unknown scope but no auth read or insert', async () => {
@@ -242,16 +240,14 @@ it('ignores an insert continuation after unmount', async () => {
   expect(schedule.mock.calls.filter(call => call[1] === 350)).toHaveLength(0);
 });
 
-it('clears the success timer when onClose synchronously unmounts the component', async () => {
-  const f = mount(); f.choose(); f.onClose.mockImplementation(f.unmount);
-  const schedule = jest.spyOn(global, 'setTimeout'); const cancel = jest.spyOn(global, 'clearTimeout');
-  await act(async () => { await f.submit()(); });
-  const successCall = schedule.mock.calls.findIndex(call => call[1] === 350);
-  expect(successCall).toBeGreaterThanOrEqual(0);
-  expect(cancel).toHaveBeenCalledWith(schedule.mock.results[successCall].value);
+it('lets a parent unmount on Done without losing confirmation or sending twice',async()=>{
+  const f=mount();f.choose();f.onClose.mockImplementation(f.unmount);const retained=f.submit();
+  await act(async()=>{await retained();await retained();});
+  expect(mockInsert).toHaveBeenCalledTimes(1);expect(f.alert().visible).toBe(true);expect(f.onClose).not.toHaveBeenCalled();
+  f.done();expect(f.onClose).toHaveBeenCalledTimes(1);
 });
 
-it('cancels delayed success after an account change while hidden', async () => {
+it('does not show the old receipt after an account change while hidden', async () => {
   const f = mount(); f.choose(); await act(async () => { await f.submit()(); });
   f.update({ visible: false });
   act(() => mockAuthListener?.('SIGNED_OUT', null));
@@ -261,8 +257,8 @@ it('cancels delayed success after an account change while hidden', async () => {
 
 it('hides an already-visible success on a new target and ignores its retained dismissal', async () => {
   const f = mount(); f.choose(); await act(async () => { await f.submit()(); });
-  f.update({ visible: false }); act(() => jest.advanceTimersByTime(350));
   const oldDismiss = f.alert().onClose;
+  expect(oldDismiss).toEqual(expect.any(Function));
   f.update({ visible: true, reportedUserId: 'target-b' });
   expect(f.alert().visible).toBe(false);
   f.choose(); mockInsert.mockResolvedValueOnce({ error: new Error('offline') });
@@ -290,7 +286,7 @@ it('does not let a retired insert finalizer unlock a newer pending report', asyn
   expect(mockInsert).toHaveBeenCalledTimes(2);
   expect(f.onClose).not.toHaveBeenCalled();
   await act(async () => { second.resolve({ error: null }); await next; });
-  expect(f.onClose).toHaveBeenCalledTimes(1);
+  expect(f.alert().visible).toBe(true);
 });
 
 it('does not retire a pending report for a same-account token refresh', async () => {
@@ -299,7 +295,7 @@ it('does not retire a pending report for a same-account token refresh', async ()
   let pending!: Promise<void>; await act(async () => { pending = f.submit()(); await Promise.resolve(); });
   act(() => mockAuthListener?.('TOKEN_REFRESHED', { user: { id: 'alice' } }));
   await act(async () => { write.resolve({ error: null }); await pending; });
-  expect(f.onClose).toHaveBeenCalledTimes(1);
+  expect(f.alert().visible).toBe(true);
 });
 
 it('allows a fresh report after signout then sign-in without reviving the old request', async () => {
@@ -350,5 +346,5 @@ it('locks Close once the report write is dispatched', async () => {
   expect(mockInsert).toHaveBeenCalledTimes(1);
   act(() => f.close()); expect(f.onClose).not.toHaveBeenCalled();
   await act(async () => { write.resolve({error:null}); await pending; });
-  expect(f.onClose).toHaveBeenCalledTimes(1);
+  expect(f.alert().visible).toBe(true);
 });
