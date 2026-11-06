@@ -82,12 +82,13 @@ export function usePlansEntry() {
     return () => { active = false; };
   }, [account]);
 
+  const isCurrentAccount = useCallback(() => mounted.current && current.current === account, [account]);
   const retry = useCallback(() => { if (current.current.unavailable) retryRead.current?.(); }, []);
   const dismissWelcome = useCallback(() => {
     if (!mounted.current || current.current !== account || !account.id) return;
     setWelcome(undefined);
     recordWelcome(account.id);
   }, [account]);
-  return { userId: account.id, accountUnavailable: account.unavailable, retry, showWelcome: welcome === account,
+  return { userId: account.id, isCurrentAccount, accountUnavailable: account.unavailable, retry, showWelcome: welcome === account,
     dismissWelcome, welcomeChecked: checked === account };
 }
