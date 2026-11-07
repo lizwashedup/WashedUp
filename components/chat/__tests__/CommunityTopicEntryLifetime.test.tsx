@@ -21,6 +21,8 @@ let mockRoomId: string, mockViewerId: string, mockMembership: string;
 let mockMembersError = false, mockMembersLoading = false;
 let mockIntroError=false, mockIntroFetching=false, mockIntroQuery:any;
 const mockIntroRefetch=jest.fn(),mockHasSaidHi=jest.fn();
+const mockMembershipRefetch=jest.fn(),mockGetMembership=jest.fn();
+let mockMembershipQuery:any, mockMembershipAbsent=false, mockGrouping=true;
 let mockFocusCleanup:(()=>void)|undefined;
 const mockRetryMembers = jest.fn().mockResolvedValue(undefined);
 let mockMessages: any[], mockFirstMessage: any, mockMembers: any[];
@@ -48,7 +50,7 @@ jest.mock('expo-image-manipulator', () => ({ manipulateAsync: (...args: any[]) =
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const cleanup=callback(); mockFocusCleanup=cleanup; return cleanup; }, [callback]), useRouter: () => ({ push: mockPush, back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({top:0,bottom:0,left:0,right:0}) }));
-jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITY_CHAT_GROUPING_ENABLED: true }));
+jest.mock('../../../constants/FeatureFlags', () => ({ get COMMUNITY_CHAT_GROUPING_ENABLED() { return mockGrouping; } }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
 jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => ({ viewerId: mockViewerId, epoch: mockEpoch, isCurrent: () => true, isLoading: false, error: null, retry: async () => {} }) }));
 jest.mock('../../../hooks/useCommunityTopicMute', () => ({ useCommunityTopicMute: () => ({ muted: false, ready: true, isChecking: false, toggle: jest.fn(), isCurrent: () => true }) }));
@@ -73,6 +75,7 @@ jest.mock('@tanstack/react-query', () => ({
   useQuery: (query: any) => {
     const {queryKey}=query;
     if(queryKey[0]==='topic-said-hi')mockIntroQuery=query;
+    if(queryKey[0]==='topic-my-membership'){mockMembershipQuery=query;return {data:mockMembershipAbsent?null:{status:mockMembership},refetch:mockMembershipRefetch};}
     const data: Record<string, unknown> = {
       'topic-my-membership': { status: mockMembership },
       'community-chat-cards': {
@@ -95,7 +98,7 @@ jest.mock('../../../lib/communityChat', () => ({
   computeEventRoomExpiry: () => null, isEventRoomClosed: (meta: any) => !!meta?.archived,
   deleteTopicMessage: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock('../../../lib/communityJoin', () => ({}));
+jest.mock('../../../lib/communityJoin', () => ({getMyMembership:(...args:any[])=>mockGetMembership(...args)}));
 jest.mock('../../../lib/creatorMode', () => ({ isLeaderAccess: () => mockLedCommunities.length > 0 }));
 jest.mock('../../../lib/creatorEvents', () => ({}));
 jest.mock('../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...args: any[]) => mockUpload(...args) }));
@@ -131,7 +134,7 @@ function type(text: string) { act(() => input().props.onChangeText(text)); }
 beforeEach(async () => {
   mockLocation.mockReset().mockResolvedValue(undefined);
   await AsyncStorage.clear(); mockConfirmed.clear(); mockCheckAttempt.mockReset().mockImplementation(async (_room: string, attempt: {id:string}) => mockConfirmed.has(attempt.id));
-  jest.clearAllMocks(); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
+  jest.clearAllMocks(); mockMembershipAbsent=false;mockMembershipQuery=undefined;mockGrouping=true;mockGetMembership.mockReset().mockResolvedValue({status:'active'}); mockMembershipRefetch.mockReset().mockResolvedValue({}); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
   mockMessagesLoading=false;mockLedCommunities=[];mockFirstMessage=null;mockMessages=[];mockMembers=[];mockArchived=false;
   mockSend.mockResolvedValue(undefined); mockRefresh.mockResolvedValue(undefined); mockVerifyTarget.mockResolvedValue(undefined);
   mockCameraPermission.mockResolvedValue({status:'granted'}); mockCamera.mockResolvedValue({canceled:false,assets:[{uri:'file:///camera.jpg'}]});
@@ -787,4 +790,50 @@ it.each(['text', 'photo', 'location'] as const)('respects a newer reading positi
   await act(async () => { pending.resolve(); await work; }); await flush();
   expect(scroll).not.toHaveBeenCalled();
   expect(composer().sending).toBe(false);
+});
+
+it('rechecks parent membership on foreground and replaces the stale composer after removal', async () => {
+  const callbacks = new Set<(state: any) => void>();
+  const originalState = AppState.currentState;
+  const originalListener = jest.isMockFunction(AppState.addEventListener) ? jest.mocked(AppState.addEventListener).getMockImplementation() : undefined;
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    callbacks.add(callback); return { remove: () => { callbacks.delete(callback); } };
+  });
+  const emit = (state: string) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+    act(() => callbacks.forEach(callback => callback(state)));
+  };
+  try {
+    await mount(); type('Unsent topic draft');
+    mockMembershipRefetch.mockImplementation(async () => { mockMembership = 'removed'; });
+    emit('background'); emit('active'); await flush(); await update();
+    expect(mockMembershipRefetch).toHaveBeenCalledTimes(1);
+    expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(0);
+    expect(mockSend).not.toHaveBeenCalled();
+  } finally {
+    act(() => tree?.unmount()); spy.mockRestore();
+    if (originalListener && jest.isMockFunction(AppState.addEventListener)) jest.mocked(AppState.addEventListener).mockImplementation(originalListener);
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: originalState });
+  }
+});
+
+it.each([true, false])('owns admission reads across account changes with grouped layout %s', async grouping => {
+  mockGrouping=grouping; await mount(); const old=mockMembershipQuery,owner=mockViewerId;
+  const held=deferred<{status:string}>();mockGetMembership.mockReturnValueOnce(held.promise);
+  const read=old.queryFn({signal:new AbortController().signal}); const rejected=expect(read).rejects.toThrow('visit changed');
+  expect(mockGetMembership).toHaveBeenCalledWith('community-a',owner);
+  mockViewerId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';mockEpoch++;await update();
+  expect(mockMembershipQuery.queryKey).not.toEqual(old.queryKey);
+  held.resolve({status:'removed'});await rejected;
+  await expect(mockMembershipQuery.queryFn({signal:new AbortController().signal})).resolves.toEqual({status:'active'});
+  expect(mockGetMembership).toHaveBeenLastCalledWith('community-a',mockViewerId);
+});
+it('does not turn an absent membership into a confirmed removal',async()=>{
+  mockMembershipAbsent=true;await mount();type('Keep my draft');expect(composer()).toBeTruthy();expect(input().props.value).toBe('Keep my draft');
+});
+it('rejects an aborted own-membership read before querying',async()=>{
+  await mount();const abort=new AbortController();abort.abort();
+  await expect(mockMembershipQuery.queryFn({signal:abort.signal})).rejects.toThrow('visit changed');
+  expect(mockGetMembership).not.toHaveBeenCalled();
 });

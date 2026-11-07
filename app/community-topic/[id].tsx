@@ -253,10 +253,19 @@ export default function CommunityTopicScreen() {
   // send failed. Checked on the topic's own community, same shape as the
   // archived check above: a failed read is treated as still-a-member, the
   // server RLS is the real gate either way.
-  const { data: myMembership } = useQuery({
-    queryKey: scopedKey(['topic-my-membership', topicMeta?.community_id]),
-    queryFn: ({ signal }) => readEntry(() => getMyMembership(topicMeta!.community_id), signal),
-    enabled: !!topicMeta?.community_id,
+  const { data: myMembership, refetch: refreshMembership } = useQuery({
+    // Own admission belongs to an account even when the legacy layout is used.
+    queryKey: ['topic-my-membership', topicMeta?.community_id, muteViewer.viewerId, muteViewer.epoch],
+    queryFn: async ({ signal }) => {
+      const requireCurrent = () => {
+        if (!identityScope.userId || !identityScope.isCurrent() || signal.aborted) throw Error('This chat visit changed.');
+      };
+      requireCurrent();
+      const result = await requestWithDeadline(getMyMembership(topicMeta!.community_id, identityScope.userId), 12_000);
+      requireCurrent();
+      return result;
+    },
+    enabled: !!topicMeta?.community_id && !!muteViewer.viewerId && !muteViewer.isLoading && !muteViewer.error,
     staleTime: 60_000,
   });
   const removedFromCommunity = myMembership?.status === 'removed' || myMembership?.status === 'banned';
@@ -387,7 +396,17 @@ export default function CommunityTopicScreen() {
     if (introLayout) void refreshMessages(true);
     return () => { coreFocused.current = false; moderatorVisit.current = null; };
   }, [!!introLayout, refreshMessages]));
-  useChatResumeRefresh(refreshMessages, entryIsCurrent, coreFocused);
+  const refreshVisibleConversation = useCallback(async (silent = false) => {
+    if (!entryIsCurrent() || !coreFocused.current) return;
+    // History and admission recover independently. Ordinary message arrivals
+    // keep their existing history path and do not issue a membership read.
+    await Promise.allSettled([
+      refreshMessages(silent),
+      topicMeta?.community_id && muteViewer.viewerId
+        ? refreshMembership({ cancelRefetch: false }) : Promise.resolve(),
+    ]);
+  }, [entryIsCurrent, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership]);
+  useChatResumeRefresh(refreshVisibleConversation, entryIsCurrent, coreFocused);
   const retryRoomKind = () => {
     if (!roomKindUnknown || !entryIsCurrent() || !coreFocused.current) return;
     void Promise.allSettled([
@@ -1228,14 +1247,14 @@ export default function CommunityTopicScreen() {
           <View style={styles.loadErrorWrap}>
             <Text style={styles.loadErrorTitle}>Messages couldn't load</Text>
             <Text style={styles.loadErrorBody}>This chat is still here. Check your connection and try again.</Text>
-            <TouchableOpacity style={styles.loadRetry} onPress={() => { void refreshMessages(); }} accessibilityRole="button" accessibilityLabel="Retry loading community messages">
+            <TouchableOpacity style={styles.loadRetry} onPress={() => { void refreshVisibleConversation(); }} accessibilityRole="button" accessibilityLabel="Retry loading community messages">
               <CreatorActionFill /><Text style={styles.loadRetryText}>Try again</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.listWrap}>
             {messagesLoadError && (
-              <TouchableOpacity style={styles.loadWarning} onPress={() => { void refreshMessages(true); }} accessibilityRole="button" accessibilityLabel="Community messages may be out of date. Retry loading">
+              <TouchableOpacity style={styles.loadWarning} onPress={() => { void refreshVisibleConversation(true); }} accessibilityRole="button" accessibilityLabel="Community messages may be out of date. Retry loading">
                 <Text style={styles.loadWarningText}>Messages may be out of date · Tap to retry</Text>
               </TouchableOpacity>
             )}
