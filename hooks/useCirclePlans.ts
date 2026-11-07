@@ -57,8 +57,9 @@ export function useCirclePlans(circleId: string | null | undefined, scope?: Circ
       requireCurrent();
       // A failed request does not establish that this circle has no plans.
       if (error) throw error;
+      if (!Array.isArray(data)) throw new Error('Couldn’t load the circle’s plans. Try again.');
       const now = Date.now();
-      return ((data ?? []) as any[])
+      return (data as any[])
         .filter((r) => {
           const end = r.end_time ? new Date(r.end_time).getTime() : new Date(r.start_time).getTime() + 3 * 60 * 60 * 1000;
           return end > now;

@@ -24,7 +24,7 @@ const auth = (id: string | null) => ({ data: { user: id ? { id } : null }, error
 let tree: ReactTestRenderer | undefined, client: QueryClient, current: ReturnType<typeof useCirclePlans>;
 let circleId: string | null, scope: CirclePlansScope | undefined;
 const makeScope = (userId = 'alice', epoch = 1) => { let live = true; return { userId, epoch, isCurrent: () => live, retire: () => { live = false; } }; };
-function Harness() { current = useCirclePlans(circleId, scope); return null; }
+function Harness() { current = useCirclePlans(circleId, scope); void current.data; void current.isError; void current.isLoading; return null; }
 const render = () => <QueryClientProvider client={client}><Harness /></QueryClientProvider>;
 async function flush() { for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
 async function mount() { act(() => { tree = create(render()); }); await flush(); }
@@ -102,4 +102,20 @@ it('preserves legacy no-scope cache key and skips added auth preflight', async (
 });
 it('preserves disabled behavior when no Circle is selected', async () => {
   circleId = null; await mount(); expect(mockGetUser).not.toHaveBeenCalled(); expect(mockRead).not.toHaveBeenCalled();
+});
+
+it.each([null,undefined,{},false])('does not turn a missing successful response into an authoritative empty Circle plan list (%p)',async data=>{
+ mockRead.mockResolvedValueOnce({data,error:null});await mount();
+ expect(current.isError).toBe(true);expect(current.data).toBeUndefined();
+});
+
+it('preserves a prior current-account result when a background response is missing and recovers on explicit retry',async()=>{
+ await mount();expect(current.data?.[0].id).toBe('plan-one');mockRead.mockReset().mockResolvedValue({data:null,error:null});
+ await act(async()=>{await current.refetch();});await flush();expect(current.isError).toBe(true);expect(current.data?.[0].id).toBe('plan-one');
+ mockRead.mockReset().mockResolvedValue(answer([row('revalidated')]));await act(async()=>{await current.refetch();});await flush();
+ expect(current.isError).toBe(false);expect(current.data?.map(p=>p.id)).toEqual(['revalidated']);
+});
+it('keeps unscoped legacy reads retryable when their response is absent',async()=>{
+ scope=undefined;mockRead.mockResolvedValueOnce({data:null,error:null});await mount();expect(current.isError).toBe(true);expect(current.data).toBeUndefined();
+ mockRead.mockResolvedValueOnce(answer([]));await act(async()=>{await current.refetch();});await flush();expect(current.isError).toBe(false);expect(current.data).toEqual([]);
 });
