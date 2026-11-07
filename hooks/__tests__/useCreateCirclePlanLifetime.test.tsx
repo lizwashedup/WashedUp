@@ -1,25 +1,27 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateCirclePlan, isUnconfirmedCirclePlanCreation, isObsoleteCirclePlanOperation, UnconfirmedCirclePlanCreationError, type CreateCirclePlanArgs } from '../useCreateCirclePlan';
-const mockGetUser=jest.fn(), mockRpc=jest.fn();
+const mockGetUser=jest.fn(), mockRpc=jest.fn(), mockStatus=jest.fn();
 let mockAuthListener: ((event:string,session:any)=>void) | undefined;
 const mockUnsubscribe=jest.fn();
-jest.mock('../../lib/supabase',()=>({supabase:{auth:{getUser:(...args:any[])=>mockGetUser(...args),onAuthStateChange:(cb:any)=>{mockAuthListener=cb;return {data:{subscription:{unsubscribe:mockUnsubscribe}}};}},rpc:(...args:any[])=>mockRpc(...args)}}));
+jest.mock('../../lib/supabase',()=>({supabase:{auth:{getUser:(...args:any[])=>mockGetUser(...args),onAuthStateChange:(cb:any)=>{mockAuthListener=cb;return {data:{subscription:{unsubscribe:mockUnsubscribe}}};}},rpc:(...args:any[])=>args[0]==='circle_plan_post_status'?mockStatus(...args):mockRpc(...args)}}));
 function deferred<T>(){let resolve!:(v:T)=>void,reject!:(e:any)=>void;const promise=new Promise<T>((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}
 let hook:ReturnType<typeof useCreateCirclePlan>, tree:ReactTestRenderer, client:QueryClient, invalidate:jest.SpyInstance;
 let current:boolean;
 const receipt={event_id:'7b42d4c2-8bd2-4f4a-8a52-37275f1c14ef',has_own_chat:true};
 const entryIsCurrent=()=>current;
 function args(extra:any={}):CreateCirclePlanArgs{return {circleId:'circle-a',title:'Beach',creatorMessage:'Meet by the beach entrance.',startTime:'2040-09-15T23:00:00.000Z',visibility:'circle_only',scope:{userId:'alice',isCurrent:entryIsCurrent},...extra};}
-function Probe(){hook=useCreateCirclePlan();return null;}
+let recoveryOwner: Parameters<typeof useCreateCirclePlan>[0];
+function Probe(){hook=useCreateCirclePlan(recoveryOwner);return null;}
 async function mount(){client=new QueryClient({defaultOptions:{mutations:{retry:false,gcTime:Infinity},queries:{retry:false,gcTime:Infinity}}});invalidate=jest.spyOn(client,'invalidateQueries').mockResolvedValue();await act(async()=>{tree=create(<QueryClientProvider client={client}><Probe/></QueryClientProvider>);});}
 async function flush(){await act(async()=>{await Promise.resolve();await Promise.resolve();});}
-beforeEach(()=>{jest.clearAllMocks();mockGetUser.mockReset();mockRpc.mockReset();mockAuthListener=undefined;current=true;mockGetUser.mockResolvedValue({data:{user:{id:'alice'}},error:null});mockRpc.mockResolvedValue({data:receipt,error:null});});
+beforeEach(async()=>{await AsyncStorage.clear();recoveryOwner=undefined;mockStatus.mockReset().mockResolvedValue({data:{status:'unknown'},error:null});jest.clearAllMocks();mockGetUser.mockReset();mockRpc.mockReset();mockAuthListener=undefined;current=true;mockGetUser.mockResolvedValue({data:{user:{id:'alice'}},error:null});mockRpc.mockResolvedValue({data:receipt,error:null});});
 afterEach(()=>{act(()=>tree?.unmount());client?.clear();});
 it('preserves exact RPC fields, defaults, receipt and existing cache prefixes',async()=>{
  await mount();let result:any;await act(async()=>{result=await hook.mutateAsync(args({memberUserIds:['bob'],locationText:'Beach',primaryVibe:'outdoors'}));});
- expect(result).toEqual(receipt);expect(mockGetUser).toHaveBeenCalledTimes(1);expect(mockRpc).toHaveBeenCalledWith('create_circle_plan',{p_circle_id:'circle-a',p_title:'Beach',p_start_time:'2040-09-15T23:00:00.000Z',p_visibility:'circle_only',p_stranger_cap:null,p_gender_rule:'mixed',p_member_user_ids:['bob'],p_location_text:'Beach',p_description:null,p_primary_vibe:'outdoors',p_host_message:'Meet by the beach entrance.',p_image_url:null});
+ expect(result).toEqual(receipt);expect(mockGetUser).toHaveBeenCalledTimes(1);expect(mockRpc).toHaveBeenCalledWith('create_circle_plan_once',{p_request_id:expect.any(String),p_circle_id:'circle-a',p_title:'Beach',p_start_time:'2040-09-15T23:00:00.000Z',p_visibility:'circle_only',p_stranger_cap:null,p_gender_rule:'mixed',p_member_user_ids:['bob'],p_location_text:'Beach',p_description:null,p_primary_vibe:'outdoors',p_host_message:'Meet by the beach entrance.',p_image_url:null});
  expect(invalidate.mock.calls.map(([v])=>v.queryKey)).toEqual([['circles','detail','circle-a'],['circle-plans','circle-a'],['events','feed'],['my-plans'],['feed-member-ids']]);
 });
 it.each(['retired','unavailable'] as const)('does not dispatch for %s scope',async kind=>{
@@ -107,37 +109,37 @@ it.each(['returned','thrown'])('keeps a %s preflight failure retryable without d
 
 it('keeps several active uncertain entries separate without replacing their locks',async()=>{
  const scopeA={userId:'alice',isCurrent:()=>current},scopeB={userId:'alice',isCurrent:()=>current};
- mockRpc.mockResolvedValueOnce({data:null,error:null}).mockResolvedValueOnce({data:null,error:null});await mount();
+ mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();
  for(const scope of [scopeA,scopeB])await act(async()=>{await expect(hook.mutateAsync(args({scope}))).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
  for(const scope of [scopeA,scopeB])await act(async()=>{await expect(hook.mutateAsync(args({scope}))).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
- expect(mockRpc).toHaveBeenCalledTimes(2);
+ expect(mockRpc).toHaveBeenCalledTimes(1);
  // Another circle in the same still-active source context is independent.
  await act(async()=>{expect(await hook.mutateAsync(args({scope:scopeA,circleId:'circle-b'}))).toEqual(receipt);});
- expect(mockRpc).toHaveBeenCalledTimes(3);
+ expect(mockRpc).toHaveBeenCalledTimes(2);
 });
 
-it('allows a new visit after uncertainty without carrying the old entry lock',async()=>{
+it('preserves an uncertain attempt across replacement visits',async()=>{
  let firstCurrent=true;const firstScope={userId:'alice',isCurrent:()=>firstCurrent};
  mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();
  await act(async()=>{await expect(hook.mutateAsync(args({scope:firstScope}))).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
  firstCurrent=false;
- await act(async()=>{expect(await hook.mutateAsync(args())).toEqual(receipt);});expect(mockRpc).toHaveBeenCalledTimes(2);
+ await act(async()=>{await expect(hook.mutateAsync(args())).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});expect(mockRpc).toHaveBeenCalledTimes(1);
 });
 
-it('retires an uncertain lock on an account generation change including ABA',async()=>{
+it('preserves an own uncertain attempt through an account ABA',async()=>{
  mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();mockAuthListener?.('SIGNED_IN',{user:{id:'alice'}});
  await act(async()=>{await expect(hook.mutateAsync(args())).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
  mockAuthListener?.('SIGNED_IN',{user:{id:'bob'}});mockAuthListener?.('SIGNED_IN',{user:{id:'alice'}});
- await act(async()=>{expect(await hook.mutateAsync(args())).toEqual(receipt);});expect(mockRpc).toHaveBeenCalledTimes(2);
+ await act(async()=>{await expect(hook.mutateAsync(args())).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});expect(mockRpc).toHaveBeenCalledTimes(1);
 });
 
-it('does not assign an old pending ambiguity to the replacement visit',async()=>{
+it('retains an old pending attempt for read-only recovery in a replacement visit',async()=>{
  const pending=deferred<any>();mockRpc.mockReturnValueOnce(pending.promise);let firstCurrent=true;
  const firstScope={userId:'alice',isCurrent:()=>firstCurrent};await mount();let first!:Promise<any>;
  act(()=>{first=hook.mutateAsync(args({scope:firstScope})).catch(e=>e);});await flush();firstCurrent=false;
  await act(async()=>{pending.reject(new TypeError('Old network failure'));expect(isObsoleteCirclePlanOperation(await first)).toBe(true);});
  expect(invalidate).not.toHaveBeenCalled();
- await act(async()=>{expect(await hook.mutateAsync(args())).toEqual(receipt);});expect(mockRpc).toHaveBeenCalledTimes(2);
+ await act(async()=>{await expect(hook.mutateAsync(args())).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});expect(mockRpc).toHaveBeenCalledTimes(1);
 });
 
 it('protects an unscoped caller only for the same circle and account lifetime',async()=>{
@@ -152,4 +154,65 @@ it.each(['', 'short', 'x'.repeat(151)])('rejects an invalid creator introduction
  await mount();
  await act(async () => { await expect(hook.mutateAsync(args({ creatorMessage }))).rejects.toBeInstanceOf(Error); });
  expect(mockGetUser).not.toHaveBeenCalled(); expect(mockRpc).not.toHaveBeenCalled();
+});
+
+it('does not dispatch a second creation when a prior Circle plan is still pending across visits',async()=>{
+ const first=deferred<any>(),second=deferred<any>();mockRpc.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+ let activeFirst=true;await mount();let original!:Promise<any>;
+ act(()=>{original=hook.mutateAsync(args({scope:{userId:'alice',isCurrent:()=>activeFirst}})).catch(error=>error);});await flush();
+ activeFirst=false;act(()=>tree.unmount());client.clear();await mount();let reopened!:Promise<any>;
+ act(()=>{reopened=hook.mutateAsync(args()).catch(error=>error);});await flush();const writes=mockRpc.mock.calls.length;
+ await act(async()=>{first.resolve({data:receipt,error:null});second.resolve({data:{...receipt,event_id:'8b42d4c2-8bd2-4f4a-8a52-37275f1c14ef'},error:null});await Promise.all([original,reopened]);});
+ expect(writes).toBe(1);
+});
+
+const useRecovery = () => { recoveryOwner={circleId:'circle-a',scope:{userId:'alice',isCurrent:entryIsCurrent}}; };
+it('bounds a held post and Check stays read-only while the old transaction can still arrive',async()=>{
+ jest.useFakeTimers();const held=deferred<any>();mockRpc.mockReturnValueOnce(held.promise);useRecovery();await mount();let first!:Promise<any>;
+ act(()=>{first=hook.mutateAsync(args()).catch(e=>e);});await flush();
+ await act(async()=>{await jest.advanceTimersByTimeAsync(12001);});expect(isUnconfirmedCirclePlanCreation(await first)).toBe(true);
+ expect(hook.recovery?.payload.p_title).toBe('Beach');expect(hook.postStillRunning).toBe(true);
+ await act(async()=>{expect(await hook.checkPost()).toBeNull();await expect(hook.retryPost()).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
+ expect(mockRpc).toHaveBeenCalledTimes(1);
+ await act(async()=>{held.resolve({data:receipt,error:null});});
+ mockStatus.mockResolvedValue({data:receipt,error:null});await act(async()=>{expect(await hook.checkPost()).toEqual(receipt);});
+ expect(hook.recovery).toBeNull();expect(mockRpc).toHaveBeenCalledTimes(1);jest.useRealTimers();
+});
+it('retries exactly the persisted request after a lost response, then permits an intentional separate plan',async()=>{
+ mockRpc.mockResolvedValueOnce({data:null,error:{message:'Lost'},status:0});useRecovery();await mount();
+ await act(async()=>{await hook.mutateAsync(args({memberUserIds:['bob'],imageUrl:'https://example.test/photo.jpg'})).catch(()=>{});});
+ const first=mockRpc.mock.calls[0][1];act(()=>tree.unmount());client.clear();await mount();
+ await act(async()=>{expect(await hook.checkPost()).toBeNull();});expect(mockRpc).toHaveBeenCalledTimes(1);
+ await act(async()=>{expect(await hook.retryPost()).toEqual(receipt);});expect(mockRpc.mock.calls[1][1]).toEqual(first);
+ await act(async()=>{await hook.mutateAsync(args({title:'Deliberately different'}));});
+ expect(mockRpc.mock.calls[2][1].p_request_id).not.toBe(first.p_request_id);
+});
+it('does not clear an earlier unknown post just because its explicit replay is refused',async()=>{
+ useRecovery();mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();
+ await act(async()=>{await hook.mutateAsync(args()).catch(()=>{});});
+ mockRpc.mockResolvedValueOnce({data:null,error:{message:'Denied'},status:403});
+ await act(async()=>{await expect(hook.retryPost()).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
+ expect(hook.recovery).not.toBeNull();mockStatus.mockResolvedValue({data:receipt,error:null});
+ await act(async()=>{expect(await hook.checkPost()).toEqual(receipt);});expect(mockRpc).toHaveBeenCalledTimes(2);
+});
+it('ignores an exact delayed status after the recovery visit retires',async()=>{
+ useRecovery();mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();await act(async()=>{await hook.mutateAsync(args()).catch(()=>{});});
+ const held=deferred<any>();mockStatus.mockReturnValue(held.promise);let checked!:Promise<any>;
+ act(()=>{checked=hook.checkPost().catch(e=>e);});await flush();current=false;
+ await act(async()=>{held.resolve({data:receipt,error:null});expect(isObsoleteCirclePlanOperation(await checked)).toBe(true);});
+ expect(invalidate).not.toHaveBeenCalled();expect((await AsyncStorage.getAllKeys()).length).toBe(1);
+});
+
+it('does not reuse another account’s original request on recovery',async()=>{
+ useRecovery();mockRpc.mockResolvedValueOnce({data:null,error:null});await mount();await act(async()=>{await hook.mutateAsync(args()).catch(()=>{});});
+ mockAuthListener?.('SIGNED_IN',{user:{id:'alice'}});mockAuthListener?.('SIGNED_IN',{user:{id:'bob'}});
+ mockGetUser.mockResolvedValue({data:{user:{id:'bob'}},error:null});
+ await act(async()=>{await expect(hook.checkPost()).rejects.toBeInstanceOf(Error);await expect(hook.retryPost()).rejects.toBeInstanceOf(Error);});
+ expect(mockRpc).toHaveBeenCalledTimes(1);expect(mockStatus).not.toHaveBeenCalled();
+});
+it('retains exact recovery but releases the transport lock after a synchronous transport exception',async()=>{
+ useRecovery();mockRpc.mockImplementationOnce(()=>{throw new TypeError('Transport setup failed');});await mount();
+ await act(async()=>{await expect(hook.mutateAsync(args())).rejects.toBeInstanceOf(UnconfirmedCirclePlanCreationError);});
+ expect(hook.postStillRunning).toBe(false);expect(hook.recovery).not.toBeNull();
+ await act(async()=>{expect(await hook.retryPost()).toEqual(receipt);});expect(mockRpc.mock.calls[1][1]).toEqual(mockRpc.mock.calls[0][1]);
 });

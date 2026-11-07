@@ -53,7 +53,7 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   jest.useFakeTimers(); live = true;
   mockAuth.mockReset().mockResolvedValue(account());
-  mockRpc.mockReset().mockImplementation(async (name: string) => ({ data: name === 'create_circle' ? ID : name === 'create_circle_plan' ? { event_id: ID, has_own_chat: false } : name === 'invite_to_circle' ? 1 : name === 'leave_circle' ? 'left' : name === 'save_circle_identity_once' ? {status:'saved'} : null, error: null, status: 200 }));
+  mockRpc.mockReset().mockImplementation(async (name: string) => ({ data: name === 'create_circle' ? ID : name === 'create_circle_plan_once' ? { event_id: ID, has_own_chat: false } : name === 'invite_to_circle' ? 1 : name === 'leave_circle' ? 'left' : name === 'save_circle_identity_once' ? {status:'saved'} : null, error: null, status: 200 }));
 });
 afterEach(() => { act(() => tree?.unmount()); tree = undefined; client?.clear(); jest.useRealTimers(); });
 
@@ -67,8 +67,8 @@ it.each(modes)('%s recovers a stalled account check without dispatching its late
   expect(mockRpc).toHaveBeenCalledTimes(1); expect(pending).toBe(false);
 });
 
-it.each(['plan','invite','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
-  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ plan: 'create_circle_plan', invite: 'invite_to_circle', leave: 'leave_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
+it.each(['invite','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
+  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ invite: 'invite_to_circle', leave: 'leave_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
   await mount(mode); let settled = false;
   act(() => { void submit().then(() => { settled = true; }, () => { settled = true; }); }); await tick(20000);
   expect(pending).toBe(true); expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1);
@@ -98,4 +98,13 @@ it('bounds a dispatched create while preserving its exact late receipt for a lat
   await act(async()=>{gate.resolve({data:ID,error:null,status:200});});await tick(1);
   expect((await readCircleCreationAttempt('alice'))?.circleId).toBe(ID);
   expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+it('bounds a dispatched plan while retaining its unresolved durable post',async()=>{
+ const gate=deferred<any>();mockRpc.mockReturnValueOnce(gate.promise);await mount('plan');let outcome:unknown;
+ act(()=>{void submit().catch(error=>{outcome=error;});});await tick(20000);
+ expect(pending).toBe(false);expect(outcome).toBeInstanceOf(Error);expect(mockRpc).toHaveBeenCalledTimes(1);
+ await act(async()=>{await submit().catch(()=>{});});expect(mockRpc).toHaveBeenCalledTimes(1);
+ await act(async()=>{gate.resolve({data:{event_id:ID,has_own_chat:false},error:null,status:200});});
+ expect((await AsyncStorage.getAllKeys()).some(key=>key.startsWith('wu.circlePlanPost.v1.'))).toBe(true);
 });

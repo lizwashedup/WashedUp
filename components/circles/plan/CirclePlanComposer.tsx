@@ -137,10 +137,16 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
   contextCurrent: () => boolean; dismissCurrent: () => boolean; retire: () => void }) {
   const styles = useMemo(() => composerStyles(appearance), [appearance]);
   const strangerMax = isDm ? DM_STRANGER_MAX : STRANGER_MAX;
-  const createPlan = useCreateCirclePlan();
+  const recoveryOwner = useMemo(() => ({ circleId, scope: entryScope }), [circleId, entryScope]);
+  const createPlan = useCreateCirclePlan(recoveryOwner);
   const queryClient = useQueryClient();
-  const [unconfirmed, setUnconfirmed] = useState(false);
+  const [localUnconfirmed, setUnconfirmed] = useState(false);
+  const unconfirmed = localUnconfirmed || !!createPlan.recovery || !!createPlan.recoveryError;
   const unconfirmedRef = useRef(false);
+  unconfirmedRef.current = unconfirmed || !!createPlan.recoveryLoading;
+  const postedRevision = useRef<number | null>(null);
+  const [checkHint, setCheckHint] = useState<string | null>(null);
+  useEffect(() => { if (unconfirmed) scrollRef.current?.scrollTo({ y: 0, animated: true }); }, [unconfirmed]);
   const [saving, setSaving] = useState(false);
   const pending = useRef<object | null>(null);
   const revision = useRef(0);
@@ -378,6 +384,7 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
     }
     const attempt = {};
     const submittedRevision = revision.current;
+    postedRevision.current = submittedRevision;
     pending.current = attempt;
     setSaving(true);
     try {
@@ -434,8 +441,48 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
     if (contextCurrent()) onCheckPlans?.();
   };
 
+  const recoverPost = async (retry: boolean) => {
+    if (!entryScope?.isCurrent() || pending.current || createPlan.isCheckingPost) return;
+    const attempt = {}; pending.current = attempt; setCheckHint(null);
+    try {
+      const result = retry ? await createPlan.retryPost() : await createPlan.checkPost();
+      if (!entryScope.isCurrent() || pending.current !== attempt) return;
+      if (!result) { setCheckHint('Still checking. No new plan was posted by this check.'); return; }
+      unconfirmedRef.current = false; setUnconfirmed(false);
+      if (revision.current !== (postedRevision.current ?? 0)) {
+        setHint('Your earlier plan was posted. Your latest changes are still here.'); return;
+      }
+      close();
+      // Recovery is a deliberate read/retry of the earlier post. Do not repeat
+      // its notification invitation or create another plan on this route.
+      if (contextCurrent()) onPosted(result);
+    } catch (error) {
+      if (entryScope.isCurrent() && pending.current === attempt && !isObsoleteCirclePlanOperation(error))
+        setCheckHint('Couldn’t confirm yet. Check again when you’re connected.');
+    } finally { if (pending.current === attempt) pending.current = null; }
+  };
+  const recoveryPanel = unconfirmed ? <View style={styles.uncertainPanel} accessibilityLiveRegion="polite">
+    <Text style={styles.uncertainTitle}>Check before posting again</Text>
+    <Text style={styles.uncertainText}>{createPlan.recovery?.payload.p_title as string || 'Your earlier plan'}</Text>
+    <Text style={styles.uncertainText}>Your earlier post may still be finishing. Check its status before starting another plan. Retry uses that same post, not your current edits.</Text>
+    {checkHint ? <Text style={styles.uncertainText}>{checkHint}</Text> : null}
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check post status"
+      disabled={createPlan.isCheckingPost || saving} accessibilityState={{ disabled: createPlan.isCheckingPost || saving, busy: createPlan.isCheckingPost }}
+      onPress={() => void recoverPost(false)} style={styles.postBtn}>
+      <Text style={styles.postBtnText} numberOfLines={1} adjustsFontSizeToFit>Check status</Text>
+    </TouchableOpacity>
+    {createPlan.recovery && !createPlan.postStillRunning ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry original post"
+      disabled={createPlan.isCheckingPost || saving} accessibilityState={{disabled: createPlan.isCheckingPost || saving}}
+      onPress={() => void recoverPost(true)} style={styles.postBtn}>
+      <Text style={styles.postBtnText} numberOfLines={1} adjustsFontSizeToFit>Retry post</Text>
+    </TouchableOpacity> : null}
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={onCheckPlans ? 'View circle' : 'Close'} onPress={checkPlans} style={styles.postBtn}>
+      <Text style={styles.postBtnText} numberOfLines={1} adjustsFontSizeToFit>{onCheckPlans ? 'View circle' : 'Close'}</Text>
+    </TouchableOpacity>
+  </View> : null;
+
   const postDisabled =
-    unconfirmed || saving || imageLoading || !!preparedPhoto.current ||
+    unconfirmed || createPlan.recoveryLoading || createPlan.isCheckingPost || saving || imageLoading || !!preparedPhoto.current ||
     !entryAvailable ||
     !title.trim() ||
     (visibilityOpen && !description.trim()) ||
@@ -456,6 +503,9 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
           <Text style={styles.sheetEyebrow}>{circleName}</Text>
           <Text style={styles.sheetTitle}>{COPY.circlePlanComposerTitle}</Text>
         </View>
+
+        {recoveryPanel}
+        {createPlan.recoveryLoading ? <Text style={styles.uncertainText}>Checking earlier posts…</Text> : null}
 
         {/* What */}
         <EditorialTitleField
@@ -708,14 +758,7 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
           <InlineNudge appearance={appearance} text={hint} />
         ) : null}
 
-        {unconfirmed ? <View style={styles.uncertainPanel} accessibilityLiveRegion="polite">
-          <Text style={styles.uncertainTitle}>Check before posting again</Text>
-          <Text style={styles.uncertainText}>We didn’t receive confirmation. Your plan may already be saved. Check the circle before posting again.</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={onCheckPlans ? 'View circle' : 'Close'}
-            onPress={checkPlans} style={styles.postBtn}>
-            <Text style={styles.postBtnText}>{onCheckPlans ? 'View circle' : 'Close'}</Text>
-          </TouchableOpacity>
-        </View> : <TouchableOpacity
+        {!unconfirmed ? <TouchableOpacity
           activeOpacity={0.85}
           onPress={onPost}
           accessibilityRole="button"
@@ -724,9 +767,9 @@ function CirclePlanComposerVisit({ visible, onClose, circleId, circleName, membe
           style={[styles.postBtn, postDisabled && styles.postBtnDisabled]}
         >
           <Text style={styles.postBtnText}>
-            {appearance ? (saving ? 'Posting…' : 'Post plan') : (visibilityOpen ? COPY.circlePlanPostToFeed : COPY.circlePlanPostToCircle(circleName))}
+            {saving ? 'Posting…' : appearance ? 'Post plan' : (visibilityOpen ? COPY.circlePlanPostToFeed : COPY.circlePlanPostToCircle(circleName))}
           </Text>
-        </TouchableOpacity>}
+        </TouchableOpacity> : null}
       </ScrollView>
     </BottomSheet>
   );

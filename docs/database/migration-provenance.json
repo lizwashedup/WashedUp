@@ -177,6 +177,11 @@
       "file": "docs/database/review-only/20261107015500_circle_identity_receipts.sql",
       "reason": "Private Circle identity receipt proposal. Not deployed; requires separately approved production-schema copy verification of admin, revision, trigger and grant contracts and separate rollout approval.",
       "source": "docs/database/review-only/20261107015500_circle_identity_receipts.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261107023500_circle_plan_post_receipts.sql",
+      "reason": "Private exact Circle plan creation receipts. Not deployed; requires separately approved schema-copy verification of create_circle_plan, audience rules, message/notification triggers and grants, then separate rollout approval.",
+      "source": "docs/database/review-only/20261107023500_circle_plan_post_receipts.sql"
     }
   ],
   "unresolved_versions": [

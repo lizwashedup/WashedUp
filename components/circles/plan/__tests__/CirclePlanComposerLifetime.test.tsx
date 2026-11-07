@@ -23,7 +23,8 @@ jest.mock('expo-image-picker', () => ({ requestMediaLibraryPermissionsAsync: (..
 jest.mock('expo-image-manipulator', () => ({ manipulateAsync: (...a:any[])=>mockPrepare(...a), SaveFormat: { JPEG: 'jpeg' } }));
 jest.mock('../../../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: (...a:any[])=>mockUpload(...a) }));
 jest.mock('../../../../lib/supabase', () => ({ supabase: { auth: { getUser: (...a:any[])=>mockGetUser(...a), refreshSession: (...a:any[])=>mockRefresh(...a) } } }));
-const mockMutate = jest.fn();
+const mockMutate = jest.fn(), mockCheckPost=jest.fn(), mockRetryPost=jest.fn();
+let mockRecovery:any=null;
 const mockInvalidate = jest.fn().mockResolvedValue(undefined);
 jest.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: mockInvalidate }) }));
 jest.mock('../../../yours/state/useAuthUserId', () => ({ useAuthUserId: () => ({ data: mockViewer }) }));
@@ -31,7 +32,7 @@ jest.mock('../../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
  const React = require('react'); const viewerId = mockViewer, epoch = mockEpoch;
  return React.useMemo(() => ({ viewerId, epoch, isLoading: false, error: null, isCurrent: () => viewerId === mockViewer && epoch === mockEpoch }), [viewerId, epoch]);
 } }));
-jest.mock('../../../../hooks/useCreateCirclePlan', () => ({ useCreateCirclePlan: () => ({ mutateAsync: mockMutate, isPending: false }), isObsoleteCirclePlanOperation: () => false, isUnconfirmedCirclePlanCreation: (error: Error) => error?.name === 'UnconfirmedCirclePlanCreationError' }));
+jest.mock('../../../../hooks/useCreateCirclePlan', () => ({ useCreateCirclePlan: () => ({ mutateAsync: mockMutate, isPending: false, recovery:mockRecovery, checkPost:mockCheckPost, retryPost:mockRetryPost }), isObsoleteCirclePlanOperation: () => false, isUnconfirmedCirclePlanCreation: (error: Error) => error?.name === 'UnconfirmedCirclePlanCreationError' }));
 jest.mock('../../../yours/primitives/BottomSheet', () => ({ __esModule: true, default: ({children}: any) => children }));
 jest.mock('../../../composer/EditorialTitleField', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../../composer/CollapsibleCalendar', () => ({ __esModule: true, default: () => null }));
@@ -61,6 +62,7 @@ const descriptionField = () => tree.root.findAllByType(TextInput).find(n=>n.prop
 function fill(title='Beach day') { act(()=>{field().onChangeText(title);messageField().onChangeText('Come along for a sunset walk.'); tree.root.findByType(CollapsibleCalendar).props.onSelect({year:2040,month:8,day:15});}); }
 async function settle(work: () => void) { await act(async()=>{work(); await Promise.resolve();}); }
 beforeEach(()=>{
+ mockRecovery=null;mockCheckPost.mockReset();mockRetryPost.mockReset();
  jest.clearAllMocks(); mockViewer='alice';mockEpoch=1;
  for(const mock of [mockPermission,mockPicker,mockPrepare,mockUpload,mockGetUser,mockRefresh])mock.mockReset();
  mockPermission.mockResolvedValue({status:'granted'});mockPicker.mockResolvedValue({canceled:false,assets:[{uri:'file:///picked.jpg'}]});
@@ -438,4 +440,24 @@ it.each(['circle-roundtrip', 'visibility-roundtrip'] as const)('retires a photo 
  expect(tree.root.findAllByType(Image).filter(n=>n.props.accessibilityLabel==='Plan photo')).toHaveLength(0);
  expect(tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Add photo')!.props.disabled).toBe(false);
  const currentPost=tree.root.findAllByType(TouchableOpacity).find(n=>n.props.onPress===post())!;expect(currentPost.props.disabled).toBe(false);
+});
+
+it('recovers an earlier exact post without another create or notification invitation',async()=>{
+ mockRecovery={requestId:'original',payload:{p_title:'Earlier walk'}};mockCheckPost.mockResolvedValue(receipt);await render();
+ expect(mockMutate).not.toHaveBeenCalled();await act(async()=>{press('Check status')();});
+ expect(mockCheckPost).toHaveBeenCalledTimes(1);expect(props.onPosted).toHaveBeenCalledWith(receipt);expect(mockNotificationRequest).not.toHaveBeenCalled();
+});
+it('does not discard newer form edits when checking the earlier post',async()=>{
+ mockRecovery={requestId:'original',payload:{p_title:'Earlier walk'}};mockCheckPost.mockResolvedValue(receipt);await render();fill('Newer idea');
+ await act(async()=>{press('Check status')();});expect(field().value).toBe('Newer idea');expect(props.onPosted).not.toHaveBeenCalled();expect(props.onClose).not.toHaveBeenCalled();
+});
+it('ignores a recovery result after Close and preserves the replacement form',async()=>{
+ mockRecovery={requestId:'original',payload:{p_title:'Earlier walk'}};const pending=deferred<any>();mockCheckPost.mockReturnValue(pending.promise);await render();
+ act(()=>press('Check status')());act(()=>sheet().onClose());props.visible=false;await render();props.visible=true;mockRecovery=null;await render();fill('New visit');
+ await settle(()=>pending.resolve(receipt));expect(field().value).toBe('New visit');expect(props.onPosted).not.toHaveBeenCalled();expect(mockNotificationRequest).not.toHaveBeenCalled();
+});
+it('does not dispatch duplicate Check or Retry taps while status is pending',async()=>{
+ mockRecovery={requestId:'original',payload:{p_title:'Earlier walk'}};const pending=deferred<any>();mockCheckPost.mockReturnValue(pending.promise);await render();
+ act(()=>{press('Check status')();press('Retry post')();press('Check status')();});expect(mockCheckPost).toHaveBeenCalledTimes(1);expect(mockRetryPost).not.toHaveBeenCalled();
+ await settle(()=>pending.resolve(null));expect(props.onPosted).not.toHaveBeenCalled();expect(mockMutate).not.toHaveBeenCalled();
 });
