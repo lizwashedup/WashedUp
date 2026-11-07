@@ -202,3 +202,43 @@ it('does not resume the old account before its pending render catches up', async
   await resume(); expect(mockRefetch).not.toHaveBeenCalled();
   await resume(); expect(mockRefetch).toHaveBeenCalledTimes(1);
 });
+
+it('refreshes Circle detail admission after returning from a covering profile', async () => {
+  await render(); const old = board(), scope = plan().scope;
+  mockFocused = false; await render();
+  mockRefetch.mockImplementation(async () => { mockUnavailable = true; });
+  mockFocused = true; await render(); await render();
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(tree.root.findAllByType(CircleNoticeboard)).toHaveLength(0);
+  expect(scope.isCurrent()).toBe(false);
+  act(() => { old.onOpenChat(); old.onPostPlan(); });
+  expect(mockDismissTo).not.toHaveBeenCalled(); expect(plan().visible).toBe(false);
+});
+
+it('keeps same-account child form ownership on a successful detail route return', async () => {
+  await render(); const scope = plan().scope;
+  act(() => { board().onPostPlan(); board().onAddPeople(); });
+  mockFocused = false; await render(); mockFocused = true; await render();
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(plan().scope).toBe(scope); expect(scope.isCurrent()).toBe(true);
+  expect(plan().visible).toBe(true); expect(add().visible).toBe(true);
+  await render(); expect(mockRefetch).toHaveBeenCalledTimes(1);
+});
+it('keeps uncertain detail return admission retryable without reviving retired controls', async () => {
+  await render(); const old = board(); mockFocused = false; await render();
+  mockRefetch.mockImplementation(async () => { mockError = true; });
+  mockFocused = true; await render(); await render();
+  expect(tree.root.findAllByType(CircleNoticeboard)).toHaveLength(0);
+  mockRefetch.mockImplementation(async () => { mockError = false; });
+  await act(async () => button(COPY.circlesRetry).onPress()); await render();
+  act(() => old.onPostPlan()); expect(plan().visible).toBe(false);
+  expect(mockRefetch).toHaveBeenCalledTimes(2);
+  act(() => board().onPostPlan()); expect(plan().visible).toBe(true);
+});
+it('revalidates only the current account after it changes behind a child route', async () => {
+  await render(); const scope = plan().scope; mockFocused = false; await render();
+  mockUser = 'bob'; mockEpoch++; await render();
+  mockRefetch.mockImplementation(async () => { expect(mockUser).toBe('bob'); });
+  mockFocused = true; await render(); expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(scope.isCurrent()).toBe(false); expect(plan().scope.userId).toBe('bob');
+});
