@@ -28,7 +28,7 @@ let mockFocusEnter:(()=>void|(()=>void))|undefined;
 const mockRetryMembers = jest.fn().mockResolvedValue(undefined);
 let mockMessages: any[], mockFirstMessage: any, mockMembers: any[];
 let mockSaidHi: boolean | undefined, mockLedCommunities: { id: string }[];
-let mockArchived = false;
+let mockArchived = false, mockEventTopic = true;
 let mockMessagesLoading = false;
 const mockPush = jest.fn(), mockInvalidate = jest.fn().mockResolvedValue(undefined);
 const mockRefresh = jest.fn().mockResolvedValue(undefined);
@@ -80,10 +80,10 @@ jest.mock('@tanstack/react-query', () => ({
     const data: Record<string, unknown> = {
       'topic-my-membership': { status: mockMembership },
       'community-chat-cards': {
-        cards: [{ community_id: 'community-a', name: 'Sunset Club LA', main_chat_name: 'After Glow', topics: [] }],
-        attendee_topics: [{ id: mockRoomId, name: 'Event room', explore_event_id: 'event-a' }],
+        cards: [{ community_id: 'community-a', name: 'Sunset Club LA', main_chat_name: 'After Glow', topics: mockEventTopic ? [] : [{ id: mockRoomId, name: 'Ordinary room', explore_event_id: null }] }],
+        attendee_topics: mockEventTopic ? [{ id: mockRoomId, name: 'Event room', explore_event_id: 'event-a' }] : [],
       },
-      'topic-meta': { id: mockRoomId, community_id: 'community-a', explore_event_id: 'event-a', archived: mockArchived, explore_events: { title: 'Sunset volleyball', host_user_id: 'creator-a' } },
+      'topic-meta': { id: mockRoomId, community_id: 'community-a', explore_event_id: mockEventTopic ? 'event-a' : null, archived: mockArchived, explore_events: mockEventTopic ? { title: 'Sunset volleyball', host_user_id: 'creator-a' } : null },
       'topic-first-message': mockFirstMessage,
       'topic-said-hi': mockSaidHi,
       'creator-access': { ledCommunities: mockLedCommunities },
@@ -135,7 +135,7 @@ function type(text: string) { act(() => input().props.onChangeText(text)); }
 beforeEach(async () => {
   mockLocation.mockReset().mockResolvedValue(undefined);
   await AsyncStorage.clear(); mockConfirmed.clear(); mockCheckAttempt.mockReset().mockImplementation(async (_room: string, attempt: {id:string}) => mockConfirmed.has(attempt.id));
-  jest.clearAllMocks(); mockMembershipAbsent=false;mockMembershipQuery=undefined;mockGrouping=true;mockGetMembership.mockReset().mockResolvedValue({status:'active'}); mockMembershipRefetch.mockReset().mockResolvedValue({}); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
+  jest.clearAllMocks(); mockEventTopic=true;mockMembershipAbsent=false;mockMembershipQuery=undefined;mockGrouping=true;mockGetMembership.mockReset().mockResolvedValue({status:'active'}); mockMembershipRefetch.mockReset().mockResolvedValue({}); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
   mockMessagesLoading=false;mockLedCommunities=[];mockFirstMessage=null;mockMessages=[];mockMembers=[];mockArchived=false;
   mockSend.mockResolvedValue(undefined); mockRefresh.mockResolvedValue(undefined); mockVerifyTarget.mockResolvedValue(undefined);
   mockCameraPermission.mockResolvedValue({status:'granted'}); mockCamera.mockResolvedValue({canceled:false,assets:[{uri:'file:///camera.jpg'}]});
@@ -850,4 +850,41 @@ it('rechecks parent membership after returning from a child route without foregr
   expect(mockMembershipRefetch).toHaveBeenCalledTimes(1);
   expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(0);
   expect(mockSend).not.toHaveBeenCalled();
+});
+
+it('retires an ordinary topic composer after voluntary parent departure and preserves the draft for rejoin',async()=>{
+ mockEventTopic=false;await mount();type('Topic goodbye draft');const priorSend=composer().onSend;
+ mockMembership='left';await update();expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+ expect(tree.root.findAllByType(Text).some(node=>node.props.children==='you left this community.')).toBe(true);
+ await act(async()=>priorSend());expect(mockSend).not.toHaveBeenCalled();
+ mockMembership='active';await update();expect(input().props.value).toBe('Topic goodbye draft');
+});
+it('keeps valid event-topic composition independent of voluntary parent departure',async()=>{
+ mockEventTopic=true;await mount();type('Event-only attendee');mockMembership='left';await update();
+ expect(input().props.value).toBe('Event-only attendee');await act(async()=>composer().onSend());expect(mockSend).toHaveBeenCalledTimes(1);
+});
+it('retires a selected photo and its old Send after ordinary parent departure',async()=>{
+ mockEventTopic=false;await mount();await act(async()=>composer().photo.onPress());expect(preview().visible).toBe(true);
+ const send=preview().onSend;mockMembership='left';await update();expect(preview().visible).toBe(false);
+ await act(async()=>send());expect(mockUpload).not.toHaveBeenCalled();expect(mockSend).not.toHaveBeenCalled();
+});
+
+it('does not dispatch a pending original retry after ordinary parent access ends during target verification',async()=>{
+ mockEventTopic=false;mockSend.mockRejectedValueOnce(Error('offline'));await mount();type('Keep the original');
+ await act(async()=>composer().onSend());expect(mockSend).toHaveBeenCalledTimes(1);
+ const target=deferred();mockVerifyTarget.mockReturnValueOnce(target.promise);let work!:Promise<void>;
+ act(()=>{work=composer().onSend();});await flush();expect(mockVerifyTarget).toHaveBeenCalledTimes(1);
+ mockMembership='left';await update();await act(async()=>{target.resolve();await work;});
+ expect(mockSend).toHaveBeenCalledTimes(1);
+ mockMembership='active';await update();
+ // An uncertain original is deliberately detached from the next editable
+ // draft. It remains in the recovery card with the same durable send ID.
+ const stored=JSON.parse((await AsyncStorage.getItem(`topic-composer:v1:${mockViewerId}:${mockRoomId}`))!);
+ expect(stored.draft.attempt).toMatchObject({text:'Keep the original',id:mockSend.mock.calls[0][4]});
+ expect(tree.root.findAllByType(Text).some(node=>node.props.children==='Keep the original')).toBe(true);
+ const retry=tree.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==='Retry original message')!;
+ expect(retry.props.disabled).toBe(false);
+ await act(async()=>{retry.props.onPress();});await flush();
+ expect(mockSend).toHaveBeenCalledTimes(2);
+ expect(mockSend.mock.calls[1][4]).toBe(mockSend.mock.calls[0][4]);
 });

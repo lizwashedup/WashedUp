@@ -268,7 +268,6 @@ export default function CommunityTopicScreen() {
     enabled: !!topicMeta?.community_id && !!muteViewer.viewerId && !muteViewer.isLoading && !muteViewer.error,
     staleTime: 60_000,
   });
-  const removedFromCommunity = myMembership?.status === 'removed' || myMembership?.status === 'banned';
 
   // inventory C-14: a real creator moderation action, distinct from the
   // report/block every member already has. Gated on this topic's OWN
@@ -330,6 +329,10 @@ export default function CommunityTopicScreen() {
   const eventTopic = !!eventId;
   const roomKindUnknown = usesLegacyHistory && !eventTopic
     && detailEventId !== null && topic?.explore_event_id !== null;
+  // Event-topic membership is attendance-owned; voluntarily leaving the
+  // parent community must not revoke that independent event access.
+  const communityAccessEnded = myMembership?.status === 'removed' || myMembership?.status === 'banned'
+    || (myMembership?.status === 'left' && !eventTopic && !roomKindUnknown);
   const checkingRoomKind = topicDetails.isFetching || chatCards.isFetching;
 
   const { data: firstMessage, isSuccess: firstMessageLoaded } = useQuery({
@@ -390,6 +393,14 @@ export default function CommunityTopicScreen() {
     return () => { if (activeEntryVisit.current === entryVisit) activeEntryVisit.current = null; };
   }, [entryVisit]);
   const entryIsCurrent = useCallback(() => activeEntryVisit.current === entryVisit && topicScopeCurrent() && (!introLayout || (coreFocused.current && AppState.currentState === 'active')), [entryVisit, topicScopeCurrent, !!introLayout]);
+  const sendAdmission = useMemo(() => ({ allowed: !communityAccessEnded && !roomKindUnknown && !archived }),
+    [entryVisit, communityAccessEnded, roomKindUnknown, archived]);
+  const currentSendAdmission = useRef<typeof sendAdmission | null>(null);
+  useLayoutEffect(() => {
+    currentSendAdmission.current = sendAdmission;
+    return () => { if (currentSendAdmission.current === sendAdmission) currentSendAdmission.current = null; };
+  }, [sendAdmission]);
+  const sendAdmissionIsCurrent = () => entryIsCurrent() && sendAdmission.allowed && currentSendAdmission.current === sendAdmission;
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
     moderatorVisit.current = {};
@@ -450,7 +461,7 @@ export default function CommunityTopicScreen() {
     return 'several people are typing...';
   }, [typingUsers]);
 
-  const attachmentAllowed = !draftBlocked && !!myId && !removedFromCommunity && !archived && !gated && !gateChecking && !editingMessageId;
+  const attachmentAllowed = !draftBlocked && !!myId && !communityAccessEnded && !archived && !gated && !gateChecking && !editingMessageId;
   const attachmentVisit = useMemo(() => ({ allowed: attachmentAllowed }), [entryVisit, attachmentAllowed]);
   const activeAttachmentVisit = useRef<typeof attachmentVisit | null>(null);
   useLayoutEffect(() => {
@@ -467,10 +478,10 @@ export default function CommunityTopicScreen() {
     setDraft(''); draftRef.current = ''; setEditingMessageId(null);
     setReplyingTo(null); setMentionQuery(null); stopTyping();
   };
-  const menuContext = useRef({ messages, archived, allowed: !removedFromCommunity && !gated && !gateChecking });
-  menuContext.current = { messages, archived, allowed: !removedFromCommunity && !gated && !gateChecking };
+  const menuContext = useRef({ messages, archived, allowed: !communityAccessEnded && !gated && !gateChecking });
+  menuContext.current = { messages, archived, allowed: !communityAccessEnded && !gated && !gateChecking };
   const selectedMessageCurrent = (messageId: string) => entryIsCurrent() && menuContext.current.allowed && menuContext.current.messages.some(message => message.id === messageId);
-  useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, messages, removedFromCommunity, archived, gated, gateChecking]);
+  useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, messages, communityAccessEnded, archived, gated, gateChecking]);
   useEffect(() => {
     if (!composerFocusRequest) return;
     const frame = requestAnimationFrame(() => { if (entryIsCurrent()) composerInputRef.current?.focus(); });
@@ -478,8 +489,8 @@ export default function CommunityTopicScreen() {
   }, [composerFocusRequest, entryIsCurrent]);
   const reactionRoomItems = useRef(roomItems); reactionRoomItems.current = roomItems;
   const reactionTopicMessages = useRef(messages); reactionTopicMessages.current = messages;
-  const reactionReadable = useRef(false); reactionReadable.current = !removedFromCommunity && !gated && !gateChecking;
-  const reactionCanRemove = useRef(false); reactionCanRemove.current = !archived && !removedFromCommunity && !gated && !gateChecking;
+  const reactionReadable = useRef(false); reactionReadable.current = !communityAccessEnded && !gated && !gateChecking;
+  const reactionCanRemove = useRef(false); reactionCanRemove.current = !archived && !communityAccessEnded && !gated && !gateChecking;
   const openReactionDetails = (messageId: string, source: 'topic' | 'broadcast' = 'topic') => {
     const isCurrent = () => entryIsCurrent() && reactionReadable.current && (source === 'topic'
       ? reactionTopicMessages.current.some(message => message.id === messageId)
@@ -488,7 +499,7 @@ export default function CommunityTopicScreen() {
     setReactionDetails({ source, messageId, scope: { userId: myId, isCurrent }, canRemove: () => entryIsCurrent() && reactionCanRemove.current,
       onChanged: () => { if (isCurrent()) void refreshMessages(true); } });
   };
-  useEffect(() => { if (reactionDetails && !reactionDetails.scope.isCurrent()) setReactionDetails(null); }, [reactionDetails, messages, roomItems, removedFromCommunity, entryVisit]);
+  useEffect(() => { if (reactionDetails && !reactionDetails.scope.isCurrent()) setReactionDetails(null); }, [reactionDetails, messages, roomItems, communityAccessEnded, entryVisit]);
   const currentAction = (action: () => void) => () => { if (entryIsCurrent()) action(); };
   const reactToMessage = async (messageId: string, key: string, retry?: () => Promise<void>) => {
     if (!entryIsCurrent() || (retry && (!selectedMessageCurrent(messageId) || menuContext.current.archived))) return;
@@ -523,8 +534,8 @@ export default function CommunityTopicScreen() {
   const photos = useMemo(() => messages.flatMap(message =>
     message.id !== welcomeMessage?.id && message.image_url
       ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [messages, welcomeMessage?.id]);
-  const photoSelection = useChatPhotoSelection(`topic:${id}:${muteViewer.viewerId}`, removedFromCommunity || gated || gateChecking ? [] : photos);
-  const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !removedFromCommunity && !profileUserId && !photoSelection.selectedId;
+  const photoSelection = useChatPhotoSelection(`topic:${id}:${muteViewer.viewerId}`, communityAccessEnded || gated || gateChecking ? [] : photos);
+  const topicReadable = !messagesLoading && !messagesLoadError && !gated && !gateChecking && !communityAccessEnded && !profileUserId && !photoSelection.selectedId;
   const ordinaryRead = useVisibleCommunityRead('topic', id ?? '', coreReadScope, messages, topicReadEnabled, topicReadable);
   const visibleRead = useRef<(items: ViewToken<TopicMessage | CommunityRoomMessage>[]) => void>(() => {});
   visibleRead.current = items => {
@@ -584,7 +595,7 @@ export default function CommunityTopicScreen() {
     finally { if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
   const handleSend = async () => {
-    if (roomKindUnknown || !entryIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
+    if (!sendAdmissionIsCurrent() || !id || !readableScope || (!draft.trim() && !composerDraft.draft.attempt) || sendAttemptRef.current || (topicMeta && isEventRoomClosed(topicMeta))) return;
     const finishTiming = beginChatTiming('community-topic', 'send-to-confirmation');
     let timingOutcome: ChatTimingOutcome = 'retired';
     const token = {}; sendAttemptRef.current = token; setSending(true);
@@ -599,6 +610,7 @@ export default function CommunityTopicScreen() {
       const alreadyConfirmed = (resumingOriginal || original.kind === 'edit') && await checkTopicComposerAttempt(id, original, readableScope);
       if (!alreadyConfirmed) {
         if (resumingOriginal) await verifyTopicComposerTarget(id, original, readableScope);
+        if (!sendAdmissionIsCurrent()) throw new Error('This chat access changed. Your message is kept.');
         if (original.kind === 'edit') await editMessage(original.id, original.text, original.mentions, original.edit ?? undefined);
         else await sendMessage(original.text, undefined, original.replyId ?? undefined, undefined, original.id, original.mentions);
         // New text sends return only after their exact receipt is validated.
@@ -619,7 +631,7 @@ export default function CommunityTopicScreen() {
     } catch (error) {
       timingOutcome = 'error';
       if (original) composerDraft.restoreFailedText(original);
-      if (entryIsCurrent() && !isObsoleteTopicOperation(error)) setAlertInfo({ title: preparedOriginal || resumingOriginal ? 'Message not confirmed' : editingMessageId ? 'Changes not saved' : 'Message not sent', message: friendlyError(error, 'Your original message is kept. Check it before trying again.') });
+      if (sendAdmissionIsCurrent() && !isObsoleteTopicOperation(error)) setAlertInfo({ title: preparedOriginal || resumingOriginal ? 'Message not confirmed' : editingMessageId ? 'Changes not saved' : 'Message not sent', message: friendlyError(error, 'Your original message is kept. Check it before trying again.') });
     } finally { finishTiming(entryIsCurrent() ? timingOutcome : 'retired'); if (entryIsCurrent() && sendAttemptRef.current === token) { sendAttemptRef.current = null; setSending(false); } }
   };
 
@@ -1204,7 +1216,7 @@ export default function CommunityTopicScreen() {
           key={`${id}:${myId}:${topic.explore_event_id}`}
           topicId={id} eventId={topic.explore_event_id} owner={readableScope}
           canManage={iAmCreatorOrLeader}
-          canCreate={canSetWelcome && !messagesLoading && !messagesLoadError && !removedFromCommunity}
+          canCreate={canSetWelcome && !messagesLoading && !messagesLoadError && !communityAccessEnded}
           onSaved={refreshWelcome}
         />}
 
@@ -1336,11 +1348,11 @@ export default function CommunityTopicScreen() {
 
         </MessageViewport>
         <ComposerDock {...(Platform.OS === 'ios' ? { inset: insets.bottom } : {})}>
-        {roomKindUnknown ? null : removedFromCommunity ? (
+        {roomKindUnknown ? null : communityAccessEnded ? (
           <View style={styles.closedNote}>
             {/* SC-07: a real reason, not a silently-broken composer.
                 copy to the taste gate */}
-            <Text style={styles.closedText}>you were removed from this community.</Text>
+            <Text style={styles.closedText}>{myMembership?.status === 'left' ? 'you left this community.' : 'you were removed from this community.'}</Text>
           </View>
         ) : archived ? (
           <View style={styles.closedNote}>
@@ -1365,7 +1377,7 @@ export default function CommunityTopicScreen() {
               {composerDraft.error ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry message draft" style={styles.draftRecoveryAction} onPress={() => { void composerDraft.retry(); }}><Text style={styles.composerContextLabel}>Try again</Text></TouchableOpacity>
                 : composerDraft.draft.attempt ? <View style={{ flexDirection: 'row', gap: 20 }}>
                   <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check original message" style={styles.draftRecoveryAction} disabled={sending} onPress={() => { void checkPendingDraft(); }}><Text style={styles.composerContextLabel}>Check</Text></TouchableOpacity>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry original message" style={styles.draftRecoveryAction} disabled={sending || archived || removedFromCommunity} onPress={() => { void handleSend(); }}><Text style={styles.composerContextLabel}>Retry original</Text></TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry original message" style={styles.draftRecoveryAction} disabled={sending || archived || communityAccessEnded} onPress={() => { void handleSend(); }}><Text style={styles.composerContextLabel}>Retry original</Text></TouchableOpacity>
                 </View> : null}
             </View>
           </View>}
