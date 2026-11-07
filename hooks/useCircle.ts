@@ -170,7 +170,7 @@ export function useCircle(circleId: string | null | undefined) {
     if (!circleId || !isCurrent()) return;
     if (identity.error) { await store.retry(); return; }
     if (!ready) return;
-    return query.refetch();
+    return query.refetch({ cancelRefetch: false });
   }, [circleId, isCurrent, identity.error, store, ready, query.refetch]);
   return {
     ...query,

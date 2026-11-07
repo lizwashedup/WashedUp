@@ -12,6 +12,8 @@
  */
 import React, { useState, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
+import { useChatResumeRefresh } from '../../../../hooks/useChatResumeRefresh';
 import { GROUPS_ENABLED } from '../../../../constants/FeatureFlags';
 import { COPY } from '../../../../components/yours/state/constants';
 import { useCircle } from '../../../../hooks/useCircle';
@@ -38,6 +40,12 @@ function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSou
   const client = useQueryClient();
   const router = useRouter();
   const { data, isError, isLoading, isFetching, refetch, viewerId: myUserId, viewerEpoch: epoch, isCurrentViewer: isCurrentUser } = useCircle(circleId);
+  const focused = useIsFocused();
+  const contextVisible = useRef(false);
+  contextVisible.current = focused && !!myUserId;
+  // History errors do not establish admission. Review the authoritative Circle
+  // payload on foreground return, retaining the existing error/retry boundary.
+  useChatResumeRefresh(refetch, isCurrentUser, contextVisible);
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
