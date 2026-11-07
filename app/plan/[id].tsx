@@ -47,6 +47,7 @@ import {
     Share,
     StyleSheet,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from 'react-native';
 import type { GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
@@ -268,6 +269,9 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED);
   const appearance = useMemo(() => MEMBER_REDESIGN_APPEARANCE_ENABLED ? { fonts } : undefined, [fonts]);
   const styles = useMemo(() => appearance ? detailAppearance(legacyStyles, fonts) : legacyStyles, [appearance, fonts]);
+  const { width: actionWidth, fontScale } = useWindowDimensions();
+  const stackMemberActions = actionWidth / fontScale < 300;
+  const memberActionWidth = stackMemberActions && styles.memberActionFullWidth;
   const joinStyles = useMemo(() => appearance ? detailAppearance(legacyJoinStyles, fonts) : legacyJoinStyles, [appearance, fonts]);
   const manageStyles = useMemo(() => appearance ? manageAppearance(legacyManageStyles, fonts) : legacyManageStyles, [appearance, fonts]);
   const managePlacesStyles = useMemo(() => appearance ? detailAppearance(legacyManagePlacesStyles, fonts) : legacyManagePlacesStyles, [appearance, fonts]);
@@ -1557,24 +1561,24 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           <Text style={styles.exceptionBannerBody}>{circleQuery.isError || viewerQuery.isError || membersQuery.isError ? 'Couldn’t check the joining details.' : 'Checking the joining details…'}</Text>
           {circleQuery.isError || viewerQuery.isError || membersQuery.isError ? <TouchableOpacity style={styles.joinButton} onPress={() => { void circleQuery.refetch().catch(() => {}); void viewerQuery.refetch(); void membersQuery.refetch(); }}><Text style={styles.joinButtonText}>Try again</Text></TouchableOpacity> : <ActivityIndicator color={accent}/>}
         </View> : isCirclePlan && circleCtx?.circle_visibility === 'circle_only' && !circleViewerIsMember ? <Text style={styles.ineligibleText}>This plan is for circle members.</Text> : isClosedPlan && (isMember || isCreator) && currentUserId ? (
-          <View style={styles.memberActions}>
+          <View style={[styles.memberActions, stackMemberActions && styles.memberActionsStacked]}>
             {hasPlanPhotos && terminalStatus !== 'cancelled' && (
               <TouchableOpacity
-                style={styles.openChatButton}
+                style={[styles.openChatButton, memberActionWidth]}
                 accessibilityRole="button"
                 accessibilityLabel="View photos"
                 onPress={() => router.push(`/album/${plan!.id}` as any)}
               >
                 <Ionicons name="camera-outline" size={18} color={Colors.white} />
-                <Text numberOfLines={1} style={styles.openChatText}>View photos</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.openChatText}>View photos</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={styles.openChatButton}
+              style={[styles.openChatButton, memberActionWidth]}
               onPress={() => router.push(planChatPath as any)}
             >
               <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-              <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={styles.openChatText}>Open Chat</Text>
             </TouchableOpacity>
           </View>
         ) : isClosedPlan ? (
@@ -1583,19 +1587,19 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           </View>
         ) : isCreator ? (
           <View>
-            <View style={styles.memberActions}>
+            <View style={[styles.memberActions, stackMemberActions && styles.memberActionsStacked]}>
               <TouchableOpacity
-                style={styles.manageButton}
+                style={[styles.manageButton, memberActionWidth]}
                 onPress={openManageModal}
               >
-                <Text style={styles.manageButtonText}>Manage Plan</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.manageButtonText}>Manage Plan</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.openChatButton}
+                style={[styles.openChatButton, memberActionWidth]}
                 onPress={() => router.push(planChatPath as any)}
               >
                 <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-                <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
             {!isCirclePlan && <TouchableOpacity
@@ -1603,7 +1607,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
               onPress={() => router.push(`/waitlist/${plan.id}` as any)}
               activeOpacity={0.85}
             >
-              <Text style={styles.waitlistManageButtonText}>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={styles.waitlistManageButtonText}>
                 {waitingCount > 0 ? `Waitlist (${waitingCount})` : 'Waitlist'}
               </Text>
             </TouchableOpacity>}
@@ -1618,16 +1622,16 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
           </View>
         ) : isMember ? (
           <View>
-            <View style={styles.memberActions}>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Leave plan" style={styles.youreGoingBadge} onPress={handleLeave}>
-                <Text numberOfLines={1} style={styles.youreGoingText}>Can't make it?</Text>
+            <View style={[styles.memberActions, stackMemberActions && styles.memberActionsStacked]}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Leave plan" style={[styles.youreGoingBadge, memberActionWidth]} onPress={handleLeave}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.youreGoingText}>Can't make it?</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.openChatButton}
+                style={[styles.openChatButton, memberActionWidth]}
                 onPress={() => router.push(planChatPath as any)}
               >
                 <MessageCircle size={18} color={Colors.white} strokeWidth={2} />
-                <Text numberOfLines={1} style={styles.openChatText}>Open Chat</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={styles.openChatText}>Open Chat</Text>
               </TouchableOpacity>
             </View>
           </View>
