@@ -31,8 +31,7 @@ function deferred<T>() {
 }
 
 const cleanup: Array<() => void> = [];
-function mount(communityId = 'room-a') {
-  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0, gcTime: Infinity } } });
+function mount(communityId = 'room-a', client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0, gcTime: Infinity } } })) {
   let mute!: Mute;
   let viewer!: Viewer;
   let renderer!: ReturnType<typeof create>;
@@ -140,11 +139,11 @@ it('never resurrects a pending attempt after room A → B → A navigation', asy
   await flush();
   expect(fixture.mute.isChecking).toBe(true);
   fixture.navigate('room-b');
-  await flush();
+  await flush(); expect(fixture.mute.isChecking).toBe(false);
   fixture.navigate('room-a');
   await flush();
-  expect(fixture.mute.isChecking).toBe(false);
-  expect(fixture.mute.muted).toBe(false);
+  expect(fixture.mute.isChecking).toBe(true);
+  expect(fixture.mute.muted).toBeUndefined();
   await act(async () => { pending.resolve(); expect(await operation).toBeUndefined(); });
   await flush();
   expect(fixture.mute.isChecking).toBe(false);
@@ -158,9 +157,10 @@ it('prevents a pending preflight from writing after account A → B → A', asyn
   readMute.mockReturnValueOnce(pending.promise);
   let operation!: ReturnType<Mute['toggle']>;
   act(() => { operation = fixture.mute.toggle(); });
-  await auth('bob');
+  await flush(); expect(readMute).toHaveBeenCalledTimes(2);
+  await auth('bob'); expect(fixture.mute.isChecking).toBe(false);
   await auth('alice');
-  expect(fixture.mute.isChecking).toBe(false);
+  expect(fixture.mute.isChecking).toBe(true);
   await act(async () => { pending.resolve(false); expect(await operation).toBeUndefined(); });
   expect(writeMute).not.toHaveBeenCalled();
 });
@@ -255,4 +255,34 @@ it('ignores a pending write result after unmount and unsubscribes its identity l
   pending.resolve();
   expect(await operation).toBeUndefined();
   expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+it.each([true, false])('recovers the saved Main setting when reentered before settlement: %s', async early => {
+  const first = mount(); await flush();
+  const gate = deferred<void>();
+  writeMute.mockImplementationOnce(async (_id, desired) => { await gate.promise; saved = desired; });
+  let change!: ReturnType<Mute['toggle']>;
+  act(() => { change = first.mute.toggle(); }); await flush();
+  expect(writeMute).toHaveBeenCalledTimes(1); first.unmount();
+  let next: ReturnType<typeof mount>;
+  if (early) {
+    next = mount('room-a', first.client); await flush();
+    expect(next.mute.isChecking).toBe(true);
+    await act(async () => { await next.mute.toggle(); });
+    expect(writeMute).toHaveBeenCalledTimes(1);
+  }
+  gate.resolve(); await change; await flush();
+  if (!early) { next = mount('room-a', first.client); await flush(); }
+  expect(next!.mute.muted).toBe(true); expect(writeMute).toHaveBeenCalledTimes(1);
+  await act(async () => { await next!.mute.toggle(); }); await flush();
+  expect(saved).toBe(false); expect(writeMute).toHaveBeenCalledTimes(2);
+});
+
+it('rechecks Main on a new visit when the write succeeded but confirmation failed', async () => {
+  const first = mount(); await flush();
+  readMute.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('Read failed'));
+  await act(async () => { await first.mute.toggle(); }); await flush();
+  expect(first.mute.ready).toBe(false); first.unmount();
+  const next = mount('room-a', first.client); await flush();
+  expect(next.mute.muted).toBe(true); expect(writeMute).toHaveBeenCalledTimes(1);
 });

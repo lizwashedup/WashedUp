@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMyBroadcastMute, setBroadcastMute } from '../lib/communityChat';
+import { useChatMuteWrite } from './useChatMuteWrite';
 import { confirmChatMuteChange } from '../lib/confirmChatMuteChange';
 import type { ObservedUser } from './useObservedUser';
 
@@ -11,6 +12,7 @@ type ChangeResult = { matched: boolean; value: boolean | null } | undefined;
 /** The existing main-room preference; whole-community and Intros preferences are separate contracts. */
 export function useCommunityBroadcastMute(communityId: string | undefined, viewer: ObservedUser) {
   const queryClient = useQueryClient();
+  const write = useChatMuteWrite('community-mute', communityId, viewer.viewerId);
   const mounted = useRef(false);
   const scopeKey = JSON.stringify([communityId, viewer.viewerId, viewer.epoch]);
   const scopeRef = useRef<Scope>({ key: scopeKey, generation: 0, busy: false, preferenceRevision: 0 });
@@ -37,7 +39,7 @@ export function useCommunityBroadcastMute(communityId: string | undefined, viewe
 
   const query = useQuery({
     queryKey,
-    enabled: canRead && !busy,
+    enabled: canRead && !busy && !write.busy && !unknown,
     staleTime: 30_000,
     queryFn: async ({ signal }) => {
       const preferenceRevision = scope.preferenceRevision;
@@ -48,12 +50,12 @@ export function useCommunityBroadcastMute(communityId: string | undefined, viewe
     },
     retry: (failureCount) => current() && !scope.busy && failureCount < 1,
   });
-  const ready = canRead && query.isSuccess && typeof query.data === 'boolean' && !unknown;
+  const ready = canRead && !write.busy && query.isSuccess && typeof query.data === 'boolean' && !unknown;
   // A disabled query is pending in React Query; that does not mean a request is running.
-  const isChecking = viewer.isLoading || busy || (canRead && (query.isLoading || query.isFetching));
+  const isChecking = viewer.isLoading || busy || write.busy || (canRead && (query.isLoading || query.isFetching));
   const muted = ready ? query.data : undefined;
 
-  const toggle = async (): Promise<ChangeResult> => {
+  const perform = async (): Promise<ChangeResult> => {
     if (!communityId || !current() || scope.busy || isChecking) return;
     scope.busy = true;
     setAttempt({ scope, busy: true, unknown: !!unknown });
@@ -104,5 +106,6 @@ export function useCommunityBroadcastMute(communityId: string | undefined, viewe
     }
   };
 
+  const toggle = () => ready ? write.run(perform, current) : perform();
   return { muted, ready, isChecking: !!isChecking, toggle };
 }
