@@ -133,14 +133,6 @@ export default function PlanChatScreen() {
     retry: (failures, error) => !(error instanceof RequestDeadlineError) && failures < 2,
   });
 
-  // Returning to an existing thread must review the plan's current status and
-  // dates as well as its messages. Keep the mounted thread and draft while the
-  // read runs; overlapping foreground returns share the pending metadata read.
-  const metadataVisible = useRef(false);
-  metadataVisible.current = focused && !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error;
-  const refreshMetadata = useCallback(() => refetchEvent({ cancelRefetch: false }), [refetchEvent]);
-  useChatResumeRefresh(refreshMetadata, readOwner.isCurrent, metadataVisible);
-
   const isCreator = !!event && event.creator_user_id === readOwner.userId;
   const membership = useQuery({
     queryKey: [...planChatAccessKey(id, readOwner.userId ?? null), readOwner.epoch],
@@ -150,6 +142,18 @@ export default function PlanChatScreen() {
     gcTime: 0,
     retry: false,
   });
+
+  // Foreground return reviews admission independently of message history and
+  // plan metadata. A history failure alone cannot prove that someone left.
+  // Share pending reads and retain the existing creator-access exception.
+  const contextVisible = useRef(false);
+  contextVisible.current = focused && !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error;
+  const { refetch: refetchMembership } = membership;
+  const refreshContext = useCallback(() => Promise.all([
+    refetchEvent({ cancelRefetch: false }),
+    ...(isCreator ? [] : [refetchMembership({ cancelRefetch: false })]),
+  ]), [refetchEvent, refetchMembership, isCreator]);
+  useChatResumeRefresh(refreshContext, readOwner.isCurrent, contextVisible);
 
   const { data: members, isError: memberError, isFetching: membersFetching, refetch: refetchMembers } = useQuery({
     queryKey: ['event-header-members', id, readOwner.userId, readOwner.epoch],

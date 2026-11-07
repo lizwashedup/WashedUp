@@ -185,3 +185,66 @@ it('refreshes changed metadata once on foreground and coalesces a still-running 
   await act(async()=>{state('background');state('active');});await flush();
   expect(calls).toBe(2);
 });
+
+it('rechecks ordinary membership on foreground before retaining the mounted conversation', async () => {
+  const listeners = new Set<(state:any)=>void>();
+  jest.spyOn(AppState,'addEventListener').mockImplementation((_name,fn)=>{listeners.add(fn);return {remove:()=>listeners.delete(fn)};});
+  const state = (value:string) => {Object.defineProperty(AppState,'currentState',{configurable:true,value});for(const fn of listeners)fn(value);};
+  state('active'); await mount(); expect(open()).toBe(true);
+  mockMembership = async () => ok(null);
+  await act(async()=>{state('background');state('active');});await flush();
+  expect(open()).toBe(false);
+  expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toContain('Chat unavailable');
+});
+
+function foregroundControls() {
+  const listeners = new Set<(state:any)=>void>();
+  jest.spyOn(AppState,'addEventListener').mockImplementation((_name,fn)=>{listeners.add(fn);return {remove:()=>listeners.delete(fn)};});
+  const state = (value:string) => {Object.defineProperty(AppState,'currentState',{configurable:true,value});for(const fn of listeners)fn(value);};
+  state('active');
+  return async () => {await act(async()=>{state('background');state('active');});await flush();};
+}
+
+it.each(['missing', 'error', 'deadline'])('offers recovery rather than claiming departure for an %s foreground membership read', async failure => {
+  const resume=foregroundControls(); await mount();
+  mockMembership = failure==='missing'?async()=>ok(undefined):failure==='error'?async()=>({data:null,error:Error('Offline')}):()=>new Promise(()=>{});
+  await resume();
+  if(failure==='deadline'){await act(async()=>{await jest.advanceTimersByTimeAsync(12000);});await flush();}
+  expect(open()).toBe(false);
+  expect(tree.root.findAllByType(Text).map(node=>node.props.children)).toContain('Chat couldn’t load');
+  mockMembership=async()=>ok({user_id:mockViewer,event_id:event.id,status:'joined'});
+  await act(async()=>tree.root.findByProps({accessibilityLabel:'Retry opening chat'}).props.onPress());await flush();
+  expect(open()).toBe(true);
+});
+
+it('does not require a creator membership row on foreground', async () => {
+  const resume=foregroundControls();mockEvent=async()=>ok({...event,creator_user_id:mockViewer});
+  await mount();mockMembership=jest.fn(async()=>ok(null));
+  await resume();expect(open()).toBe(true);expect(mockMembership).not.toHaveBeenCalled();
+});
+
+it('keeps confirmed joined archived history available on foreground', async () => {
+  const resume=foregroundControls();mockEvent=async()=>ok({...event,status:'cancelled'});
+  await mount();await resume();expect(open()).toBe(true);expect(mockThreadProps.readOnly.text).toContain('read-only');
+});
+
+it('shares an outstanding admission read across repeated foreground returns', async () => {
+  const resume=foregroundControls();await mount();const pending=deferred();
+  mockMembership=jest.fn(()=>pending.promise);
+  await resume();await resume();expect(mockMembership).toHaveBeenCalledTimes(1);
+  await act(async()=>pending.resolve(ok(null)));await flush();expect(open()).toBe(false);
+});
+
+it('does not let a departed account’s delayed admission result close the new account’s thread', async () => {
+  const resume=foregroundControls();await mount();const pending=deferred();mockMembership=()=>pending.promise;await resume();
+  mockViewer='bob';mockEpoch++;
+  mockMembership=async()=>ok({user_id:mockViewer,event_id:event.id,status:'joined'});
+  await act(async()=>tree.update(screen()));await flush();expect(open()).toBe(true);
+  await act(async()=>pending.resolve(ok(null)));await flush();expect(open()).toBe(true);
+});
+
+it('keeps a hidden thread from issuing foreground admission reads', async () => {
+  const resume=foregroundControls();await mount();mockFocused=false;await act(async()=>tree.update(screen()));await flush();
+  mockMembership=jest.fn(async()=>ok(null));await resume();expect(mockMembership).not.toHaveBeenCalled();
+  mockFocused=true;await act(async()=>tree.update(screen()));await flush();expect(open()).toBe(false);
+});
