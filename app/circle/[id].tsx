@@ -10,7 +10,7 @@
  * Gated behind GROUPS_ENABLED (a direct hit with the flag off bounces to Chats).
  * Note: the static `circle/new` route takes precedence over this dynamic one.
  */
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -46,6 +46,15 @@ function CircleDetail({ circleId }: { circleId: string }) {
   // The noticeboard can remain mounted while the OS suspends the app. Recheck
   // server admission on return without resetting same-account child drafts.
   useChatResumeRefresh(refetch, isCurrentViewer, contextVisible);
+  const previouslyFocused = useRef(focused);
+  useEffect(() => {
+    const returned = focused && !previouslyFocused.current;
+    previouslyFocused.current = focused;
+    // A profile or child route may cover this still-mounted noticeboard.
+    // Its initial query owns loading; only a real return needs a fresh read.
+    if (returned && userId && isCurrentViewer()) void refetch();
+  }, [focused, userId, isCurrentViewer, refetch]);
+
 
 
   const [confirmLeave, setConfirmLeave] = useState(false);
