@@ -430,3 +430,22 @@ it('ignores an old account membership denial after switching accounts during a f
   expect(tree.root.findAllByType(TextInput)).toHaveLength(1);
   expect(rows()[0].id).toBe('bob-2');
 });
+
+it.each([false, true])('retires the Main composer after confirmed voluntary departure and restores its draft on rejoin (mapped=%s)', async mapped => {
+  mockViewerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  mockRoomId = '11111111-1111-4111-8111-111111111111';
+  await AsyncStorage.clear(); if (mapped) enableCore();
+  await mount(); await flush();
+  const retainedChange = tree.root.findByType(TextInput).props.onChangeText;
+  act(() => retainedChange('Unsent goodbye draft'));
+  act(() => mockBlur?.());
+  mockReadMembership.mockResolvedValue({ status: 'left', role: 'member' });
+  await act(async () => mockFocus?.()); await flush();
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  expect(tree.root.findAll(node => node.props.message === 'you left this community.').length).toBeGreaterThan(0);
+  act(() => retainedChange('Retired input must not replace the draft'));
+  mockReadMembership.mockResolvedValue({ status: 'active', role: 'member' });
+  act(() => changeAppState('background'));
+  await act(async () => changeAppState('active')); await flush();
+  expect(tree.root.findByType(TextInput).props.value).toBe('Unsent goodbye draft');
+});

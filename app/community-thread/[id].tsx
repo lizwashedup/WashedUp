@@ -266,8 +266,10 @@ export default function CommunityThreadScreen() {
   const refreshMembership = useCallback(() => {
     if (id && entryIsCurrent()) void refetchMembership({ cancelRefetch: false });
   }, [id, entryIsCurrent, refetchMembership]);
-  const removedFromCommunity = myMembership?.status === 'removed' || myMembership?.status === 'banned';
-  const admissionVisit = useMemo(() => ({ allowed: identityReady && roomReady && !removedFromCommunity }), [entryVisit, identityReady, roomReady, removedFromCommunity]);
+  // An explicit voluntary departure ends Main-chat actions too. Keep unknown
+  // membership reads distinct and preserve the draft for a later rejoin.
+  const communityAccessEnded = myMembership?.status === 'left' || myMembership?.status === 'removed' || myMembership?.status === 'banned';
+  const admissionVisit = useMemo(() => ({ allowed: identityReady && roomReady && !communityAccessEnded }), [entryVisit, identityReady, roomReady, communityAccessEnded]);
   const activeAdmissionVisit = useRef<typeof admissionVisit | null>(null);
   useLayoutEffect(() => {
     activeAdmissionVisit.current = admissionVisit;
@@ -406,7 +408,7 @@ export default function CommunityThreadScreen() {
   const photos = useMemo(() => broadcasts.slice().reverse().flatMap(message =>
     message.kind === 'message' && message.image_url
       ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [broadcasts]);
-  const photoSelection = useChatPhotoSelection(`community:${id}:${myId}:${viewer.epoch}`, removedFromCommunity ? [] : photos);
+  const photoSelection = useChatPhotoSelection(`community:${id}:${myId}:${viewer.epoch}`, communityAccessEnded ? [] : photos);
   const coreFocused = useRef(false);
   // Own membership must recover even when a previous read denied admission.
   // Keep this independent of history and coalesce overlapping route/app returns.
@@ -1040,9 +1042,9 @@ export default function CommunityThreadScreen() {
 
       </MessageViewport>
       <ComposerDock {...(Platform.OS === 'ios' ? { inset: insets.bottom } : {})}>
-      {removedFromCommunity ? (
+      {communityAccessEnded ? (
         /* SC-07: a real reason, not a silently-broken composer. */
-        <PermissionState message="you were removed from this community." />
+        <PermissionState message={myMembership?.status === 'left' ? 'you left this community.' : 'you were removed from this community.'} />
       ) : (
         <>
           {!online && <OfflineBanner label="You’re offline. Reconnect, then retry any messages that didn’t send." />}
