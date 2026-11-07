@@ -32,6 +32,7 @@ jest.mock('../../../hooks/useCommunityTopicMute', () => ({ useCommunityTopicMute
 jest.mock('../../../hooks/useTopicChat', () => ({ isObsoleteTopicOperation: () => false, useTopicChat: () => ({ isCurrent: require('react').useCallback(() => true, []), messages: [], loading: false, currentUserId: 'attendee-a', currentUserName: 'Alice', refresh: jest.fn() }) }));
 jest.mock('../../../hooks/useTypingIndicator', () => ({ useTypingIndicator: () => ({ typingUsers: [], stopTyping: jest.fn(), broadcastTyping: jest.fn() }) }));
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
+const mockQueryRefetch = jest.fn().mockResolvedValue({});
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: jest.fn().mockResolvedValue(undefined), cancelQueries: jest.fn().mockResolvedValue(undefined) }),
   useQuery: ({ queryKey }: any) => {
@@ -46,7 +47,7 @@ jest.mock('@tanstack/react-query', () => ({
       'topic-said-hi': mockSaidHi,
       'topic-chat-members': [],
     };
-    return { data: dataByKey[queryKey[0]], isSuccess: true };
+    return { data: dataByKey[queryKey[0]], isSuccess: true, refetch: mockQueryRefetch };
   },
 }));
 jest.mock('../../../lib/communityChat', () => ({

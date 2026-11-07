@@ -48,6 +48,7 @@ jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: mock
 jest.mock('../../../lib/url', () => ({ ...jest.requireActual('../../../lib/url'), openUrl: jest.fn() }));
 jest.mock('../../../hooks/useTypingIndicator', () => ({ useTypingIndicator: () => ({ typingUsers: [], stopTyping: jest.fn(), broadcastTyping: jest.fn() }) }));
 jest.mock('../../../hooks/useTopicChat', () => ({ isObsoleteTopicOperation: () => false, useTopicChat: () => ({ isCurrent: mockCurrent, messages: mockMessages, loading: false, currentUserId: mockViewerId, currentUserName: 'Alice', refresh: mockRefresh, sendMessage: mockSend, deleteMessage: mockDeleteOwn, applyConfirmedRemoval: mockApplyRemoval }) }));
+const mockQueryRefetch = jest.fn().mockResolvedValue({});
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => mockQueryClient,
   useInfiniteQuery: () => ({ data: { pages: [{ messages: mockBroadcasts }] }, isLoading: false, isError: false, refetch: jest.fn().mockResolvedValue(undefined) }),
@@ -65,7 +66,7 @@ jest.mock('@tanstack/react-query', () => ({
       'creator-access': { ledCommunities: mockLedCommunities },
       'community-chat-members': [], 'topic-chat-members': [],
     };
-    return { data: data[queryKey[0]], isSuccess: true };
+    return { data: data[queryKey[0]], isSuccess: true, refetch: mockQueryRefetch };
   },
 }));
 jest.mock('../../../lib/communityChat', () => ({

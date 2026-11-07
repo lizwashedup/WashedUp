@@ -24,6 +24,7 @@ const mockIntroRefetch=jest.fn(),mockHasSaidHi=jest.fn();
 const mockMembershipRefetch=jest.fn(),mockGetMembership=jest.fn();
 let mockMembershipQuery:any, mockMembershipAbsent=false, mockGrouping=true;
 let mockFocusCleanup:(()=>void)|undefined;
+let mockFocusEnter:(()=>void|(()=>void))|undefined;
 const mockRetryMembers = jest.fn().mockResolvedValue(undefined);
 let mockMessages: any[], mockFirstMessage: any, mockMembers: any[];
 let mockSaidHi: boolean | undefined, mockLedCommunities: { id: string }[];
@@ -48,7 +49,7 @@ jest.mock('expo-image-picker', () => ({ requestCameraPermissionsAsync: (...args:
 jest.mock('expo-image-manipulator', () => ({ manipulateAsync: (...args: any[]) => mockManipulate(...args), SaveFormat: { JPEG: 'jpeg' } }));
 
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
-jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => require('react').useEffect(() => { const cleanup=callback(); mockFocusCleanup=cleanup; return cleanup; }, [callback]), useRouter: () => ({ push: mockPush, back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
+jest.mock('expo-router', () => ({ useFocusEffect: (callback: any) => { mockFocusEnter=callback; return require('react').useEffect(() => { const cleanup=callback(); mockFocusCleanup=cleanup; return cleanup; }, [callback]); }, useRouter: () => ({ push: mockPush, back: jest.fn() }), useLocalSearchParams: () => ({ id: mockRoomId }), Stack: { Screen: () => null } }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View, useSafeAreaInsets: () => ({top:0,bottom:0,left:0,right:0}) }));
 jest.mock('../../../constants/FeatureFlags', () => ({ get COMMUNITY_CHAT_GROUPING_ENABLED() { return mockGrouping; } }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: require('../../../constants/Typography').AfterglowFallbackFonts }) }));
@@ -805,7 +806,7 @@ it('rechecks parent membership on foreground and replaces the stale composer aft
     act(() => callbacks.forEach(callback => callback(state)));
   };
   try {
-    await mount(); type('Unsent topic draft');
+    await mount(); type('Unsent topic draft'); mockMembershipRefetch.mockClear();
     mockMembershipRefetch.mockImplementation(async () => { mockMembership = 'removed'; });
     emit('background'); emit('active'); await flush(); await update();
     expect(mockMembershipRefetch).toHaveBeenCalledTimes(1);
@@ -836,4 +837,17 @@ it('rejects an aborted own-membership read before querying',async()=>{
   await mount();const abort=new AbortController();abort.abort();
   await expect(mockMembershipQuery.queryFn({signal:abort.signal})).rejects.toThrow('visit changed');
   expect(mockGetMembership).not.toHaveBeenCalled();
+});
+
+
+it('rechecks parent membership after returning from a child route without foregrounding', async () => {
+  await mount(); type('Unsent topic draft');
+  mockMembershipRefetch.mockClear();
+  act(() => mockFocusCleanup?.());
+  mockMembershipRefetch.mockImplementation(async () => { mockMembership='removed'; });
+  act(() => { mockFocusCleanup=mockFocusEnter?.() || undefined; });
+  await flush(); await update();
+  expect(mockMembershipRefetch).toHaveBeenCalledTimes(1);
+  expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(0);
+  expect(mockSend).not.toHaveBeenCalled();
 });
