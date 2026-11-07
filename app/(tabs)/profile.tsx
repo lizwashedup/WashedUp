@@ -28,6 +28,7 @@ import { registerPushNotificationsWithResult } from '../../hooks/usePushNotifica
 import { supabase } from '../../lib/supabase';
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
+import { useProfileLogout } from '../../components/yours/profile/settings/useProfileLogout';
 import { useProfileHandleAvailability } from '../../components/yours/profile/settings/useProfileHandleAvailability';
 import { profileSaveFeedback } from '../../components/yours/profile/settings/profileSaveFeedback';
 import { readOwnProfile, saveOwnProfile, deleteOwnProfile, verifyProfileOwner, requireProfileScope, normalizeProfileHandle, isObsoleteProfileOperation, type ProfileOperationScope, type OwnProfile as Profile } from '../../components/yours/profile/settings/profileOperations';
@@ -302,21 +303,22 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
       }
     } finally { if (deleteLock.current === attempt) { deleteLock.current = null; if (accountCurrent()) setDeleting(false); } }
   };
-  const logoutLock = useRef<object | null>(null);
+  const logout = useProfileLogout(userId);
   const handleLogOut = () => {
-    if (!canUseProfile() || logoutLock.current) return;
+    if (!canUseProfile() || logout.busy) return;
     const info: ProfileAlert = { title: appearance ? 'Log out' : 'Log Out', message: 'Are you sure you want to log out?', buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: appearance ? 'Log out' : 'Log Out', style: 'destructive', onPress: () => {
-        if (!pageScope.isCurrent() || alertRef.current !== info || logoutLock.current) return;
-        const attempt = {}; logoutLock.current = attempt;
+        if (!pageScope.isCurrent() || alertRef.current !== info) return;
+        const finish = logout.begin();
+        if (!finish) return;
         void (async () => { try {
           await verifyProfileOwner(pageScope); requireProfileScope(pageScope);
           deliberateSignOutAt.ts = Date.now(); void forgetAccount();
           const { error } = await supabase.auth.signOut();
           if (error) throw error;
         } catch (error) { if (pageScope.isCurrent() && !isObsoleteProfileOperation(error)) setAlertInfo({ title: 'Could not log out', message: friendlyError(error, 'Please try again.') }); }
-        finally { if (logoutLock.current === attempt) logoutLock.current = null; } })();
+        finally { finish(); } })();
       } },
     ] }; setAlertInfo(info);
   };
@@ -805,9 +807,10 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
 
         {/* Log Out button — full-width outlined at bottom */}
         <View style={styles.logOutWrap}>
-          <TouchableOpacity style={styles.logOutBtn} onPress={handleLogOut} accessibilityRole="button" accessibilityLabel="Log out" activeOpacity={0.85}>
-            <Text style={styles.logOutBtnText}>{appearance ? 'Log out' : 'Log Out'}</Text>
+          <TouchableOpacity style={styles.logOutBtn} disabled={logout.busy} accessibilityState={{ busy: logout.busy, disabled: logout.busy }} onPress={handleLogOut} accessibilityRole="button" accessibilityLabel={logout.busy ? 'Logging out…' : 'Log out'} activeOpacity={0.85}>
+            <Text style={styles.logOutBtnText}>{logout.busy ? 'Logging out…' : appearance ? 'Log out' : 'Log Out'}</Text>
           </TouchableOpacity>
+          {logout.slow && <Text accessibilityLiveRegion="polite" style={styles.statusText}>Logging out is taking longer than usual. We’re waiting for confirmation.</Text>}
         </View>
 
         <Text style={styles.footer}>washedup · hello@washedup.app</Text>

@@ -406,3 +406,51 @@ it.each([false, true])('keeps confirmed community/event access behind one guarde
   await press(grouped);
   expect(mockSelected).not.toHaveBeenCalled(); expect(mockPush).toHaveBeenCalledTimes(1); expect(mockReplace).not.toHaveBeenCalled();
 });
+
+it('shows a pending logout on return and keeps the original request until the provider answers', async () => {
+  const held = deferred<{ error: Error | null }>();
+  mockSignOut.mockReturnValueOnce(held.promise);
+  await mount();
+  await press(byLabel('Log out'));
+  const confirm = alert();
+  act(() => { confirm.buttons[1].onPress(); confirm.onClose(); });
+  await flush();
+  expect(mockSignOut).toHaveBeenCalledTimes(1);
+  try {
+    act(() => tree!.unmount());
+    mockEpoch++; // a new observer need not have the old visit’s epoch
+    await mount();
+    const freshLogout = byLabel('Log out');
+    if (freshLogout && !freshLogout.props.disabled) {
+      await press(freshLogout);
+      const next = alert();
+      if (next.visible && next.buttons?.[1]) act(() => next.buttons[1].onPress());
+      await flush();
+    }
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    expect(text('Logging out…')).toBe(true);
+  } finally {
+    held.resolve({ error: new Error('Session service refused logout') });
+    await flush();
+  }
+  expect(byLabel('Log out').props.disabled).toBeFalsy();
+});
+
+it('does not give a replacement account the prior logout progress or a late refusal', async () => {
+  const held = deferred<{ error: Error | null }>();
+  mockSignOut.mockReturnValueOnce(held.promise);
+  await mount();
+  await press(byLabel('Log out'));
+  const confirm = alert();
+  act(() => { confirm.buttons[1].onPress(); confirm.onClose(); });
+  await flush();
+  expect(text('Logging out…')).toBe(true);
+  mockViewer = 'account-b'; mockEpoch++;
+  await update();
+  expect(byLabel('Log out').props.disabled).toBeFalsy();
+  held.resolve({ error: new Error('Refused for the previous account') });
+  await flush();
+  expect(alert().visible).toBeFalsy();
+  expect(mockSignOut).toHaveBeenCalledTimes(1);
+  expect(mockReplace).not.toHaveBeenCalled();
+});
