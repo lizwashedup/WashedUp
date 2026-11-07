@@ -245,12 +245,12 @@ function CreationVisit({ viewer, seed, suggestion, appearance, startFresh }: { s
   const canAdvance = ready && !busy && !grid.isLoading && !grid.isError && (step === 1 ? selectedPeople.length >= MIN_OTHERS : step === 2 ? name.trim().length > 0 : true);
   const primaryLabel = step < TOTAL_STEPS ? COPY.circleCreateNext : appearance ? 'Create circle' : COPY.circleCreateMake;
   const headerTitle = appearance ? 'New circle' : selectedPeople.length > 0 ? COPY.circleCreateBuildTitleN(selectedPeople.length + 1) : COPY.circleCreateBuildTitle;
-  const button = (label: string, action: () => void, secondary = false, disabled = false) => <Pressable onPress={action} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={[secondary ? styled.secondary : styled.primary, disabled && styled.primaryDisabled]}><Text style={secondary ? styled.secondaryLabel : styled.primaryLabel}>{label}</Text></Pressable>;
+  const button = (label: string, action: () => void, secondary = false, disabled = false) => <Pressable onPress={action} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={[secondary ? styled.secondary : styled.primary, styles.recoveryButton, disabled && styled.primaryDisabled]}><Text style={[secondary ? styled.secondaryLabel : styled.primaryLabel, styles.recoveryButtonLabel]}>{label}</Text></Pressable>;
   const loading = (label: string) => <ScrollView style={styled.flex} contentContainerStyle={styled.status}><ActivityIndicator color={accent}/><Text style={styled.body}>{label}</Text></ScrollView>;
   const renderBody = () => {
     if (viewer.isLoading) return loading('Checking your account…');
     if (!ready) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text style={styled.body}>Couldn’t check your account.</Text>{button('Try again', () => { if (live.current) void viewer.retry(); }, true)}</ScrollView>;
-    if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}>
+    if (unconfirmed) return <ScrollView contentContainerStyle={[styled.completed, { paddingBottom: insets.bottom + 24 }]}>
       <Text style={styled.completedTitle}>{previous?.circleId ? 'Circle created' : 'Check your circles'}</Text>
       <Text style={styled.body} accessibilityLiveRegion="polite">{confirmSeparate
         ? previous?.circleId ? 'Start a new circle with its own people and settings?' : 'The earlier request may still create a circle. Start a separate one?'
@@ -272,7 +272,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance, startFresh }: { s
       const complete = receipt.policyApplied && receipt.coverApplied;
       const summary = complete ? 'Your circle is ready.' : working
         ? 'Your circle is ready to open.' : 'Your circle is there. We couldn’t finish saving these details:';
-      return <ScrollView contentContainerStyle={styled.completed}>
+      return <ScrollView contentContainerStyle={[styled.completed, { paddingBottom: insets.bottom + 24 }]}>
         <Text style={styled.completedTitle}>Circle created</Text>
         <Text style={styled.body}>{summary}</Text>
         {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}
@@ -323,6 +323,8 @@ const styles = StyleSheet.create({
   primaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   secondary: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderRadius: 4, borderColor: Colors.terracotta, alignItems: 'center', justifyContent: 'center' }, secondaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   status: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 }, body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary },
+  recoveryButton: { borderRadius: 24 },
+  recoveryButtonLabel: { textAlign: 'center' },
   savingStatus: { alignItems: 'flex-start', gap: 8 },
   completed: { flexGrow: 1, padding: 24, gap: 16 }, completedTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt }, detail: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt }, error: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
 });
