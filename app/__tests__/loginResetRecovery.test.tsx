@@ -71,3 +71,15 @@ it('ignores an old sheet dismissal while a newer reset confirmation waits',async
  await act(async()=>{await button('send reset link').props.onPress()});act(()=>oldDismiss());expect(tree.root.findByType(BrandedAlert).props.visible).toBe(false);
  act(()=>tree.root.findByType(Modal).props.onDismiss());expect(tree.root.findByType(BrandedAlert).props.visible).toBe(true);
 });
+
+it('names the return and password controls and keeps password visibility separate from submission', () => {
+  const named = (label: string) => tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === label)!;
+  expect(named('Back to phone sign-in').props.accessibilityRole).toBe('button');
+  const secure = () => tree.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === 'Password')!.props.secureTextEntry;
+  expect(secure()).toBe(true);
+  act(() => named('Show password').props.onPress());
+  expect(secure()).toBe(false);
+  act(() => named('Hide password').props.onPress());
+  expect(secure()).toBe(true);
+  expect(mockLogin).not.toHaveBeenCalled();
+});
