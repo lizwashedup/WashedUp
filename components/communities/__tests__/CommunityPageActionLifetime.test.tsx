@@ -9,6 +9,8 @@ const mockParamsContext=React.createContext<string | null>(null);
 let mockId='community-a', mockFocused=true, mockUser='account-a', mockEpoch=1, mockAccountError:Error|null=null;
 const mockRetry=jest.fn();
 const mockQueryRefetch=jest.fn().mockResolvedValue({});
+let mockClient={invalidateQueries:mockInvalidate};
+const mockMembershipRead=jest.fn();
 jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush,back:mockBack}),useLocalSearchParams:()=>({id:require('react').useContext(mockParamsContext) ?? mockId}),useFocusEffect:(cb:any)=>require('react').useEffect(()=>mockFocused?cb():undefined,[cb,mockFocused]),Stack:{Screen:()=>null}}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
@@ -18,9 +20,9 @@ jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
  return{viewerId,epoch,isLoading:false,error:mockAccountError,retry:mockRetry,isCurrent};
 }}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
-jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:mockInvalidate}),useQuery:({queryKey}:any)=>({isLoading:false,isRefetching:false,refetch:mockQueryRefetch,data:queryKey[0]==='community-page'?{community:{id:mockId,name:'Test community',handle:'test-community',status:'active'},blocks:[],events:[],memberCount:2}:queryKey[0]==='community-membership'?{status:'active',role:'member'}:queryKey[0]==='community-chat-cards'?{cards:[{community_id:mockId,topics:[{id:'topic-a',name:'Walks',joined:false}]}]}:queryKey[0]==='community-faces'?[]:null})}));
+jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>mockClient,useQuery:({queryKey}:any)=>({isLoading:false,isRefetching:false,refetch:mockQueryRefetch,data:queryKey[0]==='community-page'?{community:{id:mockId,name:'Test community',handle:'test-community',status:'active'},blocks:[],events:[],memberCount:2}:queryKey[0]==='community-membership'?{status:'active',role:'member'}:queryKey[0]==='community-chat-cards'?{cards:[{community_id:mockId,topics:[{id:'topic-a',name:'Walks',joined:false}]}]}:queryKey[0]==='community-faces'?[]:null})}));
 jest.mock('../../../lib/communityChat',()=>({getCommunityChatPayload:jest.fn(),joinTopic:(...args:any[])=>mockJoin(...args)}));
-jest.mock('../../../lib/communityJoin',()=>({getJoinGate:jest.fn(),getMyMembership:jest.fn(),leaveCommunity:(...args:any[])=>mockLeave(...args)}));
+jest.mock('../../../lib/communityJoin',()=>({getJoinGate:jest.fn(),getMyMembership:(...args:any[])=>mockMembershipRead(...args),leaveCommunity:(...args:any[])=>mockLeave(...args)}));
 jest.mock('../../../lib/communityPage',()=>({getCommunityPage:jest.fn(),getMemberFaces:jest.fn()}));
 jest.mock('../../../lib/communityLeader',()=>({getLeaderCards:jest.fn()}));
 jest.mock('../../../lib/creatorMode',()=>({getJoinPolicy:jest.fn(),buildCommunityPublicLink:()=>''}));
@@ -47,7 +49,7 @@ async function settle(){await act(async()=>{for(let i=0;i<12;i++)await Promise.r
 const room=()=>tree.root.findByType(LegacyCommunityRoomDirectory).props;
 const alert=()=>tree.root.findByType(BrandedAlert).props;
 function leave(){const button=tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children==='leave community'))!;act(()=>button.props.onPress());return alert().buttons.find((b:any)=>b.text==='leave').onPress;}
-beforeEach(()=>{jest.clearAllMocks();mockId='community-a';mockFocused=true;mockUser='account-a';mockEpoch=1;mockAccountError=null;mockJoin.mockReset().mockResolvedValue(undefined);mockLeave.mockReset().mockResolvedValue(undefined);mockInvalidate.mockReset().mockResolvedValue(undefined);});
+beforeEach(()=>{mockClient={invalidateQueries:mockInvalidate};mockMembershipRead.mockReset().mockResolvedValue({id:"membership-a",status:"left",role:"member"});jest.clearAllMocks();mockId='community-a';mockFocused=true;mockUser='account-a';mockEpoch=1;mockAccountError=null;mockJoin.mockReset().mockResolvedValue(undefined);mockLeave.mockReset().mockResolvedValue(undefined);mockInvalidate.mockReset().mockResolvedValue(undefined);});
 afterEach(()=>{act(()=>tree?.unmount());});
 it.each(['blur','room','account','unmount'] as const)('does not reopen an old topic after pending join and %s retirement',async change=>{
  const pending=deferred();mockJoin.mockReturnValueOnce(pending.promise);await mount();act(()=>room().onJoinTopic('topic-a'));
@@ -118,4 +120,27 @@ it('shows explicit account recovery instead of silently ignoring Join when the a
 it('retires account-retry feedback with its initiating visit', async () => {
  mockAccountError=Error('Cannot check account');await mount();act(()=>room().onJoinTopic('topic-a'));await settle();const retry=alert().buttons[0].onPress;
  mockFocused=false;await update();mockFocused=true;await update();act(()=>retry());expect(mockRetry).not.toHaveBeenCalled();
+});
+
+it('recovers a committed leave with a lost response instead of claiming still here', async () => {
+ mockLeave.mockRejectedValueOnce({code:'NETWORK',message:'Lost reply'});
+ await mount(); const confirm=leave(); await act(async()=>confirm()); await settle();
+ expect(mockLeave).toHaveBeenCalledTimes(1);
+ expect(mockBack).toHaveBeenCalledTimes(1);
+ expect(alert().title).not.toBe('still here');
+});
+
+it('checks an uncertain leave after Back and reentry without dispatching another decision',async()=>{
+ mockLeave.mockRejectedValueOnce(Error('Lost reply'));mockMembershipRead.mockRejectedValueOnce(Error('Offline'));
+ await mount();const confirm=leave();await act(async()=>confirm());await settle();
+ expect(alert().title).toBe('could not confirm');const oldCheck=alert().buttons.find((b:any)=>b.text==='check status').onPress;
+ mockFocused=false;await update();mockFocused=true;await update();
+ act(()=>oldCheck());await settle();expect(mockMembershipRead).toHaveBeenCalledTimes(1);
+ const check=tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children==='check status'))!;
+ await act(async()=>check.props.onPress());await settle();expect(mockLeave).toHaveBeenCalledTimes(1);expect(mockBack).toHaveBeenCalledTimes(1);
+});
+it('leaves Stay untouched and permits an explicit retry after server refusal',async()=>{
+ await mount();const confirm=leave();expect(mockLeave).not.toHaveBeenCalled();expect(alert().buttons.find((b:any)=>b.text==='stay').style).toBe('cancel');
+ mockLeave.mockRejectedValueOnce({code:'42501'});await act(async()=>confirm());await settle();expect(alert().title).toBe('still here');
+ const retry=leave();await act(async()=>retry());await settle();expect(mockLeave).toHaveBeenCalledTimes(2);expect(mockBack).toHaveBeenCalledTimes(1);
 });

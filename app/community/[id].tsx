@@ -45,7 +45,8 @@ import { GeneratedPoster } from '../../components/scene/GeneratedPoster';
 import { CommunityClassificationSummary } from '../../components/scene/CommunityClassificationSummary';
 import { getCommunityPage, getMemberFaces, type CommunityPageEvent } from '../../lib/communityPage';
 import { getLeaderCards } from '../../lib/communityLeader';
-import { getJoinGate, getMyMembership, leaveCommunity } from '../../lib/communityJoin';
+import { getJoinGate, getMyMembership } from '../../lib/communityJoin';
+import { CommunityLeaveUnconfirmed, hasCommunityLeaveDecision, leaveCommunityWithReceipt } from '../../lib/communityLeaveReceipt';
 // proposal 91's policy read lives with the leader toggle; the door and the
 // toggle must agree, so both read the same self-flipping function
 import { buildCommunityPublicLink, getJoinPolicy } from '../../lib/creatorMode';
@@ -182,6 +183,7 @@ export default function CommunityPageScreen() {
   // rooms live here for discovery (unjoined rooms never clutter the chat list)
   const membershipVisit = useMemo(() => ({ active: false, attempt: null as object | null }),
     [id, focused, viewer.viewerId, viewer.epoch, viewer.isLoading, viewer.error, isMember, previewMode]);
+  const [leavingVisit, setLeavingVisit] = useState<typeof membershipVisit | null>(null);
   const committedMembershipVisit = useRef(membershipVisit);
   const membershipVisitIsCurrent = () => membershipVisit.active && committedMembershipVisit.current === membershipVisit
     && focused && viewer.isCurrent() && isMember && !previewMode;
@@ -459,9 +461,42 @@ export default function CommunityPageScreen() {
     }
   }
 
+  const leaving = leavingVisit === membershipVisit;
+  const needsLeaveCheck = !!viewer.viewerId && hasCommunityLeaveDecision(queryClient, viewer.viewerId, id!);
+  const runLeave = async (checkOnly = false) => {
+    if (!membershipActionReady()) return;
+    const attempt = {};
+    membershipVisit.attempt = attempt;
+    setLeavingVisit(membershipVisit);
+    const current = () => membershipIsCurrent() && membershipVisit.attempt === attempt;
+    const requireCurrent = () => { if (!current()) throw new Error('This community visit changed.'); };
+    try {
+      await leaveCommunityWithReceipt(queryClient, viewer.viewerId!, id!, requireCurrent, membership?.id, checkOnly);
+      if (!current()) return;
+      queryClient.invalidateQueries({ queryKey: ['community-membership', id] });
+      queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
+      queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
+      router.back();
+    } catch (error) {
+      if (!current()) return;
+      if (error instanceof CommunityLeaveUnconfirmed) {
+        setAlertInfo({ title: 'could not confirm', message: error.message,
+          buttons: [{ text: 'check status', onPress: () => {
+            if (membershipIsCurrent()) void runLeave(true);
+          } }, { text: 'not now', style: 'cancel' }] });
+      } else {
+        // Preserve explicit server refusal, including the last-leader guard.
+        setAlertInfo({ title: 'still here', message: friendlyError(error, 'You could not leave right now.') });
+      }
+    } finally {
+      if (membershipVisit.attempt === attempt) membershipVisit.attempt = null;
+      setLeavingVisit(value => value === membershipVisit ? null : value);
+    }
+  };
   const handleLeave = () => {
     if (!membershipActionReady()) return;
     if (!id) return;
+    if (needsLeaveCheck) { void runLeave(true); return; }
     setAlertInfo({
       /* copy to the taste gate */
       title: 'leave this community?',
@@ -473,25 +508,7 @@ export default function CommunityPageScreen() {
         {
           text: 'leave',
           style: 'destructive',
-          onPress: async () => {
-            if (!membershipActionReady()) return;
-            const attempt = {};
-            membershipVisit.attempt = attempt;
-            const current = () => membershipIsCurrent() && membershipVisit.attempt === attempt;
-            try {
-              await leaveCommunity(id);
-              queryClient.invalidateQueries({ queryKey: ['community-membership', id] });
-              queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
-              queryClient.invalidateQueries({ queryKey: ['community-chat-rows'] });
-              if (current()) router.back();
-            } catch (e) {
-              if (!current()) return;
-              // the RPC's last-leader guard raises here; surface it, do not swallow
-              setAlertInfo({ title: 'still here', message: friendlyError(e, 'You could not leave right now.') });
-            } finally {
-              if (membershipVisit.attempt === attempt) membershipVisit.attempt = null;
-            }
-          },
+          onPress: () => runLeave(),
         },
       ],
     });
@@ -609,9 +626,9 @@ export default function CommunityPageScreen() {
             fallback={legacyRooms} /></View> : legacyRooms)}
 
           {activeTab === 'home' && isMember && !previewMode && membership?.status === 'active' && (
-            <TouchableOpacity onPress={handleLeave} hitSlop={8} style={styles.leaveWrap} accessibilityRole="button">
+            <TouchableOpacity onPress={handleLeave} disabled={leaving} accessibilityState={{ disabled: leaving, busy: leaving }} hitSlop={8} style={styles.leaveWrap} accessibilityRole="button">
               {/* copy to the taste gate */}
-              <Text style={styles.leaveLink}>leave community</Text>
+              <Text style={styles.leaveLink}>{leaving ? 'checking status' : needsLeaveCheck ? 'check status' : 'leave community'}</Text>
             </TouchableOpacity>
           )}
 
