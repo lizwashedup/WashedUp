@@ -10,7 +10,7 @@
  *
  * Gated behind GROUPS_ENABLED; a direct hit with the flag off bounces to Chats.
  */
-import React, { useState, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useLayoutEffect, useEffect } from 'react';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { useChatResumeRefresh } from '../../../../hooks/useChatResumeRefresh';
@@ -46,6 +46,15 @@ function CircleChatScreenInner({ circleId, reactionMessageId, reactionMessageSou
   // History errors do not establish admission. Review the authoritative Circle
   // payload on foreground return, retaining the existing error/retry boundary.
   useChatResumeRefresh(refetch, isCurrentUser, contextVisible);
+  const previouslyFocused = useRef(focused);
+  useEffect(() => {
+    const returned = focused && !previouslyFocused.current;
+    previouslyFocused.current = focused;
+    // A covered tab can stay mounted. Its original query owns initial loading;
+    // a return needs a fresh admission read even within the warm-cache window.
+    if (returned && myUserId && isCurrentUser()) void refetch();
+  }, [focused, myUserId, isCurrentUser, refetch]);
+
   const [addOpen, setAddOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);

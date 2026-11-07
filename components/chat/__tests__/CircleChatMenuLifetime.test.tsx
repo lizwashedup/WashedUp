@@ -265,8 +265,9 @@ it('does not revalidate a Circle hidden behind another route on foreground', asy
   await act(async () => { resume(); await Promise.resolve(); });
   expect(mockRefetch).not.toHaveBeenCalled();
   mockFocused = true; await update();
-  await act(async () => { resume(); await Promise.resolve(); });
   expect(mockRefetch).toHaveBeenCalledTimes(1);
+  await act(async () => { resume(); await Promise.resolve(); });
+  expect(mockRefetch).toHaveBeenCalledTimes(2);
 });
 it('does not start a queued Circle foreground read for a retired account', async () => {
   const resume = foregroundReturn(); await mount();
@@ -283,4 +284,38 @@ it('keeps an unknown foreground Circle response distinct from denied admission a
   mockRefetch.mockImplementationOnce(async () => { mockError = false; });
   await act(async () => tree!.root.findByProps({ accessibilityLabel: 'Retry opening chat' }).props.onPress()); await update();
   expect(thread()).toBeDefined(); expect(mockRefetch).toHaveBeenCalledTimes(2);
+});
+
+
+it('rechecks Circle admission when returning from another route without backgrounding the app', async () => {
+  await mount(); mockFocused = false; await update();
+  mockRefetch.mockImplementationOnce(async () => { mockUnavailable = true; });
+  mockFocused = true; await update(); await update();
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
+});
+
+it('does not refresh Circle admission for unrelated renders or initial query loading', async () => {
+  await mount(); await update(); await update(); expect(mockRefetch).not.toHaveBeenCalled();
+});
+it.each(['circle', 'plan'] as const)('retains an open %s child form after a successful same-account return read', async child => {
+  mockNamed = true; await mount(); openPlus();
+  const closed = chooseDm(child); act(() => closed());
+  const before = child === 'circle' ? add() : plan(); expect(before.visible).toBe(true);
+  mockFocused = false; await update(); mockFocused = true; await update();
+  const after = child === 'circle' ? add() : plan();
+  expect(after.visible).toBe(true); expect(after.scope).toBe(before.scope);
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+});
+it('retires an open child form when the return read establishes unavailable admission', async () => {
+  mockNamed = true; await mount(); openPlus(); const closed = chooseDm('circle'); act(() => closed());
+  const oldScope = add().scope; mockFocused = false; await update();
+  mockRefetch.mockImplementationOnce(async () => { mockUnavailable = true; });
+  mockFocused = true; await update(); await update();
+  expect(oldScope.isCurrent()).toBe(false); expect(tree!.root.findAllByType(AddPeopleSheet)).toHaveLength(0);
+});
+it('reads only the current account when it changes behind the covered Circle', async () => {
+  await mount(); mockFocused = false; await update(); await move('account');
+  expect(mockRefetch).not.toHaveBeenCalled(); mockFocused = true; await update();
+  expect(mockRefetch).toHaveBeenCalledTimes(1); expect(thread()).toBeDefined();
 });
