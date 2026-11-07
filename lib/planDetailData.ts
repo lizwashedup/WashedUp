@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 
 export interface PlanDetail {
   id: string;
+  updated_at?: string | null;
   title: string;
   description: string | null;
   host_message: string | null;
@@ -50,7 +51,7 @@ export async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const { data, error } = await supabase
     .from('events')
     .select(`
-      id, title, description, host_message, start_time, end_time, drop_in, allow_duplicate,
+      id, updated_at, title, description, host_message, start_time, end_time, drop_in, allow_duplicate,
       location_text, location_lat, location_lng,
       image_url, primary_vibe, gender_rule,
       max_invites, min_invites, target_age_min, target_age_max,
@@ -85,6 +86,7 @@ export async function fetchPlanDetail(id: string): Promise<PlanDetail> {
 
   return {
     id: row.id,
+    updated_at: row.updated_at,
     title: row.title,
     description: row.description ?? null,
     host_message: row.host_message ?? null,

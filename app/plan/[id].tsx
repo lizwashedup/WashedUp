@@ -1079,7 +1079,7 @@ function PlanDetailSession({ id, identity }: { id: string; identity: ObservedUse
         }),
       };
 
-      await edit.save(updatePayload);
+      await edit.save(updatePayload, draft.original.updated_at);
     } catch (e: any) {
       const rawMsg = e?.message ?? '';
       const msg = rawMsg.includes('events_host_message_length')

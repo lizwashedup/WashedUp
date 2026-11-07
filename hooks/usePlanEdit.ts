@@ -7,8 +7,19 @@ import { supabase } from '../lib/supabase';
 import { uploadBase64ToStorage } from '../lib/uploadPhoto';
 import { PHOTO_FORMAT_ERROR_MESSAGE } from '../constants/PhotoUpload';
 import { logError } from '../lib/logger';
+import { sameEventSaveVersion } from '../lib/eventSaveVersion';
 
 type Patch = Record<string, string | number | boolean | null>;
+type Version = string | null;
+class PlanEditChanged extends Error {}
+const changedMessage = 'This plan changed or is no longer editable. Your edits are still here. Close and reopen Manage Plan to review the latest plan.';
+function validVersion(value: unknown): value is Version {
+  if (value === null) return true;
+  try { return typeof value === 'string' && sameEventSaveVersion(value, value); } catch { return false; }
+}
+function changedVersion(value: unknown, previous: Version) {
+  return typeof value === 'string' && validVersion(value) && (previous === null || !sameEventSaveVersion(value, previous));
+}
 type Options = {
   eventId: string; viewerId: string | null; isCurrent: () => boolean;
   canEdit: () => boolean; onCommitted?: () => void; onSaved: () => void; onPhoto: (url: string) => void;
@@ -32,7 +43,7 @@ export function usePlanEdit(options: Options) {
   const focused = useRef<object | null>(null);
   const editor = useRef<object | null>(null);
   const pending = useRef<'photo' | 'save' | 'check' | null>(null);
-  const unresolved = useRef<{ patch: Patch; eventId: string; viewerId: string } | null>(null);
+  const unresolved = useRef<{ patch: Patch; eventId: string; viewerId: string; version: Version } | null>(null);
   const [operation, setOperation] = useState<typeof pending.current>(null);
   const [unknown, setUnknown] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,8 +108,15 @@ export function usePlanEdit(options: Options) {
         : 'Couldn’t upload this photo. Try again.');
     } finally { finish(); }
   };
-  const save = async (draft: Patch) => {
+  const save = async (draft: Patch, version: Version | undefined) => {
     if (!mayStart() || unresolved.current || !options.viewerId) return;
+    // Capture the version shown when this form opened, never a new version
+    // read at dispatch. Route retirement cannot cancel an already sent UPDATE.
+    if (!validVersion(version)) {
+      try { options.onCommitted?.(); } catch (error) { logError(error, 'plan.edit.refresh'); }
+      setError('Couldn’t check this plan’s version. Your edits are still here. Close and reopen Manage Plan to try again.');
+      return;
+    }
     const isCurrent = capture(), eventId = options.eventId, viewerId = options.viewerId, patch = { ...draft };
     pending.current = 'save'; setOperation('save'); setError(null);
     let dispatched = false;
@@ -109,20 +127,29 @@ export function usePlanEdit(options: Options) {
       dispatched = true;
       // A deadline cannot prove the server rolled back. Keep a timed-out write
       // unresolved and reconcile its exact patch instead of resubmitting it.
-      const response = await requestWithDeadline(supabase.from('events').update(patch).eq('id', eventId).eq('creator_user_id', viewerId)
-        .select(['id', 'creator_user_id', ...Object.keys(patch)].join(',')).maybeSingle(), 15_000);
+      const update = supabase.from('events').update(patch).eq('id', eventId).eq('creator_user_id', viewerId);
+      const guarded = version === null ? update.is('updated_at', null) : update.eq('updated_at', version);
+      const response = await requestWithDeadline(guarded
+        .select(['id', 'creator_user_id', 'updated_at', ...Object.keys(patch)].join(',')).maybeSingle(), 15_000);
+      const row = response.data as unknown as Record<string, unknown> | null | undefined;
       if (response.error && rejected.has(String(response.error.code))) { dispatched = false; throw response.error; }
-      if (response.error !== null || !confirmsPlanEdit(response.data, eventId, viewerId, patch)) throw new Error('Unconfirmed save');
+      if (response.error === null && response.data === null) { dispatched = false; throw new PlanEditChanged(); }
+      if (response.error !== null || !confirmsPlanEdit(row, eventId, viewerId, patch) || !changedVersion(row?.updated_at, version)) throw new Error('Unconfirmed save');
       // A late receipt must not close a different edit. Refresh occurs on the
       // next visit through the existing detail query; no old-account UI fires.
       confirm(isCurrent);
     } catch (cause: any) {
       if (dispatched) {
-        unresolved.current = { patch, eventId, viewerId };
+        unresolved.current = { patch, eventId, viewerId, version };
         if (focused.current && latest.current.isCurrent()) setUnknown(true);
         if (isCurrent()) setError(null);
       } else if (isCurrent()) {
-        setError(cause?.message?.includes('events_host_message_length') ? 'Keep your message to 150 characters or fewer.' : 'Couldn’t save changes. Your edits are still here. Try again.');
+        if (cause instanceof PlanEditChanged) {
+          // Refresh the detail for a deliberate new edit, without replacing the
+          // currently open form or adopting the new version behind their back.
+          try { options.onCommitted?.(); } catch (error) { logError(error, 'plan.edit.refresh'); }
+          setError(changedMessage);
+        } else setError(cause?.message?.includes('events_host_message_length') ? 'Keep your message to 150 characters or fewer.' : 'Couldn’t save changes. Your edits are still here. Try again.');
       }
     } finally { finish(); }
   };
@@ -135,10 +162,18 @@ export function usePlanEdit(options: Options) {
       const auth = await requestWithDeadline(supabase.auth.getUser(), 12_000);
       if (!isCurrent()) return;
       if (auth.error || auth.data.user?.id !== attempt.viewerId) throw new Error('Account changed');
-      const response = await requestWithDeadline(supabase.from('events').select(['id', 'creator_user_id', ...Object.keys(attempt.patch)].join(','))
+      const response = await requestWithDeadline(supabase.from('events').select(['id', 'creator_user_id', 'updated_at', ...Object.keys(attempt.patch)].join(','))
         .eq('id', attempt.eventId).eq('creator_user_id', attempt.viewerId).maybeSingle(), 15_000);
       if (!isCurrent()) return;
-      if (response.error !== null || !confirmsPlanEdit(response.data, attempt.eventId, attempt.viewerId, attempt.patch)) throw new Error('Save not confirmed');
+      const row = response.data as unknown as Record<string, unknown> | null | undefined;
+      if (response.error !== null || row?.id !== attempt.eventId || row?.creator_user_id !== attempt.viewerId || !changedVersion(row?.updated_at, attempt.version)) throw new Error('Save not confirmed');
+      if (!confirmsPlanEdit(row, attempt.eventId, attempt.viewerId, attempt.patch)) {
+        // The version predicate on the original UPDATE cannot match this newer
+        // row. Keep the form visible; never retry against a silently new base.
+        unresolved.current = null; setUnknown(false); setError(changedMessage);
+        try { options.onCommitted?.(); } catch (error) { logError(error, 'plan.edit.refresh'); }
+        return;
+      }
       confirm(isCurrent);
     } catch { if (isCurrent()) setError('We still can’t confirm these changes. Check again in a moment.'); }
     finally { finish(); }
