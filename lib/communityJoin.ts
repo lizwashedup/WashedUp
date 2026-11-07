@@ -136,8 +136,10 @@ export type MembershipStatus = 'pending' | 'active' | 'left' | 'removed' | 'bann
 /** The viewer's own membership row for a community, if any. */
 export async function getMyMembership(
   communityId: string,
+  expectedUserId?: string,
 ): Promise<{ id: string; status: MembershipStatus; role: string } | null> {
   const { data: { user } } = await supabase.auth.getUser();
+  if (expectedUserId && user?.id !== expectedUserId) throw new Error('This community account changed.');
   if (!user) return null;
   const { data, error } = await supabase
     .from('community_members')
