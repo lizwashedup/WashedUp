@@ -20,8 +20,12 @@ export class UnconfirmedCircleCreationError extends Error {
 }
 export const isUnconfirmedCircleCreation = (error: unknown) => error instanceof Error && error.name === 'UnconfirmedCircleCreationError';
 type Owner = { userId: string | null | undefined };
-type Call = { args: CreateCircleArgs; owner: Owner; authEpoch: number; scope?: CircleCreationScope; circleId?: string };
+type CreateOptions = { scope?: CircleCreationScope; onSetupPending?: (receipt: CreateCircleReceipt) => void };
+type Call = CreateOptions & { args: CreateCircleArgs; owner: Owner; authEpoch: number; circleId?: string };
 type Setup = { call: Call; receipt: CreateCircleReceipt; coverId: string | null; uploaded: boolean };
+
+const hasInvitePolicyChanges = (args: CreateCircleArgs) =>
+  args.invitePolicy === 'everyone' || (args.invitePolicy === 'chosen' && args.adminUserIds.length > 0);
 
 export function useCreateCircle(userId: string | null | undefined) {
   const qc = useQueryClient();
@@ -104,7 +108,7 @@ export function useCreateCircle(userId: string | null | undefined) {
       call, coverId: null, uploaded: false,
       receipt: {
         circleId,
-        policyApplied: call.args.invitePolicy === 'only_me' || (call.args.invitePolicy === 'chosen' && call.args.adminUserIds.length === 0),
+        policyApplied: !hasInvitePolicyChanges(call.args),
         coverApplied: !call.args.coverBase64,
       },
     };
@@ -161,6 +165,9 @@ export function useCreateCircle(userId: string | null | undefined) {
       }
       check(call);
       const setup = rememberSetup(call, circleId);
+      if (!setup.receipt.policyApplied || !setup.receipt.coverApplied) {
+        call.onSetupPending?.({ ...setup.receipt });
+      }
       return applySetup(setup);
     },
   });
@@ -171,9 +178,9 @@ export function useCreateCircle(userId: string | null | undefined) {
     try { const result = await mutation.mutateAsync(call); check(call); return result; }
     finally { if (pending.current === call) pending.current = null; }
   };
-  const mutateAsync = (args: CreateCircleArgs, options?: { scope?: CircleCreationScope }) => {
+  const mutateAsync = (args: CreateCircleArgs, options?: CreateOptions) => {
     // Copy selections before TanStack can queue dispatch or the form can change.
-    const call: Call = { owner, authEpoch: authEpoch.current, scope: options?.scope,
+    const call: Call = { owner, authEpoch: authEpoch.current, scope: options?.scope, onSetupPending: options?.onSetupPending,
       args: { ...args, memberUserIds: [...args.memberUserIds], adminUserIds: [...args.adminUserIds] } };
     if (authId.current === undefined && options?.scope) authId.current = options.scope.userId;
     const sameEntry = (prior: Call) => prior.owner === owner && prior.scope?.isCurrent === call.scope?.isCurrent && current(prior);
@@ -191,7 +198,7 @@ export function useCreateCircle(userId: string | null | undefined) {
   const canResumeSetup = (requestId: string) => {
     const original = submitted.current;
     return !!original && original.requestId === requestId && current(original.call) &&
-      (!!original.call.args.coverBase64 || original.call.args.invitePolicy !== 'only_me');
+      (!!original.call.args.coverBase64 || hasInvitePolicyChanges(original.call.args));
   };
   const resumeSetupAsync = async (requestId: string) => {
     const original = submitted.current;
