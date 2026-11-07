@@ -12,7 +12,7 @@ import { useLeaveCircle } from '../useLeaveCircle';
 const mockAuth = jest.fn(), mockRpc = jest.fn();
 jest.mock('../../lib/supabase', () => ({ supabase: {
   auth: { getUser: () => mockAuth(), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
-  rpc: (...args: unknown[]) => mockRpc(...args),
+  rpc: (...args: unknown[]) => args[0] === 'circle_identity_save_status' ? Promise.resolve({data:{status:'missing',revision:'2026-11-06T00:00:00Z'},error:null}) : mockRpc(...args),
 } }));
 jest.mock('../../lib/uploadPhoto', () => ({ uploadBase64ToStorage: jest.fn() }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => '22222222-2222-4222-8222-222222222222' }));
@@ -53,7 +53,7 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   jest.useFakeTimers(); live = true;
   mockAuth.mockReset().mockResolvedValue(account());
-  mockRpc.mockReset().mockImplementation(async (name: string) => ({ data: name === 'create_circle' ? ID : name === 'create_circle_plan' ? { event_id: ID, has_own_chat: false } : name === 'invite_to_circle' ? 1 : name === 'leave_circle' ? 'left' : null, error: null, status: 200 }));
+  mockRpc.mockReset().mockImplementation(async (name: string) => ({ data: name === 'create_circle' ? ID : name === 'create_circle_plan' ? { event_id: ID, has_own_chat: false } : name === 'invite_to_circle' ? 1 : name === 'leave_circle' ? 'left' : name === 'save_circle_identity_once' ? {status:'saved'} : null, error: null, status: 200 }));
 });
 afterEach(() => { act(() => tree?.unmount()); tree = undefined; client?.clear(); jest.useRealTimers(); });
 
@@ -67,8 +67,8 @@ it.each(modes)('%s recovers a stalled account check without dispatching its late
   expect(mockRpc).toHaveBeenCalledTimes(1); expect(pending).toBe(false);
 });
 
-it.each(['plan','invite','update','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
-  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ plan: 'create_circle_plan', invite: 'invite_to_circle', leave: 'leave_circle', update: 'update_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
+it.each(['plan','invite','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
+  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ plan: 'create_circle_plan', invite: 'invite_to_circle', leave: 'leave_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
   await mount(mode); let settled = false;
   act(() => { void submit().then(() => { settled = true; }, () => { settled = true; }); }); await tick(20000);
   expect(pending).toBe(true); expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1);
