@@ -256,12 +256,16 @@ export default function CommunityThreadScreen() {
   // event/topic room, never here. Same shape as the topic room's own fix: a
   // failed/unknown membership read is treated as still-a-member, the server
   // RLS is the real gate either way.
-  const { data: myMembership } = useQuery({
+  const { data: myMembership, refetch: refetchMembership } = useQuery({
     queryKey: queryKeys.membership,
-    queryFn: ({ signal }) => readCurrent(() => getMyMembership(id!), signal),
+    queryFn: ({ signal }) => readCurrent(() => getMyMembership(id!, myId!), signal),
     enabled: !!id && identityReady,
     staleTime: 60_000,
+    retry: false,
   });
+  const refreshMembership = useCallback(() => {
+    if (id && entryIsCurrent()) void refetchMembership({ cancelRefetch: false });
+  }, [id, entryIsCurrent, refetchMembership]);
   const removedFromCommunity = myMembership?.status === 'removed' || myMembership?.status === 'banned';
   const admissionVisit = useMemo(() => ({ allowed: identityReady && roomReady && !removedFromCommunity }), [entryVisit, identityReady, roomReady, removedFromCommunity]);
   const activeAdmissionVisit = useRef<typeof admissionVisit | null>(null);
@@ -378,7 +382,10 @@ export default function CommunityThreadScreen() {
   const anchorUnavailable = !!anchor && historyFailure instanceof CommunityMessageUnavailableError;
   const isLoading = (historyLoading && !basicPage) || (needsRoomIdentity && !roomReady && !roomIdentity.isError);
   const broadcastsError = historyError || (needsRoomIdentity && roomIdentity.isError);
-  const refetchBroadcasts = () => needsRoomIdentity && !roomReady ? roomIdentity.refetch() : refetchHistory();
+  const refetchBroadcasts = () => {
+    refreshMembership();
+    return needsRoomIdentity && !roomReady ? roomIdentity.refetch() : refetchHistory();
+  };
   const broadcasts = useMemo(() => identityReady && roomReady && !anchorUnavailable ? broadcastPages?.pages.flatMap((page) => page.messages) ?? basicPage?.messages ?? [] : [], [broadcastPages, basicPage, identityReady, roomReady, anchorUnavailable]);
   const menuMessages = useRef(broadcasts); menuMessages.current = broadcasts;
   const selectedMessageCurrent = (messageId: string) => admissionIsCurrent() && menuMessages.current.some(message => message.id === messageId && !message.metadata_pending);
@@ -401,6 +408,9 @@ export default function CommunityThreadScreen() {
       ? [{ id: message.id, uri: message.image_url, senderName: message.sender_name, caption: message.body }] : []), [broadcasts]);
   const photoSelection = useChatPhotoSelection(`community:${id}:${myId}:${viewer.epoch}`, removedFromCommunity ? [] : photos);
   const coreFocused = useRef(false);
+  // Own membership must recover even when a previous read denied admission.
+  // Keep this independent of history and coalesce overlapping route/app returns.
+  useFocusEffect(useCallback(() => { refreshMembership(); }, [refreshMembership]));
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
     // Both legacy and mapped main rooms need to recover missed live updates.
@@ -413,18 +423,22 @@ export default function CommunityThreadScreen() {
     const subscription = AppState.addEventListener('change', state => {
       const returning = state === 'active' && previousState !== 'active';
       previousState = state;
-      if (returning && coreFocused.current && admissionIsCurrent()) void refetchHistory({ cancelRefetch: false });
+      if (returning && coreFocused.current) {
+        refreshMembership();
+        if (admissionIsCurrent()) void refetchHistory({ cancelRefetch: false });
+      }
     });
     return () => subscription.remove();
-  }, [admissionIsCurrent, refetchHistory]);
+  }, [admissionIsCurrent, refetchHistory, refreshMembership]);
   const previousOnline = useRef(online);
   useEffect(() => {
     const reconnected = online && !previousOnline.current;
     previousOnline.current = online;
-    if (reconnected && coreFocused.current && AppState.currentState === 'active' && admissionIsCurrent()) {
-      void refetchHistory({ cancelRefetch: false });
+    if (reconnected && coreFocused.current && AppState.currentState === 'active') {
+      refreshMembership();
+      if (admissionIsCurrent()) void refetchHistory({ cancelRefetch: false });
     }
-  }, [online, admissionIsCurrent, refetchHistory]);
+  }, [online, admissionIsCurrent, refetchHistory, refreshMembership]);
   const readAcknowledgementScope = useMemo(() => ({ userId: operationScope.userId,
     isCurrent: () => coreFocused.current && AppState.currentState === 'active' && operationScope.isCurrent(),
   }), [operationScope]);

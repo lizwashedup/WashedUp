@@ -367,3 +367,66 @@ it('refreshes ordinary history behind another screen, then reads only visible pe
   expect(mockReadMarker.mock.calls[0][1]).toBe(notice.created_at);
   await act(async () => show([old])); expect(mockReadMarker).toHaveBeenCalledTimes(1);
 });
+
+
+it.each([['foreground', false], ['child return', false], ['foreground', true], ['child return', true]])('refreshes own Main membership on %s (mapped=%s) and preserves a draft through rejoin', async (entry, mapped) => {
+  mockViewerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  mockRoomId = '11111111-1111-4111-8111-111111111111';
+  await AsyncStorage.clear();
+  if (mapped) enableCore();
+  await mount();
+  await act(async () => tree.root.findByType(TextInput).props.onChangeText('Unsent draft'));
+  mockReadMembership.mockResolvedValue({ status: 'removed' });
+  async function resume() {
+    if (entry === 'foreground') {
+      act(() => changeAppState('background'));
+      await act(async () => changeAppState('active'));
+    } else {
+      act(() => mockBlur?.());
+      await act(async () => mockFocus?.());
+    }
+    await flush();
+  }
+  await resume();
+  expect(client.getQueryData(['community-my-membership', mockRoomId, mockViewerId, 1])).toEqual({ status: 'removed' });
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+  expect(rows()).toHaveLength(1);
+  mockReadMembership.mockResolvedValue({ status: 'active' });
+  await resume();
+  expect(tree.root.findByType(TextInput).props.value).toBe('Unsent draft');
+});
+
+
+it.each(['unknown', 'error'])('does not convert an %s membership result into removal, and rechecks on return', async result => {
+  await mount();
+  if (result === 'unknown') mockReadMembership.mockResolvedValue(null);
+  else mockReadMembership.mockRejectedValue(Error('Offline'));
+  act(() => mockBlur?.()); await act(async () => mockFocus?.()); await flush();
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(1);
+  mockReadMembership.mockResolvedValue({status:'banned'});
+  act(() => mockBlur?.()); await act(async () => mockFocus?.()); await flush();
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
+});
+
+it('coalesces admission checks across foreground and route return without reading membership per message', async () => {
+  await mount();
+  const pending = deferred<any>(); mockReadMembership.mockReturnValueOnce(pending.promise);
+  const before = mockReadMembership.mock.calls.length;
+  act(() => changeAppState('background')); await act(async () => changeAppState('active')); await flush();
+  act(() => mockBlur?.()); await act(async () => mockFocus?.()); await flush();
+  expect(mockReadMembership).toHaveBeenCalledTimes(before + 1);
+  await act(async () => pending.resolve({status:'active'})); await flush();
+  const settled = mockReadMembership.mock.calls.length;
+  await act(async () => mockRealtime?.()); await flush();
+  expect(mockReadMembership).toHaveBeenCalledTimes(settled);
+});
+
+it('ignores an old account membership denial after switching accounts during a foreground check', async () => {
+  await mount(); const pending = deferred<any>(); mockReadMembership.mockReturnValueOnce(pending.promise);
+  act(() => changeAppState('background')); await act(async () => changeAppState('active')); await flush();
+  mockViewerId='bob';mockEpoch++;await update();
+  await act(async () => pending.resolve({status:'removed'})); await flush();
+  expect(client.getQueryData(['community-my-membership','community-a','bob',2])).toEqual({status:'active'});
+  expect(tree.root.findAllByType(TextInput)).toHaveLength(1);
+  expect(rows()[0].id).toBe('bob-2');
+});
