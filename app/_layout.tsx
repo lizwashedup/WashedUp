@@ -69,6 +69,7 @@ import { pendingTransferRoute } from '../lib/ticketTransfer';
 import { clearPendingDestination, consumePendingDestination, peekPendingCheckout, parseAppDestination, stashPendingDestination } from '../lib/pendingLink';
 import { subscribeAppLinks } from '../lib/subscribeAppLinks';
 import { getOrder } from '../lib/ticketing';
+import { observeProfileSignOut } from '../lib/profileSignOutIntent';
 import { forgetAccount, rememberAccount } from '../lib/knownAccount';
 import { isPostPlanSurveyHandled } from '../lib/postPlanSurveyHandled';
 import PostPlanSurvey, { SurveyPlan, SurveyMember } from '../components/PostPlanSurvey';
@@ -1084,6 +1085,7 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
       }
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY') initialAccountCheckPending = false;
       const userId = session?.user.id ?? null;
+      const profileExit = observeProfileSignOut(event, authIdentityRef.current.userId, userId);
       if (event === 'SIGNED_OUT' || event === 'PASSWORD_RECOVERY'
         || authIdentityRef.current.userId !== userId) {
         authIdentityRef.current = { userId, revision: authIdentityRef.current.revision + 1 };
@@ -1113,9 +1115,9 @@ function RootLayoutNav({ onReady }: { onReady: () => void }) {
         && event !== 'TOKEN_REFRESHED' && event !== 'USER_UPDATED' && !verificationVisit) return;
       if (!session?.user) {
         if ((event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && !verificationVisit) return;
-        // Did they choose this? A deliberate exit stamps navState immediately
-        // before signOut(); anything else is a session that died on its own.
-        const deliberate = Date.now() - deliberateSignOutAt.ts < 1500;
+        // Ordinary profile logout waits for this account’s auth event. Other
+        // deliberate exits retain their existing timestamp policy.
+        const deliberate = profileExit || Date.now() - deliberateSignOutAt.ts < 1500;
 
         if (deliberate) {
           // chosen exit: forget the device and land cold, as before

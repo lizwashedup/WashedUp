@@ -261,7 +261,7 @@ it('preserves a rejected server deletion without running fallback or signout and
 it('retires a logout confirmation after account replacement and retains the current confirmed flow', async () => {
   await mount(); await press(byLabel('Log out')); const oldConfirm = alert().buttons[1].onPress;
   mockViewer = 'account-b'; mockEpoch++; await update(); act(() => oldConfirm()); await flush(); expect(mockSignOut).not.toHaveBeenCalled();
-  await press(byLabel('Log out')); const info = alert(); act(() => { info.buttons[1].onPress(); info.buttons[1].onPress(); info.onClose(); }); await flush(); expect(mockForget).toHaveBeenCalledTimes(1); expect(mockSignOut).toHaveBeenCalledTimes(1); expect(deliberateSignOutAt.ts).toBeGreaterThan(0);
+  await press(byLabel('Log out')); const info = alert(); act(() => { info.buttons[1].onPress(); info.buttons[1].onPress(); info.onClose(); }); await flush(); expect(mockSignOut).toHaveBeenCalledTimes(1); expect(mockForget).not.toHaveBeenCalled();
 });
 
 it('opens management inside the personal navigation', async () => {
@@ -453,4 +453,17 @@ it('does not give a replacement account the prior logout progress or a late refu
   expect(alert().visible).toBeFalsy();
   expect(mockSignOut).toHaveBeenCalledTimes(1);
   expect(mockReplace).not.toHaveBeenCalled();
+});
+
+it('preserves the returning-account hint when the provider refuses a profile logout', async () => {
+  mockSignOut.mockResolvedValue({ error: new Error('Provider refused sign out') });
+  await mount();
+  await press(byLabel('Log out'));
+  const confirm = alert();
+  act(() => { confirm.buttons[1].onPress(); confirm.onClose(); });
+  await flush();
+  expect(alert().title).toBe('Could not log out');
+  expect(mockSignOut).toHaveBeenCalledTimes(1);
+  expect(mockForget).not.toHaveBeenCalled();
+  expect(deliberateSignOutAt.ts).toBe(0);
 });

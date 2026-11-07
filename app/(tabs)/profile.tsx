@@ -48,6 +48,7 @@ import { ProfileCreatorSection } from '../../components/yours/profile/settings/P
 import { checkContent } from '../../lib/contentFilter';
 import { unauthedRoute } from '../../lib/authRouting';
 import { lastUnauthRedirectAt, deliberateSignOutAt } from '../../lib/navState';
+import { withProfileSignOutIntent } from '../../lib/profileSignOutIntent';
 import { forgetAccount } from '../../lib/knownAccount';
 import { BrandedAlert, type BrandedAlertButton } from '../../components/BrandedAlert';
 
@@ -314,8 +315,7 @@ function ProfileAccount({ viewer: pushViewer, appearance }: { viewer: ObservedUs
         if (!finish) return;
         void (async () => { try {
           await verifyProfileOwner(pageScope); requireProfileScope(pageScope);
-          deliberateSignOutAt.ts = Date.now(); void forgetAccount();
-          const { error } = await supabase.auth.signOut();
+          const { error } = await withProfileSignOutIntent(userId, () => supabase.auth.signOut());
           if (error) throw error;
         } catch (error) { if (pageScope.isCurrent() && !isObsoleteProfileOperation(error)) setAlertInfo({ title: 'Could not log out', message: friendlyError(error, 'Please try again.') }); }
         finally { finish(); } })();

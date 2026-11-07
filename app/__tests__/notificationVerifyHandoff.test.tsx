@@ -1,3 +1,4 @@
+import { withProfileSignOutIntent } from '../../lib/profileSignOutIntent';
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -107,7 +108,8 @@ jest.mock('../../lib/uploadAlbumMedia', () => ({ resumeAllPendingAlbumBatches: a
 jest.mock('../../lib/logger', () => ({ logError: () => {} }));
 jest.mock('../../lib/yours/referralLink', () => ({ handleReferralUrl: (...args: any[]) => mockReferralDelivery(...args), consumePendingReferral: () => {} }));
 jest.mock('../../lib/ticketTransfer', () => ({ pendingTransferRoute: async () => null }));
-jest.mock('../../lib/knownAccount', () => ({ forgetAccount: () => {}, rememberAccount: () => {} }));
+const mockForgetAccount = jest.fn();
+jest.mock('../../lib/knownAccount', () => ({ forgetAccount: () => mockForgetAccount(), rememberAccount: () => {} }));
 jest.mock('../../lib/reviewAsk', () => ({ maybeRequestReviewAfterTopRating: async () => {} }));
 jest.mock('../../lib/giphyInit', () => ({ initGiphySDK: () => {} }));
 jest.mock('../../lib/haptics', () => ({ hapticLight: () => {}, hapticSuccess: () => {}, hapticError: () => {} }));
@@ -802,4 +804,24 @@ describe('root referral scope ownership', () => {
   await emitAuth('SIGNED_IN',{id:'person-a',phone:'+12025550100'});
   expect(scope.isCurrent()).toBe(false);
  });
+});
+
+
+it.each(['confirmed', 'refused', 'replaced'] as const)('forgets a remembered profile only on its confirmed sign-out: %s', async kind => {
+  mockUser = {id: 'person-a', phone: '+12025550100'};
+  await mount();
+  mockForgetAccount.mockClear();
+  const provider = deferred<void>();
+  const result = withProfileSignOutIntent('person-a', () => provider.promise);
+  try {
+    await tick(3000);
+    if (kind === 'refused') { provider.resolve(); await result; }
+    if (kind === 'replaced') {
+      await emitAuth('SIGNED_IN', {id:'person-b', phone:'+12025550101'});
+      await emitAuth('SIGNED_IN', {id:'person-a', phone:'+12025550100'});
+    }
+    await emitAuth('SIGNED_OUT', null);
+    expect(mockPath).toBe('/phone-entry');
+    expect(mockForgetAccount).toHaveBeenCalledTimes(kind === 'confirmed' ? 1 : 0);
+  } finally { provider.resolve(); await result; }
 });
