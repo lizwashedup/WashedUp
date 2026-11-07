@@ -39,6 +39,7 @@ jest.mock('@tanstack/react-query', () => ({
     const dataByKey: Record<string, unknown> = {
       'topic-meta': mockMeta,
       'community-notification-context': { kind: mockMeta?.explore_event_id ? 'event' : 'persistent', communityId: 'community-a' },
+      'event-topic-membership': true,
       'topic-my-membership': mockMembership ? { status: mockMembership } : null,
       'creator-access': null,
       // This fixture deliberately models an attendee who is not a community member.

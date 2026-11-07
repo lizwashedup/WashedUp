@@ -55,6 +55,7 @@ jest.mock('@tanstack/react-query', () => ({
   useQuery: ({ queryKey }: any) => {
     const data: Record<string, unknown> = {
       'community-my-membership': { status: mockMembership },
+      'event-topic-membership': true,
       'topic-my-membership': { status: mockMembership },
       'community-chat-cards': {
         cards: [{ community_id: '11111111-1111-4111-8111-111111111111', name: 'Sunset Club LA', main_chat_name: 'After Glow', topics: [] }],

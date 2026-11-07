@@ -25,10 +25,12 @@ const mockMembershipRefetch=jest.fn(),mockGetMembership=jest.fn();
 let mockMembershipQuery:any, mockMembershipAbsent=false, mockGrouping=true;
 let mockFocusCleanup:(()=>void)|undefined;
 let mockFocusEnter:(()=>void|(()=>void))|undefined;
+const mockEventMetadataRefetch=jest.fn().mockResolvedValue({});
+const mockEventMembershipRefetch=jest.fn().mockResolvedValue({});
 const mockRetryMembers = jest.fn().mockResolvedValue(undefined);
 let mockMessages: any[], mockFirstMessage: any, mockMembers: any[];
 let mockSaidHi: boolean | undefined, mockLedCommunities: { id: string }[];
-let mockArchived = false, mockEventTopic = true;
+let mockArchived = false, mockEventTopic = true, mockTopicMember = true;
 let mockMessagesLoading = false;
 const mockPush = jest.fn(), mockInvalidate = jest.fn().mockResolvedValue(undefined);
 const mockRefresh = jest.fn().mockResolvedValue(undefined);
@@ -75,10 +77,12 @@ jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: mockInvalidate, cancelQueries: jest.fn().mockResolvedValue(undefined) }),
   useQuery: (query: any) => {
     const {queryKey}=query;
+    if(queryKey[0]==='event-topic-membership')return {data:mockTopicMember,refetch:mockEventMembershipRefetch,isFetching:false};
     if(queryKey[0]==='topic-said-hi')mockIntroQuery=query;
     if(queryKey[0]==='topic-my-membership'){mockMembershipQuery=query;return {data:mockMembershipAbsent?null:{status:mockMembership},refetch:mockMembershipRefetch};}
     const data: Record<string, unknown> = {
       'topic-my-membership': { status: mockMembership },
+      'event-topic-membership': mockTopicMember,
       'community-chat-cards': {
         cards: [{ community_id: 'community-a', name: 'Sunset Club LA', main_chat_name: 'After Glow', topics: mockEventTopic ? [] : [{ id: mockRoomId, name: 'Ordinary room', explore_event_id: null }] }],
         attendee_topics: mockEventTopic ? [{ id: mockRoomId, name: 'Event room', explore_event_id: 'event-a' }] : [],
@@ -90,7 +94,7 @@ jest.mock('@tanstack/react-query', () => ({
       'topic-chat-members': mockMembers,
     };
     if(queryKey[0]==='topic-said-hi') return {data:mockSaidHi,isError:mockIntroError,isFetching:mockIntroFetching,refetch:mockIntroRefetch};
-    return { data: data[queryKey[0]], isSuccess: true, isLoading: queryKey[0]==='topic-chat-members' && mockMembersLoading, isError: queryKey[0]==='topic-chat-members' && mockMembersError, refetch: mockRetryMembers };
+    return { data: data[queryKey[0]], isSuccess: true, isLoading: queryKey[0]==='topic-chat-members' && mockMembersLoading, isError: queryKey[0]==='topic-chat-members' && mockMembersError, refetch: ['topic-meta','community-chat-cards'].includes(queryKey[0]) ? mockEventMetadataRefetch : mockRetryMembers };
   },
 }));
 jest.mock('../../../lib/communityChat', () => ({
@@ -135,7 +139,7 @@ function type(text: string) { act(() => input().props.onChangeText(text)); }
 beforeEach(async () => {
   mockLocation.mockReset().mockResolvedValue(undefined);
   await AsyncStorage.clear(); mockConfirmed.clear(); mockCheckAttempt.mockReset().mockImplementation(async (_room: string, attempt: {id:string}) => mockConfirmed.has(attempt.id));
-  jest.clearAllMocks(); mockEventTopic=true;mockMembershipAbsent=false;mockMembershipQuery=undefined;mockGrouping=true;mockGetMembership.mockReset().mockResolvedValue({status:'active'}); mockMembershipRefetch.mockReset().mockResolvedValue({}); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
+  jest.clearAllMocks(); mockEventTopic=true;mockTopicMember=true;mockMembershipAbsent=false;mockMembershipQuery=undefined;mockGrouping=true;mockGetMembership.mockReset().mockResolvedValue({status:'active'}); mockMembershipRefetch.mockReset().mockResolvedValue({}); mockIntroError=false; mockIntroFetching=false; mockIntroQuery=undefined; mockIntroRefetch.mockReset().mockResolvedValue({}); mockHasSaidHi.mockReset().mockResolvedValue(true); mockMembersError=false; mockMembersLoading=false; mockRoomId='11111111-1111-4111-8111-111111111111'; mockViewerId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; mockEpoch=1; mockMembership='active'; mockSaidHi=true;
   mockMessagesLoading=false;mockLedCommunities=[];mockFirstMessage=null;mockMessages=[];mockMembers=[];mockArchived=false;
   mockSend.mockResolvedValue(undefined); mockRefresh.mockResolvedValue(undefined); mockVerifyTarget.mockResolvedValue(undefined);
   mockCameraPermission.mockResolvedValue({status:'granted'}); mockCamera.mockResolvedValue({canceled:false,assets:[{uri:'file:///camera.jpg'}]});
@@ -565,6 +569,7 @@ it('replaces an unknown failed introduction read with explicit recovery, preserv
  mockSaidHi=undefined;mockIntroError=true;const pending=deferred<any>();mockIntroRefetch.mockReturnValue(pending.promise);await mount();
  type('Hi from Venice');expect(introCopy()).toContain('Couldn’t open this chat');expect(tree.root.findAllByType(FlatList)).toHaveLength(0);
  expect(composer().photo.disabled).toBe(true);expect(composer().camera.disabled).toBe(true);expect(composer().location.disabled).toBe(true);
+ mockIntroRefetch.mockClear(); // The automatic entry check is separate from this explicit retry.
  const retry=introRetry()!.props.onPress;act(()=>{retry();retry();});expect(mockIntroRefetch).toHaveBeenCalledTimes(1);expect(introRetry()!.props.disabled).toBe(true);expect(input().props.value).toBe('Hi from Venice');
  mockIntroError=false;mockIntroFetching=true;await update();expect(introRetry()!.props.disabled).toBe(true);expect(introCopy()).toContain('Checking…');
  mockIntroFetching=false;
@@ -585,6 +590,7 @@ it.each(['room','account','blur','unmount'] as const)('retires introduction retr
  else if(retirement==='account'){mockViewerId='new-viewer';mockEpoch++;await update();}
  else if(retirement==='blur')act(()=>mockFocusCleanup?.());
  else act(()=>tree.unmount());
+ mockIntroRefetch.mockClear(); // Ignore legitimate reads belonging to the new visit.
  retry();expect(mockIntroRefetch).not.toHaveBeenCalled();
 });
 it('bounds a stalled introduction read without query retries and isolates its account cache key',async()=>{
@@ -860,7 +866,7 @@ it('retires an ordinary topic composer after voluntary parent departure and pres
  mockMembership='active';await update();expect(input().props.value).toBe('Topic goodbye draft');
 });
 it('keeps valid event-topic composition independent of voluntary parent departure',async()=>{
- mockEventTopic=true;await mount();type('Event-only attendee');mockMembership='left';await update();
+ mockEventTopic=true;mockTopicMember=true;await mount();type('Event-only attendee');mockMembership='left';await update();
  expect(input().props.value).toBe('Event-only attendee');await act(async()=>composer().onSend());expect(mockSend).toHaveBeenCalledTimes(1);
 });
 it('retires a selected photo and its old Send after ordinary parent departure',async()=>{
@@ -887,4 +893,24 @@ it('does not dispatch a pending original retry after ordinary parent access ends
  await act(async()=>{retry.props.onPress();});await flush();
  expect(mockSend).toHaveBeenCalledTimes(2);
  expect(mockSend.mock.calls[1][4]).toBe(mockSend.mock.calls[0][4]);
+});
+
+it('retires event sending after its own topic membership ends while keeping the draft for rejoin',async()=>{
+ await mount();type('Keep my event draft');const oldSend=composer().onSend;
+ mockTopicMember=false;await update();
+ expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(0);
+ await act(async()=>{await oldSend();});expect(mockSend).not.toHaveBeenCalled();
+ mockTopicMember=true;await update();expect(input().props.value).toBe('Keep my event draft');
+});
+
+it('offers a read-only event access retry when membership is unknown',async()=>{
+ mockTopicMember=undefined as any;await mount();
+ expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(0);
+ const retry=tree.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==='Check event chat access')!;
+ mockEventMembershipRefetch.mockClear();await act(async()=>{retry.props.onPress();});
+ expect(mockEventMembershipRefetch).toHaveBeenCalledWith({cancelRefetch:false});expect(mockSend).not.toHaveBeenCalled();
+ mockTopicMember=true;await update();expect(tree.root.findAllByType(CommunityChatComposer)).toHaveLength(1);
+});
+it('keeps an ordinary topic independent of event-topic membership checks',async()=>{
+ mockEventTopic=false;mockTopicMember=false;await mount();type('Ordinary room');await act(async()=>{await composer().onSend();});expect(mockSend).toHaveBeenCalledTimes(1);
 });
