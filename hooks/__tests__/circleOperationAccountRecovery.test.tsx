@@ -1,4 +1,6 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readCircleCreationAttempt } from '../../lib/circles/creationAttempt';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateCircle } from '../useCreateCircle';
@@ -47,7 +49,8 @@ async function mount(mode: Mode) {
   act(() => { tree = create(<QueryClientProvider client={client}><Probe mode={mode}/></QueryClientProvider>); });
   await tick();
 }
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   jest.useFakeTimers(); live = true;
   mockAuth.mockReset().mockResolvedValue(account());
   mockRpc.mockReset().mockImplementation(async (name: string) => ({ data: name === 'create_circle' ? ID : name === 'create_circle_plan' ? { event_id: ID, has_own_chat: false } : name === 'invite_to_circle' ? 1 : name === 'leave_circle' ? 'left' : null, error: null, status: 200 }));
@@ -64,8 +67,8 @@ it.each(modes)('%s recovers a stalled account check without dispatching its late
   expect(mockRpc).toHaveBeenCalledTimes(1); expect(pending).toBe(false);
 });
 
-it.each(modes)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
-  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(mode === 'create' ? 'create_circle' : mode === 'plan' ? 'create_circle_plan' : mode === 'invite' ? 'invite_to_circle' : mode === 'leave' ? 'leave_circle' : 'update_circle'); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
+it.each(['plan','invite','update','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
+  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ plan: 'create_circle_plan', invite: 'invite_to_circle', leave: 'leave_circle', update: 'update_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
   await mount(mode); let settled = false;
   act(() => { void submit().then(() => { settled = true; }, () => { settled = true; }); }); await tick(20000);
   expect(pending).toBe(true); expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1);
@@ -84,4 +87,15 @@ it('keeps confirmed Circle creation when optional policy verification stalls and
   await act(async () => { gate.resolve(account()); }); await tick(1); expect(mockRpc).toHaveBeenCalledTimes(1);
   await act(async () => { receipt = await hook.retrySetupAsync(ID); });
   expect(receipt.policyApplied).toBe(true); expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['create_circle', 'update_circle']);
+});
+
+it('bounds a dispatched create while preserving its exact late receipt for a later visit', async () => {
+  const gate = deferred<{data:string;error:null;status:number}>();mockRpc.mockReturnValueOnce(gate.promise);
+  await mount('create');let outcome:unknown='pending';
+  act(()=>{void submit().then(value=>{outcome=value;},error=>{outcome=error;});});await tick(20000);
+  expect(pending).toBe(false);expect(outcome).toBeInstanceOf(Error);expect(mockRpc).toHaveBeenCalledTimes(1);
+  expect((await readCircleCreationAttempt('alice'))?.circleId).toBeNull();
+  await act(async()=>{gate.resolve({data:ID,error:null,status:200});});await tick(1);
+  expect((await readCircleCreationAttempt('alice'))?.circleId).toBe(ID);
+  expect(mockRpc).toHaveBeenCalledTimes(1);
 });
