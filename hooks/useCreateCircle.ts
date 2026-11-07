@@ -3,8 +3,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../lib/supabase';
-import { requestWithDeadline } from '../lib/requestWithDeadline';
+import { RequestDeadlineError, requestWithDeadline } from '../lib/requestWithDeadline';
 import { uploadBase64ToStorage } from '../lib/uploadPhoto';
+import { beginCircleCreation, finishCircleCreation, isCircleId, readCircleCreationAttempt } from '../lib/circles/creationAttempt';
 import { circleKeys } from '../lib/circles/keys';
 import type { CreateCircleArgs } from '../lib/circles/types';
 
@@ -21,15 +22,14 @@ export const isUnconfirmedCircleCreation = (error: unknown) => error instanceof 
 type Owner = { userId: string | null | undefined };
 type Call = { args: CreateCircleArgs; owner: Owner; authEpoch: number; scope?: CircleCreationScope; circleId?: string };
 type Setup = { call: Call; receipt: CreateCircleReceipt; coverId: string | null; uploaded: boolean };
-const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 export function useCreateCircle(userId: string | null | undefined) {
   const qc = useQueryClient();
   const owner = useMemo<Owner>(() => ({ userId }), [userId]);
   const active = useRef<Owner | null>(null), latest = useRef(owner); latest.current = owner;
   const mounted = useRef(false), authEpoch = useRef(0), authId = useRef<string | null | undefined>(undefined);
+  const submitted = useRef<{ call: Call; requestId: string } | null>(null);
   const pending = useRef<Call | null>(null), setups = useRef(new Map<string, Setup>());
-  const unconfirmed = useRef<Call | null>(null);
   useLayoutEffect(() => { active.current = owner; mounted.current = true; return () => { if (active.current === owner) active.current = null; }; }, [owner]);
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -92,8 +92,52 @@ export function useCreateCircle(userId: string | null | undefined) {
     }
     check(call); invalidate(setup); return { ...setup.receipt };
   };
+  const acknowledgeReceipt = (circleId: string) => {
+    const original = submitted.current;
+    if (!original || !current(original.call) || !setups.current.has(circleId)) return;
+    // The view has accepted this exact destination. Until then, a departure
+    // during setup or conversion must leave the confirmed circle recoverable.
+    void finishCircleCreation(original.call.owner.userId!, original.requestId, null).catch(() => {});
+  };
+  const rememberSetup = (call: Call, circleId: string) => {
+    const setup: Setup = {
+      call, coverId: null, uploaded: false,
+      receipt: {
+        circleId,
+        policyApplied: call.args.invitePolicy === 'only_me' || (call.args.invitePolicy === 'chosen' && call.args.adminUserIds.length === 0),
+        coverApplied: !call.args.coverBase64,
+      },
+    };
+    setups.current.set(circleId, setup);
+    return setup;
+  };
+  const dispatchCreate = async (call: Call, requestId: string) => {
+    const id = call.owner.userId!;
+    try { check(call); }
+    catch (error) { await finishCircleCreation(id, requestId, null); throw error; }
+    let result;
+    try {
+      result = await supabase.rpc('create_circle', {
+        p_name: call.args.name, p_description: call.args.description, p_member_user_ids: call.args.memberUserIds,
+      });
+    } catch { throw new UnconfirmedCircleCreationError(); }
+    if (result.error) {
+      if (result.status >= 400 && result.status < 500 && result.status !== 408) {
+        await finishCircleCreation(id, requestId, null);
+        throw result.error;
+      }
+      throw new UnconfirmedCircleCreationError();
+    }
+    if (!isCircleId(result.data)) throw new UnconfirmedCircleCreationError();
+    let recorded: boolean;
+    try { recorded = await finishCircleCreation(id, requestId, result.data); }
+    catch { throw new UnconfirmedCircleCreationError(); }
+    if (!recorded) throw new ObsoleteCircleCreationError();
+    return result.data;
+  };
   const mutation = useMutation<CreateCircleReceipt, Error, Call>({
     retry: false,
+    networkMode: 'always',
     mutationFn: async call => {
       check(call); await verify(call); check(call);
       if (call.circleId) {
@@ -101,24 +145,22 @@ export function useCreateCircle(userId: string | null | undefined) {
         if (!setup || setup.call.owner !== call.owner || setup.call.authEpoch !== call.authEpoch) throw new ObsoleteCircleCreationError();
         return applySetup(setup);
       }
-      let result;
+      const id = call.owner.userId!;
+      const attempt = await beginCircleCreation(id, () => check(call));
+      if (!attempt) throw new UnconfirmedCircleCreationError();
+      submitted.current = { call, requestId: attempt.requestId };
+      let circleId: string;
       try {
-        result = await supabase.rpc('create_circle', { p_name: call.args.name, p_description: call.args.description, p_member_user_ids: call.args.memberUserIds });
-      } catch (error) { check(call); throw new UnconfirmedCircleCreationError(); }
-      check(call);
-      if (result.error) {
-        // A server rejection is retryable. A transport/server timeout can have
-        // happened after commit, so a blind create retry could duplicate it.
-        if (result.status >= 400 && result.status < 500 && result.status !== 408) throw result.error;
-        throw new UnconfirmedCircleCreationError();
+        // Bound the screen's wait. The original promise still records its own
+        // receipt if it settles after the timeout or after the screen closes.
+        circleId = await requestWithDeadline(dispatchCreate(call, attempt.requestId), 12_000);
+      } catch (error) {
+        check(call);
+        if (error instanceof RequestDeadlineError) throw new UnconfirmedCircleCreationError();
+        throw error;
       }
-      if (!isUuid(result.data)) throw new UnconfirmedCircleCreationError();
-      const setup: Setup = { call, coverId: null, uploaded: false, receipt: {
-        circleId: result.data,
-        policyApplied: call.args.invitePolicy === 'only_me' || (call.args.invitePolicy === 'chosen' && call.args.adminUserIds.length === 0),
-        coverApplied: !call.args.coverBase64,
-      } };
-      setups.current.set(result.data, setup);
+      check(call);
+      const setup = rememberSetup(call, circleId);
       return applySetup(setup);
     },
   });
@@ -127,7 +169,6 @@ export function useCreateCircle(userId: string | null | undefined) {
     if (pending.current && current(pending.current)) throw new Error('Your circle is already being saved.');
     pending.current = call;
     try { const result = await mutation.mutateAsync(call); check(call); return result; }
-    catch (error) { if (current(call) && isUnconfirmedCircleCreation(error)) unconfirmed.current = call; throw error; }
     finally { if (pending.current === call) pending.current = null; }
   };
   const mutateAsync = (args: CreateCircleArgs, options?: { scope?: CircleCreationScope }) => {
@@ -136,7 +177,6 @@ export function useCreateCircle(userId: string | null | undefined) {
       args: { ...args, memberUserIds: [...args.memberUserIds], adminUserIds: [...args.adminUserIds] } };
     if (authId.current === undefined && options?.scope) authId.current = options.scope.userId;
     const sameEntry = (prior: Call) => prior.owner === owner && prior.scope?.isCurrent === call.scope?.isCurrent && current(prior);
-    if (unconfirmed.current && sameEntry(unconfirmed.current)) return Promise.reject(new UnconfirmedCircleCreationError());
     for (const setup of setups.current.values()) {
       if (sameEntry(setup.call)) return Promise.resolve({ ...setup.receipt });
     }
@@ -148,8 +188,23 @@ export function useCreateCircle(userId: string | null | undefined) {
     check(setup.call);
     return run({ ...setup.call, circleId });
   };
+  const canResumeSetup = (requestId: string) => {
+    const original = submitted.current;
+    return !!original && original.requestId === requestId && current(original.call) &&
+      (!!original.call.args.coverBase64 || original.call.args.invitePolicy !== 'only_me');
+  };
+  const resumeSetupAsync = async (requestId: string) => {
+    const original = submitted.current;
+    if (!original || !canResumeSetup(requestId)) throw new ObsoleteCircleCreationError();
+    const { call } = original;
+    const attempt = await readCircleCreationAttempt(call.owner.userId!);
+    check(call);
+    if (attempt?.requestId !== requestId || !attempt.circleId) throw new UnconfirmedCircleCreationError();
+    if (!setups.current.has(attempt.circleId)) rememberSetup(call, attempt.circleId);
+    return retrySetupAsync(attempt.circleId);
+  };
   const belongs = !mutation.variables || current(mutation.variables);
-  return { mutateAsync, retrySetupAsync,
+  return { mutateAsync, retrySetupAsync, canResumeSetup, resumeSetupAsync, acknowledgeReceipt,
     isPending: belongs && mutation.isPending,
     error: belongs ? mutation.error : null,
     data: belongs ? mutation.data : undefined,

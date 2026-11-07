@@ -1,6 +1,8 @@
+import { readCircleCreationAttempt, beginCircleCreation, finishCircleCreation } from '../../lib/circles/creationAttempt';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateCircle, type CircleCreationScope, isObsoleteCircleCreation, isUnconfirmedCircleCreation } from '../useCreateCircle';
 import type { CreateCircleArgs } from '../../lib/circles/types';
 const mockRpc=jest.fn(),mockGetUser=jest.fn(),mockUpload=jest.fn();
@@ -9,11 +11,11 @@ let mockViewer:string|null='alice';
 const ID='11111111-1111-4111-8111-111111111111';
 jest.mock('../../lib/supabase',()=>({supabase:{rpc:(...args:unknown[])=>mockRpc(...args),auth:{getUser:()=>mockGetUser(),onAuthStateChange:(fn:any)=>{mockListeners.add(fn);return {data:{subscription:{unsubscribe:()=>mockListeners.delete(fn)}}};}}}}));
 jest.mock('../../lib/uploadPhoto',()=>({uploadBase64ToStorage:(...args:unknown[])=>mockUpload(...args)}));
-jest.mock('expo-crypto',()=>({randomUUID:()=> '22222222-2222-4222-8222-222222222222'}));
+jest.mock('expo-crypto',()=>({randomUUID:jest.fn(()=> '22222222-2222-4222-8222-222222222222')}));
 const cleanups:Array<()=>void>=[];
 function deferred<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return{promise,resolve};}
 const observe=<T,>(p:Promise<T>)=>p.then(value=>({value,error:null}),error=>({value:undefined,error}));
-async function flush(){await act(async()=>{for(let i=0;i<20;i++)await Promise.resolve();});}
+async function flush(){await act(async()=>{for(let i=0;i<80;i++)await Promise.resolve();});}
 function auth(id:string|null){mockViewer=id;for(const fn of mockListeners)fn(id?'SIGNED_IN':'SIGNED_OUT',id?{user:{id}}:null);}
 function scope(){const s={userId:'alice',live:true,isCurrent:()=>s.live};return s;}
 const args=(overrides:Partial<CreateCircleArgs>={}):CreateCircleArgs=>({name:'Friends',description:null,memberUserIds:['jamie','riley'],invitePolicy:'only_me',adminUserIds:[],coverBase64:null,...overrides});
@@ -26,7 +28,7 @@ function mount(cache=new MutationCache()){
  const unmount=()=>{if(mounted)act(()=>tree.unmount());mounted=false;};cleanups.push(()=>{unmount();client.clear();});
  return{get current(){return current;},invalidate,unmount,update(id:string){userId=id;act(()=>tree.update(render()));}};
 }
-beforeEach(()=>{jest.clearAllMocks();mockViewer='alice';mockListeners.clear();mockUpload.mockReset().mockResolvedValue(undefined);mockGetUser.mockReset().mockImplementation(async()=>({data:{user:mockViewer?{id:mockViewer}:null},error:null}));mockRpc.mockReset().mockImplementation(async(name:string)=>({data:name==='create_circle'?ID:null,error:null,status:200}));});
+beforeEach(async()=>{await AsyncStorage.clear();jest.clearAllMocks();mockViewer='alice';mockListeners.clear();mockUpload.mockReset().mockResolvedValue(undefined);mockGetUser.mockReset().mockImplementation(async()=>({data:{user:mockViewer?{id:mockViewer}:null},error:null}));mockRpc.mockReset().mockImplementation(async(name:string)=>({data:name==='create_circle'?ID:null,error:null,status:200}));});
 afterEach(()=>cleanups.splice(0).forEach(fn=>fn()));
 it('preserves create arguments and returns a fully confirmed default receipt',async()=>{
  const f=mount();let receipt:any;await act(async()=>{receipt=await f.current.mutateAsync(args(),{scope:scope()});});
@@ -88,4 +90,102 @@ it('stops later cache effects if the first invalidation retires this entry',asyn
  const result=await observe(f.current.mutateAsync(args(),{scope:entry}));
  expect(isObsoleteCircleCreation(result.error)).toBe(true);expect(f.invalidate).toHaveBeenCalledTimes(1);
  expect(f.invalidate).toHaveBeenCalledWith({queryKey:['circles','mine','alice']});
+});
+
+it('does not dispatch a second identical create from a new visit while the original request is outstanding', async () => {
+  const cache = new MutationCache();
+  const first = mount(cache), visit = scope();
+  const gate = deferred<{data: string; error: null; status: number}>();
+  mockRpc.mockReturnValueOnce(gate.promise);
+  const original = observe(first.current.mutateAsync(args(), {scope: visit}));
+  await flush();
+  expect(mockRpc.mock.calls.filter(([name]) => name === 'create_circle')).toHaveLength(1);
+  visit.live = false; first.unmount();
+  const next = mount(cache);
+  // Do not await the second call: it may correctly wait for the first receipt.
+  const again = observe(next.current.mutateAsync(args(), {scope: scope()}));
+  await flush();
+  const callsWhilePending = mockRpc.mock.calls.filter(([name]) => name === 'create_circle').length;
+  gate.resolve({data: ID, error: null, status: 200});
+  await Promise.all([original, again]);
+  expect(callsWhilePending).toBe(1);
+});
+
+it('keeps a late creation receipt for the original form and resumes only explicitly requested setup', async () => {
+  const f = mount(), entry = scope(), gate = deferred<any>();
+  mockRpc.mockReturnValueOnce(gate.promise);
+  jest.useFakeTimers();
+  try {
+    const original = observe(f.current.mutateAsync(args({invitePolicy: 'everyone', coverBase64: 'photo'}), {scope: entry}));
+    await flush();
+    await act(async () => { await jest.advanceTimersByTimeAsync(12_100); });
+    expect(isUnconfirmedCircleCreation((await original).error)).toBe(true);
+    const attempt = await readCircleCreationAttempt('alice');
+    if (!attempt) throw new Error('Expected the pending circle request');
+    expect(attempt.circleId).toBeNull();
+    gate.resolve({data: ID, error: null, status: 200}); await flush();
+    expect(await readCircleCreationAttempt('alice')).toEqual({...attempt, circleId: ID});
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockUpload).not.toHaveBeenCalled();
+    expect(f.current.canResumeSetup(attempt.requestId)).toBe(true);
+    const result = await f.current.resumeSetupAsync(attempt.requestId);
+    expect(result).toEqual({circleId: ID, policyApplied: true, coverApplied: true});
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['create_circle', 'update_circle', 'update_circle']);
+    expect((await readCircleCreationAttempt('alice'))?.circleId).toBe(ID);
+    f.current.acknowledgeReceipt(ID);
+    expect(await readCircleCreationAttempt('alice')).toBeNull();
+  } finally { jest.useRealTimers(); }
+});
+
+it('preserves an unknown response across entries while another account creates its own circle', async () => {
+  const first = mount();
+  mockRpc.mockResolvedValueOnce({data: null, error: {message: 'offline'}, status: 0});
+  expect(isUnconfirmedCircleCreation((await observe(first.current.mutateAsync(args(), {scope: scope()}))).error)).toBe(true);
+  first.unmount();
+  const next = mount();
+  expect(isUnconfirmedCircleCreation((await observe(next.current.mutateAsync(args({name:'Another title'}), {scope: scope()}))).error)).toBe(true);
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+  act(() => auth('bob')); next.update('bob');
+  await next.current.mutateAsync(args(), {scope: {userId:'bob', isCurrent:()=>true}});
+  expect(mockRpc).toHaveBeenCalledTimes(2);
+});
+
+it('makes no network write if the local recovery marker could not be saved', async () => {
+  const f = mount();
+  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('Device storage unavailable'));
+  expect((await observe(f.current.mutateAsync(args(), {scope: scope()}))).error).toBeTruthy();
+  expect(mockRpc).not.toHaveBeenCalled();
+});
+
+it('cannot modify a separately started request when the earlier creation finishes late', async () => {
+  const ids = jest.requireMock('expo-crypto').randomUUID;
+  ids.mockReturnValueOnce('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  ids.mockReturnValueOnce('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  const gate = deferred<any>(), first = mount(), visit = scope();
+  mockRpc.mockReturnValueOnce(gate.promise);
+  const original = observe(first.current.mutateAsync(args({invitePolicy:'everyone'}), {scope:visit}));
+  await flush();
+  const old = await readCircleCreationAttempt('alice');
+  await finishCircleCreation('alice', old!.requestId, null);
+  const separate = await beginCircleCreation('alice', () => {});
+  expect(separate!.requestId).not.toBe(old!.requestId);
+  gate.resolve({data:ID, error:null, status:200});
+  expect(isObsoleteCircleCreation((await original).error)).toBe(true);
+  expect(await readCircleCreationAttempt('alice')).toEqual(separate);
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+});
+
+it('returns an offline identity failure without queuing a creation for reconnection', async () => {
+  onlineManager.setOnline(false);
+  try {
+    const f = mount();
+    mockGetUser.mockRejectedValueOnce(new Error('Offline'));
+    const result = await observe(f.current.mutateAsync(args(), {scope: scope()}));
+    expect(result.error?.message).toBe('Offline');
+    expect(mockRpc).not.toHaveBeenCalled();
+    onlineManager.setOnline(true); await flush();
+    expect(mockRpc).not.toHaveBeenCalled();
+    await f.current.mutateAsync(args(), {scope: scope()});
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  } finally { onlineManager.setOnline(true); }
 });

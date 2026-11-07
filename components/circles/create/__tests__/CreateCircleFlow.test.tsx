@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import { Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
@@ -13,7 +14,7 @@ jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:(p:any)=>require('react').createElement('SafeArea',p,p.children),useSafeAreaInsets:()=>({top:0,bottom:20,left:0,right:0})}));
 jest.mock('../../../../hooks/useObservedUser',()=>({useObservedUser:()=>{const epoch=mockEpoch;return{viewerId:mockUser,epoch,isLoading:mockAccountLoading,error:mockAccountError,retry:mockAccountRetry,isCurrent:()=>epoch===mockEpoch};}}));
 jest.mock('../../../../hooks/useYoursGrid',()=>({useYoursGrid:()=>({data:mockPeople,isLoading:mockLoading,isError:mockError,refetch:mockRefetch})}));
-jest.mock('../../../../hooks/useCreateCircle',()=>({useCreateCircle:()=>({mutateAsync:mockCreate,retrySetupAsync:mockRetrySetup,isPending:false}),isObsoleteCircleCreation:(e:any)=>e?.obsolete===true,isUnconfirmedCircleCreation:(e:any)=>e?.unconfirmed===true}));
+jest.mock('../../../../hooks/useCreateCircle',()=>({useCreateCircle:()=>({mutateAsync:mockCreate,retrySetupAsync:mockRetrySetup,canResumeSetup:()=>false,acknowledgeReceipt:jest.fn(),isPending:false}),isObsoleteCircleCreation:(e:any)=>e?.obsolete===true,isUnconfirmedCircleCreation:(e:any)=>e?.unconfirmed===true}));
 jest.mock('../../../../hooks/useCircleSuggestions',()=>({useSetSuggestionStatus:()=>({mutateAsync:mockConvert})}));
 jest.mock('../../../../lib/circles/pickCover',()=>({pickCoverPhoto:()=>mockPick()}));
 jest.mock('../../../../lib/haptics',()=>({hapticSelection:jest.fn()}));
@@ -69,3 +70,35 @@ it('people loading and error stay distinct from no people and retry retains the 
 it('confirmed success has truthful Finishing copy while conversion waits',async()=>{mockParams={seed:'bea,cam',suggestion:'s1'};const gate=deferred<string>();mockConvert.mockReturnValueOnce(gate.promise);const f=render();act(()=>f.button('Next').props.onPress());act(()=>f.identity().onName('Friends'));act(()=>f.button('Next').props.onPress());act(()=>f.button('Create circle').props.onPress());await flush();expect(f.text()).toContain('Your circle is ready.');expect(f.text()).toContain('Finishing…');expect(f.text()).not.toContain('couldn’t finish');expect(f.button('Create circle')).toBeUndefined();gate.resolve('converted');await flush();expect(mockReplace).toHaveBeenCalledTimes(1);});
 it('completed setup retry and View circle each ignore repeated immediate taps',async()=>{mockCreate.mockResolvedValueOnce({...complete,coverApplied:false});const gate=deferred<any>();mockRetrySetup.mockReturnValueOnce(gate.promise);const f=render();permissions(f);act(()=>f.button('Create circle').props.onPress());await flush();const retry=f.button('Try again').props.onPress;act(()=>{retry();retry();});expect(mockRetrySetup).toHaveBeenCalledTimes(1);const view=f.button('View circle').props.onPress;act(()=>{view();view();});expect(mockReplace).toHaveBeenCalledTimes(1);gate.resolve(complete);await flush();expect(mockReplace).toHaveBeenCalledTimes(1);expect(mockCreate).toHaveBeenCalledTimes(1);});
 it('a completed old people retry cannot leave a returned visit stuck',async()=>{mockError=true;const gate=deferred<any>();mockRefetch.mockReturnValueOnce(gate.promise);const f=render();act(()=>f.button('Try again').props.onPress());mockFocused=false;f.update();mockFocused=true;f.update();gate.resolve({data:[]});await flush();expect(f.button('Try again').props.disabled).toBe(false);});
+
+it('offers a read-only return after a lost response and requires a separate choice to start over', async () => {
+  const key = 'wu.circleCreation.v1.alice';
+  const marker = JSON.stringify({requestId: complete.circleId, circleId: null});
+  await AsyncStorage.setItem(key, marker);
+  try {
+    const f = render(); await flush();
+    expect(f.button('Check status')).toBeDefined();
+    act(() => f.button('Check status').props.onPress()); await flush();
+    act(() => f.button('Create another circle').props.onPress());
+    act(() => f.button('Cancel').props.onPress());
+    expect(await AsyncStorage.getItem(key)).toBe(marker);
+    act(() => f.button('Create another circle').props.onPress());
+    act(() => f.button('Start a separate circle').props.onPress()); await flush();
+    expect(f.button('Next')).toBeDefined();
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    expect(mockCreate).not.toHaveBeenCalled();
+  } finally { await AsyncStorage.removeItem(key); }
+});
+
+it('opens only the exact circle from a late receipt when the member asks to view it', async () => {
+  const key = 'wu.circleCreation.v1.alice';
+  await AsyncStorage.setItem(key, JSON.stringify({requestId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',circleId:complete.circleId}));
+  try {
+    const f = render(); await flush();
+    expect(f.text()).toContain('Circle created');
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => f.button('View circle').props.onPress()); await flush();
+    expect(mockReplace).toHaveBeenCalledWith('/circle/' + complete.circleId);
+    expect(mockCreate).not.toHaveBeenCalled();
+  } finally { await AsyncStorage.removeItem(key); }
+});

@@ -14,6 +14,7 @@ import { hapticSelection } from '../../../lib/haptics';
 import { useObservedUser, type ObservedUser } from '../../../hooks/useObservedUser';
 import { useYoursGrid } from '../../../hooks/useYoursGrid';
 import { useCreateCircle, isObsoleteCircleCreation, isUnconfirmedCircleCreation, type CreateCircleReceipt } from '../../../hooks/useCreateCircle';
+import { readCircleCreationAttempt, finishCircleCreation, type CircleCreationAttempt } from '../../../lib/circles/creationAttempt';
 import { pickCoverPhoto } from '../../../lib/circles/pickCover';
 import { useSetSuggestionStatus } from '../../../hooks/useCircleSuggestions';
 import type { CircleInvitePolicy } from '../../../lib/circles/types';
@@ -30,9 +31,10 @@ export default function CreateCircleFlow({ appearance }: { appearance?: Appearan
   const params = useLocalSearchParams<{ seed?: string; suggestion?: string }>();
   const seed = typeof params.seed === 'string' ? params.seed : undefined;
   const suggestion = typeof params.suggestion === 'string' ? params.suggestion : undefined;
-  return <CreationVisit key={JSON.stringify([viewer.viewerId, viewer.epoch, seed, suggestion])} viewer={viewer} seed={seed} suggestion={suggestion} appearance={appearance}/>;
+  const [generation, setGeneration] = useState(0);
+  return <CreationVisit startFresh={() => setGeneration(value => value + 1)} key={JSON.stringify([viewer.viewerId, viewer.epoch, seed, suggestion, generation])} viewer={viewer} seed={seed} suggestion={suggestion} appearance={appearance}/>;
 }
-function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: ObservedUser; seed?: string; suggestion?: string; appearance?: Appearance }) {
+function CreationVisit({ viewer, seed, suggestion, appearance, startFresh }: { startFresh: () => void; viewer: ObservedUser; seed?: string; suggestion?: string; appearance?: Appearance }) {
   const router = useRouter(), insets = useSafeAreaInsets(), focused = useIsFocused();
   const live = useRef(false), visitRef = useRef<Visit>({ focused, retired: false });
   if (visitRef.current.focused !== focused) visitRef.current = { focused, retired: false };
@@ -82,6 +84,50 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
     visit.retired = true;
     router.replace('/(tabs)/friends?tab=circles');
   };
+  const [previous, setPrevious] = useState<CircleCreationAttempt | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [confirmSeparate, setConfirmSeparate] = useState(false);
+  const recoveryBusy = useRef(false);
+  useEffect(() => {
+    if (!userId || !focused) return;
+    let liveRead = true;
+    void readCircleCreationAttempt(userId).then(attempt => {
+      if (liveRead && current() && attempt && !pending.current && !latest.current.receipt) {
+        setPrevious(attempt); setUnconfirmed(true);
+      }
+    }).catch(() => {
+      if (liveRead && current()) { setUnconfirmed(true); setStatusMessage('Couldn’t read the last request on this device.'); }
+    });
+    return () => { liveRead = false; };
+    // A fresh visit checks the device marker. The submit path checks it again before sending.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, visit]);
+  const checkPrevious = async (explicit: boolean) => {
+    if (!userId || !current()) return;
+    try {
+      const attempt = await readCircleCreationAttempt(userId);
+      if (!current()) return;
+      setPrevious(attempt);
+      if (explicit && !attempt) { setConfirmSeparate(false); setUnconfirmed(false); setFailure('Review the form before submitting a circle.'); }
+      else setStatusMessage(attempt?.circleId ? '' : 'Confirmation hasn’t arrived. You can check again or view your circles.');
+    } catch { if (current()) setStatusMessage('Couldn’t read the last request on this device. Check again.'); }
+  };
+  const finishPrevious = async (open: boolean) => {
+    if (!previous || !userId || !current() || recoveryBusy.current) return;
+    recoveryBusy.current = true;
+    try {
+      const matched = await finishCircleCreation(userId, previous.requestId, null, () => {
+        if (!current()) throw new Error('This visit ended.');
+      });
+      if (!current()) return;
+      if (!matched) { setConfirmSeparate(false); await checkPrevious(true); return; }
+      if (open && previous.circleId) {
+        visit.retired = true;
+        router.replace(`/circle/${previous.circleId}` as never);
+      } else startFresh();
+    } catch { if (current()) setStatusMessage('Couldn’t update the last request on this device. Check again.'); }
+    finally { recoveryBusy.current = false; }
+  };
   const back = () => {
     if (!live.current || visitRef.current !== visit || visit.retired) return;
     if (step === 1 || receipt || unconfirmed || working === 'creating' || working === 'setup') exit();
@@ -115,6 +161,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   };
   const openCircle = (confirmed: CreateCircleReceipt) => {
     if (!current()) return;
+    createCircle.acknowledgeReceipt(confirmed.circleId);
     visit.retired = true; router.replace(`/circle/${confirmed.circleId}` as never);
   };
   const recordConversion = async () => {
@@ -144,7 +191,7 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
       await applyReceipt(result, attempt, true);
     } catch (error) {
       if (!current() || pending.current !== attempt || isObsoleteCircleCreation(error)) return;
-      if (isUnconfirmedCircleCreation(error)) { latest.current.unconfirmed = true; setUnconfirmed(true); }
+      if (isUnconfirmedCircleCreation(error)) { latest.current.unconfirmed = true; setUnconfirmed(true); await checkPrevious(false); }
       else setFailure(COPY.circleCreateError);
     } finally { finishAttempt(attempt); }
   };
@@ -155,6 +202,19 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
     try { await applyReceipt(await createCircle.retrySetupAsync(confirmed.circleId), attempt, false); }
     catch (error) { if (current() && pending.current === attempt && !isObsoleteCircleCreation(error)) setFailure('Those details didn’t save. Your circle is still there.'); }
     finally { finishAttempt(attempt); }
+  };
+  const resumeSetup = async () => {
+    if (!previous || !current() || pending.current) return;
+    const attempt = { visit, kind: 'setup' as const };
+    pending.current = attempt; setWorkingState(attempt); setFailure(null);
+    try {
+      const result = await createCircle.resumeSetupAsync(previous.requestId);
+      if (!current() || pending.current !== attempt) return;
+      setUnconfirmed(false); latest.current.unconfirmed = false;
+      await applyReceipt(result, attempt, true);
+    } catch {
+      if (current()) setStatusMessage('Couldn’t finish setup. Check your circle before trying again.');
+    } finally { finishAttempt(attempt); }
   };
   const onPrimary = () => {
     if (!draftEditable() || !latest.current.usable || busy || latest.current.step !== step) return;
@@ -178,12 +238,29 @@ function CreationVisit({ viewer, seed, suggestion, appearance }: { viewer: Obser
   const canAdvance = ready && !busy && !grid.isLoading && !grid.isError && (step === 1 ? selectedPeople.length >= MIN_OTHERS : step === 2 ? name.trim().length > 0 : true);
   const primaryLabel = step < TOTAL_STEPS ? COPY.circleCreateNext : appearance ? 'Create circle' : COPY.circleCreateMake;
   const headerTitle = appearance ? 'New circle' : selectedPeople.length > 0 ? COPY.circleCreateBuildTitleN(selectedPeople.length + 1) : COPY.circleCreateBuildTitle;
-  const button = (label: string, action: () => void, secondary = false, disabled = false) => <Pressable onPress={action} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={[secondary ? styled.secondary : styled.primary, disabled && styled.primaryDisabled]}><Text numberOfLines={1} style={secondary ? styled.secondaryLabel : styled.primaryLabel}>{label}</Text></Pressable>;
+  const button = (label: string, action: () => void, secondary = false, disabled = false) => <Pressable onPress={action} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} style={[secondary ? styled.secondary : styled.primary, disabled && styled.primaryDisabled]}><Text style={secondary ? styled.secondaryLabel : styled.primaryLabel}>{label}</Text></Pressable>;
   const loading = (label: string) => <ScrollView style={styled.flex} contentContainerStyle={styled.status}><ActivityIndicator color={accent}/><Text style={styled.body}>{label}</Text></ScrollView>;
   const renderBody = () => {
     if (viewer.isLoading) return loading('Checking your account…');
     if (!ready) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text style={styled.body}>Couldn’t check your account.</Text>{button('Try again', () => { if (live.current) void viewer.retry(); }, true)}</ScrollView>;
-    if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Check your circles</Text><Text style={styled.body}>We couldn’t confirm whether your circle was created. Check your circles before starting again.</Text>{button('View circles', viewCircles)}</ScrollView>;
+    if (unconfirmed) return <ScrollView contentContainerStyle={styled.completed}>
+      <Text style={styled.completedTitle}>{previous?.circleId ? 'Circle created' : 'Check your circles'}</Text>
+      <Text style={styled.body} accessibilityLiveRegion="polite">{confirmSeparate
+        ? previous?.circleId ? 'Start a new circle with its own people and settings?' : 'The earlier request may still create a circle. Start a separate one?'
+        : statusMessage || (previous?.circleId ? 'Open your circle to review its people and settings.' : 'We couldn’t confirm whether your circle was created.')}</Text>
+      {previous?.circleId && !confirmSeparate && createCircle.canResumeSetup(previous.requestId) &&
+        button(working ? 'Saving…' : 'Finish circle setup', () => { void resumeSetup(); }, false, busy)}
+      {confirmSeparate ? <>
+        {button('Start a separate circle', () => { void finishPrevious(false); })}
+        {button('Cancel', () => setConfirmSeparate(false), true)}
+      </> : <>
+        {previous?.circleId
+          ? button('View circle', () => { void finishPrevious(true); }, false, busy)
+          : button('Check status', () => { void checkPrevious(true); })}
+        {button('View circles', viewCircles, true, busy)}
+        {previous && button('Create another circle', () => setConfirmSeparate(true), true, busy)}
+      </>}
+    </ScrollView>;
     if (receipt) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Circle created</Text><Text style={styled.body}>{receipt.policyApplied && receipt.coverApplied ? 'Your circle is ready.' : 'Your circle is there. We couldn’t finish saving these details:'}</Text>
       {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}{!receipt.coverApplied && <Text style={styled.detail}>Cover photo</Text>}
       {failure && <Text accessibilityRole="alert" style={styled.error}>{failure}</Text>}
