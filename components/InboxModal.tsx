@@ -291,8 +291,9 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
       onRequestClose={() => requestClose()}
       onDismiss={finishDismissal}
     >
-      <Pressable accessible={false} style={s.overlay} onPress={() => requestClose()}>
-        <Pressable
+      <View style={s.overlay}>
+        <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={() => requestClose()} />
+        <View
           accessible={false}
           accessibilityViewIsModal
           style={[
@@ -303,7 +304,6 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
             // stay clear of the system bar. iOS unchanged.
             Platform.OS === 'android' && { paddingBottom: 40 + insets.bottom },
           ]}
-          onPress={(e) => e.stopPropagation()}
         >
           <View style={s.handle} />
           <View style={[s.headerRow, stackHeader && s.stackedHeader]}>
@@ -520,8 +520,8 @@ export default function InboxModal({ visible, onClose, userId }: InboxModalProps
 
             </ScrollView>
           )}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
       <BrandedAlert
         visible={!!alertInfo}
         title={alertInfo?.title ?? ''}
