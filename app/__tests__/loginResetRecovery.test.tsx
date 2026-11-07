@@ -83,3 +83,20 @@ it('names the return and password controls and keeps password visibility separat
   expect(secure()).toBe(true);
   expect(mockLogin).not.toHaveBeenCalled();
 });
+
+it.each([
+  [{ name: 'AuthRetryableFetchError', status: 0 }, 'could not connect. check your connection and try again.'],
+  [{ name: 'AuthRetryableFetchError', status: 503 }, 'sign-in is temporarily unavailable. try again shortly.'],
+  [{ code: 'over_request_rate_limit', status: 429 }, 'too many sign-in attempts. wait a while, then try again.'],
+  [{ code: 'email_not_confirmed', status: 400 }, 'confirm your email before signing in. check your inbox.'],
+  [{ code: 'invalid_credentials', status: 400 }, 'wrong email or password'],
+  [{ message: 'Invalid login credentials', status: 400 }, 'wrong email or password'],
+  [{ message: 'internal detail that must not be shown', status: 400 }, 'could not sign in. please try again.'],
+] as const)('explains a provider refusal without losing the form or attempting another login: %j', async (error, expected) => {
+  fillLogin();mockLogin.mockResolvedValueOnce({error});
+  await act(async () => {await button('log in').props.onPress()});
+  expect(tree.root.findAllByType(Text).some(n=>n.props.children===expected)).toBe(true);
+  expect(mockLogin).toHaveBeenCalledTimes(1);
+  expect(postAuthTransitionRef.active).toBe(false);
+  expect(button('log in').props.disabled).toBeFalsy();
+});
