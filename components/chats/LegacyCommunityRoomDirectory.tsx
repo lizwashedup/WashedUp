@@ -10,26 +10,28 @@ import { CreatorActionFill } from '../creator/CreatorActionFill';
 type Props = {
   rooms: ReadonlyArray<{ id: string; name: string; joined: boolean }>;
   joiningTopicId: string | null;
+  checkingTopicIds?: readonly string[];
   onOpenMain: () => void;
   onOpenTopic: (id: string) => void;
   onJoinTopic: (id: string) => void;
 };
 
 /** The original community/thread identities, using the same compact room anatomy. */
-export function LegacyCommunityRoomDirectory({ rooms, joiningTopicId, onOpenMain, onOpenTopic, onJoinTopic }: Props) {
+export function LegacyCommunityRoomDirectory({ rooms, joiningTopicId, checkingTopicIds = [], onOpenMain, onOpenTopic, onJoinTopic }: Props) {
   const { fonts } = useAfterglowFonts();
   const row = (id: string, name: string, joined: boolean, main = false) => {
     const pending = joiningTopicId === id;
+    const checking = !main && checkingTopicIds.includes(id);
     return <View key={id} style={styles.row}>
       <View style={styles.icon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {main ? <MessageCircle size={22} color={AfterglowColors.ink} /> : <Users size={22} color={AfterglowColors.ink} />}
       </View>
       <Text style={[styles.name, { fontFamily: fonts.semibold }]}>{name}</Text>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={pending ? `Joining ${name}` : `${joined ? 'Open' : 'Join'} ${name}`}
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={pending ? `${checking ? 'Checking' : 'Joining'} ${name}` : checking ? `Check ${name} membership` : `${joined ? 'Open' : 'Join'} ${name}`}
         accessibilityState={{ disabled: pending, busy: pending }} disabled={pending}
-        onPress={() => main ? onOpenMain() : joined ? onOpenTopic(id) : onJoinTopic(id)} style={styles.action}>
+        onPress={() => main ? onOpenMain() : checking ? onJoinTopic(id) : joined ? onOpenTopic(id) : onJoinTopic(id)} style={styles.action}>
         <CreatorActionFill />
-        {pending ? <ActivityIndicator color={Colors.white} /> : <Text style={[styles.actionText, { fontFamily: fonts.semibold }]}>{joined ? 'Open' : 'Join'}</Text>}
+        {pending ? <ActivityIndicator color={Colors.white} /> : <Text style={[styles.actionText, { fontFamily: fonts.semibold }]}>{checking ? 'Check' : joined ? 'Open' : 'Join'}</Text>}
       </TouchableOpacity>
     </View>;
   };
