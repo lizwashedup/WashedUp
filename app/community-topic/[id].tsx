@@ -501,8 +501,8 @@ export default function CommunityTopicScreen() {
     setDraft(''); draftRef.current = ''; setEditingMessageId(null);
     setReplyingTo(null); setMentionQuery(null); stopTyping();
   };
-  const menuContext = useRef({ messages, archived, allowed: !communityAccessEnded && !eventSendingUnavailable && !gated && !gateChecking });
-  menuContext.current = { messages, archived, allowed: !communityAccessEnded && !eventSendingUnavailable && !gated && !gateChecking };
+  const menuContext = useRef({ messages, archived, canSend: !eventSendingUnavailable, allowed: !communityAccessEnded && !gated && !gateChecking });
+  menuContext.current = { messages, archived, canSend: !eventSendingUnavailable, allowed: !communityAccessEnded && !gated && !gateChecking };
   const selectedMessageCurrent = (messageId: string) => entryIsCurrent() && menuContext.current.allowed && menuContext.current.messages.some(message => message.id === messageId);
   useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, messages, communityAccessEnded, eventSendingUnavailable, archived, gated, gateChecking]);
   useEffect(() => {
@@ -513,7 +513,7 @@ export default function CommunityTopicScreen() {
   const reactionRoomItems = useRef(roomItems); reactionRoomItems.current = roomItems;
   const reactionTopicMessages = useRef(messages); reactionTopicMessages.current = messages;
   const reactionReadable = useRef(false); reactionReadable.current = !communityAccessEnded && !gated && !gateChecking;
-  const reactionCanRemove = useRef(false); reactionCanRemove.current = !archived && !communityAccessEnded && !eventSendingUnavailable && !gated && !gateChecking;
+  const reactionCanRemove = useRef(false); reactionCanRemove.current = !archived && !communityAccessEnded && !gated && !gateChecking;
   const openReactionDetails = (messageId: string, source: 'topic' | 'broadcast' = 'topic') => {
     const isCurrent = () => entryIsCurrent() && reactionReadable.current && (source === 'topic'
       ? reactionTopicMessages.current.some(message => message.id === messageId)
@@ -525,7 +525,7 @@ export default function CommunityTopicScreen() {
   useEffect(() => { if (reactionDetails && !reactionDetails.scope.isCurrent()) setReactionDetails(null); }, [reactionDetails, messages, roomItems, communityAccessEnded, entryVisit]);
   const currentAction = (action: () => void) => () => { if (entryIsCurrent()) action(); };
   const reactToMessage = async (messageId: string, key: string, retry?: () => Promise<void>) => {
-    if (!entryIsCurrent() || (retry && (!selectedMessageCurrent(messageId) || menuContext.current.archived))) return;
+    if (!sendAdmissionIsCurrent() || (retry && (!selectedMessageCurrent(messageId) || menuContext.current.archived))) return;
     try { await (retry ? retry() : toggleReaction(messageId, key)); }
     catch (error) {
       if (!entryIsCurrent() || isObsoleteTopicOperation(error)) return;
@@ -707,14 +707,14 @@ export default function CommunityTopicScreen() {
   // Blocking refetches so their messages drop out via the block filter.
   // Creator moderation (C-14) adds one more option, only when canModerate.
   const beginReply = (message: TopicMessage) => {
-    if (!entryIsCurrent()) return;
+    if (!sendAdmissionIsCurrent()) return;
     entryRevisionRef.current += 1;
     composerDraft.change({ reply: { id: message.id, body: message.body, sender_name: message.sender_name }, edit: null });
     setComposerFocusRequest(request => request + 1);
   };
 
   const beginEdit = (message: TopicMessage) => {
-    if (!entryIsCurrent()) return;
+    if (!sendAdmissionIsCurrent()) return;
     entryRevisionRef.current += 1;
     const mentions = readChatMentionDocument(message.body, message.mention_data);
     composerDraft.change({ text: message.body, mentions, edit: { id: message.id, body: message.body, edited_at: message.edited_at ?? null, mentions }, reply: null });
@@ -732,16 +732,16 @@ export default function CommunityTopicScreen() {
       preview: message.image_url ? 'Photo' : readChatLocation(message.location_lat, message.location_lng, message.body) ? 'Shared place' : message.body,
       own: message.sender_id === myId,
       selectedReaction: reactionEmoji(message.reactions.find(reaction => reaction.user_id === myId)?.reaction ?? ''),
-      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived,
-      onReact: archived ? undefined : emoji => {
-        if (!selectedMessageCurrent(message.id) || menuContext.current.archived) return;
+      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived && menuContext.current.canSend === !eventSendingUnavailable,
+      onReact: archived || eventSendingUnavailable ? undefined : emoji => {
+        if (!selectedMessageCurrent(message.id) || menuContext.current.archived || !menuContext.current.canSend) return;
         const current = menuContext.current.messages.find(row => row.id === message.id)!;
         void reactToMessage(message.id, reactionKeyForEmoji(emoji, topicReactionCounts(current.reactions, myId), 'heart'));
       },
       title: name,
       buttons: [
-        ...(!archived ? [
-          { text: 'react', onPress: currentAction(() => setReactionPickerMsgId(message.id)) },
+        ...(!archived && !eventSendingUnavailable ? [
+          { text: 'react', onPress: () => { if (sendAdmissionIsCurrent()) setReactionPickerMsgId(message.id); } },
           { text: 'reply', onPress: () => beginReply(message) },
         ] : []),
         { text: 'report', onPress: currentAction(() => { setReportTarget({ id: userId, name }); setShowReport(true); }) },
@@ -762,19 +762,19 @@ export default function CommunityTopicScreen() {
       preview: message.image_url ? 'Photo' : readChatLocation(message.location_lat, message.location_lng, message.body) ? 'Shared place' : message.body,
       own: message.sender_id === myId,
       selectedReaction: reactionEmoji(message.reactions.find(reaction => reaction.user_id === myId)?.reaction ?? ''),
-      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived,
-      onReact: archived ? undefined : emoji => {
-        if (!selectedMessageCurrent(message.id) || menuContext.current.archived) return;
+      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived && menuContext.current.canSend === !eventSendingUnavailable,
+      onReact: archived || eventSendingUnavailable ? undefined : emoji => {
+        if (!selectedMessageCurrent(message.id) || menuContext.current.archived || !menuContext.current.canSend) return;
         const current = menuContext.current.messages.find(row => row.id === message.id)!;
         void reactToMessage(message.id, reactionKeyForEmoji(emoji, topicReactionCounts(current.reactions, myId), 'heart'));
       },
       title: 'Your message',
       buttons: [
-        ...(!archived ? [
-          { text: 'react', onPress: currentAction(() => setReactionPickerMsgId(message.id)) },
+        ...(!archived && !eventSendingUnavailable ? [
+          { text: 'react', onPress: () => { if (sendAdmissionIsCurrent()) setReactionPickerMsgId(message.id); } },
           { text: 'reply', onPress: () => beginReply(message) },
         ] : []),
-        ...(!archived && message.body ? [{ text: 'edit', onPress: () => beginEdit(message) }] : []),
+        ...(!archived && !eventSendingUnavailable && message.body ? [{ text: 'edit', onPress: () => beginEdit(message) }] : []),
         { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id, true) },
         { text: 'cancel', style: 'cancel' },
       ],

@@ -914,3 +914,17 @@ it('offers a read-only event access retry when membership is unknown',async()=>{
 it('keeps an ordinary topic independent of event-topic membership checks',async()=>{
  mockEventTopic=false;mockTopicMember=false;await mount();type('Ordinary room');await act(async()=>{await composer().onSend();});expect(mockSend).toHaveBeenCalledTimes(1);
 });
+
+it('preserves report, block and authorized moderation on readable event history without sending membership',async()=>{
+ mockTopicMember=false;mockLedCommunities=[{id:'community-a'}];mockMessages=[historyMessage('message-a',1)];
+ await mount();act(()=>topicBubble().props.onLongPress());
+ expect(topicMenu().onReact).toBeUndefined();
+ expect(topicMenu().buttons.map((b:any)=>b.text)).toEqual(['report','block','remove this message','cancel']);
+});
+it('retires old event reply and reaction callbacks but preserves own removal access',async()=>{
+ mockMessages=[historyMessage('message-a',1)];await mount();act(()=>topicBubble().props.onLongPress());
+ const reply=topicMenu().buttons.find((b:any)=>b.text==='reply').onPress,react=topicMenu().onReact;
+ mockTopicMember=false;await update();await act(async()=>{reply();react('👍');});expect(mockReact).not.toHaveBeenCalled();expect(topicMenu()).toBeNull();
+ mockMessages=[historyMessage('own',2,mockViewerId)];await update();act(()=>topicBubble().props.onLongPress());
+ expect(topicMenu().buttons.map((b:any)=>b.text)).toEqual(['delete this message','cancel']);
+});
