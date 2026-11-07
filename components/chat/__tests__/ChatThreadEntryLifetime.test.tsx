@@ -1124,3 +1124,22 @@ it.each(['location', 'photos'] as const)('keeps arrivals unread behind the %s pr
   expect(mockRead).toHaveBeenCalledTimes(1);
   expect(mockCanAcknowledge()).toBe(true);
 });
+
+
+it('keeps an in-flight original recoverable after admission unmounts the composer', async () => {
+  const pending = deferred<boolean>(); mockSend.mockReturnValueOnce(pending.promise);
+  await mount(); type('Before admission changed'); act(() => sendTap()({}, true)); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  const originalId = mockSend.mock.calls[0][3];
+  act(() => tree!.unmount()); tree = undefined;
+  await act(async () => pending.resolve(true)); await flush();
+  await mount(); await flush();
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(action('Check original message')).toBeDefined();
+  type('After confirmed rejoin'); mockCheckOriginal.mockResolvedValueOnce(true);
+  act(() => action('Check original message').props.onPress()); await flush();
+  expect(mockCheckOriginal.mock.calls[0][1].id).toBe(originalId);
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(input().props.value).toBe('After confirmed rejoin');
+  expect(action('Check original message')).toBeUndefined();
+});
