@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { Alert } from 'react-native';
+import { Alert, AppState, type AppStateStatus } from 'react-native';
 import CircleDetailScreen from '../../../app/circle/[id]';
 import CircleNoticeboard from '../CircleNoticeboard';
 import AddPeopleSheet from '../AddPeopleSheet';
@@ -42,7 +42,7 @@ const alert=()=>tree.root.findByType(BrandedAlert).props;
 const button=(label:string)=>tree.root.findAll(n=>n.props.accessibilityLabel===label && typeof n.props.onPress==='function')[0].props;
 async function render(){await act(async()=>{if(tree)tree.update(<CircleDetailScreen/>);else tree=create(<CircleDetailScreen/>);});}
 async function move(kind:'room'|'account'|'access'){if(kind==='room')mockCircle='circle-b';else if(kind==='account'){mockUser='bob';mockEpoch++;}else mockError=true;await render();}
-beforeEach(()=>{jest.clearAllMocks();mockCircle='circle-a';mockUser='alice';mockEpoch=1;mockError=false;mockUnavailable=false;mockLoading=false;mockEnabled=true;mockName='Friends';mockRole='admin';mockCount=3;mockPending=false;mockFocused=true;jest.spyOn(Alert,'alert').mockImplementation(()=>{});});
+beforeEach(()=>{jest.clearAllMocks();mockRefetch.mockReset();mockCircle='circle-a';mockUser='alice';mockEpoch=1;mockError=false;mockUnavailable=false;mockLoading=false;mockEnabled=true;mockName='Friends';mockRole='admin';mockCount=3;mockPending=false;mockFocused=true;jest.spyOn(Alert,'alert').mockImplementation(()=>{});});
 afterEach(()=>{act(()=>tree?.unmount());tree=undefined as any;jest.restoreAllMocks();});
 it('supplies one stable readable scope to both sheets across ordinary metadata refresh',async()=>{
  await render();const scope=plan().scope;expect(scope).toMatchObject({userId:'alice'});expect(scope.isCurrent()).toBe(true);expect(add().scope).toBe(scope);
@@ -145,4 +145,60 @@ it('retires old controls across a confirmed membership loss and later rejoin', a
   mockUnavailable = false; await render();
   expect(scope.isCurrent()).toBe(false);
   expect(plan().scope.isCurrent()).toBe(true);
+});
+
+async function appReturn() {
+  const listeners: Array<(state: AppStateStatus) => void> = [];
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => {
+    listeners.push(callback); return { remove: () => { const i = listeners.indexOf(callback); if (i >= 0) listeners.splice(i, 1); } };
+  });
+  await render();
+  return async () => {
+    await act(async () => {
+      Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
+      [...listeners].forEach(listener => listener('background'));
+      Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+      [...listeners].forEach(listener => listener('active'));
+    });
+    await render();
+  };
+}
+it('rechecks admission when the visible Circle detail returns from background', async () => {
+  const resume = await appReturn();
+  const old = board(), scope = plan().scope;
+  mockRefetch.mockImplementation(async () => { mockUnavailable = true; });
+  await resume();
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(tree.root.findAllByType(CircleNoticeboard)).toHaveLength(0);
+  expect(scope.isCurrent()).toBe(false);
+  act(() => old.onOpenChat()); expect(mockDismissTo).not.toHaveBeenCalled();
+});
+
+it('preserves current child forms and authority after an ordinary foreground refresh', async () => {
+  const resume = await appReturn(); const scope = plan().scope;
+  act(() => { board().onPostPlan(); board().onAddPeople(); });
+  await resume(); expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(plan().scope).toBe(scope); expect(scope.isCurrent()).toBe(true);
+  expect(plan().visible).toBe(true); expect(add().visible).toBe(true);
+});
+it('does not read on initial render or while covered by another route', async () => {
+  const resume = await appReturn(); expect(mockRefetch).not.toHaveBeenCalled();
+  await render(); expect(mockRefetch).not.toHaveBeenCalled();
+  mockFocused = false; await render(); await resume(); expect(mockRefetch).not.toHaveBeenCalled();
+});
+it('keeps unknown foreground admission retryable and retires stale child controls', async () => {
+  const resume = await appReturn(); const old = board(), scope = plan().scope;
+  act(() => old.onPostPlan());
+  mockRefetch.mockImplementation(async () => { mockError = true; });
+  await resume(); expect(scope.isCurrent()).toBe(false); expect(plan().visible).toBe(false);
+  act(() => old.onOpenChat()); expect(mockDismissTo).not.toHaveBeenCalled();
+  mockRefetch.mockImplementation(async () => { mockError = false; });
+  await act(async () => button(COPY.circlesRetry).onPress()); await render();
+  expect(mockRefetch).toHaveBeenCalledTimes(2); expect(plan().scope.isCurrent()).toBe(true);
+  expect(plan().visible).toBe(false);
+});
+it('does not resume the old account before its pending render catches up', async () => {
+  const resume = await appReturn(); mockUser = 'bob'; mockEpoch++;
+  await resume(); expect(mockRefetch).not.toHaveBeenCalled();
+  await resume(); expect(mockRefetch).toHaveBeenCalledTimes(1);
 });

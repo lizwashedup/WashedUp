@@ -24,6 +24,7 @@ import { CIRCLE_HOME } from '../../constants/YoursDesign';
 import { COPY } from '../../components/yours/state/constants';
 import { hapticSelection } from '../../lib/haptics';
 import { useCircle } from '../../hooks/useCircle';
+import { useChatResumeRefresh } from '../../hooks/useChatResumeRefresh';
 import { CircleLeaveUnconfirmed } from '../../lib/circles/leaveReceipt';
 import { useLeaveCircle, isObsoleteCircleLeave } from '../../hooks/useLeaveCircle';
 import { useAfterglowFonts } from '../../hooks/useAfterglowFonts';
@@ -41,6 +42,11 @@ function CircleDetail({ circleId }: { circleId: string }) {
   const { fonts } = useAfterglowFonts(COMMUNITY_CHAT_GROUPING_ENABLED, 'creator');
   const appearance = useMemo(() => COMMUNITY_CHAT_GROUPING_ENABLED ? { fonts } : undefined, [fonts]);
   const { data, isLoading, isError, refetch, viewerId: userId, viewerEpoch, isCurrentViewer } = useCircle(circleId);
+  const contextVisible = useRef(focused); contextVisible.current = focused;
+  // The noticeboard can remain mounted while the OS suspends the app. Recheck
+  // server admission on return without resetting same-account child drafts.
+  useChatResumeRefresh(refetch, isCurrentViewer, contextVisible);
+
 
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [retryPressed, setRetryPressed] = useState(false);
