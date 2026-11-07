@@ -10,11 +10,13 @@ import { EventMediaImage } from '../../components/events/EventMediaImage';
 
 import { PublishedPageCover } from '../../components/creator/pages/PublishedPageCover';
 import { communityCoverReference } from '../../lib/publishedPageCover';
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { useObservedUser } from '../../hooks/useObservedUser';
+import { requestWithDeadline } from '../../lib/requestWithDeadline';
 import {
   Share,
+  AppState,
   View,
   ScrollView,
   TouchableOpacity,
@@ -89,7 +91,7 @@ export default function CommunityPageScreen() {
   const [roomDirectoryFocused, setRoomDirectoryFocused] = useState(false);
   useFocusEffect(useCallback(() => { visit.current.focused = true; setRoomDirectoryFocused(true); return () => { visit.current.focused = false; setRoomDirectoryFocused(false); }; }, []));
 
-  const { data: page, isLoading, error: pageError, refetch, isRefetching } = useQuery({
+  const { data: page, isLoading, error: pageError, refetch: refetchPage, isRefetching } = useQuery({
     queryKey: ['community-page', id],
     queryFn: () => getCommunityPage(id!),
     enabled: !!id,
@@ -108,11 +110,43 @@ export default function CommunityPageScreen() {
   // a separate, larger build, correctly not started here.
   const isInviteOnly = joinPolicy === 'invite_only';
 
-  const { data: membership } = useQuery({
-    queryKey: ['community-membership', id],
-    queryFn: () => getMyMembership(id!),
-    enabled: !!id,
+  const membershipReadVisit = useMemo(() => ({}), [id, viewer.viewerId, viewer.epoch]);
+  const activeMembershipRead = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    activeMembershipRead.current = membershipReadVisit;
+    return () => { if (activeMembershipRead.current === membershipReadVisit) activeMembershipRead.current = null; };
+  }, [membershipReadVisit]);
+  const membershipReadIsCurrent = useCallback(() => activeMembershipRead.current === membershipReadVisit
+    && !!viewer.viewerId && !viewer.isLoading && !viewer.error && viewer.isCurrent(),
+  [membershipReadVisit, viewer.viewerId, viewer.isLoading, viewer.error, viewer.isCurrent]);
+  const { data: membership, refetch: refetchMembership } = useQuery({
+    queryKey: ['community-membership', id, viewer.viewerId, viewer.epoch],
+    queryFn: async ({ signal }) => {
+      if (!membershipReadIsCurrent() || signal.aborted) throw new Error('This community visit changed.');
+      const result = await requestWithDeadline(getMyMembership(id!, viewer.viewerId!), 12_000);
+      if (!membershipReadIsCurrent() || signal.aborted) throw new Error('This community visit changed.');
+      return result;
+    },
+    enabled: !!id && !!viewer.viewerId && !viewer.isLoading && !viewer.error,
+    retry: false,
   });
+  const refreshMembership = useCallback(() => {
+    if (id && membershipReadIsCurrent()) void refetchMembership({ cancelRefetch: false });
+  }, [id, membershipReadIsCurrent, refetchMembership]);
+  useFocusEffect(useCallback(() => { refreshMembership(); }, [refreshMembership]));
+  useEffect(() => {
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', state => {
+      const returning = state === 'active' && previous !== 'active';
+      previous = state;
+      if (returning && visit.current.focused) refreshMembership();
+    });
+    return () => subscription.remove();
+  }, [refreshMembership]);
+  const refetch = () => {
+    refreshMembership();
+    return refetchPage({ cancelRefetch: false });
+  };
   const { data: gate } = useQuery({
     queryKey: ['community-gate', id],
     queryFn: () => getJoinGate(id!),
