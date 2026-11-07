@@ -29,7 +29,7 @@ import Colors, { AfterglowColors } from '../../constants/Colors';
 import { Fonts, FontSizes, LineHeights, AfterglowType, type AfterglowFontFamilies } from '../../constants/Typography';
 import { CIRCLE_CREATE } from '../../constants/YoursDesign';
 import { COPY } from '../yours/state/constants';
-import { useUpdateCircle, isObsoleteCircleUpdate, type UpdateCircleScope } from '../../hooks/useUpdateCircle';
+import { useUpdateCircle, isObsoleteCircleUpdate, ConflictingCircleSaveError, type UpdateCircleScope } from '../../hooks/useUpdateCircle';
 import { useObservedUser, type ObservedUser } from '../../hooks/useObservedUser';
 import { supabase } from '../../lib/supabase';
 import { uploadBase64ToStorage } from '../../lib/uploadPhoto';
@@ -41,13 +41,14 @@ import CircleCover from '../yours/circles/CircleCover';
 const FEEDBACK = {
   pick: 'Couldn’t open your photos. Try adding a cover again.',
   upload: 'Couldn’t confirm your cover upload, so your circle details haven’t been saved. Try again.',
-  save: 'Couldn’t confirm the save. Your details are still here; try again.',
+  save: 'Couldn’t confirm the save. Your details are still here.',
+  conflict: 'This circle changed while you were saving. Close this sheet and review the latest details before editing again.',
   identity: 'Couldn’t confirm your account. Try again before saving.',
   checking: 'Checking your account…',
   editUnavailable: 'Circle editing isn’t available right now. Close this sheet and reopen your circle.',
   retry: 'Try again',
 };
-type Failure = 'pick' | 'upload' | 'save' | 'identity';
+type Failure = 'pick' | 'upload' | 'save' | 'identity' | 'conflict';
 let nextNamingVisit = 0;
 
 export interface NameCircleSheetProps {
@@ -139,8 +140,9 @@ function NameCircleVisit({
   const [working, setWorking] = useState<'picking' | 'saving' | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
 
-  const busy = working !== null || update.isPending;
-  const canSave = identityReady && name.trim().length > 0 && !busy;
+  const busy = working !== null || update.isPending || update.isCheckingSave;
+  const awaitingSave = !!update.recovery || update.recoveryError || update.recoveryLoading || failure === 'conflict';
+  const canSave = identityReady && name.trim().length > 0 && !busy && !awaitingSave;
   const currentCoverUrl = buildCircleCoverUrl(circleId, currentCoverUploadId);
   const previewCoverUrl = coverPreviewUri ?? (removeCover ? null : currentCoverUrl);
   const showRemoveCover = editing ? !!previewCoverUrl : !!currentCoverUrl && !coverPreviewUri && !removeCover;
@@ -152,10 +154,13 @@ function NameCircleVisit({
   };
   const close = useCallback(() => {
     if (!mounted.current || retired.current) return;
+    // Keep a conflict explanation visible until dismissal. Refreshing an
+    // unnamed circle sooner could remove this sheet before the person reads it.
+    if (failure === 'conflict') update.refreshCircle();
     // Dismissal retires UI work; an upload or RPC already sent may still finish.
     retired.current = true;
     onClose();
-  }, [onClose]);
+  }, [onClose, failure, update.refreshCircle]);
   useLayoutEffect(() => registerClose(close), [registerClose, close]);
 
   const onPickCover = async () => {
@@ -181,7 +186,7 @@ function NameCircleVisit({
   };
 
   const save = async () => {
-    if (!isCurrent() || pending.current || name.trim().length === 0) return;
+    if (!isCurrent() || pending.current || awaitingSave || name.trim().length === 0) return;
     const attempt = {}; pending.current = attempt; setWorking('saving'); setFailure(null);
     const identity = {
       // Leave untouched stored identity exactly as supplied for cover-only edits.
@@ -222,7 +227,7 @@ function NameCircleVisit({
       onNamed?.();
       if (isCurrent()) { retired.current = true; onClose(); }
     } catch (error) {
-      if (isCurrent() && pending.current === attempt && !isObsoleteCircleUpdate(error)) setFailure(stage);
+      if (isCurrent() && pending.current === attempt && !isObsoleteCircleUpdate(error)) setFailure(error instanceof ConflictingCircleSaveError ? 'conflict' : stage);
     } finally {
       if (pending.current === attempt) {
         pending.current = null;
@@ -230,6 +235,22 @@ function NameCircleVisit({
       }
     }
   };
+  const recoverSave = async (retry: boolean) => {
+    if (!isCurrent() || pending.current || busy) return;
+    const attempt = {}; pending.current = attempt; setWorking('saving');
+    try {
+      const result = retry ? (await update.retrySave(), 'saved') : await update.checkSave();
+      if (!isCurrent() || pending.current !== attempt) return;
+      if (result === 'saved') { onNamed?.(); if (isCurrent()) { retired.current = true; onClose(); } }
+      else if (result === 'conflict') setFailure('conflict');
+      else if (result === 'idle') setFailure('save');
+    } catch (error) {
+      if (isCurrent() && pending.current === attempt && !isObsoleteCircleUpdate(error)) {
+        setFailure(error instanceof ConflictingCircleSaveError ? 'conflict' : 'save');
+      }
+    } finally { if (pending.current === attempt) { pending.current = null; if (isCurrent()) setWorking(null); } }
+  };
+
   const retryIdentity = async () => {
     if (!mounted.current || retired.current || pending.current) return;
     const attempt = {}; pending.current = attempt;
@@ -264,8 +285,8 @@ function NameCircleVisit({
             />
             <Pressable
               onPress={onPickCover}
-              disabled={!identityReady || busy}
-              accessibilityState={{ disabled: !identityReady || busy, busy: working === 'picking' }}
+              disabled={!identityReady || busy || awaitingSave}
+              accessibilityState={{ disabled: !identityReady || busy || awaitingSave, busy: working === 'picking' }}
               android_ripple={{ color: Colors.border }}
               style={styles.coverBtn}
               accessibilityRole="button"
@@ -279,8 +300,8 @@ function NameCircleVisit({
             {showRemoveCover && (
               <Pressable
                 onPress={removeSelectedCover}
-                disabled={!identityReady || busy}
-                accessibilityState={{ disabled: !identityReady || busy }}
+                disabled={!identityReady || busy || awaitingSave}
+                accessibilityState={{ disabled: !identityReady || busy || awaitingSave }}
                 hitSlop={8}
                 style={styles.removeCoverBtn}
                 accessibilityRole="button"
@@ -302,11 +323,11 @@ function NameCircleVisit({
             style={styles.field}
             value={name}
             onChangeText={value => { if (isCurrent() && !pending.current) setName(value.slice(0, 60)); }}
-            editable={identityReady && !busy}
+            editable={identityReady && !busy && !awaitingSave}
             placeholder={COPY.circleNamePlaceholder}
             placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
             maxLength={60}
-            autoFocus={!editing}
+            autoFocus={!editing && !awaitingSave}
             returnKeyType="next"
           />
           <Text style={styles.fieldLabel}>Description (optional)</Text>
@@ -315,14 +336,33 @@ function NameCircleVisit({
             style={[styles.field, styles.desc]}
             value={description}
             onChangeText={value => { if (isCurrent() && !pending.current) setDescription(value.slice(0, 140)); }}
-            editable={identityReady && !busy}
+            editable={identityReady && !busy && !awaitingSave}
             placeholder={COPY.circleDescPlaceholder}
             placeholderTextColor={appearance ? AfterglowColors.muted : Colors.tertiary}
             multiline
             maxLength={140}
           />
 
-          {(!identityReady || failure) && (
+          {(update.recovery || update.recoveryError || update.recoveryLoading) && !update.isPending && (
+            <View style={styles.feedback}>
+              <Text style={styles.feedbackText} accessibilityLiveRegion="polite">
+                {update.recoveryLoading ? 'Checking your previous save…' :
+                  update.recovery ? `The save for “${update.recovery.identity.name}” is not yet confirmed. Check its status before making another change.` :
+                  'Couldn’t check your previous save. Check again before changing this circle.'}
+              </Text>
+              <Pressable onPress={() => recoverSave(false)} disabled={busy || update.recoveryLoading}
+                accessibilityRole="button" accessibilityLabel="Check save status" style={styles.retry}>
+                <Text style={styles.coverBtnText}>Check save status</Text>
+              </Pressable>
+              {update.recovery && !update.saveStillRunning && (
+                <Pressable onPress={() => recoverSave(true)} disabled={busy}
+                  accessibilityRole="button" accessibilityLabel="Retry original save" style={styles.retry}>
+                  <Text style={styles.coverBtnText}>Retry original save</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+          {(!identityReady || (failure && !update.recovery)) && (
             <View style={styles.feedback}>
               <Text style={styles.feedbackText} accessibilityLiveRegion="polite">
                 {!identityReady ? (editUnavailable ? FEEDBACK.editUnavailable : viewer.isLoading ? FEEDBACK.checking : FEEDBACK.identity) : FEEDBACK[failure!]}
@@ -341,12 +381,12 @@ function NameCircleVisit({
             style={[styles.cta, !canSave && styles.ctaDisabled]}
             accessibilityRole="button"
             accessibilityState={{ disabled: !canSave, busy: working === 'saving' }}
-            accessibilityLabel={failure && failure !== 'pick' ? FEEDBACK.retry : COPY.circleNameSheetSave}
+            accessibilityLabel={failure && failure !== 'pick' && !awaitingSave ? FEEDBACK.retry : COPY.circleNameSheetSave}
           >
             {busy ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={styles.ctaLabel} numberOfLines={1}>{failure && failure !== 'pick' ? FEEDBACK.retry : COPY.circleNameSheetSave}</Text>
+              <Text style={styles.ctaLabel} numberOfLines={1}>{failure && failure !== 'pick' && !awaitingSave ? FEEDBACK.retry : COPY.circleNameSheetSave}</Text>
             )}
           </Pressable>
           </ScrollView>

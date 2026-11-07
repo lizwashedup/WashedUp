@@ -1,8 +1,9 @@
 /**
  * useUpdateCircle - edit a circle's identity (name / description).
  *
- * Wraps update_circle(p_circle_id, p_name, p_description), which is admin-gated
- * (the SECURITY DEFINER RPC raises if the caller isn't a circle admin). The one
+ * Uses an exact request receipt and expected revision around the existing
+ * admin-gated update_circle operation. Unknown replies retain the original
+ * request across visits; only explicit recovery resends that same request. The one
  * caller today is the "Name this circle" front door for an unnamed circle (a DM
  * grown to 3+ people); the DM's original pair are both admins, so either can
  * name it. Passing a blank name is a no-op server-side (COALESCE(NULLIF(...))),
@@ -16,6 +17,25 @@ import { useMutation, useQueryClient, type MutateOptions } from '@tanstack/react
 import { supabase } from '../lib/supabase';
 import { requestWithDeadline } from '../lib/requestWithDeadline';
 import { circleKeys } from '../lib/circles/keys';
+import * as Crypto from 'expo-crypto';
+import { beginIdentitySave, readIdentitySave, clearIdentitySave, identitySaveKey, claimIdentitySave, releaseIdentitySave,
+  identitySaveRunning, type IdentitySaveAttempt } from '../lib/circles/identitySaveAttempt';
+
+export class UnconfirmedCircleSaveError extends Error {
+  constructor() { super('Your earlier save is still being checked.'); this.name = 'UnconfirmedCircleSaveError'; }
+}
+export class ConflictingCircleSaveError extends Error {
+  constructor() { super('The circle changed while you were saving. Close this sheet and review its latest details.'); this.name = 'ConflictingCircleSaveError'; }
+}
+function statusResult(result: any): { status: 'saved' | 'conflict' | 'missing'; revision?: string | null } {
+  if (result?.error) throw result.error;
+  const value = result?.data;
+  if (value?.status === 'saved' || value?.status === 'conflict') return value;
+  if (value?.status === 'missing' && (value.revision === null || typeof value.revision === 'string')) return value;
+  throw new UnconfirmedCircleSaveError();
+}
+const refused = (result: any) => !!result?.error && Number(result.status) >= 400 && Number(result.status) < 500 && Number(result.status) !== 408;
+
 
 export interface UpdateCircleIdentity {
   name: string;
@@ -38,7 +58,7 @@ export function isObsoleteCircleUpdate(error: unknown): error is ObsoleteCircleU
   return error instanceof Error && error.name === 'ObsoleteCircleUpdateError';
 }
 type Owner = { circleId: string; userId: string | null | undefined; scope: UpdateCircleScope | null | undefined; revision: number };
-type Attempt = { owner: Owner; identity: UpdateCircleIdentity };
+type Attempt = { owner: Owner; identity: UpdateCircleIdentity; resume?: IdentitySaveAttempt };
 type Options = MutateOptions<void, Error, UpdateCircleIdentity>;
 
 export function useUpdateCircle(circleId: string, userId: string | null | undefined, scope?: UpdateCircleScope | null) {
@@ -71,8 +91,23 @@ export function useUpdateCircle(circleId: string, userId: string | null | undefi
     (!captured.scope || (captured.scope.userId === captured.userId && captured.scope.isCurrent())), []);
   const requireCurrent = (captured: Owner) => { if (!current(captured)) throw new ObsoleteCircleUpdateError(); };
 
+  const [recovery, setRecovery] = useState<{ owner: Owner; attempt: IdentitySaveAttempt | null; error?: boolean } | null>(null);
+  const [checking, setChecking] = useState<Owner | null>(null);
+  useEffect(() => {
+    if (!current(owner)) return;
+    readIdentitySave(identitySaveKey(owner.userId!, owner.circleId)).then(attempt => {
+      if (current(owner)) setRecovery({ owner, attempt });
+    }, () => { if (current(owner)) setRecovery({ owner, attempt: null, error: true }); });
+  }, [owner, current]);
+  const refreshRecovery = async (captured: Owner) => {
+    try {
+      const attempt = await readIdentitySave(identitySaveKey(captured.userId!, captured.circleId));
+      if (current(captured)) setRecovery({ owner: captured, attempt });
+    } catch { if (current(captured)) setRecovery({ owner: captured, attempt: null, error: true }); }
+  };
+
   const mutation = useMutation<void, Error, Attempt>({
-    retry: false,
+    retry: false, networkMode: 'always',
     mutationFn: async attempt => {
       const captured = attempt.owner;
       try {
@@ -82,16 +117,53 @@ export function useUpdateCircle(circleId: string, userId: string | null | undefi
         if (authError) throw authError;
         if (!user || user.id !== captured.userId) throw new ObsoleteCircleUpdateError();
         if (authUser.current === undefined) authUser.current = user.id;
-        const { name, description, coverUploadId, clearCover } = attempt.identity;
-        const { error } = await supabase.rpc('update_circle', {
-          p_circle_id: captured.circleId,
-          p_name: name,
-          p_description: description,
-          p_cover_upload_id: coverUploadId ?? null,
-          p_clear_cover: clearCover === true && !coverUploadId,
-        });
-        requireCurrent(captured);
-        if (error) throw error;
+        const key = identitySaveKey(captured.userId!, captured.circleId);
+        const lock = claimIdentitySave(key);
+        if (!lock) throw new UnconfirmedCircleSaveError();
+        let dispatched = false;
+        try {
+          let saved = await readIdentitySave(key);
+          requireCurrent(captured);
+          if (attempt.resume) {
+            if (!saved || saved.requestId !== attempt.resume.requestId) throw new UnconfirmedCircleSaveError();
+          } else {
+            if (saved) throw new UnconfirmedCircleSaveError();
+            const before = statusResult(await requestWithDeadline(supabase.rpc('circle_identity_save_status', {
+              p_circle_id: captured.circleId, p_request_id: Crypto.randomUUID(),
+            }), 12_000));
+            requireCurrent(captured);
+            if (before.status !== 'missing') throw new UnconfirmedCircleSaveError();
+            saved = await beginIdentitySave(key, before.revision!, attempt.identity, () => requireCurrent(captured));
+            if (!saved) throw new UnconfirmedCircleSaveError();
+          }
+          const stored = saved;
+          try { requireCurrent(captured); }
+          catch (error) { if (!attempt.resume) await clearIdentitySave(key, stored.requestId); throw error; }
+          const { name, description, coverUploadId, clearCover } = stored.identity;
+          // Keep the underlying request alive. Its eventual receipt belongs to
+          // this exact operation, even after the UI's bounded wait ends.
+          const write = Promise.resolve(supabase.rpc('save_circle_identity_once', {
+            p_circle_id: captured.circleId, p_request_id: stored.requestId, p_expected_revision: stored.revision,
+            p_name: name, p_description: description, p_cover_upload_id: coverUploadId ?? null,
+            p_clear_cover: clearCover === true && !coverUploadId,
+          })).then(async result => {
+            // A definitive first refusal is safe to retry. A resumed request
+            // cannot use another request's failure to erase its original marker.
+            if (!attempt.resume && refused(result)) await clearIdentitySave(key, stored.requestId);
+            return statusResult(result);
+          }).finally(() => releaseIdentitySave(key, lock));
+          dispatched = true;
+          if (current(captured)) setRecovery({ owner: captured, attempt: stored });
+          const result = await requestWithDeadline(write, 12_000);
+          requireCurrent(captured);
+          if (result.status === 'missing') throw new UnconfirmedCircleSaveError();
+          await clearIdentitySave(key, stored.requestId);
+          requireCurrent(captured);
+          if (result.status === 'conflict') throw new ConflictingCircleSaveError();
+        } finally {
+          if (!dispatched) releaseIdentitySave(key, lock);
+          await refreshRecovery(captured);
+        }
       } catch (error) {
         requireCurrent(captured);
         throw error;
@@ -125,9 +197,53 @@ export function useUpdateCircle(circleId: string, userId: string | null | undefi
     mutation.mutate(begin(identity), callbacks(options));
   };
   const mutateAsync = async (identity: UpdateCircleIdentity, options?: Options) => mutation.mutateAsync(begin(identity), callbacks(options));
+  const refreshCircle = () => {
+    if (!current(owner)) return;
+    void qc.invalidateQueries({ queryKey: circleKeys.detail(owner.circleId) });
+    if (current(owner)) void qc.invalidateQueries({ queryKey: circleKeys.mine(owner.userId!) });
+  };
+  const checkSave = async (): Promise<'saved' | 'conflict' | 'missing' | 'idle'> => {
+    requireCurrent(owner);
+    if (checking === owner || pending.current?.owner === owner) throw new UnconfirmedCircleSaveError();
+    setChecking(owner);
+    try {
+      const key = identitySaveKey(owner.userId!, owner.circleId);
+      const account = await requestWithDeadline(supabase.auth.getUser(), 12_000);
+      requireCurrent(owner);
+      if (account.error || account.data.user?.id !== owner.userId) throw new ObsoleteCircleUpdateError();
+      const stored = await readIdentitySave(key);
+      requireCurrent(owner);
+      if (!stored) { await refreshRecovery(owner); return 'idle'; }
+      const result = statusResult(await requestWithDeadline(supabase.rpc('circle_identity_save_status', {
+        p_circle_id: owner.circleId, p_request_id: stored.requestId,
+      }), 12_000));
+      requireCurrent(owner);
+      if (result.status !== 'missing') {
+        releaseIdentitySave(key);
+        await clearIdentitySave(key, stored.requestId);
+        requireCurrent(owner);
+        if (result.status === 'saved') refreshCircle();
+      }
+      await refreshRecovery(owner);
+      return result.status;
+    } finally { setChecking(value => value === owner ? null : value); }
+  };
+  const retrySave = async () => {
+    requireCurrent(owner);
+    const stored = recovery?.owner === owner ? recovery.attempt : null;
+    if (!stored || identitySaveRunning(identitySaveKey(owner.userId!, owner.circleId))) throw new UnconfirmedCircleSaveError();
+    const attempt = begin(stored.identity); attempt.resume = stored;
+    return mutation.mutateAsync(attempt);
+  };
   const belongs = mutation.variables?.owner === owner && current(owner);
   return {
-    ...mutation, mutate, mutateAsync, variables: belongs ? mutation.variables?.identity : undefined,
+    ...mutation, mutate, mutateAsync, checkSave, retrySave, refreshCircle,
+    recovery: recovery?.owner === owner ? recovery.attempt : null,
+    recoveryError: recovery?.owner === owner && !!recovery.error,
+    recoveryLoading: current(owner) && recovery?.owner !== owner,
+    isCheckingSave: checking === owner,
+    saveStillRunning: !!userId && identitySaveRunning(identitySaveKey(userId, circleId)),
+    variables: belongs ? mutation.variables?.identity : undefined,
     data: belongs ? mutation.data : undefined, error: belongs ? mutation.error : null,
     failureReason: belongs ? mutation.failureReason : null, failureCount: belongs ? mutation.failureCount : 0,
     isPending: belongs && mutation.isPending, isSuccess: belongs && mutation.isSuccess,

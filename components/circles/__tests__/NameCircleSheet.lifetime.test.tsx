@@ -1,14 +1,16 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Modal, ScrollView, Text, TextInput } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import NameCircleSheet, { type NameCircleSheetProps } from '../NameCircleSheet';
 
+const mockStatus = jest.fn();
 const mockRpc = jest.fn(), mockGetUser = jest.fn(), mockPick = jest.fn(), mockUpload = jest.fn(), mockUuid = jest.fn();
 let mockViewer: string | null = 'alice';
 const mockListeners = new Set<(event: string, session: { user: { id: string } } | null) => void>();
 jest.mock('../../../lib/supabase', () => ({ supabase: {
-  rpc: (...args: unknown[]) => mockRpc(...args),
+  rpc: (...args: unknown[]) => args[0] === 'circle_identity_save_status' ? mockStatus(...args) : mockRpc(...args),
   auth: { getUser: () => mockGetUser(), onAuthStateChange: (callback: (event: string, session: any) => void) => {
     mockListeners.add(callback); return { data: { subscription: { unsubscribe: () => mockListeners.delete(callback) } } };
   } },
@@ -52,11 +54,12 @@ function mount(extra: Partial<NameCircleSheetProps> = {}) {
     },
   };
 }
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear(); mockStatus.mockReset().mockResolvedValue({data:{status:'missing',revision:'2026-11-06T00:00:00Z'},error:null});
   jest.clearAllMocks(); mockViewer = 'alice'; mockListeners.clear();
   mockGetUser.mockReset().mockImplementation(async () => account());
-  mockRpc.mockReset().mockResolvedValue({ error: null }); mockPick.mockReset().mockResolvedValue(picked);
-  mockUpload.mockReset().mockResolvedValue('https://example.invalid/photo'); mockUuid.mockReset().mockReturnValue('cover-uuid');
+  mockRpc.mockReset().mockResolvedValue({ data:{status:'saved'}, error: null }); mockPick.mockReset().mockResolvedValue(picked);
+  mockUpload.mockReset().mockResolvedValue('https://example.invalid/photo'); mockUuid.mockReset().mockReturnValue('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 });
 afterEach(() => cleanup.splice(0).forEach(fn => fn()));
 
@@ -68,7 +71,7 @@ it('preserves required name, optional description, trimming and success callback
   expect(f.save().props.disabled).toBe(true); f.name('  '); expect(f.save().props.disabled).toBe(true);
   f.name('  Weekend crew  '); f.description('  Around town  ');
   await act(async () => { await f.save().props.onPress(); });
-  expect(mockRpc).toHaveBeenCalledWith('update_circle', { p_circle_id: 'circle-a', p_name: 'Weekend crew', p_description: 'Around town', p_cover_upload_id: null, p_clear_cover: false });
+  expect(mockRpc).toHaveBeenCalledWith('save_circle_identity_once', { p_request_id: expect.any(String), p_expected_revision:'2026-11-06T00:00:00Z', p_circle_id: 'circle-a', p_name: 'Weekend crew', p_description: 'Around town', p_cover_upload_id: null, p_clear_cover: false });
   expect(order).toEqual(['named', 'close']);
 });
 it('retains 60/140 limits and accessible field labels with keyboard scrolling', async () => {
@@ -82,14 +85,14 @@ it('retains 60/140 limits and accessible field labels with keyboard scrolling', 
 it('saves an empty optional description as null', async () => {
   const f = mount(); await flush(); f.name(); f.description('  ');
   await act(async () => { await f.save().props.onPress(); });
-  expect(mockRpc).toHaveBeenCalledWith('update_circle', expect.objectContaining({ p_description: null }));
+  expect(mockRpc).toHaveBeenCalledWith('save_circle_identity_once', expect.objectContaining({ p_description: null }));
 });
 it('uploads an added cover before pointing the existing RPC at it', async () => {
   const f = mount(); await flush(); f.name(); await f.pick();
   expect(f.preview().coverUrl).toBe(picked.uri);
   await act(async () => { await f.save().props.onPress(); });
-  expect(mockUpload).toHaveBeenCalledWith('circle-covers', 'circle-a/cover-uuid', picked.base64, { upsert: true });
-  expect(mockRpc).toHaveBeenCalledWith('update_circle', expect.objectContaining({ p_cover_upload_id: 'cover-uuid', p_clear_cover: false }));
+  expect(mockUpload).toHaveBeenCalledWith('circle-covers', 'circle-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', picked.base64, { upsert: true });
+  expect(mockRpc).toHaveBeenCalledWith('save_circle_identity_once', expect.objectContaining({ p_cover_upload_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', p_clear_cover: false }));
   expect(mockUpload.mock.invocationCallOrder[0]).toBeLessThan(mockRpc.mock.invocationCallOrder[0]);
   expect(f.done).toHaveBeenCalledTimes(1); expect(f.close).toHaveBeenCalledTimes(1);
 });
@@ -98,13 +101,13 @@ it('preserves saved-cover removal and lets a replacement pick win', async () => 
   expect(f.preview().coverUrl).toContain('circle-a/old-cover');
   act(() => f.button('Remove cover').props.onPress()); expect(f.preview().coverUrl).toBeNull();
   await f.pick(); await act(async () => { await f.save().props.onPress(); });
-  expect(mockRpc).toHaveBeenCalledWith('update_circle', expect.objectContaining({ p_clear_cover: false, p_cover_upload_id: 'cover-uuid' }));
+  expect(mockRpc).toHaveBeenCalledWith('save_circle_identity_once', expect.objectContaining({ p_clear_cover: false, p_cover_upload_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }));
 });
 it('clears a saved cover without uploading another', async () => {
   const f = mount({ currentCoverUploadId: 'old-cover' }); await flush(); f.name();
   act(() => f.button('Remove cover').props.onPress()); await act(async () => { await f.save().props.onPress(); });
   expect(mockUpload).not.toHaveBeenCalled();
-  expect(mockRpc).toHaveBeenCalledWith('update_circle', expect.objectContaining({ p_clear_cover: true, p_cover_upload_id: null }));
+  expect(mockRpc).toHaveBeenCalledWith('save_circle_identity_once', expect.objectContaining({ p_clear_cover: true, p_cover_upload_id: null }));
 });
 it('keeps a chosen cover on picker cancellation and reports picker failures for retry', async () => {
   const f = mount(); await flush(); f.name(); await f.pick(); mockPick.mockResolvedValueOnce(null); await f.pick();
@@ -133,13 +136,13 @@ it('does not silently save name and description when the selected cover fails to
   expect(f.text()).toContain('Couldn’t confirm your cover upload'); expect(f.inputs()[0].props.value).toBe('Weekend crew'); expect(f.inputs()[1].props.value).toBe('Keep this');
   expect(f.preview().coverUrl).toBe(picked.uri); expect(f.save().props.accessibilityLabel).toBe('Try again');
   await act(async () => { await f.save().props.onPress(); });
-  expect(mockUpload.mock.calls[0]).toEqual(mockUpload.mock.calls[1]); expect(mockUuid).toHaveBeenCalledTimes(1); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.done).toHaveBeenCalledTimes(1);
+  expect(mockUpload.mock.calls[0]).toEqual(mockUpload.mock.calls[1]); expect(mockUpload.mock.calls.every(call => call[1] === 'circle-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')).toBe(true); expect(mockRpc).toHaveBeenCalledTimes(1); expect(f.done).toHaveBeenCalledTimes(1);
 });
 it('reuses a completed upload while retrying an unconfirmed identity save', async () => {
   mockRpc.mockResolvedValueOnce({ error: new Error('save unavailable') }); const f = mount(); await flush(); f.name(); await f.pick();
   await act(async () => { await f.save().props.onPress(); });
-  expect(f.text()).toContain('Couldn’t confirm the save'); expect(f.close).not.toHaveBeenCalled(); expect(f.preview().coverUrl).toBe(picked.uri);
-  await act(async () => { await f.save().props.onPress(); });
+  expect(f.text()).toContain('not yet confirmed'); expect(f.close).not.toHaveBeenCalled(); expect(f.preview().coverUrl).toBe(picked.uri);
+  await act(async () => { await f.button('Retry original save').props.onPress(); });
   expect(mockUpload).toHaveBeenCalledTimes(1); expect(mockRpc.mock.calls[0]).toEqual(mockRpc.mock.calls[1]); expect(f.done).toHaveBeenCalledTimes(1);
 });
 it.each(['picker', 'upload', 'rpc'])('retires late %s completion across closing and reopening', async stage => {
@@ -150,8 +153,8 @@ it.each(['picker', 'upload', 'rpc'])('retires late %s completion across closing 
     act(() => { void f.save().props.onPress(); });
   }
   await flush(); f.update({ visible: false }); f.update({ visible: true }); await flush(); f.name('New draft');
-  await act(async () => waiting.resolve(stage === 'picker' ? picked : stage === 'upload' ? 'uploaded' : { error: null })); await flush();
-  expect(f.inputs()[0].props.value).toBe('New draft'); expect(f.preview().coverUrl).toBeNull(); expect(f.save().props.disabled).toBe(false);
+  await act(async () => waiting.resolve(stage === 'picker' ? picked : stage === 'upload' ? 'uploaded' : { data:{status:'saved'}, error: null })); await flush();
+  expect(f.inputs()[0].props.value).toBe('New draft'); expect(f.preview().coverUrl).toBeNull(); expect(f.save().props.disabled).toBe(stage === 'rpc');
   expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled(); expect(f.invalidate).not.toHaveBeenCalled();
   if (stage !== 'rpc') expect(mockRpc).not.toHaveBeenCalled();
 });
@@ -202,10 +205,10 @@ it('retires account A to B to A even before the parent updates its user prop', a
   await act(async () => upload.resolve('uploaded')); await flush(); expect(mockRpc).not.toHaveBeenCalled(); expect(f.inputs()[0].props.value).toBe('Returned account draft');
 });
 it('keeps a draft and pending save across same-account token refresh', async () => {
-  const write = deferred<{ error: null }>(); mockRpc.mockReturnValue(write.promise); const f = mount(); await flush(); f.name();
+  const write = deferred<{ data:{status:'saved'}, error: null }>(); mockRpc.mockReturnValue(write.promise); const f = mount(); await flush(); f.name();
   act(() => { void f.save().props.onPress(); }); await flush();
   act(() => { for (const listener of [...mockListeners]) listener('TOKEN_REFRESHED', { user: { id: 'alice' } }); });
-  expect(f.inputs()[0].props.value).toBe('Weekend crew'); await act(async () => write.resolve({ error: null })); await flush();
+  expect(f.inputs()[0].props.value).toBe('Weekend crew'); await act(async () => write.resolve({ data:{status:'saved'}, error: null })); await flush();
   expect(f.done).toHaveBeenCalledTimes(1); expect(f.close).toHaveBeenCalledTimes(1);
 });
 it('suppresses final close when onNamed has already retired the entry', async () => {
@@ -216,7 +219,7 @@ it.each(['picker', 'upload', 'rpc'])('retires %s on unmount and releases identit
   const waiting = deferred<any>(); const f = mount(); await flush(); f.name();
   if (stage === 'picker') { mockPick.mockReturnValueOnce(waiting.promise); act(() => { void f.button('Add a cover photo').props.onPress(); }); }
   else { if (stage === 'upload') { await f.pick(); mockUpload.mockReturnValueOnce(waiting.promise); } else mockRpc.mockReturnValueOnce(waiting.promise); act(() => { void f.save().props.onPress(); }); }
-  await flush(); f.unmount(); await act(async () => waiting.resolve(stage === 'picker' ? picked : stage === 'upload' ? 'uploaded' : { error: null })); await flush();
+  await flush(); f.unmount(); await act(async () => waiting.resolve(stage === 'picker' ? picked : stage === 'upload' ? 'uploaded' : { data:{status:'saved'}, error: null })); await flush();
   expect(mockListeners.size).toBe(0); expect(f.done).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled(); expect(f.invalidate).not.toHaveBeenCalled();
   if (stage !== 'rpc') expect(mockRpc).not.toHaveBeenCalled();
 });
@@ -254,15 +257,29 @@ it.each(['account', 'upload'] as const)('recovers a stalled cover %s without los
   await act(async()=>{waiting.resolve(stage==='account'?account():'uploaded');await jest.advanceTimersByTimeAsync(1);});
   expect(mockRpc).not.toHaveBeenCalled();expect(f.done).not.toHaveBeenCalled();expect(f.close).not.toHaveBeenCalled();
   await act(async()=>{await f.save().props.onPress();});
-  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.done).toHaveBeenCalledTimes(1);expect(f.close).toHaveBeenCalledTimes(1);expect(mockUuid).toHaveBeenCalledTimes(1);
-  expect(mockUpload.mock.calls.every(call=>call[0]==='circle-covers'&&call[1]==='circle-a/cover-uuid'&&call[2]===picked.base64&&call[3].upsert===true)).toBe(true);
+  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.done).toHaveBeenCalledTimes(1);expect(f.close).toHaveBeenCalledTimes(1);expect(mockUpload.mock.calls.every(call => call[1] === 'circle-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')).toBe(true);
+  expect(mockUpload.mock.calls.every(call=>call[0]==='circle-covers'&&call[1]==='circle-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'&&call[2]===picked.base64&&call[3].upsert===true)).toBe(true);
  } finally {f.unmount();jest.clearAllTimers();jest.useRealTimers();}
 });
-it('does not time out an identity update after the cover has already uploaded', async()=>{
- const f=mount();await flush();f.name();await f.pick();const waiting=deferred<any>();mockRpc.mockReturnValueOnce(waiting.promise);jest.useFakeTimers();
+it('bounds the wait while keeping an uploaded cover and an unresolved save protected', async () => {
+ const f=mount(); await flush();f.name();await f.pick();const waiting=deferred<any>();mockRpc.mockReturnValueOnce(waiting.promise);jest.useFakeTimers();
  try {
-  act(()=>{void f.save().props.onPress();});await act(async()=>{await jest.advanceTimersByTimeAsync(45000);});
-  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.save().props.disabled).toBe(true);expect(f.text()).not.toContain('Couldn’t confirm your cover upload');expect(f.done).not.toHaveBeenCalled();
-  await act(async()=>{waiting.resolve({error:null});await jest.advanceTimersByTimeAsync(1);});expect(f.done).toHaveBeenCalledTimes(1);
+  act(()=>{void f.save().props.onPress();});await act(async()=>{await jest.advanceTimersByTimeAsync(13000);});
+  expect(mockRpc).toHaveBeenCalledTimes(1);expect(f.save().props.disabled).toBe(true);
+  expect(f.text()).toContain('not yet confirmed');expect(f.button('Check save status')).toBeDefined();
+  expect(f.button('Retry original save')).toBeUndefined();expect(f.done).not.toHaveBeenCalled();
+  await act(async()=>{waiting.resolve({data:{status:'saved'},error:null});await jest.advanceTimersByTimeAsync(1);});
+  expect(f.done).not.toHaveBeenCalled();
+  mockStatus.mockResolvedValueOnce({data:{status:'saved'},error:null});
+  await act(async()=>{await f.button('Check save status').props.onPress();});
+  expect(f.done).toHaveBeenCalledTimes(1);expect(mockRpc).toHaveBeenCalledTimes(1);expect(mockUpload).toHaveBeenCalledTimes(1);
  } finally {f.unmount();jest.clearAllTimers();jest.useRealTimers();}
+});
+
+it('keeps another-session conflict readable until Close, then refreshes the Circle',async()=>{
+ mockRpc.mockResolvedValueOnce({data:{status:'conflict'},error:null});const f=mount();await flush();f.name();
+ await act(async()=>{await f.save().props.onPress();});
+ expect(f.text()).toContain('This circle changed while you were saving');expect(f.save().props.disabled).toBe(true);
+ expect(f.invalidate).not.toHaveBeenCalled();expect(f.close).not.toHaveBeenCalled();
+ f.dismiss();expect(f.close).toHaveBeenCalledTimes(1);expect(f.invalidate).toHaveBeenCalledTimes(2);expect(mockRpc).toHaveBeenCalledTimes(1);
 });
