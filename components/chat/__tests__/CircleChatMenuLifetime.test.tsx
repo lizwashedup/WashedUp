@@ -1,13 +1,15 @@
 jest.mock('../../ProfileButton', () => ({ __esModule: true, default: () => require('react').createElement(require('react-native').TouchableOpacity, { accessibilityRole: 'button', accessibilityLabel: 'Profile' }) }));
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { ActionSheetIOS, Alert, Platform, Text, TouchableOpacity } from 'react-native';
+import { ActionSheetIOS, Alert, AppState, Platform, Text, TouchableOpacity } from 'react-native';
 import CircleChatScreen from '../../../app/(tabs)/chats/circle/[id]';
 import ChatThread from '../ChatThread';
 import MenuCard from '../../menu/MenuCard';
 import AddPeopleSheet from '../../circles/AddPeopleSheet';
 import CirclePlanComposer from '../../circles/plan/CirclePlanComposer';
 
+let mockFocused = true;
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 let mockAnchor: string | undefined;
 let mockRoomId = 'circle-one', mockViewerId: string | null = 'account-a', mockEpoch = 1;
 let mockError = false, mockNamed = false, mockLoading = false, mockUnavailable = false;
@@ -63,7 +65,7 @@ function chooseDm(key: 'plan' | 'circle') {
   return menu().onClosed;
 }
 beforeEach(() => {
-  mockAnchor=undefined; jest.clearAllMocks(); mockRoomId = 'circle-one'; mockViewerId = 'account-a'; mockEpoch = 1; mockNamed = false; mockError = false; mockLoading = false; mockUnavailable = false;
+  mockFocused=true; mockAnchor=undefined; jest.clearAllMocks(); mockRefetch.mockReset(); mockRoomId = 'circle-one'; mockViewerId = 'account-a'; mockEpoch = 1; mockNamed = false; mockError = false; mockLoading = false; mockUnavailable = false;
   nativeMenus = []; androidMenus = [];
   jest.replaceProperty(Platform, 'OS', 'ios');
   jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((options, choose) => { nativeMenus.push({ options, choose }); });
@@ -229,4 +231,56 @@ it.each([true, false])('returns to Chats while a named Circle (%s) or direct cha
   act(() => back.props.onPress());
   expect(mockNavigate).toHaveBeenCalledWith('/(tabs)/chats');
   expect(mockBack).not.toHaveBeenCalled();
+});
+
+
+it('retires a mounted Circle thread after authoritative foreground admission denial', async () => {
+  const listeners = new Set<(state: any) => void>();
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, fn) => {
+    listeners.add(fn); return { remove: () => listeners.delete(fn) };
+  });
+  const state = (value: string) => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value });
+    for (const fn of listeners) fn(value);
+  };
+  state('active'); await mount(); expect(thread()).toBeDefined();
+  mockRefetch.mockImplementation(async () => { mockUnavailable = true; });
+  await act(async () => { state('background'); state('active'); await Promise.resolve(); });
+  await update();
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+  expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
+  expect(tree!.root.findAllByType(Text).map(node => node.props.children)).toContain('Chat unavailable');
+});
+
+
+function foregroundReturn() {
+  const listeners = new Set<(state: any) => void>();
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_name, fn) => { listeners.add(fn); return { remove: () => listeners.delete(fn) }; });
+  const state = (value: string) => { Object.defineProperty(AppState, 'currentState', { configurable: true, value }); for (const fn of listeners) fn(value); };
+  state('active');
+  return () => { state('background'); state('active'); };
+}
+it('does not revalidate a Circle hidden behind another route on foreground', async () => {
+  const resume = foregroundReturn(); await mount(); mockFocused = false; await update();
+  await act(async () => { resume(); await Promise.resolve(); });
+  expect(mockRefetch).not.toHaveBeenCalled();
+  mockFocused = true; await update();
+  await act(async () => { resume(); await Promise.resolve(); });
+  expect(mockRefetch).toHaveBeenCalledTimes(1);
+});
+it('does not start a queued Circle foreground read for a retired account', async () => {
+  const resume = foregroundReturn(); await mount();
+  await act(async () => { resume(); mockViewerId = 'account-b'; mockEpoch++; await Promise.resolve(); });
+  expect(mockRefetch).not.toHaveBeenCalled();
+  await update();
+});
+it('keeps an unknown foreground Circle response distinct from denied admission and permits Retry', async () => {
+  const resume = foregroundReturn(); await mount();
+  mockRefetch.mockImplementationOnce(async () => { mockError = true; });
+  await act(async () => { resume(); await Promise.resolve(); }); await update();
+  expect(tree!.root.findAllByType(ChatThread)).toHaveLength(0);
+  expect(tree!.root.findAllByType(Text).map(node => node.props.children)).toContain('Chat couldn’t load');
+  mockRefetch.mockImplementationOnce(async () => { mockError = false; });
+  await act(async () => tree!.root.findByProps({ accessibilityLabel: 'Retry opening chat' }).props.onPress()); await update();
+  expect(thread()).toBeDefined(); expect(mockRefetch).toHaveBeenCalledTimes(2);
 });

@@ -285,3 +285,14 @@ it('shows an unavailable circle for the confirmed nonmember response and accepts
   await act(async () => { await current.refetch(); }); await flush();
   expect(current.data?.circle.name).toBe('Rejoined circle');
 });
+
+
+it('shares an in-flight Circle refresh across repeated foreground requests', async () => {
+  await mount(); const pending = deferred<ReturnType<typeof answer>>();
+  mockRpc.mockReturnValue(pending.promise);
+  const first = current.refetch(); await flush();
+  const second = current.refetch(); await flush();
+  expect(mockRpc).toHaveBeenCalledTimes(2);
+  pending.resolve(answer('Current Circle')); await Promise.all([first, second]); await flush();
+  expect(current.data?.circle.name).toBe('Current Circle');
+});
