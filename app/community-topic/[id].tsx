@@ -393,9 +393,12 @@ export default function CommunityTopicScreen() {
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
     moderatorVisit.current = {};
+    // A child route can outlive a membership change without backgrounding.
+    // The account-owned query coalesces this with initial/foreground reads.
+    if (topicMeta?.community_id && muteViewer.viewerId) void refreshMembership({ cancelRefetch: false });
     if (introLayout) void refreshMessages(true);
     return () => { coreFocused.current = false; moderatorVisit.current = null; };
-  }, [!!introLayout, refreshMessages]));
+  }, [!!introLayout, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership]));
   const refreshVisibleConversation = useCallback(async (silent = false) => {
     if (!entryIsCurrent() || !coreFocused.current) return;
     // History and admission recover independently. Ordinary message arrivals
