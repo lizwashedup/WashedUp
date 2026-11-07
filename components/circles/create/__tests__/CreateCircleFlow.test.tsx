@@ -102,3 +102,20 @@ it('opens only the exact circle from a late receipt when the member asks to view
     expect(mockCreate).not.toHaveBeenCalled();
   } finally { await AsyncStorage.removeItem(key); }
 });
+
+it('can open the confirmed circle during setup without retrying or navigating again on the late response', async () => {
+  const f = render(), gate = deferred<any>();
+  mockCreate.mockImplementationOnce((_args, options) => {
+    options.onSetupPending({...complete, policyApplied:false});
+    return gate.promise;
+  });
+  permissions(f); act(() => f.button('Create circle').props.onPress()); await flush();
+  expect(f.text()).toContain('Circle created');
+  expect(f.text()).toContain('Saving the remaining details');
+  expect(f.text()).not.toContain('couldn’t finish');
+  expect(f.button('Try again')).toBeUndefined();
+  act(() => f.button('View circle').props.onPress());
+  gate.resolve(complete); await flush();
+  expect(mockReplace).toHaveBeenCalledTimes(1);
+  expect(mockRetrySetup).not.toHaveBeenCalled();
+});

@@ -189,3 +189,25 @@ it('returns an offline identity failure without queuing a creation for reconnect
     expect(mockRpc).toHaveBeenCalledTimes(1);
   } finally { onlineManager.setOnline(true); }
 });
+
+it('makes the confirmed circle available while the optional policy is still saving', async () => {
+  const f = mount(), visit = scope(), onSetupPending = jest.fn(), gate = deferred<any>();
+  mockRpc.mockResolvedValueOnce({data: ID, error: null, status: 200}).mockReturnValueOnce(gate.promise);
+  const operation = observe(f.current.mutateAsync(args({invitePolicy: 'everyone', coverBase64: 'later'}), {scope: visit, onSetupPending}));
+  await flush();
+  const beforePolicyCompletes = onSetupPending.mock.calls.map(([receipt]) => receipt);
+  visit.live = false;
+  gate.resolve({data: null, error: null, status: 200});
+  expect(isObsoleteCircleCreation((await operation).error)).toBe(true);
+  expect(beforePolicyCompletes).toEqual([{circleId: ID, policyApplied: false, coverApplied: false}]);
+  expect(mockUpload).not.toHaveBeenCalled();
+  expect(mockRpc).toHaveBeenCalledTimes(2);
+});
+
+it('finishes a chosen policy with no additional admins without presenting unnecessary setup', async () => {
+  const f = mount(), onSetupPending = jest.fn();
+  const receipt = await f.current.mutateAsync(args({invitePolicy:'chosen',adminUserIds:[]}), {scope:scope(),onSetupPending});
+  expect(receipt.policyApplied).toBe(true);
+  expect(onSetupPending).not.toHaveBeenCalled();
+  expect(mockRpc).toHaveBeenCalledTimes(1);
+});

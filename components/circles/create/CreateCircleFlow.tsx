@@ -187,7 +187,14 @@ function CreationVisit({ viewer, seed, suggestion, appearance, startFresh }: { s
       const result = await createCircle.mutateAsync({ name: draft.name.trim(), description: draft.description.trim() || null,
         memberUserIds: memberIds, invitePolicy: draft.policy,
         adminUserIds: draft.policy === 'chosen' ? [...draft.adminIds].filter(id => memberIds.includes(id)) : [], coverBase64: draft.coverBase64,
-      }, { scope: { userId, isCurrent: current } });
+      }, {
+        scope: { userId, isCurrent: current },
+        onSetupPending: confirmed => {
+          if (!current() || pending.current !== attempt) return;
+          latest.current.receipt = confirmed;
+          setReceipt(confirmed); setWorkingState({ visit, kind: 'setup' });
+        },
+      });
       await applyReceipt(result, attempt, true);
     } catch (error) {
       if (!current() || pending.current !== attempt || isObsoleteCircleCreation(error)) return;
@@ -261,13 +268,24 @@ function CreationVisit({ viewer, seed, suggestion, appearance, startFresh }: { s
         {previous && button('Create another circle', () => setConfirmSeparate(true), true, busy)}
       </>}
     </ScrollView>;
-    if (receipt) return <ScrollView contentContainerStyle={styled.completed}><Text style={styled.completedTitle}>Circle created</Text><Text style={styled.body}>{receipt.policyApplied && receipt.coverApplied ? 'Your circle is ready.' : 'Your circle is there. We couldn’t finish saving these details:'}</Text>
-      {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}{!receipt.coverApplied && <Text style={styled.detail}>Cover photo</Text>}
-      {failure && <Text accessibilityRole="alert" style={styled.error}>{failure}</Text>}
-      {working && loading(receipt.policyApplied && receipt.coverApplied ? 'Finishing…' : 'Saving the remaining details…')}
-      {(!receipt.policyApplied || !receipt.coverApplied) && button(working ? 'Saving…' : 'Try again', () => { void retrySetup(); }, false, busy)}
-      {button('View circle', () => openCircle(receipt), true)}
-    </ScrollView>;
+    if (receipt) {
+      const complete = receipt.policyApplied && receipt.coverApplied;
+      const summary = complete ? 'Your circle is ready.' : working
+        ? 'Your circle is ready to open.' : 'Your circle is there. We couldn’t finish saving these details:';
+      return <ScrollView contentContainerStyle={styled.completed}>
+        <Text style={styled.completedTitle}>Circle created</Text>
+        <Text style={styled.body}>{summary}</Text>
+        {!receipt.policyApplied && <Text style={styled.detail}>Who can add people</Text>}
+        {!receipt.coverApplied && <Text style={styled.detail}>Cover photo</Text>}
+        {failure && <Text accessibilityRole="alert" style={styled.error}>{failure}</Text>}
+        {working && <View style={styles.savingStatus}>
+          <ActivityIndicator color={accent}/>
+          <Text accessibilityLiveRegion="polite" style={styled.body}>{complete ? 'Finishing…' : 'Saving the remaining details…'}</Text>
+        </View>}
+        {!working && !complete && button('Try again', () => { void retrySetup(); }, false, busy)}
+        {button('View circle', () => openCircle(receipt), true)}
+      </ScrollView>;
+    }
     if (grid.isLoading) return loading('Loading your people…');
     if (grid.isError) return <ScrollView style={styled.flex} contentContainerStyle={styled.status}><Text accessibilityRole="alert" style={styled.body}>Your people didn’t load.</Text>{button(retryingPeople ? 'Trying again…' : 'Try again', () => { void retryPeople(); }, true, retryingPeople)}</ScrollView>;
     if (step === 1) return <PeopleStep people={people} selected={selectedIds} onToggle={toggleSelected} onAddPeople={exit} appearance={appearance}/>;
@@ -305,6 +323,7 @@ const styles = StyleSheet.create({
   primaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.white },
   secondary: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderRadius: 4, borderColor: Colors.terracotta, alignItems: 'center', justifyContent: 'center' }, secondaryLabel: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyMD, color: Colors.terracotta },
   status: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24 }, body: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyLG, color: Colors.secondary },
+  savingStatus: { alignItems: 'flex-start', gap: 8 },
   completed: { flexGrow: 1, padding: 24, gap: 16 }, completedTitle: { fontFamily: Fonts.displayBold, fontSize: FontSizes.displayMD, color: Colors.asphalt }, detail: { fontFamily: Fonts.sansBold, fontSize: FontSizes.bodyLG, color: Colors.asphalt }, error: { fontFamily: Fonts.sans, fontSize: FontSizes.bodyMD, color: Colors.errorRed },
 });
 function afterglow(fonts: AfterglowFontFamilies) { return StyleSheet.create({
