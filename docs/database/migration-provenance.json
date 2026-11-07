@@ -172,6 +172,11 @@
       "file": "docs/database/review-only/20261106023000_interest_expiry_after_reactivation.sql",
       "reason": "Private interest expiration correction. Verify the actual expiration job, reactivation timestamp and scheduler privileges on a separately approved production-schema copy before rollout.",
       "source": "docs/database/review-only/20261106023000_interest_expiry_after_reactivation.sql"
+    },
+    {
+      "file": "docs/database/review-only/20261107015500_circle_identity_receipts.sql",
+      "reason": "Private Circle identity receipt proposal. Not deployed; requires separately approved production-schema copy verification of admin, revision, trigger and grant contracts and separate rollout approval.",
+      "source": "docs/database/review-only/20261107015500_circle_identity_receipts.sql"
     }
   ],
   "unresolved_versions": [

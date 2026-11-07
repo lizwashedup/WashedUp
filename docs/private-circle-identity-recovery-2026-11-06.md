@@ -17,3 +17,5 @@ Conflict feedback remains visible until Close. The editor then refreshes the det
 ## Release prerequisite
 
 Both client and SQL remain private. Before rollout, separately verify `20261107015500_circle_identity_receipts.sql` on an approved production-schema copy, including the actual Circle admin predicate, identity update rules, row triggers, `updated_at` behavior and role grants. The receipt table has no direct authenticated/anonymous privileges. Verify account/Circle deletion cascades and that any deployed row trigger preserves a distinct revision. Deploying the client without the new RPCs would safely refuse saves; there is deliberately no unsafe fallback to the legacy unconfirmed write. Obtain separate rollout approval. Existing schema holds and the App Store rebuild hold remain in force.
+
+Regression Lock caught the new held SQL in the active migration inventory. Moved it to docs/database/review-only and registered the hold; the SQL and product behavior are unchanged. No inventory baseline was loosened.
