@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMyTopicMute, setMyTopicMute, type TopicNotificationScope } from '../lib/topicNotificationPreference';
+import { useChatMuteWrite } from './useChatMuteWrite';
 import { confirmChatMuteChange } from '../lib/confirmChatMuteChange';
 import type { ObservedUser } from './useObservedUser';
 
@@ -12,6 +13,7 @@ type ChangeResult = { matched: boolean; value: boolean | null } | undefined;
  * Reading or muting never joins a topic or changes its history/read markers. */
 export function useCommunityTopicMute(topicId: string | undefined, viewer: ObservedUser) {
   const queryClient = useQueryClient();
+  const write = useChatMuteWrite('topic-mute', topicId, viewer.viewerId);
   const mounted = useRef(false);
   const scopeKey = JSON.stringify([topicId, viewer.viewerId, viewer.epoch]);
   const scopeRef = useRef<Scope>({ key: scopeKey, generation: 0, busy: false, preferenceRevision: 0 });
@@ -39,7 +41,7 @@ export function useCommunityTopicMute(topicId: string | undefined, viewer: Obser
 
   const query = useQuery({
     queryKey,
-    enabled: canRead && !busy,
+    enabled: canRead && !busy && !write.busy && !unknown,
     staleTime: 30_000,
     queryFn: async ({ signal }) => {
       const revision = scope.preferenceRevision;
@@ -50,11 +52,11 @@ export function useCommunityTopicMute(topicId: string | undefined, viewer: Obser
     },
     retry: failureCount => current() && !scope.busy && failureCount < 1,
   });
-  const ready = canRead && query.isSuccess && typeof query.data === 'boolean' && !unknown;
-  const isChecking = viewer.isLoading || busy || (canRead && (query.isLoading || query.isFetching));
+  const ready = canRead && !write.busy && query.isSuccess && typeof query.data === 'boolean' && !unknown;
+  const isChecking = viewer.isLoading || busy || write.busy || (canRead && (query.isLoading || query.isFetching));
   const muted = ready ? query.data : undefined;
 
-  const toggle = async (): Promise<ChangeResult> => {
+  const perform = async (): Promise<ChangeResult> => {
     if (!topicId || !current() || scope.busy || isChecking) return;
     scope.busy = true;
     setAttempt({ scope, busy: true, unknown: !!unknown });
@@ -104,5 +106,6 @@ export function useCommunityTopicMute(topicId: string | undefined, viewer: Obser
     }
   };
 
+  const toggle = () => ready ? write.run(perform, current) : perform();
   return { muted, ready, isChecking: !!isChecking, toggle, isCurrent: current };
 }
