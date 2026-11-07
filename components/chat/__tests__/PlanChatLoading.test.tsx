@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { AppState, Text, TouchableOpacity } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import PlanChatScreen from '../../../app/(tabs)/chats/[id]';
@@ -46,7 +46,7 @@ beforeEach(() => {
   mockEvent = async () => ok(event); mockMembers = async () => ok([{ user_id: 'peer' }]);
   mockProfiles = async () => ok([{ id: 'peer', first_name_display: 'Peer', profile_photo_url: null }]);
 });
-afterEach(() => { act(() => tree?.unmount()); client.clear(); jest.useRealTimers(); });
+afterEach(() => { act(() => tree?.unmount()); client.clear(); jest.restoreAllMocks(); jest.useRealTimers(); });
 it.each(['members', 'profiles'])('opens the plan thread while optional %s remain pending', async stage => {
   const pending = deferred();
   if (stage === 'members') mockMembers = () => pending.promise; else mockProfiles = () => pending.promise;
@@ -129,4 +129,59 @@ it.each([true, false])('makes the mounted conversation read-only at its 48-hour 
   act(() => jest.advanceTimersByTime(1));
   expect(mockThreadProps.readOnly?.text).toContain('read-only');
   expect(open()).toBe(true);
+});
+
+
+it.each(['creator', 'member'])('refreshes cancellation on returning to a mounted %s thread', async role => {
+  let current = {...event, creator_user_id: role === 'creator' ? mockViewer : 'peer'};
+  mockEvent = jest.fn(async () => ok({...current}));
+  await mount(); expect(mockThreadProps.readOnly).toBeNull();
+  const thread = tree.root.findByProps({testID: 'thread-open'});
+  mockFocused = false; await act(async () => tree.update(screen())); await flush();
+  current = {...current, status: 'cancelled'};
+  mockFocused = true; await act(async () => tree.update(screen())); await flush();
+  expect(mockThreadProps.readOnly?.text).toContain('read-only');
+  expect(tree.root.findByProps({testID: 'thread-open'})).toBe(thread);
+});
+
+it('refreshes changed title and time on return without replacing the conversation', async () => {
+  await mount(); const thread = tree.root.findByProps({testID:'thread-open'});
+  mockFocused = false; await act(async () => tree.update(screen())); await flush();
+  mockEvent = async () => ok({...event, title: 'A later picnic', start_time: '2099-02-02T16:00:00Z'});
+  mockFocused = true; await act(async () => tree.update(screen())); await flush();
+  expect(mockThreadProps.title).toBe('A later picnic');
+  expect(mockThreadProps.subtitle).toContain('Feb');
+  expect(mockThreadProps.readOnly).toBeNull();
+  expect(tree.root.findByProps({testID:'thread-open'})).toBe(thread);
+});
+
+it('recovers failed metadata on return without removing available history', async () => {
+  await mount(); const thread = tree.root.findByProps({testID:'thread-open'});
+  mockFocused = false; await act(async () => tree.update(screen())); await flush();
+  mockEvent = async () => ({data:null,error:new Error('Offline')});
+  mockFocused = true; await act(async () => tree.update(screen())); await flush();
+  await act(async () => {await jest.advanceTimersByTimeAsync(5000);}); await flush();
+  expect(tree.root.findByProps({testID:'thread-open'})).toBe(thread);
+  const retry = tree.root.findByProps({accessibilityLabel:'Retry Plan details'});
+  mockEvent = async () => ok({...event,status:'cancelled'});
+  await act(async () => retry.props.onPress()); await flush();
+  expect(mockThreadProps.readOnly?.text).toContain('read-only');
+});
+
+it('refreshes changed metadata once on foreground and coalesces a still-running read', async () => {
+  const listeners = new Set<(state:any)=>void>();
+  jest.spyOn(AppState,'addEventListener').mockImplementation((_name,fn)=>{listeners.add(fn);return {remove:()=>listeners.delete(fn)};});
+  const state = (value:string) => {Object.defineProperty(AppState,'currentState',{configurable:true,value});for(const fn of listeners)fn(value);};
+  state('active');
+  let calls=0; const pending=deferred();
+  mockEvent=async()=>{calls++;return calls===1?ok(event):pending.promise;};
+  await mount(); expect(calls).toBe(1);
+  await act(async()=>{state('background');state('active');});await flush();
+  await act(async()=>{state('background');state('active');});await flush();
+  expect(calls).toBe(2);
+  await act(async()=>pending.resolve(ok({...event,status:'cancelled'})));await flush();
+  expect(mockThreadProps.readOnly?.text).toContain('read-only');
+  mockFocused=false;await act(async()=>tree.update(screen()));await flush();
+  await act(async()=>{state('background');state('active');});await flush();
+  expect(calls).toBe(2);
 });

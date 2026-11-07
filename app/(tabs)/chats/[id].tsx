@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { COMMUNITY_CHAT_GROUPING_ENABLED } from '../../../constants/FeatureFlags
 import { ChatEntryState } from '../../../components/chat/ChatEntryState';
 import { requestWithDeadline, RequestDeadlineError } from '../../../lib/requestWithDeadline';
 import { useObservedUser } from '../../../hooks/useObservedUser';
+import { useChatResumeRefresh } from '../../../hooks/useChatResumeRefresh';
 const ThreadComponent = ChatThread;
 
 async function currentChatRead<T>(read: () => PromiseLike<T>, isCurrent: () => boolean): Promise<T> {
@@ -127,10 +128,18 @@ export default function PlanChatScreen() {
   const { data: event, isError: eventError, isLoading: eventLoading, isFetching: eventFetching, refetch: refetchEvent } = useQuery({
     queryKey: ['event-info', id, readOwner.userId, readOwner.epoch],
     queryFn: () => currentChatRead(() => fetchEventInfo(id), readOwner.isCurrent),
-    enabled: !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error,
-    staleTime: 60_000,
+    enabled: focused && !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error,
+    staleTime: 0,
     retry: (failures, error) => !(error instanceof RequestDeadlineError) && failures < 2,
   });
+
+  // Returning to an existing thread must review the plan's current status and
+  // dates as well as its messages. Keep the mounted thread and draft while the
+  // read runs; overlapping foreground returns share the pending metadata read.
+  const metadataVisible = useRef(false);
+  metadataVisible.current = focused && !!id && !!readOwner.userId && !viewer.isLoading && !viewer.error;
+  const refreshMetadata = useCallback(() => refetchEvent({ cancelRefetch: false }), [refetchEvent]);
+  useChatResumeRefresh(refreshMetadata, readOwner.isCurrent, metadataVisible);
 
   const isCreator = !!event && event.creator_user_id === readOwner.userId;
   const membership = useQuery({
