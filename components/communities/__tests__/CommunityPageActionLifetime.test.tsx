@@ -8,6 +8,7 @@ const mockPush=jest.fn(), mockBack=jest.fn(), mockJoin=jest.fn(), mockLeave=jest
 const mockParamsContext=React.createContext<string | null>(null);
 let mockId='community-a', mockFocused=true, mockUser='account-a', mockEpoch=1, mockAccountError:Error|null=null;
 const mockRetry=jest.fn();
+const mockQueryRefetch=jest.fn().mockResolvedValue({});
 jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush,back:mockBack}),useLocalSearchParams:()=>({id:require('react').useContext(mockParamsContext) ?? mockId}),useFocusEffect:(cb:any)=>require('react').useEffect(()=>mockFocused?cb():undefined,[cb,mockFocused]),Stack:{Screen:()=>null}}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
@@ -17,7 +18,7 @@ jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
  return{viewerId,epoch,isLoading:false,error:mockAccountError,retry:mockRetry,isCurrent};
 }}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
-jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:mockInvalidate}),useQuery:({queryKey}:any)=>({isLoading:false,isRefetching:false,refetch:jest.fn(),data:queryKey[0]==='community-page'?{community:{id:mockId,name:'Test community',handle:'test-community',status:'active'},blocks:[],events:[],memberCount:2}:queryKey[0]==='community-membership'?{status:'active',role:'member'}:queryKey[0]==='community-chat-cards'?{cards:[{community_id:mockId,topics:[{id:'topic-a',name:'Walks',joined:false}]}]}:queryKey[0]==='community-faces'?[]:null})}));
+jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>({invalidateQueries:mockInvalidate}),useQuery:({queryKey}:any)=>({isLoading:false,isRefetching:false,refetch:mockQueryRefetch,data:queryKey[0]==='community-page'?{community:{id:mockId,name:'Test community',handle:'test-community',status:'active'},blocks:[],events:[],memberCount:2}:queryKey[0]==='community-membership'?{status:'active',role:'member'}:queryKey[0]==='community-chat-cards'?{cards:[{community_id:mockId,topics:[{id:'topic-a',name:'Walks',joined:false}]}]}:queryKey[0]==='community-faces'?[]:null})}));
 jest.mock('../../../lib/communityChat',()=>({getCommunityChatPayload:jest.fn(),joinTopic:(...args:any[])=>mockJoin(...args)}));
 jest.mock('../../../lib/communityJoin',()=>({getJoinGate:jest.fn(),getMyMembership:jest.fn(),leaveCommunity:(...args:any[])=>mockLeave(...args)}));
 jest.mock('../../../lib/communityPage',()=>({getCommunityPage:jest.fn(),getMemberFaces:jest.fn()}));
