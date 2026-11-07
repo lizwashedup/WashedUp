@@ -17,7 +17,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    TouchableWithoutFeedback,
+    ScrollView,
     View,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -175,13 +175,10 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-          <View style={styles.container}>
             {/* Back affordance — only when /login is reached via the
                 phone-entry escape hatch. Matches the chevron pattern used
                 on verify-code and onboarding so it feels native to the
-                rest of the app, in-flow rather than absolute so the
-                Keyboard.dismiss wrapper doesn't swallow the tap. */}
+                rest of the app. */}
             {PHONE_AUTH_ENABLED && (
               <View style={styles.topNavRow}>
                 <TouchableOpacity
@@ -191,6 +188,7 @@ export default function LoginScreen() {
                     if (router.canGoBack()) router.back();
                     else router.replace('/phone-entry');
                   }}
+                  accessibilityRole="button" accessibilityLabel="Back to phone sign-in"
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                   style={styles.backHit}
                 >
@@ -198,6 +196,7 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </View>
             )}
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
             {/* Top section ~40% */}
             <Animated.View
               entering={FadeIn.duration(400)}
@@ -243,7 +242,7 @@ export default function LoginScreen() {
                 <TextInput
                   ref={passwordInputRef}
                   style={[
-                    styles.input,
+                    styles.input, styles.passwordInput,
                     passwordFocused && styles.inputFocused,
                   ]}
                   accessibilityLabel="Password"
@@ -261,6 +260,7 @@ export default function LoginScreen() {
                 />
                 <TouchableOpacity
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button" accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
                   onPress={() => { setPasswordVisible((v) => !v); triggerHaptic(); }}
                   style={styles.eyeButton}
                 >
@@ -285,7 +285,7 @@ export default function LoginScreen() {
               <View style={styles.gap20} />
 
               <TouchableOpacity
-                style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+                style={[styles.primaryButton, styles.loginAction, loading && styles.primaryButtonDisabled]}
                 accessibilityRole="button"
                 accessibilityLabel="Log in"
                 onPress={handleLogin}
@@ -329,8 +329,7 @@ export default function LoginScreen() {
                 </>
               )}
             </Animated.View>
-          </View>
-        </TouchableWithoutFeedback>
+        </ScrollView>
       </KeyboardAvoidingView>
 
       {/* Reset Password Modal */}
@@ -416,7 +415,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   container: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
   },
@@ -424,7 +423,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingTop: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: 36,
     minHeight: 36,
   },
   backHit: {
@@ -459,7 +458,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   formSection: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'flex-start',
     minHeight: 320,
   },
@@ -473,7 +472,7 @@ const styles = StyleSheet.create({
   gap8: { height: 8 },
   gap16: { height: 16 },
   input: {
-    height: 52,
+    minHeight: 52,
     backgroundColor: Colors.cardBg,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -495,6 +494,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  passwordInput: { paddingRight: 58 },
   passwordWrap: {
     position: 'relative',
   },
@@ -525,6 +525,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  loginAction: { height: 'auto', minHeight: 52, paddingVertical: 8 },
   primaryButtonDisabled: {
     opacity: 0.9,
   },
