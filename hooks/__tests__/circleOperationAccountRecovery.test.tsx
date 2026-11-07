@@ -68,7 +68,7 @@ it.each(modes)('%s recovers a stalled account check without dispatching its late
 });
 
 it.each(['plan','invite','update','leave'] as const)('%s keeps a dispatched mutation pending beyond the account-read deadline', async mode => {
-  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(mode === 'create' ? 'create_circle' : mode === 'plan' ? 'create_circle_plan' : mode === 'invite' ? 'invite_to_circle' : mode === 'leave' ? 'leave_circle' : 'update_circle'); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
+  const gate = deferred<{ data: unknown; error: null; status: number }>(); const result = await mockRpc(({ plan: 'create_circle_plan', invite: 'invite_to_circle', leave: 'leave_circle', update: 'update_circle' })[mode]); mockRpc.mockClear().mockReturnValueOnce(gate.promise);
   await mount(mode); let settled = false;
   act(() => { void submit().then(() => { settled = true; }, () => { settled = true; }); }); await tick(20000);
   expect(pending).toBe(true); expect(settled).toBe(false); expect(mockRpc).toHaveBeenCalledTimes(1);
