@@ -28,6 +28,7 @@ import Colors from '../../constants/Colors';
 import { Fonts, FontSizes } from '../../constants/Typography';
 import { supabase } from '../../lib/supabase';
 import { PHONE_AUTH_ENABLED } from '../../constants/FeatureFlags';
+import { emailSignInFeedback } from '../../lib/emailSignInFeedback';
 import { postAuthTransitionRef } from '../../lib/navState';
 import { WELCOME_HERO_URI } from '../../lib/onboardingAssets';
 
@@ -94,11 +95,11 @@ export default function LoginScreen() {
     try {
       const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (!isCurrent()) return;
-      if (signInError) { setError('wrong email or password'); return; }
+      if (signInError) { setError(emailSignInFeedback(signInError)); return; }
       setPassword(''); postAuthTransitionRef.active = true;
       // Root layout handles redirect via onAuthStateChange.
-    } catch {
-      if (isCurrent()) setError('could not sign in. please try again.');
+    } catch (error) {
+      if (isCurrent()) setError(emailSignInFeedback(error));
     } finally {
       if (loginPending.current === attempt) {
         loginPending.current = null;
