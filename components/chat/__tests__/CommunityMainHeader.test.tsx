@@ -36,10 +36,11 @@ jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => mock
 jest.mock('../../../hooks/useCommunityBroadcastMute', () => ({ useCommunityBroadcastMute: () => mockMute }));
 jest.mock('../../../hooks/useNetworkStatus', () => ({ useNetworkStatus: () => ({ online: mockOnline }) }));
 jest.mock('../../../hooks/useBlock', () => ({ useBlock: () => ({ blockUser: jest.fn() }) }));
+const mockQueryRefetch = jest.fn().mockResolvedValue(undefined);
 jest.mock('@tanstack/react-query', () => ({
   useQueryClient: () => mockQueryClient,
   useInfiniteQuery: () => ({ data: { pages: [{ messages: mockMessages }] }, isLoading: false, isError: false, refetch: jest.fn() }),
-  useQuery: ({ queryKey }: any) => ({ isSuccess: true, data: queryKey[0] === 'community-chat-cards'
+  useQuery: ({ queryKey }: any) => ({ isSuccess: true, refetch: mockQueryRefetch, data: queryKey[0] === 'community-chat-cards'
     ? { cards: [{ community_id: '11111111-1111-4111-8111-111111111111', name: 'Sunset Club LA', main_chat_name: 'After Glow' }] }
     : queryKey[0] === 'community-my-membership' ? { status: mockRemoved ? 'removed' : 'active' }
       : queryKey[0] === 'community-pinned-event' ? mockPinned : undefined }),

@@ -31,6 +31,7 @@ const mockCameraPermission = jest.fn(), mockCamera = jest.fn();
 const mockPermission = jest.fn(), mockPick = jest.fn(), mockManipulate = jest.fn(), mockUpload = jest.fn();
 const mockInvalidate = jest.fn().mockResolvedValue(undefined), mockCancel = jest.fn().mockResolvedValue(undefined);
 const mockSetCache = jest.fn();
+const mockMembershipRefetch = jest.fn().mockResolvedValue(undefined);
 const mockQueryClient = { setQueryData: mockSetCache, invalidateQueries: mockInvalidate, cancelQueries: mockCancel };
 const mockRealtime: (() => void)[] = [];
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
@@ -54,7 +55,7 @@ jest.mock('@tanstack/react-query', () => ({
     'community-my-membership': { status: mockMembership },
     'community-chat-cards': { cards: [{ community_id: mockRoomId, name: 'Sunset Club', main_chat_name: 'After Glow' }] },
     'community-chat-members': mockMembers,
-  } as Record<string, unknown>)[queryKey[0] as string], isLoading: queryKey[0]==='community-chat-members' && mockMembersLoading, isError: queryKey[0]==='community-chat-members' && mockMembersError, refetch: mockRetryMembers }),
+  } as Record<string, unknown>)[queryKey[0] as string], isLoading: queryKey[0]==='community-chat-members' && mockMembersLoading, isError: queryKey[0]==='community-chat-members' && mockMembersError, refetch: queryKey[0] === 'community-my-membership' ? mockMembershipRefetch : mockRetryMembers }),
 }));
 jest.mock('../../../lib/communityChat', () => ({
   markBroadcastsRead: (...args: any[]) => mockRead(...args),
