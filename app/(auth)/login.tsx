@@ -341,8 +341,10 @@ export default function LoginScreen() {
         onDismiss={finishResetDismissal}
         statusBarTranslucent
       >
-        <Pressable accessible={false} style={modalStyles.overlay} onPress={closeResetModal}>
-          <Pressable accessible={false} style={modalStyles.content} onPress={(e) => e.stopPropagation()}>
+        <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <SafeAreaView edges={['top', 'bottom']} style={modalStyles.overlay}>
+            <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={closeResetModal} />
+            <ScrollView style={modalStyles.content} contentContainerStyle={modalStyles.contentPadding} keyboardShouldPersistTaps="handled">
             <Text style={modalStyles.title}>reset password</Text>
             <Text style={modalStyles.subtitle}>enter your email to receive a reset link.</Text>
             <TextInput
@@ -363,7 +365,7 @@ export default function LoginScreen() {
             />
             {resetError ? <Text style={modalStyles.errorText}>{resetError}</Text> : null}
             <TouchableOpacity
-              style={[styles.primaryButton, resetLoading && styles.primaryButtonDisabled]}
+              style={[styles.primaryButton, styles.loginAction, resetLoading && styles.primaryButtonDisabled]}
               accessibilityRole="button"
               accessibilityLabel="Send reset link"
               onPress={handleSendResetLink}
@@ -380,8 +382,9 @@ export default function LoginScreen() {
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cancel password reset" onPress={closeResetModal} style={modalStyles.cancelButton}>
               <Text style={modalStyles.cancelText}>cancel</Text>
             </TouchableOpacity>
-          </Pressable>
-        </Pressable>
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
       </Modal>
         <BrandedAlert
           visible={!!alertInfo}
@@ -532,6 +535,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontFamily: Fonts.sansBold,
     fontSize: FontSizes.displaySM,
+    textAlign: 'center',
     color: Colors.white,
   },
   errorText: {
@@ -576,8 +580,12 @@ const modalStyles = StyleSheet.create({
   content: {
     width: '100%',
     maxWidth: 360,
+    maxHeight: '100%',
+    flexGrow: 0,
     backgroundColor: Colors.cardBg,
     borderRadius: 20,
+  },
+  contentPadding: {
     padding: 24,
   },
   title: {
