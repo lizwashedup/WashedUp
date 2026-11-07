@@ -208,7 +208,7 @@ it('chooses a plan photo even when broad library access is denied', async () => 
 
 it('does not let an unresolved save from a retired route overwrite a newer confirmed edit',async()=>{
  jest.useFakeTimers();try { let title='Original', version=originalVersion;let finishOld!:()=>void;
- const commit=(patch:any,filters:any[])=>{if(!filters.some(([key,value])=>key==='updated_at'&&value===version))return {data:null,error:null};title=patch.title;version=savedVersion;return success(patch);};
+ const commit=(patch:any,filters:any[])=>{if(filters.some(([key,value])=>key==='updated_at'&&value!==version))return {data:null,error:null};title=patch.title;version=savedVersion;return success(patch);};
  mockWrite.mockImplementation((_table,patch,filters)=>Promise.resolve(commit(patch,filters)));
  mockWrite.mockImplementationOnce((_table,patch,filters)=>new Promise(resolve=>{finishOld=()=>resolve(commit(patch,filters));}));
  const old=mount();let pending!:Promise<void>;act(()=>{pending=old.current.save({title:'Earlier edit'});});
