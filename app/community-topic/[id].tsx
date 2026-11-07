@@ -1,3 +1,4 @@
+import { getMyEventTopicMembership } from '../../lib/eventTopicMembership';
 import { useChatScrollFollow } from '../../hooks/useChatScrollFollow';
 import { beginChatTiming, type ChatTimingOutcome } from '../../lib/chatPerformance';
 import { useChatMessageAnchor, useChatAnchorScroll } from '../../hooks/useChatMessageAnchor';
@@ -334,6 +335,18 @@ export default function CommunityTopicScreen() {
   const communityAccessEnded = myMembership?.status === 'removed' || myMembership?.status === 'banned'
     || (myMembership?.status === 'left' && !eventTopic && !roomKindUnknown);
   const checkingRoomKind = topicDetails.isFetching || chatCards.isFetching;
+  const eventMembership = useQuery({
+    queryKey: ['event-topic-membership', id, muteViewer.viewerId, muteViewer.epoch],
+    enabled: eventTopic && !!id && !!muteViewer.viewerId && !muteViewer.isLoading && !muteViewer.error,
+    queryFn: ({ signal }) => getMyEventTopicMembership(id!, {
+      userId: identityScope.userId!, isCurrent: () => !signal.aborted && identityScope.isCurrent(),
+    }),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const refreshEventMembership = eventMembership.refetch;
+  const eventSendingUnavailable = eventTopic && eventMembership.data !== true;
+
 
   const { data: firstMessage, isSuccess: firstMessageLoaded } = useQuery({
     queryKey: scopedKey(['topic-first-message', id]),
@@ -393,33 +406,43 @@ export default function CommunityTopicScreen() {
     return () => { if (activeEntryVisit.current === entryVisit) activeEntryVisit.current = null; };
   }, [entryVisit]);
   const entryIsCurrent = useCallback(() => activeEntryVisit.current === entryVisit && topicScopeCurrent() && (!introLayout || (coreFocused.current && AppState.currentState === 'active')), [entryVisit, topicScopeCurrent, !!introLayout]);
-  const sendAdmission = useMemo(() => ({ allowed: !communityAccessEnded && !roomKindUnknown && !archived }),
-    [entryVisit, communityAccessEnded, roomKindUnknown, archived]);
+  const sendAdmission = useMemo(() => ({ allowed: !communityAccessEnded && !eventSendingUnavailable && !roomKindUnknown && !archived }),
+    [entryVisit, communityAccessEnded, eventSendingUnavailable, roomKindUnknown, archived]);
   const currentSendAdmission = useRef<typeof sendAdmission | null>(null);
   useLayoutEffect(() => {
     currentSendAdmission.current = sendAdmission;
     return () => { if (currentSendAdmission.current === sendAdmission) currentSendAdmission.current = null; };
   }, [sendAdmission]);
   const sendAdmissionIsCurrent = () => entryIsCurrent() && sendAdmission.allowed && currentSendAdmission.current === sendAdmission;
+  // Re-entry can follow an RSVP change. Membership, room metadata and the
+  // previous introduction are independent reads; none acknowledges messages.
+  const refreshEventAccess = useCallback(() => Promise.allSettled([
+    refreshEventMembership({ cancelRefetch: false }),
+    topicDetails.refetch({ cancelRefetch: false }),
+    chatCards.refetch({ cancelRefetch: false }),
+    refetchIntroStatus({ cancelRefetch: false }),
+  ]), [refreshEventMembership, topicDetails.refetch, chatCards.refetch, refetchIntroStatus]);
   useFocusEffect(useCallback(() => {
     coreFocused.current = true;
     moderatorVisit.current = {};
     // A child route can outlive a membership change without backgrounding.
     // The account-owned query coalesces this with initial/foreground reads.
     if (topicMeta?.community_id && muteViewer.viewerId) void refreshMembership({ cancelRefetch: false });
+    if (eventTopic && muteViewer.viewerId) void refreshEventAccess();
     if (introLayout) void refreshMessages(true);
     return () => { coreFocused.current = false; moderatorVisit.current = null; };
-  }, [!!introLayout, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership]));
+  }, [!!introLayout, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership, eventTopic, refreshEventAccess]));
   const refreshVisibleConversation = useCallback(async (silent = false) => {
     if (!entryIsCurrent() || !coreFocused.current) return;
     // History and admission recover independently. Ordinary message arrivals
     // keep their existing history path and do not issue a membership read.
     await Promise.allSettled([
       refreshMessages(silent),
+      eventTopic && muteViewer.viewerId ? refreshEventAccess() : Promise.resolve(),
       topicMeta?.community_id && muteViewer.viewerId
         ? refreshMembership({ cancelRefetch: false }) : Promise.resolve(),
     ]);
-  }, [entryIsCurrent, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership]);
+  }, [entryIsCurrent, refreshMessages, topicMeta?.community_id, muteViewer.viewerId, refreshMembership, eventTopic, refreshEventAccess]);
   useChatResumeRefresh(refreshVisibleConversation, entryIsCurrent, coreFocused);
   const retryRoomKind = () => {
     if (!roomKindUnknown || !entryIsCurrent() || !coreFocused.current) return;
@@ -461,7 +484,7 @@ export default function CommunityTopicScreen() {
     return 'several people are typing...';
   }, [typingUsers]);
 
-  const attachmentAllowed = !draftBlocked && !!myId && !communityAccessEnded && !archived && !gated && !gateChecking && !editingMessageId;
+  const attachmentAllowed = !draftBlocked && !!myId && !communityAccessEnded && !eventSendingUnavailable && !archived && !gated && !gateChecking && !editingMessageId;
   const attachmentVisit = useMemo(() => ({ allowed: attachmentAllowed }), [entryVisit, attachmentAllowed]);
   const activeAttachmentVisit = useRef<typeof attachmentVisit | null>(null);
   useLayoutEffect(() => {
@@ -478,10 +501,10 @@ export default function CommunityTopicScreen() {
     setDraft(''); draftRef.current = ''; setEditingMessageId(null);
     setReplyingTo(null); setMentionQuery(null); stopTyping();
   };
-  const menuContext = useRef({ messages, archived, allowed: !communityAccessEnded && !gated && !gateChecking });
-  menuContext.current = { messages, archived, allowed: !communityAccessEnded && !gated && !gateChecking };
+  const menuContext = useRef({ messages, archived, canSend: !eventSendingUnavailable, allowed: !communityAccessEnded && !gated && !gateChecking });
+  menuContext.current = { messages, archived, canSend: !eventSendingUnavailable, allowed: !communityAccessEnded && !gated && !gateChecking };
   const selectedMessageCurrent = (messageId: string) => entryIsCurrent() && menuContext.current.allowed && menuContext.current.messages.some(message => message.id === messageId);
-  useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, messages, communityAccessEnded, archived, gated, gateChecking]);
+  useEffect(() => { if (messageMenu && !messageMenu.isCurrent()) setMessageMenu(null); }, [messageMenu, messages, communityAccessEnded, eventSendingUnavailable, archived, gated, gateChecking]);
   useEffect(() => {
     if (!composerFocusRequest) return;
     const frame = requestAnimationFrame(() => { if (entryIsCurrent()) composerInputRef.current?.focus(); });
@@ -502,7 +525,7 @@ export default function CommunityTopicScreen() {
   useEffect(() => { if (reactionDetails && !reactionDetails.scope.isCurrent()) setReactionDetails(null); }, [reactionDetails, messages, roomItems, communityAccessEnded, entryVisit]);
   const currentAction = (action: () => void) => () => { if (entryIsCurrent()) action(); };
   const reactToMessage = async (messageId: string, key: string, retry?: () => Promise<void>) => {
-    if (!entryIsCurrent() || (retry && (!selectedMessageCurrent(messageId) || menuContext.current.archived))) return;
+    if (!sendAdmissionIsCurrent() || (retry && (!selectedMessageCurrent(messageId) || menuContext.current.archived))) return;
     try { await (retry ? retry() : toggleReaction(messageId, key)); }
     catch (error) {
       if (!entryIsCurrent() || isObsoleteTopicOperation(error)) return;
@@ -612,7 +635,7 @@ export default function CommunityTopicScreen() {
         if (resumingOriginal) await verifyTopicComposerTarget(id, original, readableScope);
         if (!sendAdmissionIsCurrent()) throw new Error('This chat access changed. Your message is kept.');
         if (original.kind === 'edit') await editMessage(original.id, original.text, original.mentions, original.edit ?? undefined);
-        else await sendMessage(original.text, undefined, original.replyId ?? undefined, undefined, original.id, original.mentions);
+        else await sendMessage(original.text, undefined, original.replyId ?? undefined, undefined, original.id, original.mentions, { userId: readableScope.userId, isCurrent: sendAdmissionIsCurrent });
         // New text sends return only after their exact receipt is validated.
         if (original.kind === 'edit' && !await checkTopicComposerAttempt(id, original, readableScope)) throw Error('Your original message has not been confirmed yet.');
       }
@@ -684,14 +707,14 @@ export default function CommunityTopicScreen() {
   // Blocking refetches so their messages drop out via the block filter.
   // Creator moderation (C-14) adds one more option, only when canModerate.
   const beginReply = (message: TopicMessage) => {
-    if (!entryIsCurrent()) return;
+    if (!sendAdmissionIsCurrent()) return;
     entryRevisionRef.current += 1;
     composerDraft.change({ reply: { id: message.id, body: message.body, sender_name: message.sender_name }, edit: null });
     setComposerFocusRequest(request => request + 1);
   };
 
   const beginEdit = (message: TopicMessage) => {
-    if (!entryIsCurrent()) return;
+    if (!sendAdmissionIsCurrent()) return;
     entryRevisionRef.current += 1;
     const mentions = readChatMentionDocument(message.body, message.mention_data);
     composerDraft.change({ text: message.body, mentions, edit: { id: message.id, body: message.body, edited_at: message.edited_at ?? null, mentions }, reply: null });
@@ -709,16 +732,16 @@ export default function CommunityTopicScreen() {
       preview: message.image_url ? 'Photo' : readChatLocation(message.location_lat, message.location_lng, message.body) ? 'Shared place' : message.body,
       own: message.sender_id === myId,
       selectedReaction: reactionEmoji(message.reactions.find(reaction => reaction.user_id === myId)?.reaction ?? ''),
-      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived,
-      onReact: archived ? undefined : emoji => {
-        if (!selectedMessageCurrent(message.id) || menuContext.current.archived) return;
+      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived && menuContext.current.canSend === !eventSendingUnavailable,
+      onReact: archived || eventSendingUnavailable ? undefined : emoji => {
+        if (!selectedMessageCurrent(message.id) || menuContext.current.archived || !menuContext.current.canSend) return;
         const current = menuContext.current.messages.find(row => row.id === message.id)!;
         void reactToMessage(message.id, reactionKeyForEmoji(emoji, topicReactionCounts(current.reactions, myId), 'heart'));
       },
       title: name,
       buttons: [
-        ...(!archived ? [
-          { text: 'react', onPress: currentAction(() => setReactionPickerMsgId(message.id)) },
+        ...(!archived && !eventSendingUnavailable ? [
+          { text: 'react', onPress: () => { if (sendAdmissionIsCurrent()) setReactionPickerMsgId(message.id); } },
           { text: 'reply', onPress: () => beginReply(message) },
         ] : []),
         { text: 'report', onPress: currentAction(() => { setReportTarget({ id: userId, name }); setShowReport(true); }) },
@@ -739,19 +762,19 @@ export default function CommunityTopicScreen() {
       preview: message.image_url ? 'Photo' : readChatLocation(message.location_lat, message.location_lng, message.body) ? 'Shared place' : message.body,
       own: message.sender_id === myId,
       selectedReaction: reactionEmoji(message.reactions.find(reaction => reaction.user_id === myId)?.reaction ?? ''),
-      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived,
-      onReact: archived ? undefined : emoji => {
-        if (!selectedMessageCurrent(message.id) || menuContext.current.archived) return;
+      isCurrent: () => selectedMessageCurrent(message.id) && menuContext.current.archived === archived && menuContext.current.canSend === !eventSendingUnavailable,
+      onReact: archived || eventSendingUnavailable ? undefined : emoji => {
+        if (!selectedMessageCurrent(message.id) || menuContext.current.archived || !menuContext.current.canSend) return;
         const current = menuContext.current.messages.find(row => row.id === message.id)!;
         void reactToMessage(message.id, reactionKeyForEmoji(emoji, topicReactionCounts(current.reactions, myId), 'heart'));
       },
       title: 'Your message',
       buttons: [
-        ...(!archived ? [
-          { text: 'react', onPress: currentAction(() => setReactionPickerMsgId(message.id)) },
+        ...(!archived && !eventSendingUnavailable ? [
+          { text: 'react', onPress: () => { if (sendAdmissionIsCurrent()) setReactionPickerMsgId(message.id); } },
           { text: 'reply', onPress: () => beginReply(message) },
         ] : []),
-        ...(!archived && message.body ? [{ text: 'edit', onPress: () => beginEdit(message) }] : []),
+        ...(!archived && !eventSendingUnavailable && message.body ? [{ text: 'edit', onPress: () => beginEdit(message) }] : []),
         { text: 'delete this message', style: 'destructive', onPress: () => handleDeleteMessage(message.id, true) },
         { text: 'cancel', style: 'cancel' },
       ],
@@ -1362,6 +1385,18 @@ export default function CommunityTopicScreen() {
                 ? 'this chat space is closed. the event was cancelled.'
                 : 'this chat space is closed. the event has passed.'}
             </Text>
+          </View>
+        ) : eventSendingUnavailable ? (
+          <View style={styles.closedNote}>
+            <Text style={styles.closedText}>{eventMembership.data === false
+              ? 'you’re not in this event chat.'
+              : eventMembership.isFetching ? 'checking your event chat access…' : 'couldn’t check your event chat access.'}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check event chat access"
+              disabled={eventMembership.isFetching} onPress={() => {
+                if (entryIsCurrent() && coreFocused.current) void refreshEventAccess();
+              }}>
+              <Text style={styles.composerContextLabel}>Check access</Text>
+            </TouchableOpacity>
           </View>
         ) : (
         <View>
