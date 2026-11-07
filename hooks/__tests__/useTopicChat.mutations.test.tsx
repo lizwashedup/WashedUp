@@ -748,3 +748,13 @@ it.each(['account','topic'])('retires the status check on %s change', async chan
   expect(fixture.chat.messages.map(row=>row.id)).toEqual(['new']);
   expect(mockInvalidate).not.toHaveBeenCalled();
 });
+
+it('stops a reply send if the caller loses event admission during its parent read', async () => {
+  const fixture=mount();await flush();const pending=deferred();mockRead.mockReturnValueOnce(pending.promise);
+  let admitted=true;
+  const work=start(()=>fixture.chat.sendMessage('Kept event reply',undefined,'older-parent',undefined,'kept-event-reply',undefined,{userId:'alice',isCurrent:()=>admitted}));
+  await flush();admitted=false;
+  await act(async()=>{pending.resolve(page([message('older-parent')]));await work;});
+  expect(mockTransport.mock.calls.some(call=>call[1]==='insert')).toBe(false);
+  expect(fixture.chat.messages.some(row=>row.id==='kept-event-reply')).toBe(false);
+});
