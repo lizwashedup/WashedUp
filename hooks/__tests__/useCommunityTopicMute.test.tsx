@@ -26,8 +26,7 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => { resolve = yes; });
   return { promise, resolve };
 }
-function mount() {
-  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0, gcTime: Infinity } } });
+function mount(client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0, gcTime: Infinity } } })) {
   let mute!: Mute, viewer!: Viewer, tree!: ReturnType<typeof create>;
   let unmounted = false;
   function Harness({ id }: { id: string }) { viewer = useObservedUser(); mute = useCommunityTopicMute(id, viewer); return null; }
@@ -101,16 +100,17 @@ it('shows the authoritative mismatch instead of claiming the requested change sa
   await flush(); expect(fixture.mute.muted).toBe(false);
 });
 
-it.each(['room', 'account'])('ignores a pending write after %s A → B → A and permits a new attempt', async transition => {
+it.each(['room', 'account'])('keeps a dispatched write scoped to its member and room across %s A → B → A', async transition => {
   const fixture = mount(); await flush();
   const pending = deferred<void>(); write.mockReturnValueOnce(pending.promise);
   let operation!: ReturnType<Mute['toggle']>;
   act(() => { operation = fixture.mute.toggle(); }); await flush();
   if (transition === 'room') {
-    fixture.navigate('event-b'); await flush(); fixture.navigate('persistent-a'); await flush();
-  } else { await auth('bob'); await auth('alice'); }
-  expect(fixture.mute.isChecking).toBe(false);
-  await act(async () => { pending.resolve(); expect(await operation).toBeUndefined(); });
+    fixture.navigate('event-b'); await flush(); expect(fixture.mute.isChecking).toBe(false); fixture.navigate('persistent-a'); await flush();
+  } else { await auth('bob'); expect(fixture.mute.isChecking).toBe(false); await auth('alice'); }
+  // The old visit cannot publish a result, but its dispatched write still belongs to A.
+  expect(fixture.mute.isChecking).toBe(true);
+  await act(async () => { pending.resolve(); expect(await operation).toBeUndefined(); }); await flush();
   await act(async () => { expect(await fixture.mute.toggle()).toEqual({ value: true, matched: true }); });
 });
 
@@ -151,4 +151,38 @@ it('discards a pending outcome after unmount and cleans up the identity listener
   let operation!: ReturnType<Mute['toggle']>;
   act(() => { operation = fixture.mute.toggle(); }); await flush(); fixture.unmount();
   pending.resolve(); expect(await operation).toBeUndefined(); expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+it.each([true, false])('reads the saved setting if the chat reopens before settlement: %s', async before => {
+  const first = mount(); await flush();
+  const gate = deferred<void>();
+  write.mockImplementationOnce(async (scope, desired) => { await gate.promise; saved.set(key(scope), desired); });
+  let request!: Promise<unknown>;
+  act(() => { request = first.mute.toggle(); }); await flush();
+  expect(write).toHaveBeenCalledTimes(1);
+  first.unmount();
+  let next: ReturnType<typeof mount>;
+  if (before) {
+    next = mount(first.client); await flush();
+    expect(next.mute.isChecking).toBe(true);
+    await act(async () => { await next.mute.toggle(); });
+    expect(write).toHaveBeenCalledTimes(1);
+  }
+  gate.resolve(); await request; await flush();
+  if (!before) { next = mount(first.client); await flush(); }
+  expect(next!.mute.ready).toBe(true); expect(next!.mute.muted).toBe(true);
+  expect(write).toHaveBeenCalledTimes(1);
+  await act(async () => { await next!.mute.toggle(); }); await flush();
+  expect(next!.mute.muted).toBe(false); expect(write).toHaveBeenCalledTimes(2);
+});
+
+it('does not revive the pre-write value after a lost readback and a fresh visit', async () => {
+  const first = mount(); await flush();
+  read.mockRejectedValueOnce(new Error('Offline during readback'));
+  await act(async () => { await first.mute.toggle(); }); await flush();
+  expect(first.mute.ready).toBe(false);
+  first.unmount();
+  const next = mount(first.client); await flush();
+  expect(next.mute.muted).toBe(true);
+  expect(write).toHaveBeenCalledTimes(1);
 });
