@@ -44,14 +44,14 @@ const mockSave = jest.fn();
 let mockWishlist: any;
 const mockMutationCalls: any[] = [];
 const mockSelect = jest.fn();
-const mockUpdate = jest.fn();
+const mockUpdate = jest.fn(), mockEq = jest.fn();
 let mockRead: any = null;
 let mockEditResponse: any = undefined, mockPlacesProps: any;
 const mockPhotoUpload=jest.fn(), mockImagePrepare=jest.fn();
 let mockWaitlist:any, mockWaitlistOptions:any;
 const mockWaitlistChange=jest.fn(),mockWaitlistRefresh=jest.fn(),mockWaitlistRetry=jest.fn();
-const mockTable: any = { select: (...args: any[]) => { mockSelect(...args); return mockTable; }, eq: () => mockTable, is: () => mockTable, update: (payload: any) => {mockUpdate(payload);return mockTable;},
-  single: async () => ({ data: mockRead, error: null }), maybeSingle: () => Promise.resolve(mockEditResponse ?? { data: mockUpdate.mock.calls.length ? {...mockPlan,...mockUpdate.mock.calls.at(-1)[0]} : null, error: null }), then: (yes: any) => Promise.resolve({ data: [], error: null }).then(yes) };
+const mockTable: any = { select: (...args: any[]) => { mockSelect(...args); return mockTable; }, eq: (...args:any[]) => {mockEq(...args);return mockTable;}, is: () => mockTable, update: (payload: any) => {mockUpdate(payload);return mockTable;},
+  single: async () => ({ data: mockRead, error: null }), maybeSingle: () => Promise.resolve(mockEditResponse ?? { data: mockUpdate.mock.calls.length ? {...mockPlan,...mockUpdate.mock.calls.at(-1)[0],updated_at:'2026-11-06T02:00:00.123457Z'} : null, error: null }), then: (yes: any) => Promise.resolve({ data: [], error: null }).then(yes) };
 
 let mockInterest:any,mockInterestOptions:any;
 const mockInterestSend=jest.fn(),mockInterestRetry=jest.fn();
@@ -128,7 +128,7 @@ beforeEach(() => {
   mockNotice.mockResolvedValue({ needsAssent: false }); mockAssent.mockResolvedValue(true); mockJoin.mockReset();
   mockDeparture = { leave: mockLeave, cancel: mockCancel, checkResult: mockCheckDeparture, isPending: false, isChecking: false, unknownAction: null, isCurrent: mockCurrent };
   mockYoursEnabled = false; mockAccount = 'viewer'; mockEpoch = 1; mockCurrent.mockReturnValue(true);
-  mockPlan = { id: 'plan-1', title: 'Coffee with a few new faces', description: 'Meet by the park.', host_message: 'Come as you are.', circle_id: null,
+  mockPlan = { id: 'plan-1', updated_at:'2026-11-06T02:00:00.123456Z', title: 'Coffee with a few new faces', description: 'Meet by the park.', host_message: 'Come as you are.', circle_id: null,
     start_time: '2040-09-16T17:00:00Z', end_time: null, location_text: 'Ocean Park', location_lat: null, location_lng: null, image_url: null, primary_vibe: 'Outdoors',
     gender_rule: 'mixed', target_age_min: null, target_age_max: null, max_invites: 7, min_invites: 2, member_count: 3, creator_user_id: 'amelia',
     creator: { id: 'amelia', first_name_display: 'Amelia', profile_photo_url: null }, is_featured: false, status: 'active' };
@@ -408,7 +408,7 @@ it('keeps ordinary and Featured capacity editing off Circle plans',async()=>{
 });
 
 it('closes Manage only after the exact updated plan receipt',async()=>{await openEditor();act(()=>manageInput(mockPlan.title).props.onChangeText('Updated coffee'));await act(async()=>button('Save changes').props.onPress());expect(tree.root.findAllByType(Modal).some(n=>n.props.visible&&n.props.animationType==='slide')).toBe(false);expect(mockClient.invalidateQueries).toHaveBeenCalled();});
-it('keeps an uncertain save visible and checks it without a second write',async()=>{mockEditResponse={data:null,error:null};await openEditor();await act(async()=>button('Save changes').props.onPress());expect(allText()).toContain('Check your changes');expect(button('Save changes')).toBeUndefined();expect(manageModal().props.visible).toBe(true);mockEditResponse=undefined;await act(async()=>button('Check changes').props.onPress());expect(mockUpdate).toHaveBeenCalledTimes(1);expect(tree.root.findAllByType(Modal).some(n=>n.props.visible&&n.props.animationType==='slide')).toBe(false);});
+it('keeps an uncertain save visible and checks it without a second write',async()=>{mockEditResponse={data:undefined,error:null};await openEditor();await act(async()=>button('Save changes').props.onPress());expect(allText()).toContain('Check your changes');expect(button('Save changes')).toBeUndefined();expect(manageModal().props.visible).toBe(true);mockEditResponse=undefined;await act(async()=>button('Check changes').props.onPress());expect(mockUpdate).toHaveBeenCalledTimes(1);expect(tree.root.findAllByType(Modal).some(n=>n.props.visible&&n.props.animationType==='slide')).toBe(false);});
 it('clears old map coordinates when the creator types a new location',async()=>{mockPlan.location_lat=34.005;mockPlan.location_lng=-118.487;await openEditor();act(()=>mockPlacesProps.textInputProps.onChangeText('A different cafe'));await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({location_text:'A different cafe',location_lat:null,location_lng:null});});
 it('keeps the selected place name and coordinates together',async()=>{await openEditor();act(()=>mockPlacesProps.onPress({description:'New cafe',structured_formatting:{main_text:'New cafe'}},{geometry:{location:{lat:34.1,lng:-118.2}}}));await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({location_text:'New cafe',location_lat:34.1,location_lng:-118.2});});
 it('preserves the previous photo when replacement upload fails',async()=>{mockPlan.image_url='https://example.test/old.jpg';mockPhotoUpload.mockRejectedValue(new Error('Rejected'));await openEditor();await act(async()=>button('Change photo').props.onPress());expect(mockPhotoUpload).toHaveBeenCalledTimes(1);expect(allText()).toContain('Couldn’t upload this photo');await act(async()=>button('Save changes').props.onPress());expect(mockUpdate.mock.calls[0][0]).toMatchObject({image_url:'https://example.test/old.jpg'});});
@@ -1208,4 +1208,31 @@ describe('the live banner on plan detail', () => {
     expect(allText()).toContain('happening right now');
     expect(allText().includes('still room for you')).toBe(state === 'eligible');
   });
+});
+
+
+it('keeps the actual Manage form and photo on a confirmed version conflict',async()=>{
+ mockPlan.image_url='https://example.test/original.jpg';await openEditor();
+ act(()=>manageInput(mockPlan.title).props.onChangeText('My unsaved title'));
+ mockEditResponse={data:null,error:null};await act(async()=>button('Save changes').props.onPress());
+ expect(manageModal().props.visible).toBe(true);expect(manageInput('My unsaved title')).toBeDefined();
+ expect(allText()).toContain('Close and reopen Manage Plan');expect(allText()).not.toContain('Check your changes');
+ expect(mockUpdate.mock.calls[0][0].image_url).toBe('https://example.test/original.jpg');
+ expect(mockClient.invalidateQueries).toHaveBeenCalled();
+});
+it('keeps the form-open version when fresh detail arrives in the background',async()=>{
+ await openEditor();const displayedVersion=mockPlan.updated_at;
+ act(()=>manageInput(mockPlan.title).props.onChangeText('My draft title'));
+ mockPlan={...mockPlan,title:'Other device title',updated_at:'2026-11-06T03:00:00.123456Z'};
+ await act(async()=>tree.update(<PlanDetailScreen/>));
+ mockEditResponse={data:null,error:null};await act(async()=>button('Save changes').props.onPress());
+ expect(mockEq).toHaveBeenCalledWith('updated_at',displayedVersion);
+ expect(mockEq).not.toHaveBeenCalledWith('updated_at',mockPlan.updated_at);
+ expect(manageInput('My draft title')).toBeDefined();
+});
+it('refreshes a versionless cached detail without dispatching an unguarded save',async()=>{
+ delete mockPlan.updated_at;await openEditor();act(()=>manageInput(mockPlan.title).props.onChangeText('Keep this title'));
+ await act(async()=>button('Save changes').props.onPress());expect(mockUpdate).not.toHaveBeenCalled();
+ expect(manageInput('Keep this title')).toBeDefined();expect(manageModal().props.visible).toBe(true);
+ expect(allText()).toContain('Couldn’t check this plan’s version');expect(mockClient.invalidateQueries).toHaveBeenCalled();
 });
