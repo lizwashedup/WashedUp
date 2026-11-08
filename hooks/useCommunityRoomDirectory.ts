@@ -7,13 +7,28 @@ import { requestWithDeadline, RequestDeadlineError } from '../lib/requestWithDea
 import { setOptionalRoomMembership } from '../lib/communityOptionalRoom';
 
 type Change = { topicId: string; joined: boolean; retryReady: boolean };
+type Flight = { pending: boolean; dispatched: boolean; acknowledged: boolean; refused: boolean };
+type StoredChange = Change & { flight?: Flight };
+// A route replacement must not forget an in-flight membership decision.
+// Session ownership is scoped to this query client, account and community.
+const changes = new WeakMap<object, Map<string, StoredChange>>();
+const definiteRefusal = (error: unknown) => !!error && typeof error === 'object' && 'code' in error
+  && ['42501','P0001','23503','23514','22P02','42883'].includes(String(error.code));
 /** One current-account/page operation at a time. Blur pauses dispatch but keeps
  * uncertain membership changes available for read-only checking on return. */
 export function useCommunityRoomDirectory(communityId: string, viewer: ObservedUser, enabled: boolean) {
   const client = useQueryClient(), mounted = useRef(false), active = useRef(enabled);
   active.current = enabled;
   const foreground = useRef(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
-  const owner = useMemo(() => ({ communityId, userId: viewer.viewerId, epoch: viewer.epoch, busy: false, change: null as Change | null, notice: null as string | null }), [communityId, viewer.viewerId, viewer.epoch]);
+  const owner = useMemo(() => {
+    let store = changes.get(client);
+    if (!store) { store = new Map(); changes.set(client, store); }
+    const key = JSON.stringify([communityId, viewer.viewerId]);
+    return { communityId, userId: viewer.viewerId, epoch: viewer.epoch, busy: false, notice: null as string | null,
+      get change(): StoredChange | null { return store.get(key) ?? null; },
+      set change(value: StoredChange | null) { if (value) store.set(key, value); else store.delete(key); },
+    };
+  }, [client, communityId, viewer.viewerId, viewer.epoch]);
   const currentOwner = useRef(owner); currentOwner.current = owner;
   const [, render] = useState(0);
   const same = () => mounted.current && currentOwner.current === owner && viewer.isCurrent();
@@ -48,14 +63,32 @@ export function useCommunityRoomDirectory(communityId: string, viewer: ObservedU
   };
   const perform = async (change: Change) => {
     if (!current() || owner.busy || !viewer.viewerId) return;
-    owner.busy = true; owner.notice = null; owner.change = { ...change, retryReady: false }; update();
+    const flight: Flight = { pending: true, dispatched: false, acknowledged: false, refused: false };
+    const pending: StoredChange = { ...change, retryReady: false, flight };
+    owner.busy = true; owner.notice = null; owner.change = pending; update();
+    let dispatchActive = true;
+    const operation = (async () => {
+      try {
+        await client.cancelQueries({ queryKey: key, exact: true }, { revert: false });
+        if (!current() || !dispatchActive) throw Error('This community visit changed.');
+        return await setOptionalRoomMembership(communityId, change.topicId, change.joined,
+          { ...scope, isCurrent: () => dispatchActive && current() }, {
+            dispatched: () => { flight.dispatched = true; },
+            acknowledged: () => { flight.acknowledged = true; },
+            failed: error => { if (definiteRefusal(error)) flight.refused = true; },
+          });
+      } catch (error) {
+        flight.refused = flight.refused || !flight.dispatched || definiteRefusal(error);
+        throw error;
+      } finally { flight.pending = false; }
+    })();
     try {
-      await client.cancelQueries({ queryKey: key, exact: true }, { revert: false });
-      if (!current()) return;
-      const result = await setOptionalRoomMembership(communityId, change.topicId, change.joined, scope);
-      if (current()) { confirmed(result); return true; }
-    } catch { /* Keep exact intended membership; never resubmit automatically. */ }
-    finally { owner.busy = false; update(); }
+      const result = await requestWithDeadline(operation, 12_000);
+      if (current() && owner.change === pending) { confirmed(result); return true; }
+    } catch {
+      // Missing status is not proof a previously dispatched write cannot arrive.
+      if (owner.change === pending) pending.retryReady = flight.refused;
+    } finally { dispatchActive = false; owner.busy = false; update(); }
   };
   const change = (topicId: string, joined: boolean) => {
     if (owner.change || owner.busy || !current()) return;
@@ -71,15 +104,20 @@ export function useCommunityRoomDirectory(communityId: string, viewer: ObservedU
       if (!current()) return;
       if (!layout) throw Error('Community chats unavailable.');
       const room = layout.rooms.find(item => item.id === change.topicId && item.role === 'optional');
-      if (!room) { confirmed(layout); owner.notice = 'This group is no longer available.'; return; }
+      if (!room) {
+        client.setQueryData(key, layout);
+        if (!change.flight?.pending) { owner.change = null; owner.notice = 'This group is no longer available.'; }
+        return;
+      }
       client.setQueryData(key, layout);
-      if (room.joined === change.joined) confirmed(layout!);
-      else owner.change = { ...change, retryReady: true };
+      const stillWriting = change.flight?.pending && !change.flight.acknowledged;
+      if (room.joined === change.joined && !stillWriting) confirmed(layout);
+      else owner.change = { ...change, retryReady: !stillWriting && !!(change.flight?.refused || change.flight?.acknowledged) };
     } catch { if (same()) owner.change = { ...change, retryReady: false }; }
     finally { owner.busy = false; update(); }
   };
   const retry = () => { if (owner.change?.retryReady) return perform(owner.change); };
   return { data: same() ? query.data : undefined, error: viewer.error ?? query.error, loading: viewer.isLoading || query.isLoading,
-    fetching: query.isFetching, notice: owner.notice, busy: owner.busy, pending: owner.change, change, check, retry, refresh,
+    fetching: query.isFetching, notice: owner.notice, busy: owner.busy, pending: owner.change ? { topicId: owner.change.topicId, joined: owner.change.joined, retryReady: owner.change.retryReady } : null, change, check, retry, refresh,
     ready: enabled && !!viewer.viewerId && !viewer.error && !viewer.isLoading && query.isSuccess && current(), isCurrent: current };
 }

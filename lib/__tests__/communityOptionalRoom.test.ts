@@ -54,3 +54,20 @@ it('retains a failed mutation as uncertain without sending another write', async
   await expect(setOptionalRoomMembership('page','optional',true,scope)).rejects.toThrow('Response lost');
   expect(mockUpsert).toHaveBeenCalledTimes(1);expect(mockRead).toHaveBeenCalledTimes(1);
 });
+
+it('records an exact statement acknowledgement after leaving without issuing a late status read',async()=>{
+ let alive=true;mockSelect.mockImplementationOnce(async()=>{alive=false;return {data:[{topic_id:'optional',user_id:'member'}],error:null};});
+ const observer={dispatched:jest.fn(),acknowledged:jest.fn()};
+ await expect(setOptionalRoomMembership('page','optional',true,{...scope,isCurrent:()=>alive},observer)).rejects.toThrow();
+ expect(observer.dispatched).toHaveBeenCalledTimes(1);expect(observer.acknowledged).toHaveBeenCalledTimes(1);expect(mockRead).toHaveBeenCalledTimes(1);
+});
+it('does not acknowledge a malformed or another-account write response',async()=>{
+ const observer={dispatched:jest.fn(),acknowledged:jest.fn()};mockSelect.mockResolvedValueOnce({data:[{topic_id:'optional',user_id:'other'}],error:null});
+ await expect(setOptionalRoomMembership('page','optional',true,scope,observer)).rejects.toThrow();expect(observer.acknowledged).not.toHaveBeenCalled();
+});
+it('reports a definite server refusal to its original bookkeeping even after route retirement',async()=>{
+ let alive=true;const denied={code:'42501'};mockSelect.mockImplementationOnce(async()=>{alive=false;return {data:null,error:denied};});
+ const observer={dispatched:jest.fn(),acknowledged:jest.fn(),failed:jest.fn()};
+ await expect(setOptionalRoomMembership('page','optional',true,{...scope,isCurrent:()=>alive},observer)).rejects.toThrow();
+ expect(observer.failed).toHaveBeenCalledWith(denied);expect(observer.acknowledged).not.toHaveBeenCalled();
+});
