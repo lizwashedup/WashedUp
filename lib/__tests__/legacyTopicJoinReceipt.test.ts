@@ -10,7 +10,7 @@ const scope={userId:'alice',isCurrent:()=>alive};
 const run=()=>joinLegacyTopicWithReceipt(client,'community','topic',scope);
 const pending=()=>hasLegacyTopicJoin(client,'alice','community','topic');
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(yes=>{resolve=yes});return{resolve,promise};}
-beforeEach(()=>{jest.resetAllMocks();client={};alive=true;mockDispatch=true;join.mockResolvedValue();read.mockResolvedValue(false);});
+beforeEach(()=>{jest.resetAllMocks();client={};alive=true;mockDispatch=true;join.mockResolvedValue(undefined);read.mockResolvedValue(false);});
 afterEach(()=>jest.useRealTimers());
 it('opens after the documented successful insert response',async()=>{await run();expect(join).toHaveBeenCalledTimes(1);expect(read).not.toHaveBeenCalled();expect(pending()).toBe(false);});
 it('recovers a lost response from the exact own membership without another write',async()=>{
