@@ -1092,12 +1092,14 @@ export async function deleteTopicMessage(
 }
 
 /** Joining a topic = subscribing to it (doc 09: push ON once joined). */
-export async function joinTopic(topicId: string, scope?: CommunityOperationScope): Promise<void> {
+export async function joinTopic(topicId: string, scope?: CommunityOperationScope, onDispatch?: () => void): Promise<void> {
   const user = await communityOperationUser(scope);
   if (!user) throw new Error('Not signed in');
-  const { error } = await scopedCommunityRequest(scope, () => supabase
-    .from('community_topic_members')
-    .upsert({ topic_id: topicId, user_id: user.id }, { onConflict: 'topic_id,user_id' }));
+  const { error } = await scopedCommunityRequest(scope, () => {
+    onDispatch?.();
+    return supabase.from('community_topic_members')
+      .upsert({ topic_id: topicId, user_id: user.id }, { onConflict: 'topic_id,user_id', ignoreDuplicates: true });
+  });
   if (error) throw error;
 }
 

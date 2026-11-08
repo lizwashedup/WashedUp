@@ -50,7 +50,8 @@ import { CommunityLeaveUnconfirmed, hasCommunityLeaveDecision, leaveCommunityWit
 // proposal 91's policy read lives with the leader toggle; the door and the
 // toggle must agree, so both read the same self-flipping function
 import { buildCommunityPublicLink, getJoinPolicy } from '../../lib/creatorMode';
-import { getCommunityChatPayload, joinTopic } from '../../lib/communityChat';
+import { getCommunityChatPayload } from '../../lib/communityChat';
+import { hasLegacyTopicJoin, joinLegacyTopicWithReceipt, LegacyTopicJoinUnconfirmed } from '../../lib/legacyTopicJoinReceipt';
 import { formatEventDateLA } from '../../lib/laDate';
 import { HOUSE_MARK_LABEL, isHouseCommunity } from '../../lib/houseCommunity';
 import { friendlyError } from '../../lib/friendlyError';
@@ -233,16 +234,17 @@ export default function CommunityPageScreen() {
     const current = () => membershipIsCurrent() && membershipVisit.attempt === attempt;
     setJoining({ visit: membershipVisit, topicId });
     try {
-      await joinTopic(topicId, { userId: viewer.viewerId!, isCurrent: current });
+      await joinLegacyTopicWithReceipt(queryClient, id!, topicId, { userId: viewer.viewerId!, isCurrent: current });
       if (!current()) return;
       hapticSuccess();
-      await queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] });
-      if (!current()) return;
+      void queryClient.invalidateQueries({ queryKey: ['community-chat-cards'] }).catch(() => {});
       router.push(`/community-topic/${topicId}` as never);
     } catch (e) {
       if (!current()) return;
       // the lowercase law: this page's own system copy
-      setAlertInfo({ title: 'that did not work', message: friendlyError(e, 'Try again in a moment.') });
+      setAlertInfo(e instanceof LegacyTopicJoinUnconfirmed
+        ? { title: 'still checking your chat', message: e.message }
+        : { title: 'that did not work', message: friendlyError(e, 'Try again in a moment.') });
     } finally {
       if (current()) setJoining(null);
       if (membershipVisit.attempt === attempt) membershipVisit.attempt = null;
@@ -251,6 +253,7 @@ export default function CommunityPageScreen() {
 
   const legacyRooms = isMember ? <LegacyCommunityRoomDirectory
     rooms={rooms} joiningTopicId={joiningTopicId}
+    checkingTopicIds={rooms.filter(room => viewer.viewerId && hasLegacyTopicJoin(queryClient, viewer.viewerId, id!, room.id)).map(room => room.id)}
     onOpenMain={() => { if (!previewMode && visit.current.focused) router.push(`/community-thread/${id}` as never); }}
     onOpenTopic={topicId => { if (!previewMode && visit.current.focused) router.push(`/community-topic/${topicId}` as never); }}
     onJoinTopic={topicId => { void handleJoinTopic(topicId); }}

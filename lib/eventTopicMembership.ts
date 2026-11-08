@@ -5,7 +5,7 @@ import type { CommunityOperationScope } from './communityChat';
 /** Own topic row is readable under the existing self-select policy even when
  * attendance no longer grants the surrounding event chat. This checks sending
  * membership only; a parent-community member may still legitimately read. */
-export async function getMyEventTopicMembership(topicId: string, owner: CommunityOperationScope): Promise<boolean> {
+export async function getMyTopicMembership(topicId: string, owner: CommunityOperationScope): Promise<boolean> {
   let active = true;
   const requireCurrent = () => {
     if (!active || !topicId || !owner.userId || !owner.isCurrent()) throw Error('This chat visit changed.');
@@ -23,8 +23,11 @@ export async function getMyEventTopicMembership(topicId: string, owner: Communit
       requireCurrent();
       if (error) throw error;
       if (data === null) return false;
-      if (data?.topic_id !== topicId || data?.user_id !== owner.userId) throw Error('Could not check your event chat membership.');
+      if (data?.topic_id !== topicId || data?.user_id !== owner.userId) throw Error('Could not check your chat membership.');
       return true;
     })(), 12_000);
   } finally { active = false; }
 }
+
+// Keep the event-admission caller explicit; both read the same exact own row.
+export const getMyEventTopicMembership = getMyTopicMembership;

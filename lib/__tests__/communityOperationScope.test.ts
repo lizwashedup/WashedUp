@@ -475,7 +475,7 @@ it('legacy topic join rejects mismatched auth even before the observer reports i
 });
 it('legacy topic join preserves the initiating user and exact topic upsert', async () => {
  await community.joinTopic('topic-a',scope());
- expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({table:'community_topic_members',operation:'upsert',payload:{topic_id:'topic-a',user_id:'account-a'},conflict:{onConflict:'topic_id,user_id'}});
+ expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({table:'community_topic_members',operation:'upsert',payload:{topic_id:'topic-a',user_id:'account-a'},conflict:{onConflict:'topic_id,user_id',ignoreDuplicates:true}});
 });
 
 
@@ -744,4 +744,10 @@ describe.each([
     execute.mockResolvedValueOnce({data:[],error:null});
     await expect(read()).resolves.toMatchObject({[rows]:[],hasMore:false,olderCursor:null});
   });
+});
+
+it('reports topic dispatch only after verified current identity',async()=>{
+ const dispatch=jest.fn();getUser.mockRejectedValueOnce(Error('identity offline'));
+ await expect(community.joinTopic('topic-a',scope(),dispatch)).rejects.toThrow('identity offline');expect(dispatch).not.toHaveBeenCalled();
+ await community.joinTopic('topic-a',scope(),dispatch);expect(dispatch).toHaveBeenCalledTimes(1);
 });

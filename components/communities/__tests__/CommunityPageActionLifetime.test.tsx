@@ -10,7 +10,8 @@ let mockId='community-a', mockFocused=true, mockUser='account-a', mockEpoch=1, m
 const mockRetry=jest.fn();
 const mockQueryRefetch=jest.fn().mockResolvedValue({});
 let mockClient={invalidateQueries:mockInvalidate};
-const mockMembershipRead=jest.fn();
+const mockMembershipRead=jest.fn(), mockTopicMembership=jest.fn();
+jest.mock('../../../lib/eventTopicMembership',()=>({getMyTopicMembership:(...args:any[])=>mockTopicMembership(...args)}));
 jest.mock('expo-router',()=>({useRouter:()=>({push:mockPush,back:mockBack}),useLocalSearchParams:()=>({id:require('react').useContext(mockParamsContext) ?? mockId}),useFocusEffect:(cb:any)=>require('react').useEffect(()=>mockFocused?cb():undefined,[cb,mockFocused]),Stack:{Screen:()=>null}}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
 jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
@@ -21,7 +22,7 @@ jest.mock('../../../hooks/useObservedUser',()=>({useObservedUser:()=>{
 }}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
 jest.mock('@tanstack/react-query',()=>({useQueryClient:()=>mockClient,useQuery:({queryKey}:any)=>({isLoading:false,isRefetching:false,refetch:mockQueryRefetch,data:queryKey[0]==='community-page'?{community:{id:mockId,name:'Test community',handle:'test-community',status:'active'},blocks:[],events:[],memberCount:2}:queryKey[0]==='community-membership'?{status:'active',role:'member'}:queryKey[0]==='community-chat-cards'?{cards:[{community_id:mockId,topics:[{id:'topic-a',name:'Walks',joined:false}]}]}:queryKey[0]==='community-faces'?[]:null})}));
-jest.mock('../../../lib/communityChat',()=>({getCommunityChatPayload:jest.fn(),joinTopic:(...args:any[])=>mockJoin(...args)}));
+jest.mock('../../../lib/communityChat',()=>({getCommunityChatPayload:jest.fn(),joinTopic:(...args:any[])=>{args[2]?.();return mockJoin(...args)}}));
 jest.mock('../../../lib/communityJoin',()=>({getJoinGate:jest.fn(),getMyMembership:(...args:any[])=>mockMembershipRead(...args),leaveCommunity:(...args:any[])=>mockLeave(...args)}));
 jest.mock('../../../lib/communityPage',()=>({getCommunityPage:jest.fn(),getMemberFaces:jest.fn()}));
 jest.mock('../../../lib/communityLeader',()=>({getLeaderCards:jest.fn()}));
@@ -49,7 +50,7 @@ async function settle(){await act(async()=>{for(let i=0;i<12;i++)await Promise.r
 const room=()=>tree.root.findByType(LegacyCommunityRoomDirectory).props;
 const alert=()=>tree.root.findByType(BrandedAlert).props;
 function leave(){const button=tree.root.findAllByType(TouchableOpacity).find(n=>n.findAllByType(Text).some(t=>t.props.children==='leave community'))!;act(()=>button.props.onPress());return alert().buttons.find((b:any)=>b.text==='leave').onPress;}
-beforeEach(()=>{mockClient={invalidateQueries:mockInvalidate};mockMembershipRead.mockReset().mockResolvedValue({id:"membership-a",status:"left",role:"member"});jest.clearAllMocks();mockId='community-a';mockFocused=true;mockUser='account-a';mockEpoch=1;mockAccountError=null;mockJoin.mockReset().mockResolvedValue(undefined);mockLeave.mockReset().mockResolvedValue(undefined);mockInvalidate.mockReset().mockResolvedValue(undefined);});
+beforeEach(()=>{mockClient={invalidateQueries:mockInvalidate};mockTopicMembership.mockReset().mockResolvedValue(false);mockMembershipRead.mockReset().mockResolvedValue({id:"membership-a",status:"left",role:"member"});jest.clearAllMocks();mockId='community-a';mockFocused=true;mockUser='account-a';mockEpoch=1;mockAccountError=null;mockJoin.mockReset().mockResolvedValue(undefined);mockLeave.mockReset().mockResolvedValue(undefined);mockInvalidate.mockReset().mockResolvedValue(undefined);});
 afterEach(()=>{act(()=>tree?.unmount());});
 it.each(['blur','room','account','unmount'] as const)('does not reopen an old topic after pending join and %s retirement',async change=>{
  const pending=deferred();mockJoin.mockReturnValueOnce(pending.promise);await mount();act(()=>room().onJoinTopic('topic-a'));
@@ -59,20 +60,20 @@ it.each(['blur','room','account','unmount'] as const)('does not reopen an old to
  if(change==='unmount')act(()=>tree.unmount());
  await act(async()=>pending.resolve());await settle();expect(mockPush).not.toHaveBeenCalled();
 });
-it('does not navigate after route retirement during join invalidation',async()=>{
+it('opens the confirmed chat without waiting for a stalled cards refresh',async()=>{
  const pending=deferred();mockInvalidate.mockReturnValueOnce(pending.promise);await mount();act(()=>room().onJoinTopic('topic-a'));await settle();
- mockFocused=false;await update();await act(async()=>pending.resolve());await settle();expect(mockPush).not.toHaveBeenCalled();
+ expect(mockPush).toHaveBeenCalledTimes(1);mockFocused=false;await update();await act(async()=>pending.resolve());await settle();expect(mockPush).toHaveBeenCalledTimes(1);
 });
 it('starts only one legacy join for retained duplicate callbacks and keeps the current destination',async()=>{
  const pending=deferred();mockJoin.mockReturnValue(pending.promise);await mount();const join=room().onJoinTopic;
  act(()=>{join('topic-a');join('topic-a')});expect(mockJoin).toHaveBeenCalledTimes(1);
  await act(async()=>pending.resolve());await settle();expect(mockPush).toHaveBeenCalledWith('/community-topic/topic-a');
 });
-it('an old result cannot release a new visit join lock',async()=>{
- const old=deferred(),fresh=deferred();mockJoin.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);await mount();act(()=>room().onJoinTopic('topic-a'));
+it('does not issue another topic join after Back and reentry while the original is pending',async()=>{
+ const old=deferred();mockJoin.mockReturnValueOnce(old.promise);await mount();act(()=>room().onJoinTopic('topic-a'));
  mockFocused=false;await update();mockFocused=true;await update();act(()=>room().onJoinTopic('topic-a'));
- await act(async()=>old.resolve());await settle();expect(room().joiningTopicId).toBe('topic-a');expect(mockPush).not.toHaveBeenCalled();
- await act(async()=>fresh.resolve());await settle();expect(room().joiningTopicId).toBeNull();expect(mockPush).toHaveBeenCalledTimes(1);
+ await settle();expect(mockJoin).toHaveBeenCalledTimes(1);
+ await act(async()=>old.resolve());await settle();expect(mockPush).not.toHaveBeenCalled();
 });
 it('does not pop another route after a pending leave finishes',async()=>{
  const pending=deferred();mockLeave.mockReturnValueOnce(pending.promise);await mount();const confirm=leave();act(()=>{void confirm()});
@@ -86,8 +87,8 @@ it('starts one current leave and preserves its Back destination',async()=>{
  const pending=deferred();mockLeave.mockReturnValue(pending.promise);await mount();const confirm=leave();act(()=>{confirm();confirm()});expect(mockLeave).toHaveBeenCalledTimes(1);
  await act(async()=>pending.resolve());await settle();expect(mockBack).toHaveBeenCalledTimes(1);
 });
-it('a current join error releases the same visit for an explicit later action',async()=>{
- mockJoin.mockRejectedValueOnce(Error('offline'));await mount();act(()=>room().onJoinTopic('topic-a'));await settle();expect(room().joiningTopicId).toBeNull();expect(alert().visible).toBe(true);
+it('a definite join refusal releases the same visit for an explicit later action',async()=>{
+ mockJoin.mockRejectedValueOnce({code:'42501'});await mount();act(()=>room().onJoinTopic('topic-a'));await settle();expect(room().joiningTopicId).toBeNull();expect(alert().visible).toBe(true);
  act(()=>room().onJoinTopic('topic-a'));await settle();expect(mockJoin).toHaveBeenCalledTimes(2);expect(mockPush).toHaveBeenCalledTimes(1);
 });
 
@@ -143,4 +144,17 @@ it('leaves Stay untouched and permits an explicit retry after server refusal',as
  await mount();const confirm=leave();expect(mockLeave).not.toHaveBeenCalled();expect(alert().buttons.find((b:any)=>b.text==='stay').style).toBe('cancel');
  mockLeave.mockRejectedValueOnce({code:'42501'});await act(async()=>confirm());await settle();expect(alert().title).toBe('still here');
  const retry=leave();await act(async()=>retry());await settle();expect(mockLeave).toHaveBeenCalledTimes(2);expect(mockBack).toHaveBeenCalledTimes(1);
+});
+
+it('shows bounded Check recovery and resumes without a second join after an uncertain reply',async()=>{
+ mockJoin.mockRejectedValueOnce(Error('lost reply'));await mount();act(()=>room().onJoinTopic('topic-a'));await settle();
+ expect(room().joiningTopicId).toBeNull();expect(room().checkingTopicIds).toEqual(['topic-a']);expect(alert().title).toBe('still checking your chat');
+ mockFocused=false;await update();mockFocused=true;await update();expect(room().checkingTopicIds).toEqual(['topic-a']);
+ mockTopicMembership.mockResolvedValueOnce(true);act(()=>room().onJoinTopic('topic-a'));await settle();
+ expect(mockJoin).toHaveBeenCalledTimes(1);expect(mockPush).toHaveBeenCalledWith('/community-topic/topic-a');
+});
+it('keeps unknown joins owned by the original account',async()=>{
+ mockJoin.mockRejectedValueOnce(Error('lost reply'));await mount();act(()=>room().onJoinTopic('topic-a'));await settle();
+ mockUser='account-b';mockEpoch++;await update();expect(room().checkingTopicIds).toEqual([]);
+ mockUser='account-a';mockEpoch++;await update();expect(room().checkingTopicIds).toEqual(['topic-a']);
 });
