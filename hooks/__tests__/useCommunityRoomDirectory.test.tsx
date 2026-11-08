@@ -3,11 +3,11 @@ import { act, create } from 'react-test-renderer';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCommunityRoomDirectory } from '../useCommunityRoomDirectory';
 import { getCommunityRoomIdentities, type CommunityRoomIdentities } from '../../lib/communityRoomHistory';
-import { setOptionalRoomMembership } from '../../lib/communityOptionalRoom';
 import type { ObservedUser } from '../useObservedUser';
 jest.mock('../../lib/communityRoomHistory',()=>({getCommunityRoomIdentities:jest.fn()}));
-jest.mock('../../lib/communityOptionalRoom',()=>({setOptionalRoomMembership:jest.fn(),requireOptionalRoom:(layout:any,id:string)=>{const room=layout?.rooms.find((r:any)=>r.id===id&&r.role==='optional');if(!room)throw Error('Unavailable');return room;}}));
-const read=jest.mocked(getCommunityRoomIdentities),write=jest.mocked(setOptionalRoomMembership);
+const mockMutation=jest.fn();
+jest.mock('../../lib/communityOptionalRoom',()=>({setOptionalRoomMembership:(...args:any[])=>{args[4]?.dispatched();return mockMutation(...args)},requireOptionalRoom:(layout:any,id:string)=>{const room=layout?.rooms.find((r:any)=>r.id===id&&r.role==='optional');if(!room)throw Error('Unavailable');return room;}}));
+const read=jest.mocked(getCommunityRoomIdentities),write=mockMutation;
 const layout=(joined=false):CommunityRoomIdentities=>({communityId:'page',name:'Community',rooms:[{id:'room',role:'optional',storage:'topic',name:'Walks',included:false,joined,notifications_on:joined?false:null}]});
 const close:Array<()=>void>=[];
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return{resolve,promise};};
@@ -17,9 +17,9 @@ function mount(){
  function Harness(){const captured=id;const viewer={viewerId:id,epoch,isLoading:false,error:null,retry:async()=>{},isCurrent:()=>id===captured} as ObservedUser;result=useCommunityRoomDirectory('page',viewer,enabled);return null;}
  const node=()=> <QueryClientProvider client={client}><Harness/></QueryClientProvider>;
  act(()=>{tree=create(node());});close.push(()=>{act(()=>tree.unmount());client.clear();});
- return{client,get result(){return result;},focus:(value:boolean)=>{enabled=value;act(()=>tree.update(node()));},account:(value:string)=>{id=value;epoch++;act(()=>tree.update(node()));}};
+ return{client,get result(){return result;},remount:()=>{act(()=>tree.unmount());act(()=>{tree=create(node())});},focus:(value:boolean)=>{enabled=value;act(()=>tree.update(node()));},account:(value:string)=>{id=value;epoch++;act(()=>tree.update(node()));}};
 }
-beforeEach(()=>{jest.clearAllMocks();read.mockResolvedValue(layout());write.mockResolvedValue(layout(true));});
+beforeEach(()=>{jest.clearAllMocks();read.mockReset().mockResolvedValue(layout());write.mockReset().mockResolvedValue(layout(true));});
 afterEach(async()=>{close.splice(0).forEach(fn=>fn());await flush();});
 it('loads without changing membership or acknowledging messages',async()=>{const f=mount();await flush();expect(f.result.data).toEqual(layout());expect(write).not.toHaveBeenCalled();});
 it('serializes rapid taps and updates the same directory after confirmed joining',async()=>{
@@ -32,8 +32,8 @@ it('requires a read-only check after an unknown response and confirms an already
  await act(async()=>{await f.result.retry();await f.result.change('room',false);});expect(write).toHaveBeenCalledTimes(1);
  read.mockResolvedValue(layout(true));await act(async()=>{await f.result.check();});expect(write).toHaveBeenCalledTimes(1);expect(f.result.pending).toBeNull();
 });
-it('offers only an explicit retry of the original desired state after checking an unapplied change',async()=>{
- write.mockRejectedValueOnce(Error('Rejected')).mockResolvedValue(layout(true));const f=mount();await flush();await act(async()=>{await f.result.change('room',true);});await flush();await act(async()=>{await f.result.check();});expect(f.result.pending?.retryReady).toBe(true);expect(write).toHaveBeenCalledTimes(1);
+it('offers an explicit same-action retry after a definite refusal',async()=>{
+ write.mockRejectedValueOnce({code:'42501'}).mockResolvedValue(layout(true));const f=mount();await flush();await act(async()=>{await f.result.change('room',true);});await flush();await act(async()=>{await f.result.check();});expect(f.result.pending?.retryReady).toBe(true);expect(write).toHaveBeenCalledTimes(1);
  read.mockResolvedValue(layout(true));await act(async()=>{await f.result.retry();});expect(write).toHaveBeenCalledTimes(2);expect(write.mock.calls[1][2]).toBe(true);
 });
 it('keeps an uncertain operation through blur and returns with checking available',async()=>{
@@ -71,4 +71,50 @@ it('ends a stalled membership check with the original uncertain action preserved
   expect(f.result.busy).toBe(false);expect(f.result.pending).toEqual({topicId:'room',joined:true,retryReady:false});
   expect(write).toHaveBeenCalledTimes(1);
  }finally{jest.useRealTimers();}
+});
+
+it('ends waiting for a held join without enabling another membership write',async()=>{
+ const wait=deferred<CommunityRoomIdentities>();write.mockReturnValueOnce(wait.promise);const f=mount();await flush();
+ jest.useFakeTimers();
+ try {
+  act(()=>{void f.result.change('room',true);});
+  await act(async()=>{await jest.advanceTimersByTimeAsync(31_000);});
+  expect(f.result.busy).toBe(false);expect(f.result.pending?.retryReady).toBe(false);
+  await act(async()=>{await f.result.change('room',true);await f.result.retry();});expect(write).toHaveBeenCalledTimes(1);
+ }finally{wait.resolve(layout(true));jest.useRealTimers();}
+});
+
+it('keeps the pending join across page replacement and makes Check read-only until settlement',async()=>{
+ const wait=deferred<CommunityRoomIdentities>();write.mockReturnValueOnce(wait.promise);const f=mount();await flush();
+ act(()=>{void f.result.change('room',true);});await flush();f.remount();await flush();
+ expect(f.result.pending).toEqual({topicId:'room',joined:true,retryReady:false});
+ await act(async()=>{await f.result.check();await f.result.retry();await f.result.change('room',true);});
+ expect(write).toHaveBeenCalledTimes(1);expect(f.result.pending?.retryReady).toBe(false);
+ read.mockResolvedValue(layout(true));await act(async()=>{wait.resolve(layout(true));});await flush();
+ expect(f.result.pending).not.toBeNull();await act(async()=>{await f.result.check();});expect(f.result.pending).toBeNull();expect(f.result.data?.rooms[0].joined).toBe(true);
+});
+it('does not offer retry merely because an uncertain write has an unchanged status',async()=>{
+ write.mockRejectedValueOnce(Error('response lost'));const f=mount();await flush();await act(async()=>{await f.result.change('room',true);await f.result.check();await f.result.retry();});
+ expect(f.result.pending?.retryReady).toBe(false);expect(write).toHaveBeenCalledTimes(1);
+});
+it('retains a pending leave through an account round trip without borrowing it for the next account',async()=>{
+ read.mockResolvedValue(layout(true));const wait=deferred<CommunityRoomIdentities>();write.mockReturnValueOnce(wait.promise);const f=mount();await flush();act(()=>{void f.result.change('room',false);});await flush();
+ f.account('b');await flush();expect(f.result.pending).toBeNull();f.account('a');await flush();expect(f.result.pending?.joined).toBe(false);
+ await act(async()=>{await f.result.check();await f.result.retry();});expect(write).toHaveBeenCalledTimes(1);
+ read.mockResolvedValue(layout(false));await act(async()=>{wait.resolve(layout(false));});await flush();await act(async()=>{await f.result.check();});expect(f.result.pending).toBeNull();
+});
+it('recovers an acknowledged write when only its optional status read remains stalled',async()=>{
+ const wait=deferred<CommunityRoomIdentities>();write.mockImplementationOnce((...args:any[])=>{args[4].acknowledged();return wait.promise;});const f=mount();await flush();jest.useFakeTimers();
+ try{
+  act(()=>{void f.result.change('room',true);});await act(async()=>{await jest.advanceTimersByTimeAsync(12_001);});expect(f.result.busy).toBe(false);
+  read.mockResolvedValue(layout(true));await act(async()=>{await f.result.check();});expect(f.result.pending).toBeNull();expect(write).toHaveBeenCalledTimes(1);
+ }finally{wait.resolve(layout(true));jest.useRealTimers();}
+});
+
+it('does not release a still-dispatched request merely because another session now matches its desired state',async()=>{
+ const wait=deferred<CommunityRoomIdentities>();write.mockReturnValueOnce(wait.promise);const f=mount();await flush();
+ act(()=>{void f.result.change('room',true);});await flush();f.remount();await flush();read.mockResolvedValue(layout(true));
+ await act(async()=>{await f.result.check();await f.result.change('room',false);});
+ expect(f.result.pending?.retryReady).toBe(false);expect(write).toHaveBeenCalledTimes(1);
+ await act(async()=>{wait.resolve(layout(true));});await flush();await act(async()=>{await f.result.check();});expect(f.result.pending).toBeNull();
 });
