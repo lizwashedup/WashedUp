@@ -1,6 +1,7 @@
 import React from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { AppState, Text, TouchableOpacity, type AppStateStatus } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { useFocusEffect } from '@react-navigation/native';
 import ChatsScreen from '../../../app/(tabs)/chats/index';
 import { useChatList, type ChatPreview } from '../../../hooks/useChatList';
 import type { ObservedUser } from '../../../hooks/useObservedUser';
@@ -8,7 +9,13 @@ import type { ObservedUser } from '../../../hooks/useObservedUser';
 const mockGetUser = jest.fn();
 const mockAuthListeners = new Set<(event: string, session: any) => void>();
 const mockRefetch = jest.fn();
+const mockCommunityRefresh = jest.fn();
+let mockCommunities = false, mockCommunityViewer: string | null = null;
 const mockOldRefetch = jest.fn();
+const appListeners = new Set<(state: AppStateStatus) => void>();
+function appState(state: AppStateStatus) { Object.defineProperty(AppState, 'currentState', { configurable: true, value: state }); for (const cb of appListeners) cb(state); }
+const flushResume = async () => { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+function focusInbox() { let blur: any; act(() => { blur = jest.mocked(useFocusEffect).mock.calls[0][0](); }); return blur; }
 let mockObserved: ObservedUser;
 const mockClient = { invalidateQueries: jest.fn(), cancelQueries: jest.fn().mockResolvedValue(undefined) };
 
@@ -30,10 +37,10 @@ jest.mock('../../../hooks/useObservedUser', () => ({ useObservedUser: () => {
   return mockObserved;
 } }));
 jest.mock('../../../hooks/useAfterglowFonts', () => ({ useAfterglowFonts: () => ({ fonts: jest.requireActual('../../../constants/Typography').AfterglowFonts }) }));
-jest.mock('../../../hooks/useCommunityChatRows', () => ({ useCommunityChatRows: () => ({ data: [], viewerId: null, isLoading: false, error: null, refetch: jest.fn() }) }));
+jest.mock('../../../hooks/useCommunityChatRows', () => ({ useCommunityChatRows: () => ({ data: [], viewerId: mockCommunityViewer, isLoading: false, error: null, refetch: mockCommunityRefresh }) }));
 jest.mock('../../../hooks/useCommunityChatPreference', () => ({ useCommunityChatPreference: () => ({}) }));
 jest.mock('../../../hooks/useLeaveCircle', () => ({ useLeaveCircle: () => ({ isPending: false }), isObsoleteCircleLeave: () => false }));
-jest.mock('../../../constants/FeatureFlags', () => ({ COMMUNITIES_ENABLED: false, GROUPS_ENABLED: true, COMMUNITY_CHAT_GROUPING_ENABLED: true, CHAT_DELETE_ENABLED: false, YOURS_PAGE_ENABLED: true, CREATOR_PAGES_ENABLED: false }));
+jest.mock('../../../constants/FeatureFlags', () => ({ get COMMUNITIES_ENABLED() { return mockCommunities; }, GROUPS_ENABLED: true, COMMUNITY_CHAT_GROUPING_ENABLED: true, CHAT_DELETE_ENABLED: false, YOURS_PAGE_ENABLED: true, CREATOR_PAGES_ENABLED: false }));
 jest.mock('../../../lib/chatListSignal', () => ({ consumeChatListDirty: () => false }));
 jest.mock('../../../lib/haptics', () => ({ hapticSelection: jest.fn() }));
 jest.mock('../../../lib/communityChatInbox', () => ({ projectCommunityChatInbox: () => ({ communities: [], eventRooms: [], unclassifiedRooms: [] }) }));
@@ -66,14 +73,17 @@ const emit = async (id: string | null) => { await act(async () => {
   for (const callback of mockAuthListeners) callback(id ? 'SIGNED_IN' : 'SIGNED_OUT', id ? { user: { id } } : null);
 }); };
 beforeEach(() => {
-  jest.clearAllMocks(); jest.useFakeTimers(); mockAuthListeners.clear();
+  jest.clearAllMocks(); jest.useFakeTimers(); mockAuthListeners.clear(); appListeners.clear();
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, callback) => { appListeners.add(callback); return { remove: () => appListeners.delete(callback) }; });
+  mockCommunities = false; mockCommunityViewer = null; mockCommunityRefresh.mockReset().mockResolvedValue(undefined);
   mockGetUser.mockReset().mockResolvedValue(user('alice'));
   mockRefetch.mockResolvedValue(undefined); mockOldRefetch.mockResolvedValue(undefined);
   jest.mocked(useChatList).mockImplementation(viewer => ({ chats: viewer ? [planFor(viewer)] : [],
     loading: viewer === undefined, loadError: false, refetch: viewer === 'alice' ? mockOldRefetch : mockRefetch, removeChat: jest.fn(),
   }));
 });
-afterEach(async () => { await act(async () => { tree?.unmount(); await jest.runOnlyPendingTimersAsync(); }); jest.useRealTimers(); });
+afterEach(async () => { await act(async () => { tree?.unmount(); await jest.runOnlyPendingTimersAsync(); }); jest.useRealTimers(); jest.restoreAllMocks(); });
 
 it('passes the bounded observer account to the actual list and follows account events', async () => {
   await mount();
@@ -145,4 +155,66 @@ it('does not invoke the old-account refetch when auth changes while the rendered
   expect(texts()).toContain('Plan for bob');
   expect(mockOldRefetch).not.toHaveBeenCalled();
   expect(mockRefetch).not.toHaveBeenCalled();
+});
+
+
+it('silently refreshes the visible inbox after backgrounding without needing a tab switch', async () => {
+  await mount(); focusInbox();
+  expect(mockOldRefetch).not.toHaveBeenCalled();
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  expect(mockOldRefetch).toHaveBeenCalledWith(true);
+  expect(texts()).toContain('Plan for alice');
+});
+
+it('does not start an inbox refresh after leaving the tab', async () => {
+  await mount(); const blur = focusInbox();
+  act(() => blur());
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).not.toHaveBeenCalled();
+});
+
+it('coalesces repeated resumes while the current inbox read is pending', async () => {
+  await mount(); focusInbox();
+  const pending = deferred(); mockOldRefetch.mockReturnValueOnce(pending.promise);
+  appState('background'); appState('active'); await flushResume();
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve(undefined));
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(2);
+});
+
+it('retires a queued old-account resume when the account changes', async () => {
+  await mount(); focusInbox();
+  appState('background'); appState('active');
+  await emit('bob'); await flushResume();
+  expect(mockOldRefetch).not.toHaveBeenCalled();
+});
+
+
+it.each(['plans', 'communities'] as const)('refreshes both inbox sources and recovers after a %s failure', async failure => {
+  mockCommunities = true; mockCommunityViewer = 'alice';
+  await mount(); focusInbox();
+  (failure === 'plans' ? mockOldRefetch : mockCommunityRefresh).mockRejectedValueOnce(new Error('Offline'));
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  expect(mockCommunityRefresh).toHaveBeenCalledTimes(1);
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(2);
+  expect(mockCommunityRefresh).toHaveBeenCalledTimes(2);
+});
+
+it('does not refresh stale community rows owned by a different account', async () => {
+  mockCommunities = true; mockCommunityViewer = 'another-account';
+  await mount(); focusInbox();
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).toHaveBeenCalledTimes(1);
+  expect(mockCommunityRefresh).not.toHaveBeenCalled();
+});
+
+it('does not refresh a signed-out account on return', async () => {
+  await mount(); focusInbox(); await emit(null);
+  appState('background'); appState('active'); await flushResume();
+  expect(mockOldRefetch).not.toHaveBeenCalled(); expect(mockRefetch).not.toHaveBeenCalled();
 });
